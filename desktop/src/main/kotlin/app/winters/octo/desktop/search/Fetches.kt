@@ -4,6 +4,8 @@ import app.winters.octo.subsonic.Acquisition
 import app.winters.octo.subsonic.AcquisitionStage
 import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.SubsonicException
+import app.winters.octo.ui.downloads.AskedSong
+import app.winters.octo.ui.downloads.stillAsked
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -59,6 +61,7 @@ class Fetches(
     // Called when a song was asked for, so the downloads drawer looks now.
     private val onAsked: () -> Unit = {},
     private val pollMs: Long = FETCH_POLL_MS,
+    private val clock: () -> Long = System::currentTimeMillis,
 ) {
     private val _phases = MutableStateFlow<Map<String, FetchPhase>>(emptyMap())
 
@@ -72,6 +75,9 @@ class Fetches(
     // from where it was found.
     private val landed = ConcurrentHashMap<String, String>()
 
+    // When each song was asked for, once the server took the ask.
+    private val askedAt = ConcurrentHashMap<String, Long>()
+
     fun phase(id: String): FetchPhase = phases.value[id] ?: FetchPhase.None
 
     // The library copy of a song asked for here, if it has landed.
@@ -81,10 +87,12 @@ class Fetches(
     fun request(id: String) {
         val now = phase(id)
         if (now != FetchPhase.None && now !is FetchPhase.Failed) return
+        askedAt.remove(id)
         _phases.update { it + (id to FetchPhase.Queued) }
         scope.launch {
             try {
                 client.star(listOf(id))
+                askedAt[id] = clock()
                 onAsked()
                 follow()
             } catch (e: SubsonicException) {
@@ -105,18 +113,23 @@ class Fetches(
     }
 
     // One look at the server's list. Each song asked for takes the newest
-    // entry with its id.
+    // entry with its id. One the list does not show is no longer on its way
+    // once it is not still taken as asked for (stillAsked), so it can be
+    // asked for again; until the server took the ask it stays queued.
     suspend fun poll() {
+        val since = clock()
         val list = try {
             client.acquisitions()
         } catch (e: SubsonicException) {
             return
         }
+        val now = clock()
         var arrived = false
         _phases.update { phases ->
             phases.mapValues { (id, phase) ->
                 if (!phase.inFlight) return@mapValues phase
-                val entry = list.filter { it.id == id }.maxByOrNull { it.startedAt.orEmpty() } ?: return@mapValues phase
+                val entry = list.filter { it.id == id }.maxByOrNull { it.startedAt.orEmpty() }
+                    ?: return@mapValues askedAt[id]?.takeIf { !stillAsked(AskedSong(id, it), since, now) }?.let { FetchPhase.None } ?: phase
                 phaseOf(entry).also {
                     if (it != FetchPhase.Done) return@also
                     arrived = true

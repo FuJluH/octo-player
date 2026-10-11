@@ -222,4 +222,47 @@ class FetchesTest {
         assertEquals(1, arrived)
         scope.cancel()
     }
+
+    // A clock that moves on a little each time it is read, so a list asked
+    // for after the ask is always later than it.
+    private fun ticking(): () -> Long {
+        val t = java.util.concurrent.atomic.AtomicLong(1_000_000)
+        return { t.addAndGet(10) }
+    }
+
+    @Test
+    fun aSongTheServerNeverListsIsNotLeftQueued() = runBlocking {
+        server.answer("star")
+        server.answer("getAcquisitions", """"acquisitions":{"acquisition":[]}""")
+        val scope = CoroutineScope(Dispatchers.Default + Job())
+        val fetches = Fetches(server.client(), scope, pollMs = 50, clock = ticking())
+        fetches.request("ext1")
+        withTimeout(5_000) { fetches.phases.first { it["ext1"] == FetchPhase.None } }
+        scope.cancel()
+    }
+
+    @Test
+    fun aSongTheServerForgetsIsNotLeftDownloading() = runBlocking {
+        server.answer("star")
+        server.answer("getAcquisitions", """"acquisitions":{"acquisition":[{"id":"ext1","state":"downloading","progress":0.4,"startedAt":"2026-09-27T10:00:00Z"}]}""")
+        val scope = CoroutineScope(Dispatchers.Default + Job())
+        val fetches = Fetches(server.client(), scope, pollMs = 50, clock = ticking())
+        fetches.request("ext1")
+        withTimeout(5_000) { fetches.phases.first { it["ext1"] is FetchPhase.Downloading } }
+        // The server restarted and its list is empty.
+        server.answer("getAcquisitions", """"acquisitions":{"acquisition":[]}""")
+        withTimeout(5_000) { fetches.phases.first { it["ext1"] == FetchPhase.None } }
+        scope.cancel()
+    }
+
+    @Test
+    fun withNoListComingBack_ASongJustAskedStaysQueued() = runBlocking {
+        server.answer("star")
+        val scope = CoroutineScope(Dispatchers.Default + Job())
+        val fetches = Fetches(server.client(), scope, pollMs = 50, clock = ticking())
+        fetches.request("ext1")
+        withTimeout(5_000) { while (server.calls.count { it.url.pathSegments.last() == "getAcquisitions" } < 3) kotlinx.coroutines.delay(20) }
+        assertEquals(FetchPhase.Queued, fetches.phase("ext1"))
+        scope.cancel()
+    }
 }

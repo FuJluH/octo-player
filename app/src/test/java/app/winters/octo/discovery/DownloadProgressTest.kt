@@ -264,7 +264,9 @@ class DownloadProgressTest {
         runCurrent()
         assertEquals(List(ARRIVAL_TRIES) { "sync" }, host.calls)
         assertTrue(run.isCompleted)
-        assertEquals(DownloadPhase.Adding, watch.live.value["find:a"])
+        // In the server's library: shown as in the library, not as on its way.
+        assertEquals(DownloadPhase.Done, watch.live.value["find:a"])
+        assertEquals(DownloadPhase.Done, phaseFor(host.row("find:a"), watch.live.value["find:a"], NOW, watch.listedSince.value))
     }
 
     @Test
@@ -314,6 +316,90 @@ class DownloadProgressTest {
         advanceTimeBy(POLL_MS)
         runCurrent()
         assertEquals(DownloadPhase.Queued, watch.live.value["find:a"])
+        run.cancel()
+    }
+
+    // ---------------------------------------------------------------------------
+    // The same rule as the downloads pill
+
+    @Test
+    fun aDownloadTheServersListDoesNotShowIsNotQueued() {
+        val asked = find("a", "Nightcall")
+        val later = NOW + 1_000
+        assertEquals("No list since the ask", DownloadPhase.Queued, phaseFor(asked, null, later, listedSince = NOW - 1))
+        assertEquals("A list asked for after the ask, without it", DownloadPhase.None, phaseFor(asked, null, later, listedSince = NOW + 500))
+        assertEquals("No list coming back, within two minutes", DownloadPhase.Queued, phaseFor(asked, null, NOW + 60_000))
+        assertEquals("No list coming back, after two minutes", DownloadPhase.None, phaseFor(asked, null, NOW + 2 * 60_000))
+        assertEquals("The reporter's: an hour on, after a restart", DownloadPhase.None, phaseFor(asked, null, NOW + 60 * 60_000))
+        assertEquals("The server's news still wins", DownloadPhase.Downloading(0.3f), phaseFor(asked, DownloadPhase.Downloading(0.3f), later, listedSince = NOW + 500))
+        assertEquals("Landed", DownloadPhase.Done, phaseFor(asked.copy(adoptedId = "t1"), null, later, listedSince = NOW + 500))
+    }
+
+    @Test
+    fun aSongAskedWithItsAlbumWaitsForTheAlbum() {
+        val asked = find("a", "Nightcall")
+        assertEquals(DownloadPhase.Queued, phaseFor(asked, null, NOW + 10 * 60_000, listedSince = NOW + 9 * 60_000, album = true))
+        assertEquals(DownloadPhase.None, phaseFor(asked, null, NOW + 30 * 60_000, listedSince = NOW + 29 * 60_000, album = true))
+    }
+
+    @Test
+    fun aServerThatListsNothingKeepsItsDownloadsQueuedUntilGivenUp() {
+        val asked = find("a", "Nightcall")
+        assertEquals(DownloadPhase.Queued, phaseFor(asked, null, NOW + 3 * 60 * 60_000, lists = false))
+        assertEquals(DownloadPhase.None, phaseFor(asked, null, NOW + 25 * 60 * 60_000, lists = false))
+    }
+
+    @Test
+    fun songsAskedForWithTheirAlbumShareItsTime() {
+        val one = find("a", "Nightcall").copy(albumId = "al-1")
+        val two = find("b", "Roadgame").copy(albumId = "al-1")
+        val alone = find("c", "Testarossa").copy(albumId = "al-1", requestedAt = NOW + 5)
+        val other = find("d", "Odd Look").copy(albumId = "al-2")
+        assertEquals(setOf("find:a", "find:b"), askedWithAlbum(listOf(one, two, alone, other)))
+        assertEquals(listOf(true, true, false, false), askedSongs(listOf(one, two, alone, other), "server:octo").map { it.album })
+    }
+
+    @Test
+    fun anotherServersListSaysNothingOfThisServersFinds() {
+        val here = find("a", "Nightcall")
+        val there = find("b", "Roadgame").copy(sourceId = "server:other")
+        val inputs = PhaseInputs(listOf(here, there), emptyMap(), listedSince = NOW + 500, lists = true, sourceId = "server:octo")
+        val phases = phasesOf(inputs, NOW + 1_000)
+        assertEquals(DownloadPhase.None, phases["find:a"])
+        assertEquals("Still within two minutes of its ask", DownloadPhase.Queued, phases["find:b"])
+        assertEquals(2 * 60_000L - 1_000, recheckMs(inputs, NOW + 1_000))
+        assertNull(recheckMs(PhaseInputs(listOf(here), emptyMap(), NOW + 500, true, "server:octo"), NOW + 1_000))
+    }
+
+    @Test
+    fun theWatchSaysWhenItsNewestListWasAskedFor_AndAForgottenDownloadLeaves() = runTest {
+        val host = FakeHost(find("a", "Nightcall"))
+        var list = listOf(entry("a", "downloading", 0.4f))
+        host.answer = { list }
+        val watch = watchOf(host)
+        assertNull(watch.listedSince.value)
+        val run = backgroundScope.async { watch.run() }
+        runCurrent()
+        assertEquals(NOW, watch.listedSince.value)
+        assertEquals(DownloadPhase.Downloading(0.4f), phaseFor(host.row("find:a"), watch.live.value["find:a"], NOW, watch.listedSince.value))
+
+        // The server restarted and forgot it.
+        list = emptyList()
+        advanceTimeBy(POLL_MS)
+        runCurrent()
+        val now = NOW + testScheduler.currentTime
+        assertNull(watch.live.value["find:a"])
+        assertEquals(DownloadPhase.None, phaseFor(host.row("find:a"), null, now, watch.listedSince.value))
+        run.cancel()
+    }
+
+    @Test
+    fun aSongTheServerNeverTookShowsAddAfterTheFirstList() = runTest {
+        val host = FakeHost(find("a", "Nightcall", requestedAt = NOW - 1))
+        val watch = watchOf(host)
+        val run = backgroundScope.async { watch.run() }
+        runCurrent()
+        assertEquals(DownloadPhase.None, phaseFor(host.row("find:a"), watch.live.value["find:a"], NOW, watch.listedSince.value))
         run.cancel()
     }
 }

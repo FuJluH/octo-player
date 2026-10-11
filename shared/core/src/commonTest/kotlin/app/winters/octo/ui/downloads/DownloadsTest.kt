@@ -765,4 +765,14 @@ class DownloadsTest {
         watch.reset()
         assertNull(watch.listedSince.value)
     }
+
+    @Test
+    fun aSongAskedWithItsAlbumCountsUntilTheAlbumIsListed_ThirtyMinutesAtMost() {
+        val ask = AskedSong("a", now - 10 * 60_000L, album = true)
+        assertTrue("Lists since have not shown the album yet", stillAsked(ask, now - 1_000, now))
+        assertEquals(1, pillCount(emptyList(), listOf(ask), now - 1_000, now))
+        assertFalse(stillAsked(ask.copy(askedAt = now - ASKED_ALBUM_UNLISTED_MS), now - 1_000, now))
+        assertEquals(20 * 60_000L, stillAskedForMs(ask, now - 1_000, now))
+        assertNull(stillAskedForMs(AskedSong("a", now - 1_000), now - 500, now))
+    }
 }

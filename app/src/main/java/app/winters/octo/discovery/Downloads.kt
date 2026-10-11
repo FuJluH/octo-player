@@ -25,6 +25,9 @@ import app.winters.octo.subsonic.OCTO_ACQUISITIONS
 import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.ui.common.Feedback
 import app.winters.octo.ui.downloads.AskedSong
+import app.winters.octo.ui.downloads.stillAskedForMs
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.transformLatest
 import dagger.Lazy
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -136,11 +139,23 @@ class Downloads @Inject constructor(
         },
     )
 
-    // Every find asked for, and how its download is going.
-    val phases: StateFlow<Map<String, DownloadPhase>> = combine(online.requestedFlow(), tracker.live) { rows, live ->
-        val now = System.currentTimeMillis()
-        rows.associate { it.id to phaseFor(it, live[it.id], now) }
-    }.stateIn(scope, SharingStarted.Eagerly, emptyMap())
+    // Whether the server in use lists its downloads, as far as is known.
+    private val lists = MutableStateFlow(true)
+
+    // Every find asked for, and how its download is going: by the same rule
+    // as the downloads pill, so no find shows as queued for a download the
+    // server no longer has. Read again when the next ask runs out.
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val phases: StateFlow<Map<String, DownloadPhase>> =
+        combine(online.requestedFlow(), tracker.live, tracker.listedSince, lists, sessions.state) { rows, live, since, lists, state ->
+            PhaseInputs(rows, live, since, lists, (state as? SessionState.SignedIn)?.session?.sourceId)
+        }.transformLatest { inputs ->
+            while (true) {
+                val now = System.currentTimeMillis()
+                emit(phasesOf(inputs, now))
+                delay(recheckMs(inputs, now) ?: break)
+            }
+        }.stateIn(scope, SharingStarted.Eagerly, emptyMap())
 
     // Finds asked for, by id, and whether each has arrived.
     val states: StateFlow<Map<String, DownloadState>> = phases
@@ -307,7 +322,10 @@ class Downloads @Inject constructor(
     // updated since.
     private suspend fun reportsProgress(): Boolean {
         val session = session() ?: return false
-        if ("$OCTO_ACQUISITIONS:1" in session.extensions) return true
+        if ("$OCTO_ACQUISITIONS:1" in session.extensions) {
+            lists.value = true
+            return true
+        }
         val now = System.currentTimeMillis()
         synchronized(support) {
             support[session.sourceId]?.let { (yes, at) -> if (yes || now - at < RECHECK_SUPPORT_MS) return yes }
@@ -320,6 +338,7 @@ class Downloads @Inject constructor(
 
     private fun noteSupport(session: Session, yes: Boolean) {
         synchronized(support) { support[session.sourceId] = yes to System.currentTimeMillis() }
+        lists.value = yes
     }
 
     // One quiet line when a song asked for in this run reaches the library,
@@ -422,10 +441,43 @@ fun downloadMatches(find: OnlineSongEntity, record: DownloadRecord): Boolean =
 
 // The finds asked for on server `sourceId` that have not reached the
 // library, by the id the server lists them under. None while signed out.
-fun askedSongs(rows: List<OnlineSongEntity>, sourceId: String?): List<AskedSong> =
-    if (sourceId == null) emptyList()
-    else rows.filter { it.sourceId == sourceId && it.requestedAt > 0 && it.adoptedId.isEmpty() }
-        .map { AskedSong(it.id.removePrefix(FIND_PREFIX), it.requestedAt) }
+fun askedSongs(rows: List<OnlineSongEntity>, sourceId: String?): List<AskedSong> {
+    if (sourceId == null) return emptyList()
+    val withAlbum = askedWithAlbum(rows)
+    return rows.filter { it.sourceId == sourceId && it.requestedAt > 0 && it.adoptedId.isEmpty() }
+        .map { askOf(it, it.id in withAlbum) }
+}
+
+// What the finds' phases are read from: the finds asked for, what the
+// server last said of each, when its newest list was asked for, whether it
+// lists downloads at all, and the server in use. A list from the server in
+// use says nothing of another server's finds.
+class PhaseInputs(
+    val rows: List<OnlineSongEntity>,
+    val live: Map<String, DownloadPhase>,
+    val listedSince: Long?,
+    val lists: Boolean,
+    val sourceId: String?,
+)
+
+fun phasesOf(inputs: PhaseInputs, now: Long): Map<String, DownloadPhase> {
+    val withAlbum = askedWithAlbum(inputs.rows)
+    return inputs.rows.associate { row ->
+        val since = inputs.listedSince.takeIf { row.sourceId == inputs.sourceId }
+        row.id to phaseFor(row, inputs.live[row.id], now, since, row.id in withAlbum, inputs.lists)
+    }
+}
+
+// How long until a find's phase may change by the clock alone: when the
+// first one still taken as asked for runs out.
+fun recheckMs(inputs: PhaseInputs, now: Long): Long? {
+    if (!inputs.lists) return null
+    val withAlbum = askedWithAlbum(inputs.rows)
+    return inputs.rows
+        .filter { it.adoptedId.isEmpty() && it.id !in inputs.live && stateOf(it, now) == DownloadState.Requested }
+        .mapNotNull { row -> stillAskedForMs(askOf(row, row.id in withAlbum), inputs.listedSince.takeIf { row.sourceId == inputs.sourceId }, now) }
+        .minOrNull()
+}
 
 fun stateOf(row: OnlineSongEntity, now: Long): DownloadState = when {
     row.adoptedId.isNotEmpty() -> DownloadState.Done

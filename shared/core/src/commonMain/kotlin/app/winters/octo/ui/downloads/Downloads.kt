@@ -285,38 +285,55 @@ fun stepWords(row: DownloadRow): String = when (row.phase) {
 }
 
 // A song asked for from this device that has not reached the library: the
-// id it was asked for with on the server, and when it was asked for.
-data class AskedSong(val serverId: String, val askedAt: Long)
+// id it was asked for with on the server, when it was asked for, and
+// whether it was asked for with its whole album.
+data class AskedSong(val serverId: String, val askedAt: Long, val album: Boolean = false)
 
-// The longest a song asked for here is counted while no list asked for
-// after it has come back, as when the server cannot be reached.
+// The longest a song asked for here is taken as on its way while no list
+// asked for after it has come back, as when the server cannot be reached.
 const val ASKED_UNLISTED_MS = 2 * 60_000L
 
+// The longest a song asked for with its album is taken as on its way while
+// no list shows it: the server lists an album's songs only once it starts
+// on the album, which can wait behind other downloads.
+const val ASKED_ALBUM_UNLISTED_MS = 30 * 60_000L
+
+// Whether a song asked for that the server's lists do not show is still
+// taken as on its way. The server lists a song's download before it
+// answers the ask, so the first list asked for after the ask settles it:
+// not on that list, it is not on its way (refused, forgotten, or ended and
+// cleared). Until such a list comes back it is, for ASKED_UNLISTED_MS at
+// most. A song asked for with its album waits for the album instead, for
+// ASKED_ALBUM_UNLISTED_MS at most. `listedSince` is when the newest list
+// that came back was asked for, or null before any did.
+fun stillAsked(ask: AskedSong, listedSince: Long?, now: Long): Boolean {
+    val age = now - ask.askedAt
+    return if (ask.album) age in 0 until ASKED_ALBUM_UNLISTED_MS
+    else age in 0 until ASKED_UNLISTED_MS && (listedSince == null || listedSince < ask.askedAt)
+}
+
+// How long until stillAsked turns false for `ask` by the clock alone, or
+// null when it already is.
+fun stillAskedForMs(ask: AskedSong, listedSince: Long?, now: Long): Long? =
+    if (!stillAsked(ask, listedSince, now)) null
+    else ask.askedAt + (if (ask.album) ASKED_ALBUM_UNLISTED_MS else ASKED_UNLISTED_MS) - now
+
 // How many songs the pill counts: the drawer's running rows, and songs
-// asked for here that no list could show yet. The server puts a download
-// on its list before it answers the ask, so the first list asked for after
-// the ask settles it: listed, the song is one of the rows; not listed
-// (refused, forgotten, ended and cleared), it is not on its way. Until such
-// a list comes back an ask counts, for ASKED_UNLISTED_MS at most.
-// `listedSince` is when the newest list that came back was asked for, or
-// null before any did.
+// asked for here that no list shows but that are still taken as on their
+// way (stillAsked).
 fun pillCount(rows: List<DownloadRow>, asked: List<AskedSong>, listedSince: Long?, now: Long): Int =
     runningCount(rows) + unlisted(rows, asked, listedSince, now).size
 
 // How long until pillCount may change with no new list or ask: when the
 // first ask it counts runs out, or null when it counts none.
 fun pillRecheckMs(rows: List<DownloadRow>, asked: List<AskedSong>, listedSince: Long?, now: Long): Long? =
-    unlisted(rows, asked, listedSince, now).minOfOrNull { it.askedAt + ASKED_UNLISTED_MS - now }
+    unlisted(rows, asked, listedSince, now).mapNotNull { stillAskedForMs(it, listedSince, now) }.minOrNull()
 
-// The asks pillCount counts beside the rows: not on a running row, asked
-// for after the newest list that came back was asked for, and lately.
+// The asks pillCount counts beside the rows: not on a running row, and
+// still taken as on their way.
 private fun unlisted(rows: List<DownloadRow>, asked: List<AskedSong>, listedSince: Long?, now: Long): List<AskedSong> {
     val running = rows.filter { !it.finished }.flatMapTo(HashSet()) { listOfNotNull(it.askedId, it.findId) }
-    return asked.filter { ask ->
-        ask.serverId !in running &&
-            (listedSince == null || listedSince < ask.askedAt) &&
-            now - ask.askedAt in 0 until ASKED_UNLISTED_MS
-    }
+    return asked.filter { ask -> ask.serverId !in running && stillAsked(ask, listedSince, now) }
 }
 
 // What the pill says aloud: "Downloading 42%, Da Funk. 2 more on the way".

@@ -5,6 +5,8 @@ import app.winters.octo.catalog.OnlineSongEntity
 import app.winters.octo.catalog.SongIdentity
 import app.winters.octo.subsonic.Acquisition
 import app.winters.octo.subsonic.AcquisitionStage
+import app.winters.octo.ui.downloads.AskedSong
+import app.winters.octo.ui.downloads.stillAsked
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -59,12 +61,38 @@ fun phaseOf(acquisition: Acquisition): DownloadPhase = when (acquisition.stage) 
 }
 
 // What one find shows: the library has the last word, then the server's
-// news, and a download asked for with no news yet is queued.
-fun phaseFor(row: OnlineSongEntity, live: DownloadPhase?, now: Long): DownloadPhase = when (stateOf(row, now)) {
+// news. A download the server's newest list does not show is queued only
+// while it is still taken as asked for (stillAsked), and otherwise not on
+// its way, so it can be asked for again. `listedSince` is when that list
+// was asked for, `album` whether the song was asked for with its album,
+// and `lists` whether the server lists its downloads at all: one that does
+// not is only ever asked about through the library, so its downloads stay
+// queued until they arrive or are given up.
+fun phaseFor(
+    row: OnlineSongEntity,
+    live: DownloadPhase?,
+    now: Long,
+    listedSince: Long? = null,
+    album: Boolean = false,
+    lists: Boolean = true,
+): DownloadPhase = when (stateOf(row, now)) {
     DownloadState.Done -> DownloadPhase.Done
     DownloadState.None -> DownloadPhase.None
-    DownloadState.Requested -> live ?: DownloadPhase.Queued
+    DownloadState.Requested -> live ?: if (!lists || stillAsked(askOf(row, album), listedSince, now)) DownloadPhase.Queued else DownloadPhase.None
 }
+
+// A find asked for, as the shared rule reads it.
+fun askOf(row: OnlineSongEntity, album: Boolean = false): AskedSong =
+    AskedSong(row.id.removePrefix(FIND_PREFIX), row.requestedAt, album)
+
+// The finds among `rows` asked for with their whole album: requestAlbum
+// gives every song of an album one time, which a song asked for alone
+// never shares with another song of its album.
+fun askedWithAlbum(rows: List<OnlineSongEntity>): Set<String> =
+    rows.filter { it.requestedAt > 0 && !it.albumId.isNullOrEmpty() }
+        .groupBy { it.albumId to it.requestedAt }
+        .values.filter { it.size > 1 }
+        .flatMapTo(HashSet()) { group -> group.map { it.id } }
 
 // The plain state, for places that only need to know whether a download
 // can be asked for. A failed one can be asked for again.
@@ -125,6 +153,13 @@ class ProgressWatch(private val host: AcquisitionHost, private val clock: () -> 
 
     // What the server last said about each find it is downloading.
     val live: StateFlow<Map<String, DownloadPhase>> = _live
+
+    private val _listedSince = MutableStateFlow<Long?>(null)
+
+    // When the newest list that came back was asked for, or null before
+    // any did: a find asked for before then that `live` leaves out is not
+    // on that list.
+    val listedSince: StateFlow<Long?> = _listedSince
 
     private val lock = Any()
     private val highest = HashMap<String, Float>()
@@ -219,6 +254,7 @@ class ProgressWatch(private val host: AcquisitionHost, private val clock: () -> 
             _live.value = emptyMap()
             return Poll.Idle
         }
+        val askedAt = clock()
         val list = try {
             host.acquisitions() ?: return Poll.Unsupported
         } catch (e: CancellationException) {
@@ -231,13 +267,14 @@ class ProgressWatch(private val host: AcquisitionHost, private val clock: () -> 
         val next = HashMap<String, DownloadPhase>()
         val due = mutableListOf<Pair<OnlineSongEntity, Acquisition>>()
         var pending = false
+        val withAlbum = askedWithAlbum(waiting)
         synchronized(lock) {
             for (find in waiting) {
                 val skip = passedOver[find.id]
                 val entry = acquisitionFor(find, if (skip == null) list else list.filter { it != skip })
                 if (entry == null) {
                     val since = unseenSince.getOrPut(find.id) { now }
-                    if (now - since < UNSEEN_MS) pending = true
+                    if (now - since < UNSEEN_MS || stillAsked(askOf(find, find.id in withAlbum), askedAt, now)) pending = true
                     continue
                 }
                 unseenSince.remove(find.id)
@@ -254,12 +291,16 @@ class ProgressWatch(private val host: AcquisitionHost, private val clock: () -> 
                             due += find to entry
                         }
                         if ((tries[find.id] ?: 0) < ARRIVAL_TRIES) pending = true
+                        // In the server's library, and brought in as often as it will be:
+                        // in the library, whether or not a copy of it here has been linked yet.
+                        else if (due.none { it.first.id == find.id }) next[find.id] = DownloadPhase.Done
                     }
                     else -> pending = true
                 }
             }
         }
         _live.value = next
+        _listedSince.value = askedAt
         return if (pending || due.isNotEmpty()) Poll.Asked(due) else Poll.Idle
     }
 
