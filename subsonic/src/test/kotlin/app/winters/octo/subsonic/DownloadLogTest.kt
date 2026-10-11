@@ -85,6 +85,33 @@ class DownloadLogTest {
     }
 
     @Test
+    fun anywayIsSentOnlyWhenAsked_AndAQuestionIsReadBack() = runTest {
+        answer("pickFoundSong")
+        client().pickFoundSong("a1b2c3", FoundCandidate(source = "Soulseek", index = 3, id = "c-7f3a"))
+        assertNull("Not asked, not sent", server.takeRequest().url.queryParameter("anyway"))
+
+        val question = "This copy is FLAC like yours, so it is not better. Replace yours anyway?"
+        server.enqueue(
+            MockResponse.Builder()
+                .body("""{"subsonic-response":{"status":"ok","version":"1.16.1","pick":{"state":"confirm","detail":"$question","key":null}}}""")
+                .build(),
+        )
+        val asked = client().pickFoundSong("a1b2c3", FoundCandidate(source = "Soulseek", id = "c-7f3a"), anyway = false)
+        assertEquals("false", server.takeRequest().url.queryParameter("anyway"))
+        assertTrue(asked.confirm)
+        assertFalse(asked.queued)
+        assertEquals(question, asked.detail)
+        assertNull(asked.key)
+
+        answer("pickFoundSong")
+        client().pickFoundSong("a1b2c3", FoundCandidate(source = "Soulseek", id = "c-7f3a"), anyway = true)
+        val again = server.takeRequest()
+        assertEquals("true", again.url.queryParameter("anyway"))
+        assertEquals("c-7f3a", again.url.queryParameter("copy"))
+        assertEquals("a1b2c3", again.url.queryParameter("search"))
+    }
+
+    @Test
     fun pickingOnAServerWithoutCopyIdsSendsThePlace() = runTest {
         answer("pickFoundSong")
         client().pickFoundSong("a1b2c3", FoundCandidate(source = "Soulseek", index = 3))

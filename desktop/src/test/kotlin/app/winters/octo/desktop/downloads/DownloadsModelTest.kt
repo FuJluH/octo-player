@@ -12,6 +12,8 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -150,6 +152,87 @@ class DownloadsModelTest {
         delay(300)
         assertEquals(DrawerView.List, model.view)
         assertTrue("No log is followed", "getAcquisition" !in server.endpoints())
+        model.close()
+    }
+
+    private val question = "Yours looks like a live recording and this copy is the plain song. Replace yours anyway?"
+
+    // A finished search for a song in the library, with one copy, on a
+    // server listing octoAcquisitions at `acquisitions`. The server asks
+    // about any pick sent with anyway=false and takes the rest.
+    private suspend fun pickReady(acquisitions: String): DownloadsModel {
+        extensions(acquisitions)
+        downloads()
+        server.answer(
+            "findSongs",
+            """"foundSongs":{"id":"f1","state":"done","song":{"title":"Holocene","artist":"Bon Iver","libraryId":"nd-1"},"candidate":[{"source":"Soulseek","peer":"p1","format":"flac","index":0,"id":"c-1"}]}""",
+            type = "octo",
+        )
+        server.answerBy("pickFoundSong") { request ->
+            if (request.url.queryParameter("anyway") == "false") {
+                server.ok(""""pick":{"state":"confirm","detail":"$question","key":null}""", type = "octo")
+            } else {
+                server.ok(""""pick":{"state":"queued","detail":"Getting FLAC from p1.","key":"soulseek:ho"}""", type = "octo")
+            }
+        }
+        val model = DownloadsModel(server.client(), scope)
+        model.start()
+        until("the server said") { model.supported != null }
+        model.open = true
+        model.find("nd-1", "Holocene")
+        until("the search ended") { model.found.value?.state == "done" }
+        return model
+    }
+
+    private fun picks() = server.calls.filter { it.url.pathSegments.last() == "pickFoundSong" }
+
+    @Test
+    fun aServerThatAsksFirstGetsAnywayFalse_AndReplaceAnywaySendsTheSameCopy() = runBlocking {
+        val model = pickReady("[1,2,3]")
+        assertTrue(model.asksFirst)
+        model.pick("f1", model.found.value!!.candidate.single())
+        until("the question came") { model.question.value != null }
+        assertEquals(question, model.question.value!!.words)
+        assertEquals("c-1", model.question.value!!.copy.id)
+        assertNull("A question is not a refusal", model.picked.value)
+        assertEquals(DrawerView.Find("nd-1", "Holocene"), model.view)
+        assertEquals("false", picks().single().url.queryParameter("anyway"))
+
+        model.replaceAnyway()
+        until("the pick opened its log") { model.view == DrawerView.Log("soulseek:ho") }
+        assertNull(model.question.value)
+        val again = picks().last()
+        assertEquals(2, picks().size)
+        assertEquals("true", again.url.queryParameter("anyway"))
+        assertEquals("f1", again.url.queryParameter("search"))
+        assertEquals("c-1", again.url.queryParameter("copy"))
+        model.close()
+    }
+
+    @Test
+    fun keepMineSendsNothing() = runBlocking {
+        val model = pickReady("[1,2,3]")
+        model.pick("f1", model.found.value!!.candidate.single())
+        until("the question came") { model.question.value != null }
+
+        model.keepMine()
+        assertNull(model.question.value)
+        model.replaceAnyway()
+        delay(200)
+        assertEquals("Only the first pick was sent", 1, picks().size)
+        assertEquals(DrawerView.Find("nd-1", "Holocene"), model.view)
+        assertEquals(1, model.found.value!!.candidate.size)
+        model.close()
+    }
+
+    @Test
+    fun anOlderServerIsNeverSentAnyway() = runBlocking {
+        val model = pickReady("[1,2]")
+        assertFalse(model.asksFirst)
+        model.pick("f1", model.found.value!!.candidate.single())
+        until("the pick opened its log") { model.view == DrawerView.Log("soulseek:ho") }
+        assertNull(picks().single().url.queryParameter("anyway"))
+        assertNull(model.question.value)
         model.close()
     }
 }

@@ -4,6 +4,7 @@ import app.winters.octo.subsonic.Acquisition
 import app.winters.octo.subsonic.AcquisitionStage
 import app.winters.octo.subsonic.FoundCandidate
 import app.winters.octo.subsonic.FoundSongs
+import app.winters.octo.subsonic.PICK_SKIPPED
 import app.winters.octo.subsonic.PickResult
 import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.subsonic.Upgrade
@@ -231,14 +232,24 @@ class DownloadLogWatch(
     }
 }
 
-// What Find songs needs from the app: the server's three calls.
+// What Find songs needs from the app: the server's three calls. `anyway`
+// is null when it is not to be sent at all.
 interface FindSource {
     suspend fun start(id: String): FoundSongs
 
     suspend fun get(search: String): FoundSongs
 
-    suspend fun pick(search: String, copy: FoundCandidate): PickResult
+    suspend fun pick(search: String, copy: FoundCandidate, anyway: Boolean?): PickResult
 }
+
+// A picked copy the server would not take without a yes: it is not better
+// than the library's. `words` is the whole question, as the server put it.
+data class PickQuestion(val search: String, val copy: FoundCandidate, val words: String)
+
+// What is asked when the server sends no words of its own.
+const val REPLACE_ANYWAY_FALLBACK = "This copy is not better than yours. Replace yours anyway?"
+const val REPLACE_ANYWAY = "Replace anyway"
+const val KEEP_MINE = "Keep mine"
 
 // A Find songs search, followed until every source has answered, and the
 // copy picked from it.
@@ -260,6 +271,18 @@ class FindSongsWatch(
     // What the last pick did.
     val picked: StateFlow<PickResult?> = _picked
 
+    private val _question = MutableStateFlow<PickQuestion?>(null)
+
+    // A pick waiting for "Replace anyway" or "Keep mine", while its search
+    // is the one on screen.
+    val question: StateFlow<PickQuestion?> = _question
+
+    // Whether the server asks before a copy that is not better replaces the
+    // library's (octoAcquisitions 3). Only then is `anyway` sent; an older
+    // server never gets it and says no in words instead.
+    @Volatile
+    var asksFirst: Boolean = false
+
     private var job: Job? = null
 
     // Starts a search for a song by its id on the server.
@@ -268,6 +291,7 @@ class FindSongsWatch(
         _found.value = null
         _problem.value = null
         _picked.value = null
+        _question.value = null
         job = scope.launch {
             var now = try {
                 source.start(id)
@@ -294,20 +318,48 @@ class FindSongsWatch(
     // nor from a list that another search has replaced: a copy's place
     // there could name another copy by then. What the server did is shown
     // only while its search is still the one on screen.
+    // A server that asks first may answer with a question instead, which
+    // waits in `question` for replaceAnyway or keepMine.
     suspend fun pick(search: String, copy: FoundCandidate): PickResult {
+        _question.value = null
+        return send(search, copy, if (asksFirst) false else null)
+    }
+
+    // Sends the pick the question was about again, to replace the library's
+    // copy all the same. Null when that question is no longer the one
+    // waiting (answered already, or its search gone), and nothing is sent.
+    suspend fun replaceAnyway(question: PickQuestion): PickResult? {
+        if (!_question.compareAndSet(question, null)) return null
+        return send(question.search, question.copy, true)
+    }
+
+    // Leaves the library's copy as it is: nothing is sent. Given a
+    // question, only that one is let go, not one asked since.
+    fun keepMine(question: PickQuestion? = null) {
+        if (question == null) _question.value = null else _question.compareAndSet(question, null)
+    }
+
+    private suspend fun send(search: String, copy: FoundCandidate, anyway: Boolean?): PickResult {
         val now = _found.value
         val refused = when {
             now == null || now.id != search -> FIND_LIST_CHANGED
             now.searching -> FIND_PICK_WAIT
             else -> null
         }
-        if (refused != null) return PickResult("skipped", refused).also { _picked.value = it }
+        if (refused != null) return PickResult(PICK_SKIPPED, refused).also { _picked.value = it }
         val result = try {
-            source.pick(search, copy)
+            source.pick(search, copy, anyway)
         } catch (e: SubsonicException) {
-            PickResult("skipped", e.message ?: "The server could not be asked")
+            PickResult(PICK_SKIPPED, e.message ?: "The server could not be asked")
         }
-        if (showing(search)) _picked.value = result
+        if (showing(search)) {
+            if (result.confirm) {
+                _picked.value = null
+                _question.value = PickQuestion(search, copy, result.detail?.takeIf(String::isNotBlank) ?: REPLACE_ANYWAY_FALLBACK)
+            } else {
+                _picked.value = result
+            }
+        }
         return result
     }
 
@@ -321,5 +373,6 @@ class FindSongsWatch(
         _found.value = null
         _problem.value = null
         _picked.value = null
+        _question.value = null
     }
 }

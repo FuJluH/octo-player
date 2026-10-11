@@ -9,6 +9,7 @@ import app.winters.octo.subsonic.FoundCandidate
 import app.winters.octo.subsonic.FoundSongs
 import app.winters.octo.subsonic.OCTO_ACQUISITIONS
 import app.winters.octo.subsonic.OCTO_DOWNLOAD_LOG_VERSION
+import app.winters.octo.subsonic.OCTO_REPLACE_ANYWAY_VERSION
 import app.winters.octo.subsonic.PickResult
 import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.Upgrade
@@ -18,6 +19,7 @@ import app.winters.octo.ui.downloads.DownloadsSource
 import app.winters.octo.ui.downloads.DownloadsWatch
 import app.winters.octo.ui.downloads.FindSongsWatch
 import app.winters.octo.ui.downloads.FindSource
+import app.winters.octo.ui.downloads.PickQuestion
 import app.winters.octo.subsonic.OCTO_LIBRARY_ACTIONS
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -79,7 +81,8 @@ class DownloadsModel(
 
             override suspend fun get(search: String): FoundSongs = client.foundSongs(search)
 
-            override suspend fun pick(search: String, copy: FoundCandidate): PickResult = client.pickFoundSong(search, copy)
+            override suspend fun pick(search: String, copy: FoundCandidate, anyway: Boolean?): PickResult =
+                client.pickFoundSong(search, copy, anyway)
         },
         scope,
     )
@@ -102,6 +105,12 @@ class DownloadsModel(
     val found: StateFlow<FoundSongs?> get() = findWatch.found
     val findProblem: StateFlow<String?> get() = findWatch.problem
     val picked: StateFlow<PickResult?> get() = findWatch.picked
+    val question: StateFlow<PickQuestion?> get() = findWatch.question
+
+    // Whether the server asks before a copy that is not better replaces the
+    // library's, rather than saying no.
+    var asksFirst by mutableStateOf(false)
+        private set
 
     // Asks whether the server keeps logs, and follows its downloads if so.
     // A server out of reach is asked again a little later, until it says.
@@ -110,8 +119,11 @@ class DownloadsModel(
             while (isActive) {
                 val logs = client.supportsIfKnown(OCTO_ACQUISITIONS, OCTO_DOWNLOAD_LOG_VERSION)
                 val upgrades = logs?.let { client.supportsIfKnown(OCTO_LIBRARY_ACTIONS, 2) }
-                if (logs != null && upgrades != null) {
+                val asks = if (logs == true && upgrades != null) client.supportsIfKnown(OCTO_ACQUISITIONS, OCTO_REPLACE_ANYWAY_VERSION) else false
+                if (logs != null && upgrades != null && asks != null) {
                     upgradesToo = upgrades
+                    findWatch.asksFirst = asks
+                    asksFirst = asks
                     supported = logs
                     if (logs) watch.start()
                     return@launch
@@ -172,17 +184,30 @@ class DownloadsModel(
     // opens its download's log, so the person can follow it from the start,
     // but only while the drawer still shows that search: closed meanwhile,
     // or gone on to something else, it is left as it is.
+    // A server that asks first may answer with a question instead, held in
+    // `question` until replaceAnyway or keepMine.
     fun pick(search: String, copy: FoundCandidate) {
-        scope.launch {
-            val result = findWatch.pick(search, copy)
-            if (!result.queued) return@launch
-            watch.wake()
-            if (!(view is DrawerView.Find && findWatch.showing(search))) return@launch
-            // A replacement waits in the upgrade queue before it has a log
-            // of its own; the list shows it meanwhile.
-            val key = result.key
-            if (key != null) showLog(key) else showList()
-        }
+        scope.launch { picked(search, findWatch.pick(search, copy)) }
+    }
+
+    // Sends the question's pick again, to replace the library's copy all
+    // the same; it then goes on as any pick.
+    fun replaceAnyway() {
+        val asked = findWatch.question.value ?: return
+        scope.launch { findWatch.replaceAnyway(asked)?.let { picked(asked.search, it) } }
+    }
+
+    // Leaves the library's copy as it is; nothing is sent.
+    fun keepMine(question: PickQuestion? = null) = findWatch.keepMine(question)
+
+    private fun picked(search: String, result: PickResult) {
+        if (!result.queued) return
+        watch.wake()
+        if (!(view is DrawerView.Find && findWatch.showing(search))) return
+        // A replacement waits in the upgrade queue before it has a log
+        // of its own; the list shows it meanwhile.
+        val key = result.key
+        if (key != null) showLog(key) else showList()
     }
 
     fun clear(key: String? = null) {

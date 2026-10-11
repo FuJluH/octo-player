@@ -1,13 +1,18 @@
 package app.winters.octo.ui.downloads
 
 import androidx.annotation.DrawableRes
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +24,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -28,6 +34,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -37,6 +45,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -45,6 +54,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -63,6 +73,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.winters.octo.data.ServerDownloads
 import app.winters.octo.data.SheetView
+import app.winters.octo.design.AccentButton
 import app.winters.octo.design.ButtonSize
 import app.winters.octo.design.GlassSheet
 import app.winters.octo.design.GlazeButton
@@ -70,6 +81,7 @@ import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoDuration
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
+import app.winters.octo.design.SheetFill
 import app.winters.octo.design.Spinner
 import app.winters.octo.design.motionScale
 import app.winters.octo.design.octoTween
@@ -81,6 +93,8 @@ import app.winters.octo.subsonic.FoundCandidate
 import app.winters.octo.subsonic.FoundSongs
 import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.QuietButton
+import app.winters.octo.ui.family.MORE_BELOW
+import kotlinx.coroutines.launch
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 
@@ -99,14 +113,84 @@ class ServerDownloadsViewModel @Inject constructor(val downloads: ServerDownload
 fun ServerDownloadsHost(vm: ServerDownloadsViewModel = hiltViewModel()) {
     val model = vm.downloads
     val view by model.view.collectAsStateWithLifecycle()
-    GlassSheet(visible = view != null, onDismiss = model::close) {
-        when (val now = view) {
-            SheetView.List, null -> DownloadList(model)
-            is SheetView.Log -> DownloadLog(model, now.key)
-            is SheetView.Find -> FindSongs(model, now)
+    Box(Modifier.fillMaxSize()) {
+        GlassSheet(visible = view != null, onDismiss = model::close) {
+            when (val now = view) {
+                SheetView.List, null -> DownloadList(model)
+                is SheetView.Log -> DownloadLog(model, now.key)
+                is SheetView.Find -> FindSongs(model, now)
+            }
+        }
+        ReplaceAnywaySheet(model, (view as? SheetView.Find)?.title)
+    }
+}
+
+// The server's question about a copy that is not better than the library's,
+// word for word, under the song's whole title, in a sheet over Find songs.
+// "Replace anyway" sends the pick again to replace it all the same; "Keep
+// mine", back, a tap off it or pulling it down sends nothing. The buttons
+// stay in place under words that scroll, should they ever not fit.
+@Composable
+private fun ReplaceAnywaySheet(model: ServerDownloads, fallbackTitle: String?) {
+    val question by model.question.collectAsStateWithLifecycle()
+    val found by model.found.collectAsStateWithLifecycle()
+    // The last question stays drawn while its sheet slides away.
+    var shown by remember { mutableStateOf(question) }
+    LaunchedEffect(question) { question?.let { shown = it } }
+    val asked = shown
+    GlassSheet(visible = question != null, onDismiss = { question?.let(model::keepMine) }, scrolls = false) {
+        if (asked != null) {
+            val title = found?.song?.title?.takeIf(String::isNotBlank) ?: fallbackTitle?.takeIf(String::isNotBlank)
+            Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                title?.let { Text(it, style = OctoType.headline, color = OctoColors.TextPrimary, modifier = Modifier.semantics { heading() }) }
+                val scroll = rememberScrollState()
+                Box(Modifier.weight(1f, fill = false)) {
+                    Text(
+                        asked.words,
+                        style = OctoType.bodySmall,
+                        color = OctoColors.TextSecondary,
+                        modifier = Modifier.fillMaxWidth().verticalScroll(scroll),
+                    )
+                    MoreBelow(scroll, Modifier.align(Alignment.BottomCenter))
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    GlazeButton(KEEP_MINE, { model.keepMine(asked) }, size = ButtonSize.Medium, modifier = Modifier.weight(1f))
+                    AccentButton(REPLACE_ANYWAY, onClick = model::replaceAnyway, size = ButtonSize.Medium, fill = OctoColors.Accent, modifier = Modifier.weight(1f))
+                }
+            }
         }
     }
 }
+
+// A soft fade at the bottom of words that scroll, with a "More below"
+// button that scrolls to their end; gone once the end shows.
+@Composable
+private fun MoreBelow(scroll: ScrollState, modifier: Modifier) {
+    val scope = rememberCoroutineScope()
+    val motion = motionScale()
+    AnimatedVisibility(scroll.canScrollForward, modifier, enter = fadeIn(octoTween(motion, OctoDuration.Card)), exit = fadeOut(octoTween(motion, OctoDuration.Card))) {
+        Box(
+            Modifier.fillMaxWidth().height(48.dp).background(Brush.verticalGradient(listOf(Color.Transparent, SheetFill))),
+            contentAlignment = Alignment.BottomCenter,
+        ) {
+            Row(
+                Modifier
+                    .padding(bottom = 4.dp)
+                    .background(OctoColors.AccentSelected, PillShape)
+                    .border(1.dp, Thread, PillShape)
+                    .clickable(role = Role.Button, onClickLabel = MORE_BELOW) { scope.launch { scroll.animateScrollTo(scroll.maxValue) } }
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(MORE_BELOW, style = OctoType.caption.copy(fontWeight = FontWeight.SemiBold), color = OctoColors.TextPrimary)
+                Icon(painterResource(OctoIcons.Collapse), contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(14.dp))
+            }
+        }
+    }
+}
+
+private val PillShape = RoundedCornerShape(50)
 
 // ---------------------------------------------------------------------------
 // The list
@@ -413,6 +497,7 @@ private fun ColumnScope.FindSongs(model: ServerDownloads, view: SheetView.Find) 
     val found by model.found.collectAsStateWithLifecycle()
     val problem by model.findProblem.collectAsStateWithLifecycle()
     val picked by model.picked.collectAsStateWithLifecycle()
+    val asksFirst by model.asksFirst.collectAsStateWithLifecycle()
     val searching = found?.searching != false && problem == null
     // A copy waiting for "Replace it", for a song already in the library,
     // with the search it came from. A new search, Search again too, asks
@@ -427,7 +512,7 @@ private fun ColumnScope.FindSongs(model: ServerDownloads, view: SheetView.Find) 
         }
     }
     LazyColumn(Modifier.weight(1f, fill = false), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 16.dp)) {
-        item(key = "head") { FindHead(view, found, model::artwork) }
+        item(key = "head") { FindHead(view, found, asksFirst, model::artwork) }
         found?.source?.let { sources -> item(key = "sources") { Sources(sources) } }
         listOfNotNull(problem, found?.error, picked?.takeIf { !it.queued }?.detail).forEachIndexed { index, words ->
             item(key = "problem$index") { Text(words, style = OctoType.caption, color = OctoColors.SignalOrange, modifier = Modifier.padding(vertical = 6.dp)) }
@@ -439,7 +524,7 @@ private fun ColumnScope.FindSongs(model: ServerDownloads, view: SheetView.Find) 
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text("Replace your copy with ${candidateFacts(copy).take(2).joinToString(", ")}?", style = OctoType.bodySmall, color = OctoColors.TextPrimary)
-                    Text(FIND_REPLACES, style = OctoType.caption, color = OctoColors.TextMuted)
+                    Text(findReplaces(asksFirst), style = OctoType.caption, color = OctoColors.TextMuted)
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         GlazeButton("Cancel", { asking = null }, size = ButtonSize.Small)
                         GlazeButton("Replace it", {
@@ -472,7 +557,7 @@ private fun ColumnScope.FindSongs(model: ServerDownloads, view: SheetView.Find) 
 }
 
 @Composable
-private fun FindHead(view: SheetView.Find, found: FoundSongs?, artwork: (String?) -> String?) {
+private fun FindHead(view: SheetView.Find, found: FoundSongs?, asksFirst: Boolean, artwork: (String?) -> String?) {
     val song = found?.song
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         Artwork(artwork(song?.coverArt ?: view.id), 64.dp, shape = RoundedCornerShape(10.dp))
@@ -485,7 +570,7 @@ private fun FindHead(view: SheetView.Find, found: FoundSongs?, artwork: (String?
     if (song != null) {
         Column(Modifier.fillMaxWidth().padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             ownedCopyText(song.quality, song.size)?.let { Text(it, style = OctoType.bodySmall, color = OctoColors.TextPrimary) }
-            Text(if (song.libraryId != null) FIND_REPLACES else FIND_DOWNLOADS, style = OctoType.caption, color = OctoColors.TextMuted)
+            Text(if (song.libraryId != null) findReplaces(asksFirst) else FIND_DOWNLOADS, style = OctoType.caption, color = OctoColors.TextMuted)
         }
     }
 }

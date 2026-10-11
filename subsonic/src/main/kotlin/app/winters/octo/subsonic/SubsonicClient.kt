@@ -152,12 +152,20 @@ class SubsonicClient(
 
     // Fetches exactly this copy from a Find songs list: by its id, or on a
     // server older than copy ids, by its place on the list, which holds
-    // only once the search has finished.
-    suspend fun pickFoundSong(search: String, copy: FoundCandidate): PickResult {
+    // only once the search has finished. `anyway` is sent only when not
+    // null, and only to a server that lists octoAcquisitions at
+    // OCTO_REPLACE_ANYWAY_VERSION: false asks first about a copy that is
+    // not better than the library's, true replaces it all the same.
+    suspend fun pickFoundSong(search: String, copy: FoundCandidate, anyway: Boolean? = null): PickResult {
         val which = copy.id?.let { "copy" to it }
             ?: copy.index?.let { "candidate" to it.toString() }
-            ?: return PickResult("skipped", "This copy cannot be picked. Search again.")
-        return get("pickFoundSong", mapOf("search" to search, which), "pick", PickResult.serializer())
+            ?: return PickResult(PICK_SKIPPED, "This copy cannot be picked. Search again.")
+        val params = buildMap {
+            put("search", search)
+            put(which.first, which.second)
+            anyway?.let { put("anyway", it.toString()) }
+        }
+        return get("pickFoundSong", params, "pick", PickResult.serializer())
     }
 
     // What the signed-in user may do to the library's files. Only for

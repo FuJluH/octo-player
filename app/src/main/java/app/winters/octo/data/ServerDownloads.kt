@@ -14,6 +14,7 @@ import app.winters.octo.subsonic.FoundSongs
 import app.winters.octo.subsonic.OCTO_ACQUISITIONS
 import app.winters.octo.subsonic.OCTO_DOWNLOAD_LOG_VERSION
 import app.winters.octo.subsonic.OCTO_LIBRARY_ACTIONS
+import app.winters.octo.subsonic.OCTO_REPLACE_ANYWAY_VERSION
 import app.winters.octo.subsonic.PickResult
 import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.subsonic.Upgrade
@@ -23,6 +24,7 @@ import app.winters.octo.ui.downloads.DownloadsSource
 import app.winters.octo.ui.downloads.DownloadsWatch
 import app.winters.octo.ui.downloads.FindSongsWatch
 import app.winters.octo.ui.downloads.FindSource
+import app.winters.octo.ui.downloads.PickQuestion
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -107,8 +109,8 @@ class ServerDownloads @Inject constructor(
 
             override suspend fun get(search: String): FoundSongs = client()?.foundSongs(search) ?: throw SubsonicException.NotFound("Not signed in")
 
-            override suspend fun pick(search: String, copy: FoundCandidate): PickResult =
-                client()?.pickFoundSong(search, copy) ?: PickResult("skipped", "Not signed in")
+            override suspend fun pick(search: String, copy: FoundCandidate, anyway: Boolean?): PickResult =
+                client()?.pickFoundSong(search, copy, anyway) ?: PickResult("skipped", "Not signed in")
         },
         scope,
     )
@@ -120,6 +122,13 @@ class ServerDownloads @Inject constructor(
     val found: StateFlow<FoundSongs?> get() = findWatch.found
     val findProblem: StateFlow<String?> get() = findWatch.problem
     val picked: StateFlow<PickResult?> get() = findWatch.picked
+    val question: StateFlow<PickQuestion?> get() = findWatch.question
+
+    private val _asksFirst = MutableStateFlow(false)
+
+    // Whether the server asks before a copy that is not better replaces the
+    // library's, rather than saying no.
+    val asksFirst: StateFlow<Boolean> = _asksFirst
 
     fun start() {
         if (running) return
@@ -133,6 +142,9 @@ class ServerDownloads @Inject constructor(
                 close()
                 val session = (state as? SessionState.SignedIn)?.session
                 val logs = session != null && "$OCTO_ACQUISITIONS:$OCTO_DOWNLOAD_LOG_VERSION" in session.extensions
+                val asks = logs && "$OCTO_ACQUISITIONS:$OCTO_REPLACE_ANYWAY_VERSION" in session.extensions
+                findWatch.asksFirst = asks
+                _asksFirst.value = asks
                 _supported.value = logs
                 if (logs) watch.start()
             }
@@ -214,16 +226,29 @@ class ServerDownloads @Inject constructor(
     // opens its download's log; a replacement waits in the upgrade queue
     // first, so the list shows it. Only while the sheet still shows that
     // search: closed meanwhile, or gone on to something else, it is left as
-    // it is and only the list is asked again.
+    // it is and only the list is asked again. A server that asks first may
+    // answer with a question instead, held in `question` until
+    // replaceAnyway or keepMine.
     fun pick(search: String, copy: FoundCandidate) {
-        scope.launch {
-            val result = findWatch.pick(search, copy)
-            if (!result.queued) return@launch
-            watch.wake()
-            if (!(_view.value is SheetView.Find && findWatch.showing(search))) return@launch
-            val key = result.key
-            if (key != null) showLog(key) else showList()
-        }
+        scope.launch { picked(search, findWatch.pick(search, copy)) }
+    }
+
+    // Sends the question's pick again, to replace the library's copy all
+    // the same; it then goes on as any pick.
+    fun replaceAnyway() {
+        val asked = findWatch.question.value ?: return
+        scope.launch { findWatch.replaceAnyway(asked)?.let { picked(asked.search, it) } }
+    }
+
+    // Leaves the library's copy as it is; nothing is sent.
+    fun keepMine(question: PickQuestion? = null) = findWatch.keepMine(question)
+
+    private fun picked(search: String, result: PickResult) {
+        if (!result.queued) return
+        watch.wake()
+        if (!(_view.value is SheetView.Find && findWatch.showing(search))) return
+        val key = result.key
+        if (key != null) showLog(key) else showList()
     }
 
     fun clear(key: String? = null) {

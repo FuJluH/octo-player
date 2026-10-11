@@ -1,13 +1,18 @@
 package app.winters.octo.desktop.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -30,6 +35,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -41,17 +48,23 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.unit.dp
+import app.winters.octo.design.AccentButton
+import app.winters.octo.design.ButtonSize
 import app.winters.octo.design.ControlHeight
 import app.winters.octo.design.Corner
 import app.winters.octo.design.CutTxt
@@ -98,7 +111,12 @@ import app.winters.octo.ui.downloads.stepOf
 import app.winters.octo.ui.downloads.DownloadRow
 import app.winters.octo.ui.downloads.FIND_DOWNLOADS
 import app.winters.octo.ui.downloads.FIND_PICK_WAIT
-import app.winters.octo.ui.downloads.FIND_REPLACES
+import app.winters.octo.ui.downloads.KEEP_MINE
+import app.winters.octo.ui.downloads.PickQuestion
+import app.winters.octo.ui.downloads.REPLACE_ANYWAY
+import app.winters.octo.ui.downloads.findReplaces
+import app.winters.octo.ui.family.MORE_BELOW
+import kotlinx.coroutines.launch
 import app.winters.octo.ui.downloads.FIND_SONGS
 import app.winters.octo.ui.downloads.LogMark
 import app.winters.octo.ui.downloads.RowPhase
@@ -452,8 +470,14 @@ private fun FindSongs(app: AppState, model: DownloadsModel, view: DrawerView.Fin
     val found by model.found.collectAsState()
     val problem by model.findProblem.collectAsState()
     val picked by model.picked.collectAsState()
+    val question by model.question.collectAsState()
     val searching = found?.searching != false && problem == null
     val list = rememberLazyListState()
+    // A copy that is not better than the library's: the server's question,
+    // in a dialog of its own.
+    LaunchedEffect(question) {
+        question?.let { askReplaceAnyway(app, model, it, found?.song?.title?.takeIf(String::isNotBlank) ?: view.title) }
+    }
     LazyColumn(modifier.scrollbar(list), list, contentPadding = PaddingValues(start = Space.L, end = Space.L, top = Space.S, bottom = Space.Xl)) {
         item(key = "bar") {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -467,7 +491,7 @@ private fun FindSongs(app: AppState, model: DownloadsModel, view: DrawerView.Fin
                 TextAction("Search again", model::searchAgain, enabled = !searching, icon = OctoIcons.Search)
             }
         }
-        item(key = "head") { FindHead(view, found) }
+        item(key = "head") { FindHead(view, found, model.asksFirst) }
         found?.source?.let { sources -> item(key = "sources") { Sources(sources) } }
         problem?.let { item(key = "problem") { Txt(it, DesktopType.meta, OctoColors.SignalOrange, Modifier.padding(vertical = Space.S), maxLines = 3) } }
         found?.error?.let { item(key = "error") { Txt(it, DesktopType.meta, OctoColors.SignalOrange, Modifier.padding(vertical = Space.S), maxLines = 3) } }
@@ -487,7 +511,7 @@ private fun FindSongs(app: AppState, model: DownloadsModel, view: DrawerView.Fin
 
 // The song looked for, the library's copy of it, and what picking does.
 @Composable
-private fun FindHead(view: DrawerView.Find, found: FoundSongs?) {
+private fun FindHead(view: DrawerView.Find, found: FoundSongs?, asksFirst: Boolean) {
     val song = found?.song
     Row(Modifier.fillMaxWidth().padding(top = Space.S), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.L)) {
         Cover(song?.coverArt ?: view.id, Modifier.size(HeadCover), shape = Corner.ArtMShape, placeholder = OctoIcons.Songs)
@@ -500,7 +524,7 @@ private fun FindHead(view: DrawerView.Find, found: FoundSongs?) {
     if (song != null) {
         Column(Modifier.fillMaxWidth().padding(top = Space.M), verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
             ownedCopyText(song.quality, song.size)?.let { Txt(it, DesktopType.table, OctoColors.TextPrimary) }
-            Txt(if (song.libraryId != null) FIND_REPLACES else FIND_DOWNLOADS, DesktopType.meta, OctoColors.TextMuted, maxLines = 3)
+            Txt(if (song.libraryId != null) findReplaces(asksFirst) else FIND_DOWNLOADS, DesktopType.meta, OctoColors.TextMuted, maxLines = 3)
         }
     }
 }
@@ -586,7 +610,7 @@ private fun pickCopy(app: AppState, model: DownloadsModel, found: FoundSongs, co
         MenuTitle(found.song.title)
         PopupPadding {
             Txt(
-                "Replace your copy with ${candidateFacts(copy).take(2).joinToString(", ")}? $FIND_REPLACES",
+                "Replace your copy with ${candidateFacts(copy).take(2).joinToString(", ")}? ${findReplaces(model.asksFirst)}",
                 DesktopType.body, OctoColors.TextPrimary, maxLines = 6,
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.M, Alignment.End)) {
@@ -600,6 +624,77 @@ private fun pickCopy(app: AppState, model: DownloadsModel, found: FoundSongs, co
     }
 }
 
+// The server's question about a copy that is not better than the library's,
+// word for word, under the song's whole title. "Replace anyway" sends the
+// pick again to replace it all the same; "Keep mine", Escape or a click off
+// the card sends nothing. The buttons stay in place under words that
+// scroll, should they ever not fit. It goes away by itself once the
+// question does (the search replaced, or the drawer closed).
+private fun askReplaceAnyway(app: AppState, model: DownloadsModel, asked: PickQuestion, title: String) {
+    app.popups.showCentred(width = 420.dp, scrim = true, scrollsItself = true) { close ->
+        val now by model.question.collectAsState()
+        LaunchedEffect(now) { if (now != asked) close() }
+        var answered by remember { mutableStateOf(false) }
+        DisposableEffect(Unit) { onDispose { if (!answered) model.keepMine(asked) } }
+        Txt(
+            title, DesktopType.emphasis, OctoColors.TextPrimary,
+            Modifier.padding(start = Space.L, end = Space.L, top = Space.M, bottom = Space.S).semantics { heading() },
+            maxLines = Int.MAX_VALUE,
+        )
+        val scroll = rememberScrollState()
+        Box(Modifier.weight(1f, fill = false)) {
+            Txt(
+                asked.words, DesktopType.body, OctoColors.TextPrimary,
+                Modifier.fillMaxWidth().verticalScroll(scroll).padding(horizontal = Space.L, vertical = Space.Xs),
+                maxLines = Int.MAX_VALUE,
+            )
+            MoreBelow(scroll, Modifier.align(Alignment.BottomCenter))
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(start = Space.L, end = Space.L, top = Space.M, bottom = Space.S),
+            horizontalArrangement = Arrangement.spacedBy(Space.M, Alignment.End),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            GlazeCapsule(null, KEEP_MINE, close)
+            AccentButton(REPLACE_ANYWAY, {
+                answered = true
+                model.replaceAnyway()
+                close()
+            }, size = ButtonSize.Medium, fill = OctoColors.Accent)
+        }
+    }
+}
+
+// A soft fade at the bottom of words that scroll, with a "More below"
+// button that scrolls to their end; gone once the end shows.
+@Composable
+private fun MoreBelow(scroll: ScrollState, modifier: Modifier) {
+    val scope = rememberCoroutineScope()
+    val motion = motionScale()
+    AnimatedVisibility(scroll.canScrollForward, modifier, enter = fadeIn(octoTween(motion, OctoDuration.Card)), exit = fadeOut(octoTween(motion, OctoDuration.Card))) {
+        Box(
+            Modifier.fillMaxWidth().height(48.dp).background(Brush.verticalGradient(listOf(Color.Transparent, MoreBelowFade))),
+            contentAlignment = Alignment.BottomCenter,
+        ) {
+            Row(
+                Modifier
+                    .padding(bottom = Space.Xs)
+                    .background(OctoColors.AccentSelected, PillShape)
+                    .border(1.dp, SeparatorColor, PillShape)
+                    .clickable(role = Role.Button, onClickLabel = MORE_BELOW) { scope.launch { scroll.animateScrollTo(scroll.maxValue) } }
+                    .padding(horizontal = Space.M, vertical = Space.Xxs),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Space.Xs),
+            ) {
+                Txt(MORE_BELOW, DesktopType.label, OctoColors.TextPrimary)
+                Glyph(OctoIcons.Collapse, size = 14.dp)
+            }
+        }
+    }
+}
+
+private val PillShape = RoundedCornerShape(50)
+private val MoreBelowFade = Color(0xF0141416)
 private val LineCover = RowHeight.Regular
 private val HeadCover = FrameSize.PlayerCover + Space.Xs
 private val MarkSize = IconSize.Transport + Space.Xxs

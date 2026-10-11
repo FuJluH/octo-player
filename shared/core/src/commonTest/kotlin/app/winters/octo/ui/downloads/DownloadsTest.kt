@@ -271,6 +271,9 @@ class DownloadsTest {
         var asks = 0
         var searches = 0
         val picks = mutableListOf<Pair<String, FoundCandidate>>()
+
+        // What each pick sent as `anyway`, null when it was left out.
+        val anyways = mutableListOf<Boolean?>()
         var answer: suspend () -> PickResult = { PickResult("queued", "Getting it.", "soulseek:x") }
 
         override suspend fun start(id: String): FoundSongs {
@@ -284,8 +287,9 @@ class DownloadsTest {
             return FoundSongs(id = search, state = if (asks < 2) "searching" else "done", candidate = listOf(copy, FoundCandidate(source = "Lidarr", index = 1, id = "c2")))
         }
 
-        override suspend fun pick(search: String, copy: FoundCandidate): PickResult {
+        override suspend fun pick(search: String, copy: FoundCandidate, anyway: Boolean?): PickResult {
             picks += search to copy
+            anyways += anyway
             return answer()
         }
 
@@ -310,6 +314,105 @@ class DownloadsTest {
         assertTrue(picked.queued)
         assertEquals("soulseek:x", watch.picked.value!!.key)
         assertEquals(listOf("f1" to FakeFind.copy), source.picks)
+    }
+
+    // A search that has finished, ready to pick from.
+    private fun TestScope.doneWatch(source: FakeFind, asksFirst: Boolean): FindSongsWatch {
+        val scope = TestScope(StandardTestDispatcher(testScheduler))
+        val watch = FindSongsWatch(source, scope)
+        watch.asksFirst = asksFirst
+        watch.search("nd-1")
+        scope.advanceTimeBy(FIND_POLL_MS * 3)
+        assertEquals("done", watch.found.value!!.state)
+        return watch
+    }
+
+    private val question = "This copy is MP3 320 and yours is FLAC, so it sounds worse. Replace yours anyway?"
+
+    @Test
+    fun anOlderServerIsNeverSentAnyway() = runTest {
+        val source = FakeFind()
+        source.answer = { PickResult("skipped", "Your copy is already FLAC, so nothing would be better.") }
+        val watch = doneWatch(source, asksFirst = false)
+        watch.pick("f1", FakeFind.copy)
+        assertEquals(listOf<Boolean?>(null), source.anyways)
+        assertNull(watch.question.value)
+        assertEquals("Your copy is already FLAC, so nothing would be better.", watch.picked.value!!.detail)
+        watch.close()
+    }
+
+    @Test
+    fun aServerThatAsksFirstGetsAnywayFalse_AndItsQuestionWaits() = runTest {
+        val source = FakeFind()
+        source.answer = { PickResult("confirm", question) }
+        val watch = doneWatch(source, asksFirst = true)
+        val first = watch.pick("f1", FakeFind.copy)
+        assertTrue(first.confirm)
+        assertEquals(listOf<Boolean?>(false), source.anyways)
+        assertEquals(PickQuestion("f1", FakeFind.copy, question), watch.question.value)
+        assertNull("A question is not a refusal", watch.picked.value)
+        watch.close()
+        assertNull(watch.question.value)
+    }
+
+    @Test
+    fun replaceAnywaySendsTheSameCopyWithAnywayTrue() = runTest {
+        val source = FakeFind()
+        source.answer = { PickResult("confirm", question) }
+        val watch = doneWatch(source, asksFirst = true)
+        watch.pick("f1", FakeFind.copy)
+        val asked = watch.question.value!!
+
+        source.answer = { PickResult("queued", "Getting it.", "soulseek:x") }
+        val result = watch.replaceAnyway(asked)!!
+        assertTrue(result.queued)
+        assertEquals(listOf("f1" to FakeFind.copy, "f1" to FakeFind.copy), source.picks)
+        assertEquals(listOf<Boolean?>(false, true), source.anyways)
+        assertNull(watch.question.value)
+        assertEquals("soulseek:x", watch.picked.value!!.key)
+
+        // Answered once: a second tap sends nothing.
+        assertNull(watch.replaceAnyway(asked))
+        assertEquals(2, source.picks.size)
+        watch.close()
+    }
+
+    @Test
+    fun keepMineSendsNothing() = runTest {
+        val source = FakeFind()
+        source.answer = { PickResult("confirm", "") }
+        val watch = doneWatch(source, asksFirst = true)
+        watch.pick("f1", FakeFind.copy)
+        assertEquals("No words from the server: ours", REPLACE_ANYWAY_FALLBACK, watch.question.value!!.words)
+        val asked = watch.question.value!!
+
+        watch.keepMine()
+        assertNull(watch.question.value)
+        assertNull(watch.picked.value)
+        assertEquals("f1", watch.found.value!!.id)
+        assertNull("Kept: replacing is no longer on offer", watch.replaceAnyway(asked))
+        assertEquals(1, source.picks.size)
+        watch.close()
+    }
+
+    @Test
+    fun aQuestionGoesWithItsSearch() = runTest {
+        val source = FakeFind()
+        source.answer = { PickResult("confirm", question) }
+        val scope = TestScope(StandardTestDispatcher(testScheduler))
+        val watch = FindSongsWatch(source, scope)
+        watch.asksFirst = true
+        watch.search("nd-1")
+        scope.advanceTimeBy(FIND_POLL_MS * 3)
+        watch.pick("f1", FakeFind.copy)
+        val asked = watch.question.value!!
+
+        watch.search("nd-1")
+        scope.runCurrent()
+        assertNull(watch.question.value)
+        assertNull(watch.replaceAnyway(asked))
+        assertEquals(1, source.picks.size)
+        watch.close()
     }
 
     @Test

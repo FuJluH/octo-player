@@ -4,8 +4,13 @@ import kotlinx.serialization.Serializable
 
 // The OpenSubsonic extension an Octo server lists when it can say how the
 // downloads it was asked for are going. Version 2 adds each download's log,
-// clearing finished ones, and Find songs.
+// clearing finished ones, and Find songs. Version 3 lets a picked copy that
+// is not better than the library's ask first and replace it anyway.
 const val OCTO_ACQUISITIONS = "octoAcquisitions"
+
+// The version of octoAcquisitions whose pickFoundSong takes `anyway` and may
+// answer PICK_CONFIRM with the question to ask.
+const val OCTO_REPLACE_ANYWAY_VERSION = 3
 
 // Where one download on the server has got to.
 enum class AcquisitionStage(val wire: String) {

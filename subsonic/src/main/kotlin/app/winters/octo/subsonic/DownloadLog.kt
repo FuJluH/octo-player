@@ -142,15 +142,27 @@ const val FIND_DONE = "done"
 const val FIND_FAILED = "failed"
 const val FIND_OFF = "off"
 
+// The states a pick answers with.
+const val PICK_QUEUED = "queued"
+const val PICK_SKIPPED = "skipped"
+
+// From octoAcquisitions 3, for a pick sent with anyway=false: the copy is
+// not better than the library's, and `detail` holds the whole question to
+// ask before sending it again with anyway=true.
+const val PICK_CONFIRM = "confirm"
+
 // What picking a copy did: queued, with the downloads row to follow when
-// there is one, or skipped with the server's words why.
+// there is one, skipped with the server's words why, or a question to
+// confirm first.
 @Serializable
 data class PickResult(
     val state: String = "",
     val detail: String? = null,
     val key: String? = null,
 ) {
-    val queued: Boolean get() = state == "queued"
+    val queued: Boolean get() = state == PICK_QUEUED
+
+    val confirm: Boolean get() = state == PICK_CONFIRM
 }
 
 @Serializable
