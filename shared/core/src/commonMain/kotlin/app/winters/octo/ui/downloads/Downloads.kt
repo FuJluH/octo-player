@@ -72,6 +72,8 @@ data class DownloadRow(
     // What Find songs looks for from this row: the library song once it is
     // there, otherwise the found song.
     val findId: String?,
+    // The id the download was asked for with, when it is one.
+    val askedId: String? = null,
 ) {
     val finished: Boolean get() = phase.finished
 }
@@ -139,6 +141,7 @@ fun rowOf(acquisition: Acquisition, upgrade: Upgrade? = null): DownloadRow {
         updatedAt = maxOf(acquisition.updatedAt.orEmpty(), upgrade?.updatedAt.orEmpty()).ifEmpty { null },
         logKey = acquisition.key,
         findId = upgrade?.id ?: acquisition.libraryId ?: acquisition.id.takeIf(String::isNotBlank),
+        askedId = acquisition.id.takeIf(String::isNotBlank),
     )
 }
 
@@ -279,6 +282,41 @@ fun stepWords(row: DownloadRow): String = when (row.phase) {
     RowPhase.Adding -> "Adding"
     RowPhase.Done -> "Done"
     RowPhase.Failed -> "Failed"
+}
+
+// A song asked for from this device that has not reached the library: the
+// id it was asked for with on the server, and when it was asked for.
+data class AskedSong(val serverId: String, val askedAt: Long)
+
+// The longest a song asked for here is counted while no list asked for
+// after it has come back, as when the server cannot be reached.
+const val ASKED_UNLISTED_MS = 2 * 60_000L
+
+// How many songs the pill counts: the drawer's running rows, and songs
+// asked for here that no list could show yet. The server puts a download
+// on its list before it answers the ask, so the first list asked for after
+// the ask settles it: listed, the song is one of the rows; not listed
+// (refused, forgotten, ended and cleared), it is not on its way. Until such
+// a list comes back an ask counts, for ASKED_UNLISTED_MS at most.
+// `listedSince` is when the newest list that came back was asked for, or
+// null before any did.
+fun pillCount(rows: List<DownloadRow>, asked: List<AskedSong>, listedSince: Long?, now: Long): Int =
+    runningCount(rows) + unlisted(rows, asked, listedSince, now).size
+
+// How long until pillCount may change with no new list or ask: when the
+// first ask it counts runs out, or null when it counts none.
+fun pillRecheckMs(rows: List<DownloadRow>, asked: List<AskedSong>, listedSince: Long?, now: Long): Long? =
+    unlisted(rows, asked, listedSince, now).minOfOrNull { it.askedAt + ASKED_UNLISTED_MS - now }
+
+// The asks pillCount counts beside the rows: not on a running row, asked
+// for after the newest list that came back was asked for, and lately.
+private fun unlisted(rows: List<DownloadRow>, asked: List<AskedSong>, listedSince: Long?, now: Long): List<AskedSong> {
+    val running = rows.filter { !it.finished }.flatMapTo(HashSet()) { listOfNotNull(it.askedId, it.findId) }
+    return asked.filter { ask ->
+        ask.serverId !in running &&
+            (listedSince == null || listedSince < ask.askedAt) &&
+            now - ask.askedAt in 0 until ASKED_UNLISTED_MS
+    }
 }
 
 // What the pill says aloud: "Downloading 42%, Da Funk. 2 more on the way".

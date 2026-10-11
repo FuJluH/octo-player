@@ -24,6 +24,7 @@ import app.winters.octo.subsonic.Acquisition
 import app.winters.octo.subsonic.OCTO_ACQUISITIONS
 import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.ui.common.Feedback
+import app.winters.octo.ui.downloads.AskedSong
 import dagger.Lazy
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -152,6 +153,12 @@ class Downloads @Inject constructor(
     val adoptions: StateFlow<Map<String, String>?> = online.requestedFlow()
         .map(::adoptionsOf)
         .stateIn(scope, SharingStarted.Eagerly, null)
+
+    // Songs asked for from this phone on the server in use that have not
+    // reached the library, for the downloads pill.
+    val asked: StateFlow<List<AskedSong>> = combine(online.requestedFlow(), sessions.state) { rows, state ->
+        askedSongs(rows, (state as? SessionState.SignedIn)?.session?.sourceId)
+    }.distinctUntilChanged().stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private val _arrived = MutableStateFlow(0)
 
@@ -412,6 +419,13 @@ fun adoptions(waiting: List<OnlineSongEntity>, library: List<TrackEntity>): Map<
 // recording by the same artist.
 fun downloadMatches(find: OnlineSongEntity, record: DownloadRecord): Boolean =
     sameRecording(record.title, record.artist, find.title, find.artist)
+
+// The finds asked for on server `sourceId` that have not reached the
+// library, by the id the server lists them under. None while signed out.
+fun askedSongs(rows: List<OnlineSongEntity>, sourceId: String?): List<AskedSong> =
+    if (sourceId == null) emptyList()
+    else rows.filter { it.sourceId == sourceId && it.requestedAt > 0 && it.adoptedId.isEmpty() }
+        .map { AskedSong(it.id.removePrefix(FIND_PREFIX), it.requestedAt) }
 
 fun stateOf(row: OnlineSongEntity, now: Long): DownloadState = when {
     row.adoptedId.isNotEmpty() -> DownloadState.Done

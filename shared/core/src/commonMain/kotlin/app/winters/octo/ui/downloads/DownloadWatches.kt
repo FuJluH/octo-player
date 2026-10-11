@@ -68,6 +68,12 @@ class DownloadsWatch(
     private val _loaded = MutableStateFlow(false)
     val loaded: StateFlow<Boolean> = _loaded
 
+    private val _listedSince = MutableStateFlow<Long?>(null)
+
+    // When the newest list that came back was asked for, or null before any
+    // did: songs asked for before then are on it if they are on their way.
+    val listedSince: StateFlow<Long?> = _listedSince
+
     private val wake = Channel<Unit>(Channel.CONFLATED)
     private var job: Job? = null
     private var lastAcquisitions: List<Acquisition> = emptyList()
@@ -112,6 +118,7 @@ class DownloadsWatch(
         lastUpgrades = emptyList()
         synchronized(hidden) { hidden.clear() }
         _loaded.value = false
+        _listedSince.value = null
         _rows.value = emptyList()
         _upgrades.value = emptyList()
     }
@@ -129,6 +136,7 @@ class DownloadsWatch(
 
     // One look at the server.
     suspend fun poll() {
+        val askedAt = clock()
         try {
             lastAcquisitions = source.acquisitions()
             lastUpgrades = try {
@@ -139,6 +147,7 @@ class DownloadsWatch(
             _loaded.value = true
             _upgrades.value = lastUpgrades
             show()
+            _listedSince.value = askedAt
         } catch (e: SubsonicException) {
             // Kept as it was: a moment without the server changes nothing.
         }

@@ -44,7 +44,11 @@ import app.winters.octo.ui.common.DownloadRing
 import app.winters.octo.ui.common.rememberSystemReduceMotion
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.chrisbanes.haze.HazeState
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -57,9 +61,18 @@ class DownloadsPillViewModel @Inject constructor(
     private val serverDownloads: ServerDownloads,
     player: PlayerSettings,
 ) : ViewModel() {
-    // How many songs asked for are still on their way into the library.
-    val coming: StateFlow<Int> = downloads.phases
-        .map { phases -> phases.values.count(::onItsWay) }
+    // How many songs are on their way into the library: the server's
+    // running rows, and songs just asked for that no list could show yet.
+    // Looked at again when the oldest of those runs out.
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val coming: StateFlow<Int> = combine(serverDownloads.rows, downloads.asked, serverDownloads.listedSince, ::Triple)
+        .transformLatest { (rows, asked, since) ->
+            while (true) {
+                val now = System.currentTimeMillis()
+                emit(pillCount(rows, asked, since, now))
+                delay(pillRecheckMs(rows, asked, since, now) ?: break)
+            }
+        }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
@@ -81,10 +94,6 @@ class DownloadsPillViewModel @Inject constructor(
         serverDownloads.open()
     }
 }
-
-// A song asked for that has not arrived yet, nor failed.
-internal fun onItsWay(phase: DownloadPhase): Boolean =
-    phase == DownloadPhase.Queued || phase is DownloadPhase.Downloading || phase == DownloadPhase.Adding
 
 // The pill's words: how many songs are on their way, until the server's
 // list says which step they are on.
@@ -113,7 +122,7 @@ fun DownloadsPill(haze: HazeState, modifier: Modifier = Modifier, vm: DownloadsP
     val calm = appCalm || rememberSystemReduceMotion()
     if (coming <= 0 || !canOpen) return
     val lead = pillLead(rows)
-    val more = if (lead != null) runningCount(rows) - 1 else 0
+    val more = if (lead != null) coming - 1 else 0
     val spoken = if (lead != null) pillSpoken(rows) else comingText(coming)
     val motion = motionScale()
     FloatingGlaze(

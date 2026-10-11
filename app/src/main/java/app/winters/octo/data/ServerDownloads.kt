@@ -126,6 +126,7 @@ class ServerDownloads @Inject constructor(
 
     val rows: StateFlow<List<DownloadRow>> get() = watch.rows
     val loaded: StateFlow<Boolean> get() = watch.loaded
+    val listedSince: StateFlow<Long?> get() = watch.listedSince
     val log: StateFlow<Acquisition?> get() = logWatch.row
     val logProblem: StateFlow<String?> get() = logWatch.problem
     val found: StateFlow<FoundSongs?> get() = findWatch.found

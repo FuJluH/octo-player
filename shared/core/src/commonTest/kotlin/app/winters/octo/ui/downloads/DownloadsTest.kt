@@ -679,4 +679,90 @@ class DownloadsTest {
         val downloading = rowOf(download("s:a", "downloading", progress = 0.42f), Upgrade(id = "nd-1", state = "working"))
         assertEquals("Replacing... Downloading 42%", replacingWords(replacingRow(r, listOf(downloading))))
     }
+
+    // ---------------------------------------------------------------------------
+    // The pill's count
+
+    private fun asked(id: String, agoMs: Long) = AskedSong(id, now - agoMs)
+
+    private fun rows(vararg list: Acquisition) = drawerRows(list.toList(), emptyList(), now)
+
+    @Test
+    fun aSongAskedForLongAgoThatNoListShows_IsNotCounted() {
+        // The phone still holds an ask from an hour ago; the server's list,
+        // asked for seconds ago, has nothing: the drawer is empty, so is the pill.
+        assertEquals(0, pillCount(emptyList(), listOf(asked("a", 60 * 60_000L)), now - 5_000, now))
+    }
+
+    @Test
+    fun aSongJustAskedFor_CountsUntilTheFirstListAfterIt() {
+        val ask = asked("a", 1_000)
+        assertEquals("No list asked for since the ask", 1, pillCount(emptyList(), listOf(ask), now - 10_000, now))
+        assertEquals("No list at all yet", 1, pillCount(emptyList(), listOf(ask), null, now))
+        assertEquals("A list asked for after it, without it: refused or never taken", 0, pillCount(emptyList(), listOf(ask), now - 500, now))
+    }
+
+    @Test
+    fun aListedSongCountsOnce_WhicheverListIsNewer() {
+        val running = rows(download("s:a", "downloading", progress = 0.4f))
+        val ask = asked("a", 1_000)
+        assertEquals(1, pillCount(running, listOf(ask), now - 500, now))
+        assertEquals("Listed before the newest list came back", 1, pillCount(running, listOf(ask), now - 10_000, now))
+    }
+
+    @Test
+    fun aSongListedUnderItsLibraryIdCountsOnce() {
+        val importing = rows(download("s:a", "importing").copy(libraryId = "nd-9"))
+        assertEquals("nd-9", importing.single().findId)
+        assertEquals(1, pillCount(importing, listOf(asked("a", 1_000)), now - 10_000, now))
+    }
+
+    @Test
+    fun aDoneOrFailedSongIsNotCounted() {
+        val ask = asked("a", 60_000)
+        assertEquals(0, pillCount(rows(download("s:a", "done")), listOf(ask), now - 500, now))
+        assertEquals(0, pillCount(rows(download("s:a", "failed", error = "no copy")), listOf(ask), now - 500, now))
+        assertEquals("Ended, and its row since cleared", 0, pillCount(emptyList(), listOf(ask), now - 500, now))
+    }
+
+    @Test
+    fun withNoListComingBack_AnAskCountsTwoMinutesAtMost() {
+        assertEquals(1, pillCount(emptyList(), listOf(asked("a", ASKED_UNLISTED_MS - 1)), null, now))
+        assertEquals(0, pillCount(emptyList(), listOf(asked("a", ASKED_UNLISTED_MS)), null, now))
+        assertEquals("After a restart nothing has come back yet, and an old ask is not counted", 0, pillCount(emptyList(), listOf(asked("a", 3 * 60 * 60_000L)), null, now))
+        assertEquals("An ask from a clock set later is not counted", 0, pillCount(emptyList(), listOf(asked("a", -60_000)), null, now))
+    }
+
+    @Test
+    fun runningRowsCountWithoutAnyAsk() {
+        val list = rows(download("s:a", "downloading"), download("s:b", "queued"), download("s:c", "done"))
+        assertEquals(2, pillCount(list, emptyList(), now - 500, now))
+    }
+
+    @Test
+    fun thePillLooksAgainWhenTheFirstCountedAskRunsOut() {
+        val asks = listOf(asked("a", 30_000), asked("b", 90_000))
+        assertEquals(30_000L, pillRecheckMs(emptyList(), asks, null, now))
+        assertNull("Nothing counted, nothing to look at", pillRecheckMs(emptyList(), asks, now - 500, now))
+        assertNull(pillRecheckMs(rows(download("s:a", "downloading")), listOf(asked("a", 30_000)), null, now))
+    }
+
+    @Test
+    fun theWatchSaysWhenItsNewestListWasAskedFor() = runTest {
+        var clock = now
+        val source = FakeDownloads().apply { list = listOf(download("s:a", "downloading")) }
+        val scope = TestScope(StandardTestDispatcher(testScheduler))
+        val watch = DownloadsWatch(source, scope, clock = { clock })
+        assertNull(watch.listedSince.value)
+        watch.poll()
+        assertEquals(now, watch.listedSince.value)
+
+        clock = now + 5_000
+        source.fail = true
+        watch.poll()
+        assertEquals("A list that did not come back changes nothing", now, watch.listedSince.value)
+
+        watch.reset()
+        assertNull(watch.listedSince.value)
+    }
 }
