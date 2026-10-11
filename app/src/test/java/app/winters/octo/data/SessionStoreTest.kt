@@ -12,7 +12,7 @@ import app.winters.octo.livelists.accountKey
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -52,7 +52,8 @@ class SessionStoreTest {
     // gives back what a fresh store reads from that file.
     private fun oldFile(): Preferences = runBlocking {
         val file = File(folder.root, "session.preferences_pb")
-        val writer = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val writerJob = SupervisorJob()
+        val writer = CoroutineScope(writerJob + Dispatchers.IO)
         PreferenceDataStoreFactory.create(scope = writer) { file }.edit { p ->
             p[stringPreferencesKey("server_url")] = url
             p[stringPreferencesKey("username")] = "winters"
@@ -64,12 +65,14 @@ class SessionStoreTest {
             p[stringSetPreferencesKey("extensions")] = setOf("songLyrics:1", "apiKeyAuthentication:1")
             p[stringPreferencesKey("connection")] = connection
         }
-        writer.cancel()
-        val reader = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        // A second store may open the file only once the first has fully let go of it.
+        writerJob.cancelAndJoin()
+        val readerJob = SupervisorJob()
+        val reader = CoroutineScope(readerJob + Dispatchers.IO)
         try {
             PreferenceDataStoreFactory.create(scope = reader) { file }.data.first()
         } finally {
-            reader.cancel()
+            readerJob.cancelAndJoin()
         }
     }
 
