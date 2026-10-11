@@ -1,5 +1,7 @@
 package app.winters.octo.health
 
+import app.winters.octo.subsonic.TrashedSong
+
 // The words both apps use around Library health's fixes and deleting a
 // song from disk, so the desktop and the phone ask and answer alike.
 
@@ -27,6 +29,26 @@ const val FIX_OTHER_SERVER = "That change was made on another server, so it cann
 // The line after a delete.
 fun deletedLine(count: Int, title: String?): String =
     if (count == 1 && title != null) "Deleted $title from disk." else "Deleted ${countText(count, "song", "songs")} from disk."
+
+// What Recently removed says about a song whose file another copy
+// replaced: "Replaced: was FLAC 16-bit 44.1 kHz, now MP3 320".
+fun replacedText(was: String?, now: String?): String {
+    val parts = listOfNotNull(
+        was?.trim()?.takeIf(String::isNotEmpty)?.let { "was $it" },
+        now?.trim()?.takeIf(String::isNotEmpty)?.let { "now $it" },
+    )
+    return if (parts.isEmpty()) "Replaced by another copy" else "Replaced: ${parts.joinToString(", ")}"
+}
+
+// What a screen reader says for that line.
+fun replacedSpoken(was: String?, now: String?): String {
+    val text = replacedText(was, now)
+    return if (text.startsWith("Replaced: ")) "Replaced by another copy. Yours " + text.removePrefix("Replaced: ") else text
+}
+
+// The step that puts a song in the trash back: a removed one returns, a
+// replaced one swaps back in.
+fun TrashedSong.restoreStep(): FixStep = FixStep.Restore(id, title, replaced = replaced)
 
 // What the Recently removed list says about one song's time left, from
 // the server's "goneAt", counted from `nowMillis`.

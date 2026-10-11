@@ -186,7 +186,19 @@ data class TrashedSong(
     val removedAt: String? = null,
     // When the server deletes it for good; null keeps it until cleared.
     val goneAt: String? = null,
-)
+    // TRASH_REMOVED (also when left out) or TRASH_REPLACED: a file another
+    // copy took the place of, with the file in the trash (`was`) and the
+    // one in the library now (`now`), like "FLAC 16-bit 44.1 kHz". Putting
+    // a replaced one back swaps the two.
+    val kind: String? = null,
+    val was: String? = null,
+    val now: String? = null,
+) {
+    val replaced: Boolean get() = kind == TRASH_REPLACED
+}
+
+const val TRASH_REMOVED = "removed"
+const val TRASH_REPLACED = "replaced"
 
 @Serializable
 data class LibraryTrash(

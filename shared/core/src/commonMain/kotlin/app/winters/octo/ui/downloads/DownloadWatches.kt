@@ -59,6 +59,11 @@ class DownloadsWatch(
     // What the drawer shows, running first.
     val rows: StateFlow<List<DownloadRow>> = _rows
 
+    private val _upgrades = MutableStateFlow<List<Upgrade>>(emptyList())
+
+    // The higher quality copies as the server last listed them.
+    val upgrades: StateFlow<List<Upgrade>> = _upgrades
+
     // Whether the server has answered since the start.
     private val _loaded = MutableStateFlow(false)
     val loaded: StateFlow<Boolean> = _loaded
@@ -108,6 +113,7 @@ class DownloadsWatch(
         synchronized(hidden) { hidden.clear() }
         _loaded.value = false
         _rows.value = emptyList()
+        _upgrades.value = emptyList()
     }
 
     // Asks again now, as after a song was asked for.
@@ -131,6 +137,7 @@ class DownloadsWatch(
                 lastUpgrades
             }
             _loaded.value = true
+            _upgrades.value = lastUpgrades
             show()
         } catch (e: SubsonicException) {
             // Kept as it was: a moment without the server changes nothing.
@@ -242,15 +249,6 @@ interface FindSource {
     suspend fun pick(search: String, copy: FoundCandidate, anyway: Boolean?): PickResult
 }
 
-// A picked copy the server would not take without a yes: it is not better
-// than the library's. `words` is the whole question, as the server put it.
-data class PickQuestion(val search: String, val copy: FoundCandidate, val words: String)
-
-// What is asked when the server sends no words of its own.
-const val REPLACE_ANYWAY_FALLBACK = "This copy is not better than yours. Replace yours anyway?"
-const val REPLACE_ANYWAY = "Replace anyway"
-const val KEEP_MINE = "Keep mine"
-
 // A Find songs search, followed until every source has answered, and the
 // copy picked from it.
 class FindSongsWatch(
@@ -273,13 +271,14 @@ class FindSongsWatch(
 
     private val _question = MutableStateFlow<PickQuestion?>(null)
 
-    // A pick waiting for "Replace anyway" or "Keep mine", while its search
-    // is the one on screen.
+    // A pick waiting for an answer (see AskKind), while its search is the
+    // one on screen.
     val question: StateFlow<PickQuestion?> = _question
 
-    // Whether the server asks before a copy that is not better replaces the
-    // library's (octoAcquisitions 3). Only then is `anyway` sent; an older
-    // server never gets it and says no in words instead.
+    // Whether the server asks before a copy replaces the library's
+    // (octoAcquisitions 3). Only then is `anyway` sent: false to ask, which
+    // never fetches a library song, and true once the person said yes. An
+    // older server never gets it and says no in words instead.
     @Volatile
     var asksFirst: Boolean = false
 
@@ -318,16 +317,18 @@ class FindSongsWatch(
     // nor from a list that another search has replaced: a copy's place
     // there could name another copy by then. What the server did is shown
     // only while its search is still the one on screen.
-    // A server that asks first may answer with a question instead, which
-    // waits in `question` for replaceAnyway or keepMine.
+    // A server that asks first answers a library song's pick with a
+    // question instead, which waits in `question` for replaceAnyway or
+    // keepMine.
     suspend fun pick(search: String, copy: FoundCandidate): PickResult {
         _question.value = null
         return send(search, copy, if (asksFirst) false else null)
     }
 
-    // Sends the pick the question was about again, to replace the library's
-    // copy all the same. Null when that question is no longer the one
-    // waiting (answered already, or its search gone), and nothing is sent.
+    // Sends the pick the question was about again with anyway=true, to
+    // replace the library's copy. Null when that question is no longer the
+    // one waiting (answered already, or its search gone), and nothing is
+    // sent.
     suspend fun replaceAnyway(question: PickQuestion): PickResult? {
         if (!_question.compareAndSet(question, null)) return null
         return send(question.search, question.copy, true)
@@ -353,9 +354,18 @@ class FindSongsWatch(
             PickResult(PICK_SKIPPED, e.message ?: "The server could not be asked")
         }
         if (showing(search)) {
-            if (result.confirm) {
+            val song = _found.value?.song
+            val asked = when {
+                result.confirm -> PickQuestion(
+                    search, copy, result.detail?.takeIf(String::isNotBlank) ?: REPLACE_ANYWAY_FALLBACK,
+                    AskKind.Confirm, result.compare, song?.libraryId, song?.title.orEmpty(),
+                )
+                result.ready -> PickQuestion(search, copy, replaceQuestion(copy), AskKind.Ready, result.compare, song?.libraryId, song?.title.orEmpty())
+                else -> null
+            }
+            if (asked != null) {
                 _picked.value = null
-                _question.value = PickQuestion(search, copy, result.detail?.takeIf(String::isNotBlank) ?: REPLACE_ANYWAY_FALLBACK)
+                _question.value = asked
             } else {
                 _picked.value = result
             }

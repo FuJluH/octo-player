@@ -15,6 +15,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.GlazeCapsule
@@ -45,6 +47,9 @@ import app.winters.octo.health.countText
 import app.winters.octo.health.duplicateFix
 import app.winters.octo.health.fixMeaning
 import app.winters.octo.health.goneText
+import app.winters.octo.health.replacedSpoken
+import app.winters.octo.health.replacedText
+import app.winters.octo.health.restoreStep
 import app.winters.octo.health.heading
 import app.winters.octo.health.origin
 import app.winters.octo.health.steps
@@ -308,13 +313,24 @@ fun showTrash(app: AppState) {
                     val gone = song.goneAt?.let { runCatching { Instant.parse(it).toEpochMilli() }.getOrNull() }
                     MenuRow("${song.title}, ${song.artist}", {
                         close()
-                        app.runFix("Putting back", listOf(FixStep.Restore(song.id, song.title)))
+                        app.runFix("Putting back", listOf(song.restoreStep()))
                     }, OctoIcons.History, detail = goneText(gone, now))
+                    // A replaced song names both files: the one in the
+                    // trash and the one that took its place.
+                    if (song.replaced) {
+                        Txt(
+                            replacedText(song.was, song.now),
+                            DesktopType.meta,
+                            OctoColors.TextSecondary,
+                            Modifier.padding(start = 46.dp, end = 16.dp, bottom = 4.dp).semantics { contentDescription = replacedSpoken(song.was, song.now) },
+                            maxLines = Int.MAX_VALUE,
+                        )
+                    }
                 }
                 PopupPadding {
                     More(PREVIEW_LINES, trash.songs.size)
                     Buttons("$PUT_BACK all ${countText(trash.songs.size, "song", "songs")}", close = close) {
-                        app.runFix("Putting back", trash.songs.map { FixStep.Restore(it.id, it.title) })
+                        app.runFix("Putting back", trash.songs.map { it.restoreStep() })
                     }
                 }
             }

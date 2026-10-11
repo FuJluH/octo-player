@@ -20,6 +20,9 @@ import app.winters.octo.ui.downloads.DownloadsWatch
 import app.winters.octo.ui.downloads.FindSongsWatch
 import app.winters.octo.ui.downloads.FindSource
 import app.winters.octo.ui.downloads.PickQuestion
+import app.winters.octo.ui.downloads.ReplaceEnd
+import app.winters.octo.ui.downloads.Replacements
+import app.winters.octo.ui.downloads.Replacing
 import app.winters.octo.subsonic.OCTO_LIBRARY_ACTIONS
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -50,12 +53,14 @@ sealed interface DrawerView {
 // this person or did lately, each one's log, and Find songs. Whether the
 // server keeps logs is asked live, as "Find higher quality" is, since the
 // extensions saved at sign-in may be older than the server. Made with each
-// connection and closed with it.
+// connection and closed with it. `ended` hears each replacement of a
+// library song's copy as it ends on the server.
 @Stable
 class DownloadsModel(
     private val client: SubsonicClient,
     parent: CoroutineScope,
     private val probeRetryMs: Long = PROBE_RETRY_MS,
+    private val ended: (ReplaceEnd) -> Unit = {},
 ) {
     private val scope = CoroutineScope(parent.coroutineContext + SupervisorJob(parent.coroutineContext[Job]))
 
@@ -107,6 +112,10 @@ class DownloadsModel(
     val picked: StateFlow<PickResult?> get() = findWatch.picked
     val question: StateFlow<PickQuestion?> get() = findWatch.question
 
+    // Library songs being replaced by a copy picked here.
+    private val replacements = Replacements()
+    val replacing: StateFlow<Map<String, Replacing>> get() = replacements.now
+
     // Whether the server asks before a copy that is not better replaces the
     // library's, rather than saying no.
     var asksFirst by mutableStateOf(false)
@@ -114,7 +123,12 @@ class DownloadsModel(
 
     // Asks whether the server keeps logs, and follows its downloads if so.
     // A server out of reach is asked again a little later, until it says.
+    // Each list of higher quality copies the server sends ends whichever
+    // replacements it shows ended.
     fun start() {
+        scope.launch {
+            watch.upgrades.collect { upgrades -> replacements.update(upgrades).forEach(ended) }
+        }
         scope.launch {
             while (isActive) {
                 val logs = client.supportsIfKnown(OCTO_ACQUISITIONS, OCTO_DOWNLOAD_LOG_VERSION)
@@ -190,11 +204,21 @@ class DownloadsModel(
         scope.launch { picked(search, findWatch.pick(search, copy)) }
     }
 
-    // Sends the question's pick again, to replace the library's copy all
-    // the same; it then goes on as any pick.
+    // Answers the question yes: the pick goes again with anyway=true. A
+    // library song's copy then shows as replacing on its row, followed
+    // until it ends; any other pick goes on as usual.
     fun replaceAnyway() {
         val asked = findWatch.question.value ?: return
-        scope.launch { findWatch.replaceAnyway(asked)?.let { picked(asked.search, it) } }
+        scope.launch {
+            val result = findWatch.replaceAnyway(asked) ?: return@launch
+            val replacing = Replacing.of(asked)
+            if (result.queued && replacing != null) {
+                replacements.start(replacing, watch.upgrades.value)
+                watch.wake()
+            } else {
+                picked(asked.search, result)
+            }
+        }
     }
 
     // Leaves the library's copy as it is; nothing is sent.

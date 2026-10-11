@@ -449,7 +449,7 @@ class AppState(
                 null
             },
             // The same for the downloads drawer.
-            if (connection.isOcto) DownloadsModel(connection.client, scope) else null,
+            if (connection.isOcto) DownloadsModel(connection.client, scope, ended = { replaceEnded(it) }) else null,
         )
     }
 

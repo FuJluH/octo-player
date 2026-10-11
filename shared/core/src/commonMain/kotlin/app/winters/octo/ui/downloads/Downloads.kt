@@ -225,7 +225,7 @@ const val DOWNLOADS_EMPTY = "Nothing downloading. Songs you add show here, with 
 // that is not. A server that asks first about a copy that is not better
 // says the second line; an older one only takes a better copy.
 const val FIND_REPLACES = "Only a better copy can take your copy's place, and yours stays until the new one passes every check."
-const val FIND_REPLACES_ASKS = "A copy that is not better than yours asks you first. Yours stays until the new one passes every check."
+const val FIND_REPLACES_ASKS = "Picking a copy asks you before it replaces yours. Yours stays until the new one passes every check."
 
 fun findReplaces(asksFirst: Boolean): String = if (asksFirst) FIND_REPLACES_ASKS else FIND_REPLACES
 const val FIND_DOWNLOADS = "Pick a copy to download that one. It goes through the same checks as any download."

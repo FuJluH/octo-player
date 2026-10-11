@@ -24,7 +24,11 @@ import app.winters.octo.ui.downloads.DownloadsSource
 import app.winters.octo.ui.downloads.DownloadsWatch
 import app.winters.octo.ui.downloads.FindSongsWatch
 import app.winters.octo.ui.downloads.FindSource
+import app.winters.octo.ui.common.Feedback
 import app.winters.octo.ui.downloads.PickQuestion
+import app.winters.octo.ui.downloads.ReplaceEnd
+import app.winters.octo.ui.downloads.Replacements
+import app.winters.octo.ui.downloads.Replacing
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -54,12 +58,17 @@ sealed interface SheetView {
 // songs. Only on a server that lists octoAcquisitions at version 2, read
 // from the extensions the session asks for at each start. The list is
 // followed while the app runs: often while the sheet is open, every few
-// seconds while something is on its way, and seldom otherwise.
+// seconds while something is on its way, and seldom otherwise. A library
+// song's copy replaced from Find songs is followed until it ends, and a
+// line says how it went: with Undo once replaced, which puts the old copy
+// back through `files`.
 @Singleton
 class ServerDownloads @Inject constructor(
     @ApplicationContext private val context: Context,
     private val sessions: SessionRepository,
     private val sources: SourceDao,
+    private val files: LibraryFiles,
+    private val feedback: Feedback,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var running = false
@@ -124,6 +133,10 @@ class ServerDownloads @Inject constructor(
     val picked: StateFlow<PickResult?> get() = findWatch.picked
     val question: StateFlow<PickQuestion?> get() = findWatch.question
 
+    // Library songs being replaced by a copy picked in Find songs.
+    private val replacements = Replacements()
+    val replacing: StateFlow<Map<String, Replacing>> get() = replacements.now
+
     private val _asksFirst = MutableStateFlow(false)
 
     // Whether the server asks before a copy that is not better replaces the
@@ -135,10 +148,14 @@ class ServerDownloads @Inject constructor(
         running = true
         (context.applicationContext as? Application)?.registerActivityLifecycleCallbacks(ForegroundCallbacks())
         scope.launch {
+            watch.upgrades.collect { upgrades -> replacements.update(upgrades).forEach(::ended) }
+        }
+        scope.launch {
             // A new sign-in, or the same one with its extensions read again.
             sessions.state.distinctUntilChangedBy { (it as? SessionState.SignedIn)?.session }.collect { state ->
                 watch.stop()
                 watch.reset()
+                replacements.clear()
                 close()
                 val session = (state as? SessionState.SignedIn)?.session
                 val logs = session != null && "$OCTO_ACQUISITIONS:$OCTO_DOWNLOAD_LOG_VERSION" in session.extensions
@@ -233,11 +250,38 @@ class ServerDownloads @Inject constructor(
         scope.launch { picked(search, findWatch.pick(search, copy)) }
     }
 
-    // Sends the question's pick again, to replace the library's copy all
-    // the same; it then goes on as any pick.
+    // Answers the question yes: the pick goes again with anyway=true. A
+    // library song's copy then shows as replacing on its row, followed
+    // until it ends; any other pick goes on as usual.
     fun replaceAnyway() {
         val asked = findWatch.question.value ?: return
-        scope.launch { findWatch.replaceAnyway(asked)?.let { picked(asked.search, it) } }
+        scope.launch {
+            val result = findWatch.replaceAnyway(asked) ?: return@launch
+            val replacing = Replacing.of(asked)
+            if (result.queued && replacing != null) {
+                replacements.start(replacing, watch.upgrades.value)
+                watch.wake()
+            } else {
+                picked(asked.search, result)
+            }
+        }
+    }
+
+    // A replacement ended. Replaced: a line with Undo, which puts the old
+    // copy back on the server it was replaced on. Kept: the server's words
+    // why, with the downloads one tap away.
+    private fun ended(end: ReplaceEnd) {
+        when (end) {
+            is ReplaceEnd.Replaced -> {
+                val on = files.server()
+                val back = end.putBack
+                feedback.undoable(end.words) { files.launch(listOf(back), on = on) }
+            }
+            is ReplaceEnd.Kept -> feedback.show(end.words, "Show downloads", onAction = {
+                open()
+                showList()
+            })
+        }
     }
 
     // Leaves the library's copy as it is; nothing is sent.

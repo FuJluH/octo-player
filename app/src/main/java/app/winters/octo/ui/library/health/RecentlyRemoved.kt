@@ -32,9 +32,13 @@ import app.winters.octo.design.AccentButton
 import app.winters.octo.design.ButtonSize
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
-import app.winters.octo.health.FixStep
 import app.winters.octo.health.PUT_BACK
 import app.winters.octo.health.RECENTLY_REMOVED
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import app.winters.octo.health.restoreStep
+import app.winters.octo.health.replacedText
+import app.winters.octo.health.replacedSpoken
 import app.winters.octo.health.countText
 import app.winters.octo.health.goneText
 import app.winters.octo.subsonic.LibraryTrash
@@ -110,7 +114,7 @@ class RecentlyRemovedViewModel @Inject constructor(private val files: LibraryFil
         if (songs.isEmpty()) return
         val ids = songs.mapTo(HashSet()) { it.id }
         trash = trash?.let { it.copy(songs = it.songs.filterNot { song -> song.id in ids }) }
-        files.launch(songs.map { FixStep.Restore(it.id, it.title) }, on = from) { _ ->
+        files.launch(songs.map { it.restoreStep() }, on = from) { _ ->
             load()
             false
         }
@@ -164,6 +168,16 @@ private fun TrashRow(song: TrashedSong, gone: String, canRestore: Boolean, onPut
             Text(song.title, style = OctoType.body, color = OctoColors.TextPrimary)
             val from = listOf(song.artist, song.album).filter(String::isNotBlank).joinToString(" • ")
             if (from.isNotEmpty()) Text(from, style = OctoType.caption, color = OctoColors.TextMuted)
+            // A replaced song names both files: the one in the trash and the
+            // one that took its place.
+            if (song.replaced) {
+                Text(
+                    replacedText(song.was, song.now),
+                    style = OctoType.caption,
+                    color = OctoColors.TextSecondary,
+                    modifier = Modifier.semantics { contentDescription = replacedSpoken(song.was, song.now) },
+                )
+            }
             Text(gone, style = OctoType.caption, color = OctoColors.TextMuted)
         }
         if (canRestore) RowButton(PUT_BACK, "$PUT_BACK ${song.title}", onPutBack)

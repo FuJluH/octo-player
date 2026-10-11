@@ -247,7 +247,9 @@ sealed interface FixStep {
     data class Retag(override val id: String, override val title: String, val tags: Map<String, String>) : FixStep
     data class JoinAlbum(override val id: String, override val title: String, val like: String) : FixStep
     data class AddCover(override val id: String, override val title: String) : FixStep
-    data class Restore(override val id: String, override val title: String) : FixStep
+    // `replaced`: the song's file was replaced by another copy, and putting
+    // it back swaps the two, leaving the newer one in the trash.
+    data class Restore(override val id: String, override val title: String, val replaced: Boolean = false) : FixStep
     data class Undo(override val id: String, override val title: String) : FixStep
 
     val action: String
@@ -273,7 +275,8 @@ sealed interface FixStep {
         get() = when (this) {
             is Remove -> Restore(id, title)
             is Retag, is JoinAlbum, is AddCover -> Undo(id, title)
-            is Restore -> Remove(id, title)
+            // Swapping a replaced file back is undone by swapping again.
+            is Restore -> if (replaced) Restore(id, title, replaced = true) else Remove(id, title)
             is Undo -> null
         }
 }
@@ -299,6 +302,8 @@ data class FixOutcome(
     val rehearsed: Boolean = false,
     // Stopped before the end.
     val stopped: Boolean = false,
+    // The server's own words for steps done, when it gave any.
+    val said: Map<FixStep, String> = emptyMap(),
 ) {
     val removed: Set<String> get() = done.filterIsInstance<FixStep.Remove>().mapTo(HashSet()) { it.id }
 
@@ -307,6 +312,13 @@ data class FixOutcome(
 
     // One line for the window: what was done, and what was not.
     fun summary(): String {
+        // Putting back one replaced file: the server says best what it did,
+        // or why there is nothing to put back.
+        val only = (done + failed.map { it.first }).singleOrNull()
+        if (!rehearsed && only is FixStep.Restore && only.replaced) {
+            said[only]?.let { return it }
+            failed.singleOrNull()?.let { return it.second }
+        }
         if (rehearsed) return "The server only rehearsed this, because its library actions are in dry run. Nothing changed."
         val parts = ArrayList<String>()
         val removes = done.count { it is FixStep.Remove }
@@ -349,6 +361,7 @@ suspend fun runFix(
     val done = ArrayList<FixStep>()
     val unchanged = ArrayList<FixStep>()
     val failed = ArrayList<Pair<FixStep, String>>()
+    val said = HashMap<FixStep, String>()
     var rehearsed = false
     var stopped = false
     progress(0, steps.size)
@@ -360,7 +373,10 @@ suspend fun runFix(
         try {
             val answer = send(step)
             when (answer.outcome) {
-                LibraryActionState.Applied -> done += step
+                LibraryActionState.Applied -> {
+                    done += step
+                    answer.detail?.takeIf(String::isNotBlank)?.let { said[step] = it }
+                }
                 LibraryActionState.Rehearsed -> rehearsed = true
                 // Skipped with nothing to change is not a failure: the song
                 // already says it, or the cover is there.
@@ -373,7 +389,7 @@ suspend fun runFix(
         }
         progress(index + 1, steps.size)
     }
-    return FixOutcome(done, unchanged, failed, rehearsed, stopped)
+    return FixOutcome(done, unchanged, failed, rehearsed, stopped, said)
 }
 
 private fun LibraryActionResult.words(): String = detail?.takeIf(String::isNotBlank) ?: "the server said $state"

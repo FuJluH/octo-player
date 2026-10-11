@@ -8,6 +8,7 @@ import app.winters.octo.health.HealthCheck
 import app.winters.octo.health.deletedLine
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicClient
+import app.winters.octo.ui.downloads.ReplaceEnd
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -78,6 +79,29 @@ fun AppState.removeFromMyLibrary(songs: List<Song>) {
         noticeDetail = null
         noticeAction = null
         if (removed > 0) catchUp()
+    }
+}
+
+// A library song's copy picked in Find songs has replaced it, or not. The
+// notice says which. Replaced, it offers Undo, which puts the old copy back
+// on the server it was replaced on (the newer one then waits in Recently
+// removed). Kept, the server's words say why and point to the drawer.
+fun AppState.replaceEnded(end: ReplaceEnd) {
+    notice = end.words
+    noticeDetail = null
+    when (end) {
+        is ReplaceEnd.Replaced -> {
+            val client = connection?.client
+            val back = end.putBack
+            noticeAction = client?.let {
+                NoticeAction(end.words, "Undo") {
+                    noticeAction = null
+                    runFix("Putting back", listOf(back), on = it)
+                }
+            }
+            catchUp()
+        }
+        is ReplaceEnd.Kept -> noticeAction = NoticeAction(end.words, "Show downloads") { showSidePanel(SidePanel.Downloads) }
     }
 }
 

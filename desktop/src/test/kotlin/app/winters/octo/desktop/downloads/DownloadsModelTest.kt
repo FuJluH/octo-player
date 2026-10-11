@@ -1,6 +1,10 @@
 package app.winters.octo.desktop.downloads
 
 import app.winters.octo.desktop.FakeServer
+import app.winters.octo.health.FixStep
+import app.winters.octo.ui.downloads.AskKind
+import app.winters.octo.ui.downloads.ReplaceEnd
+import app.winters.octo.ui.downloads.compareLines
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
@@ -160,6 +164,12 @@ class DownloadsModelTest {
     // A finished search for a song in the library, with one copy, on a
     // server listing octoAcquisitions at `acquisitions`. The server asks
     // about any pick sent with anyway=false and takes the rest.
+    // What the server answers a library song's first pick: "confirm" or "ready".
+    private var ask = "confirm"
+
+    // Replacements that ended, as the app heard them.
+    private val ends = java.util.concurrent.CopyOnWriteArrayList<ReplaceEnd>()
+
     private suspend fun pickReady(acquisitions: String): DownloadsModel {
         extensions(acquisitions)
         downloads()
@@ -170,12 +180,16 @@ class DownloadsModelTest {
         )
         server.answerBy("pickFoundSong") { request ->
             if (request.url.queryParameter("anyway") == "false") {
-                server.ok(""""pick":{"state":"confirm","detail":"$question","key":null}""", type = "octo")
+                val detail = if (ask == "confirm") "\"$question\"" else "null"
+                server.ok(
+                    """"pick":{"state":"$ask","detail":$detail,"key":null,"compare":{"yours":{"quality":"FLAC","length":420,"take":"live recording"},"copy":{"quality":"FLAC","length":298,"take":"the plain song"}}}""",
+                    type = "octo",
+                )
             } else {
                 server.ok(""""pick":{"state":"queued","detail":"Getting FLAC from p1.","key":"soulseek:ho"}""", type = "octo")
             }
         }
-        val model = DownloadsModel(server.client(), scope)
+        val model = DownloadsModel(server.client(), scope, ended = { ends += it })
         model.start()
         until("the server said") { model.supported != null }
         model.open = true
@@ -198,14 +212,55 @@ class DownloadsModelTest {
         assertEquals(DrawerView.Find("nd-1", "Holocene"), model.view)
         assertEquals("false", picks().single().url.queryParameter("anyway"))
 
+        assertEquals(listOf("Yours: FLAC, 7:00, live recording", "This copy: FLAC, 4:58, the plain song"), compareLines(model.question.value!!.compare))
+
+        // Yes: sent once with anyway=true, and the copy's row shows it replacing.
         model.replaceAnyway()
-        until("the pick opened its log") { model.view == DrawerView.Log("soulseek:ho") }
+        model.replaceAnyway()
+        until("the copy is replacing") { "nd-1" in model.replacing.value }
         assertNull(model.question.value)
+        assertEquals("The drawer stays on the copies", DrawerView.Find("nd-1", "Holocene"), model.view)
         val again = picks().last()
         assertEquals(2, picks().size)
         assertEquals("true", again.url.queryParameter("anyway"))
         assertEquals("f1", again.url.queryParameter("search"))
         assertEquals("c-1", again.url.queryParameter("copy"))
+        assertEquals("id:c-1", model.replacing.value["nd-1"]!!.copyKey)
+
+        // The server swaps it in: the app hears it once, with the take named.
+        server.answer("getUpgrades", """"upgrades":[{"id":"nd-1","title":"Holocene","artist":"Bon Iver","state":"upgraded","updatedAt":"${java.time.Instant.now()}"}]""", type = "octo")
+        model.wake()
+        until("the replacement ended") { ends.isNotEmpty() }
+        val end = ends.single() as ReplaceEnd.Replaced
+        assertEquals("Replaced with the plain song", end.words)
+        assertEquals(FixStep.Restore("nd-1", "Holocene", replaced = true), end.putBack)
+        assertTrue(model.replacing.value.isEmpty())
+        model.close()
+    }
+
+    @Test
+    fun aBetterCopyIsAskedTheUsualWay_AndAFailedReplaceSaysYourCopyWasKept() = runBlocking {
+        ask = "ready"
+        val model = pickReady("[1,2,3]")
+        model.pick("f1", model.found.value!!.candidate.single())
+        until("the question came") { model.question.value != null }
+        assertEquals(AskKind.Ready, model.question.value!!.kind)
+        assertEquals("false", picks().single().url.queryParameter("anyway"))
+
+        model.replaceAnyway()
+        until("the copy is replacing") { "nd-1" in model.replacing.value }
+        assertEquals("true", picks().last().url.queryParameter("anyway"))
+        server.answer(
+            "getUpgrades",
+            """"upgrades":[{"id":"nd-1","title":"Holocene","state":"failed","detail":"The copy you picked was not the right recording, so it was thrown away. Your copy was kept.","updatedAt":"${java.time.Instant.now()}"}]""",
+            type = "octo",
+        )
+        model.wake()
+        until("the replacement ended") { ends.isNotEmpty() }
+        assertEquals(
+            "The copy you picked was not the right recording, so it was thrown away. Your copy was kept. Details are in Downloads.",
+            ends.single().words,
+        )
         model.close()
     }
 

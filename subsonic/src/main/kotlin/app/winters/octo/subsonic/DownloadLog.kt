@@ -96,7 +96,16 @@ data class FoundCandidate(
     // stays the same copy while the list still grows; older servers send
     // none.
     val id: String? = null,
+    // How it stands against the library's copy, for a song in the library:
+    // VS_YOURS_SAME, VS_YOURS_LOWER or VS_YOURS_NOT_BETTER, with the words
+    // to show. Left out when it is better, and for a song not in the library.
+    val vsYours: String? = null,
+    val vsYoursText: String? = null,
 )
+
+const val VS_YOURS_SAME = "same"
+const val VS_YOURS_LOWER = "lower"
+const val VS_YOURS_NOT_BETTER = "notBetter"
 
 // The song a Find songs search looks for, with the library's copy when
 // there is one.
@@ -111,7 +120,15 @@ data class FoundSong(
     val format: String? = null,
     val quality: String? = null,
     val size: Long? = null,
+    // When the library's copy looks like another take of the song, a line
+    // saying so (TAKE_LIVE, TAKE_VERSION or TAKE_LENGTH in `takeKind`).
+    val take: String? = null,
+    val takeKind: String? = null,
 )
+
+const val TAKE_LIVE = "live"
+const val TAKE_VERSION = "version"
+const val TAKE_LENGTH = "length"
 
 // How one source's look went.
 @Serializable
@@ -146,10 +163,30 @@ const val FIND_OFF = "off"
 const val PICK_QUEUED = "queued"
 const val PICK_SKIPPED = "skipped"
 
-// From octoAcquisitions 3, for a pick sent with anyway=false: the copy is
-// not better than the library's, and `detail` holds the whole question to
-// ask before sending it again with anyway=true.
+// From octoAcquisitions 3, for a library song's pick sent with
+// anyway=false, which never fetches: PICK_READY for a better copy of the
+// right song, asked the usual way, and PICK_CONFIRM for one that needs the
+// person's word, with the whole question in `detail`. Either is sent again
+// with anyway=true to fetch it.
+const val PICK_READY = "ready"
 const val PICK_CONFIRM = "confirm"
+
+// One side of a pick's comparison: its quality in short words ("FLAC",
+// "MP3 320"), its length in seconds and what take it is ("live
+// recording", "the plain song"). Any of them can be missing.
+@Serializable
+data class PickSide(
+    val quality: String? = null,
+    val length: Int? = null,
+    val take: String? = null,
+)
+
+// The library's copy beside the picked one.
+@Serializable
+data class PickCompare(
+    val yours: PickSide? = null,
+    val copy: PickSide? = null,
+)
 
 // What picking a copy did: queued, with the downloads row to follow when
 // there is one, skipped with the server's words why, or a question to
@@ -159,8 +196,12 @@ data class PickResult(
     val state: String = "",
     val detail: String? = null,
     val key: String? = null,
+    // With PICK_READY and PICK_CONFIRM: the two copies side by side.
+    val compare: PickCompare? = null,
 ) {
     val queued: Boolean get() = state == PICK_QUEUED
+
+    val ready: Boolean get() = state == PICK_READY
 
     val confirm: Boolean get() = state == PICK_CONFIRM
 }

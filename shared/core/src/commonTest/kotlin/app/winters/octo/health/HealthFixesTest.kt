@@ -5,6 +5,7 @@ import app.winters.octo.subsonic.LibraryActionResult
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SongLookup
 import app.winters.octo.subsonic.SongTag
+import app.winters.octo.subsonic.TrashedSong
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -214,6 +215,35 @@ class HealthFixesTest {
         assertEquals(1, asked)
         assertTrue(stopped.stopped)
         assertFalse(stopped.summary().isEmpty())
+    }
+
+    @Test
+    fun puttingBackAReplacedCopySaysTheServersWords_AndUndoSwapsAgain() = runTest {
+        val replaced = TrashedSong(id = "nd-1", title = "Holocene", kind = "replaced", was = "FLAC 16-bit 44.1 kHz", now = "MP3 320")
+        assertTrue(replaced.replaced)
+        assertFalse(TrashedSong(id = "x", title = "X").replaced)
+        assertEquals("Replaced: was FLAC 16-bit 44.1 kHz, now MP3 320", replacedText(replaced.was, replaced.now))
+        assertEquals("Replaced by another copy", replacedText(null, " "))
+        val step = replaced.restoreStep()
+        assertEquals(FixStep.Restore("nd-1", "Holocene", replaced = true), step)
+        assertEquals(step, step.undo)
+
+        val sent = ArrayList<String>()
+        val back = runFix(listOf(step), {
+            sent += "${it.action}:${it.id}"
+            LibraryActionResult(it.id, it.action, "applied", "Put back your old copy. The one that replaced it is in Recently removed.")
+        })
+        assertEquals(listOf("restore:nd-1"), sent)
+        assertEquals("Put back your old copy. The one that replaced it is in Recently removed.", back.summary())
+
+        val notKept = runFix(listOf(step), {
+            LibraryActionResult(it.id, it.action, "skipped", "Your old copy was not kept on this server, so there is nothing to put back.")
+        })
+        assertEquals("Your old copy was not kept on this server, so there is nothing to put back.", notKept.summary())
+
+        // A plain removed song still reads as before.
+        val plain = runFix(listOf(FixStep.Restore("x", "X")), { LibraryActionResult(it.id, it.action, "applied", "Put back.") })
+        assertEquals("Put back 1 song.", plain.summary())
     }
 
     @Test

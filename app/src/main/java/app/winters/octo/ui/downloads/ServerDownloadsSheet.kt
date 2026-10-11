@@ -62,6 +62,9 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
@@ -125,32 +128,48 @@ fun ServerDownloadsHost(vm: ServerDownloadsViewModel = hiltViewModel()) {
     }
 }
 
-// The server's question about a copy that is not better than the library's,
-// word for word, under the song's whole title, in a sheet over Find songs.
-// "Replace anyway" sends the pick again to replace it all the same; "Keep
-// mine", back, a tap off it or pulling it down sends nothing. The buttons
-// stay in place under words that scroll, should they ever not fit.
+// The question before a copy that needs the person's word replaces the
+// library's, in a sheet over Find songs: "Replace your copy?" and the
+// song's whole title, the two copies side by side, then the server's
+// sentence word for word. "Replace anyway" sends the pick again with
+// anyway=true; "Keep mine", back, a tap off it or pulling it down sends
+// nothing. The buttons stay in place under words that scroll, should they
+// ever not fit.
 @Composable
 private fun ReplaceAnywaySheet(model: ServerDownloads, fallbackTitle: String?) {
     val question by model.question.collectAsStateWithLifecycle()
-    val found by model.found.collectAsStateWithLifecycle()
+    val confirm = question?.takeIf { it.kind == AskKind.Confirm }
     // The last question stays drawn while its sheet slides away.
-    var shown by remember { mutableStateOf(question) }
-    LaunchedEffect(question) { question?.let { shown = it } }
+    var shown by remember { mutableStateOf(confirm) }
+    LaunchedEffect(confirm) { confirm?.let { shown = it } }
     val asked = shown
-    GlassSheet(visible = question != null, onDismiss = { question?.let(model::keepMine) }, scrolls = false) {
+    GlassSheet(visible = confirm != null, onDismiss = { confirm?.let(model::keepMine) }, scrolls = false) {
         if (asked != null) {
-            val title = found?.song?.title?.takeIf(String::isNotBlank) ?: fallbackTitle?.takeIf(String::isNotBlank)
-            Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                title?.let { Text(it, style = OctoType.headline, color = OctoColors.TextPrimary, modifier = Modifier.semantics { heading() }) }
+            val title = asked.title.ifBlank { fallbackTitle.orEmpty() }
+            Column(
+                Modifier.padding(horizontal = 20.dp, vertical = 8.dp).semantics { paneTitle = REPLACE_TITLE },
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(REPLACE_TITLE, style = OctoType.headline, color = OctoColors.TextPrimary, modifier = Modifier.semantics { heading() })
+                    if (title.isNotBlank()) Text(title, style = OctoType.bodySmall, color = OctoColors.TextSecondary)
+                }
                 val scroll = rememberScrollState()
                 Box(Modifier.weight(1f, fill = false)) {
-                    Text(
-                        asked.words,
-                        style = OctoType.bodySmall,
-                        color = OctoColors.TextSecondary,
-                        modifier = Modifier.fillMaxWidth().verticalScroll(scroll),
-                    )
+                    Column(Modifier.fillMaxWidth().verticalScroll(scroll), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        val lines = compareLines(asked.compare)
+                        if (lines.isNotEmpty()) {
+                            Column(
+                                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Chip).padding(14.dp).semantics(mergeDescendants = true) {},
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                lines.forEachIndexed { index, line ->
+                                    Text(line, style = OctoType.bodySmall, color = if (index == 0) OctoColors.TextSecondary else OctoColors.TextPrimary)
+                                }
+                            }
+                        }
+                        Text(asked.words, style = OctoType.bodySmall, color = OctoColors.TextPrimary)
+                    }
                     MoreBelow(scroll, Modifier.align(Alignment.BottomCenter))
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -498,10 +517,14 @@ private fun ColumnScope.FindSongs(model: ServerDownloads, view: SheetView.Find) 
     val problem by model.findProblem.collectAsStateWithLifecycle()
     val picked by model.picked.collectAsStateWithLifecycle()
     val asksFirst by model.asksFirst.collectAsStateWithLifecycle()
+    val question by model.question.collectAsStateWithLifecycle()
+    val replacing by model.replacing.collectAsStateWithLifecycle()
+    val rows by model.rows.collectAsStateWithLifecycle()
     val searching = found?.searching != false && problem == null
-    // A copy waiting for "Replace it", for a song already in the library,
-    // with the search it came from. A new search, Search again too, asks
-    // nothing of the old one's copies.
+    // On an older server: a copy waiting for "Replace it", for a song
+    // already in the library, with the search it came from. A new search,
+    // Search again too, asks nothing of the old one's copies. A server that
+    // asks first says itself when to ask, in `question`.
     var asking by remember(view, found?.id) { mutableStateOf<Pair<String, FoundCandidate>?>(null) }
     Bar(back = if (view.from != null) "Back to the log" else "Back to $SERVER_DOWNLOADS", onBack = { view.from?.let(model::showLog) ?: model.showList() }) {
         if (!searching) {
@@ -517,25 +540,38 @@ private fun ColumnScope.FindSongs(model: ServerDownloads, view: SheetView.Find) 
         listOfNotNull(problem, found?.error, picked?.takeIf { !it.queued }?.detail).forEachIndexed { index, words ->
             item(key = "problem$index") { Text(words, style = OctoType.caption, color = OctoColors.SignalOrange, modifier = Modifier.padding(vertical = 6.dp)) }
         }
-        asking?.takeIf { (search, _) -> search == found?.id }?.let { (search, copy) ->
+        // The usual question for a better copy: asked here on an older
+        // server, or as the server answered on one that asks first.
+        val ready = question?.takeIf { it.kind == AskKind.Ready && it.search == found?.id }
+        val local = asking?.takeIf { (search, _) -> search == found?.id }
+        if (ready != null || local != null) {
+            val copy = ready?.copy ?: local!!.second
             item(key = "ask") {
-                Column(
-                    Modifier.fillMaxWidth().padding(vertical = 8.dp).clip(RoundedCornerShape(14.dp)).background(Chip).padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Text("Replace your copy with ${candidateFacts(copy).take(2).joinToString(", ")}?", style = OctoType.bodySmall, color = OctoColors.TextPrimary)
-                    Text(findReplaces(asksFirst), style = OctoType.caption, color = OctoColors.TextMuted)
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        GlazeButton("Cancel", { asking = null }, size = ButtonSize.Small)
-                        GlazeButton("Replace it", {
+                ReplaceItCard(
+                    copy,
+                    asksFirst,
+                    no = { if (ready != null) model.keepMine(ready) else asking = null },
+                    yes = {
+                        if (ready != null) {
+                            model.replaceAnyway()
+                        } else {
                             asking = null
-                            model.pick(search, copy)
-                        }, size = ButtonSize.Small, icon = painterResource(OctoIcons.Lossless))
-                    }
-                }
+                            model.pick(local!!.first, copy)
+                        }
+                    },
+                )
             }
         }
         item(key = "rule") { Rule() }
+        // The library's copy looks like another take: said over the copies.
+        takeLine(found?.song?.take)?.let { line ->
+            item(key = "take") {
+                Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Mark(OctoIcons.Info, OctoColors.TextSecondary, 16.dp)
+                    Text(line, style = OctoType.caption, color = OctoColors.TextPrimary, modifier = Modifier.weight(1f))
+                }
+            }
+        }
         val copies = found?.candidate.orEmpty()
         if (copies.isEmpty() && !searching) item(key = "none") { Text("Nothing found on your sources.", style = OctoType.bodySmall, color = OctoColors.TextMuted) }
         // The list still grows while sources answer, so a copy is picked
@@ -544,14 +580,25 @@ private fun ColumnScope.FindSongs(model: ServerDownloads, view: SheetView.Find) 
             item(key = "wait") { Text(FIND_PICK_WAIT, style = OctoType.caption, color = OctoColors.TextMuted, modifier = Modifier.padding(bottom = 6.dp)) }
         }
         val shown = found
+        // While a copy replaces the library's, its row says how far it is,
+        // and no other copy of the song can be picked.
+        val busy = shown?.song?.libraryId?.let { it in replacing } == true
         items(copies, key = ::copyKey) { copy ->
-            CopyLine(copy, compact = false, onPick = if (shown != null && canPick(shown, copy)) {
-                {
-                    if (shown.song.libraryId != null) asking = shown.id to copy else model.pick(shown.id, copy)
-                }
-            } else {
-                null
-            })
+            val mine = replacing.values.firstOrNull { it.search == shown?.id && it.copyKey == copyKey(copy) }
+            CopyLine(
+                copy,
+                compact = false,
+                onPick = if (shown != null && !busy && canPick(shown, copy)) {
+                    {
+                        // A server that asks first is asked at once; an older one is asked here.
+                        if (shown.song.libraryId != null && !asksFirst) asking = shown.id to copy else model.pick(shown.id, copy)
+                    }
+                } else {
+                    null
+                },
+                replacing = mine?.let { replacingRow(it, rows) },
+                replacingNow = mine != null,
+            )
         }
     }
 }
@@ -563,7 +610,7 @@ private fun FindHead(view: SheetView.Find, found: FoundSongs?, asksFirst: Boolea
         Artwork(artwork(song?.coverArt ?: view.id), 64.dp, shape = RoundedCornerShape(10.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(FIND_SONGS.uppercase(), style = OctoType.caption, color = OctoColors.TextMuted)
-            Text(song?.title?.takeIf(String::isNotBlank) ?: view.title, style = OctoType.headline, color = OctoColors.TextPrimary, maxLines = 2)
+            Text(song?.title?.takeIf(String::isNotBlank) ?: view.title, style = OctoType.headline, color = OctoColors.TextPrimary)
             song?.artist?.takeIf(String::isNotBlank)?.let { Text(it, style = OctoType.bodySmall, color = OctoColors.TextSecondary) }
         }
     }
@@ -597,7 +644,7 @@ private fun Sources(sources: List<FindSourceState>) {
 // whether Octo would take it. On Find songs it can be got; the song's
 // cover is drawn once, over the list.
 @Composable
-private fun CopyLine(copy: FoundCandidate, compact: Boolean, onPick: (() -> Unit)? = null) {
+private fun CopyLine(copy: FoundCandidate, compact: Boolean, onPick: (() -> Unit)? = null, replacing: DownloadRow? = null, replacingNow: Boolean = false) {
     Row(
         Modifier.fillMaxWidth().padding(vertical = 8.dp, horizontal = if (compact) 12.dp else 0.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -606,6 +653,7 @@ private fun CopyLine(copy: FoundCandidate, compact: Boolean, onPick: (() -> Unit
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 copyBadge(copy)?.let { Badge(it, lossless = isLosslessCopy(copy)) }
+                vsYoursTag(copy)?.let { VsYours(it, vsYoursSpoken(copy).orEmpty()) }
                 Text(candidateTitle(copy), style = OctoType.bodySmall, color = OctoColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
             }
             val where = copy.album?.takeIf(String::isNotBlank) ?: copy.folder
@@ -614,6 +662,16 @@ private fun CopyLine(copy: FoundCandidate, compact: Boolean, onPick: (() -> Unit
             // Octo's order for a copy it would try; why not, for one it would pass over.
             val verdict = copy.rank?.let(::rankWords) ?: candidateVerdict(copy)
             verdict?.let { Text(it, style = OctoType.caption, color = if (copy.rank == 1) OctoColors.TextPrimary else OctoColors.TextMuted, maxLines = 2) }
+            if (replacingNow) {
+                Row(
+                    Modifier.padding(top = 4.dp).semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Ring(replacing?.fraction, 16.dp)
+                    Text(replacingWords(replacing), style = OctoType.caption, color = OctoColors.TextPrimary)
+                }
+            }
         }
         if (onPick != null) {
             Box(
@@ -626,6 +684,40 @@ private fun CopyLine(copy: FoundCandidate, compact: Boolean, onPick: (() -> Unit
             ) {
                 Icon(painterResource(OctoIcons.Download), contentDescription = null, tint = OctoColors.TextSecondary, modifier = Modifier.size(22.dp))
             }
+        }
+    }
+}
+
+// How a copy stands against the library's: a quiet outlined word beside
+// its kind, read out in full.
+@Composable
+private fun VsYours(text: String, spoken: String) {
+    Text(
+        text,
+        style = OctoType.caption,
+        color = OctoColors.TextSecondary,
+        maxLines = 1,
+        modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .border(1.dp, Thread, RoundedCornerShape(4.dp))
+            .padding(horizontal = 6.dp)
+            .semantics { contentDescription = spoken },
+    )
+}
+
+// The usual question before a better copy replaces the library's, as a
+// card over the copies.
+@Composable
+private fun ReplaceItCard(copy: FoundCandidate, asksFirst: Boolean, no: () -> Unit, yes: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().padding(vertical = 8.dp).clip(RoundedCornerShape(14.dp)).background(Chip).padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(replaceQuestion(copy), style = OctoType.bodySmall, color = OctoColors.TextPrimary)
+        Text(findReplaces(asksFirst), style = OctoType.caption, color = OctoColors.TextMuted)
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            GlazeButton("Cancel", no, size = ButtonSize.Small)
+            GlazeButton("Replace it", yes, size = ButtonSize.Small, icon = painterResource(OctoIcons.Lossless))
         }
     }
 }

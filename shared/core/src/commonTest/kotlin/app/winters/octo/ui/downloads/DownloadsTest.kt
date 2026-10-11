@@ -3,7 +3,11 @@ package app.winters.octo.ui.downloads
 import app.winters.octo.subsonic.Acquisition
 import app.winters.octo.subsonic.AcquisitionEvent
 import app.winters.octo.subsonic.FoundCandidate
+import app.winters.octo.subsonic.FoundSong
 import app.winters.octo.subsonic.FoundSongs
+import app.winters.octo.subsonic.LIBRARY_ACTION_RESTORE
+import app.winters.octo.subsonic.PickCompare
+import app.winters.octo.subsonic.PickSide
 import app.winters.octo.subsonic.PickResult
 import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.subsonic.Upgrade
@@ -276,6 +280,9 @@ class DownloadsTest {
         val anyways = mutableListOf<Boolean?>()
         var answer: suspend () -> PickResult = { PickResult("queued", "Getting it.", "soulseek:x") }
 
+        // The library's copy of the song, when the search is for one.
+        var libraryId: String? = null
+
         override suspend fun start(id: String): FoundSongs {
             searches++
             asks = 0
@@ -284,7 +291,12 @@ class DownloadsTest {
 
         override suspend fun get(search: String): FoundSongs {
             asks++
-            return FoundSongs(id = search, state = if (asks < 2) "searching" else "done", candidate = listOf(copy, FoundCandidate(source = "Lidarr", index = 1, id = "c2")))
+            return FoundSongs(
+                id = search,
+                state = if (asks < 2) "searching" else "done",
+                song = FoundSong(title = "Holocene", libraryId = libraryId),
+                candidate = listOf(copy, FoundCandidate(source = "Lidarr", index = 1, id = "c2")),
+            )
         }
 
         override suspend fun pick(search: String, copy: FoundCandidate, anyway: Boolean?): PickResult {
@@ -349,7 +361,7 @@ class DownloadsTest {
         val first = watch.pick("f1", FakeFind.copy)
         assertTrue(first.confirm)
         assertEquals(listOf<Boolean?>(false), source.anyways)
-        assertEquals(PickQuestion("f1", FakeFind.copy, question), watch.question.value)
+        assertEquals(PickQuestion("f1", FakeFind.copy, question, title = "Holocene"), watch.question.value)
         assertNull("A question is not a refusal", watch.picked.value)
         watch.close()
         assertNull(watch.question.value)
@@ -532,5 +544,139 @@ class DownloadsTest {
         assertEquals(listOf("Soulseek"), badgeFacts(plain, Locale.ROOT))
         assertNull(copyBadge(FoundCandidate(source = "Lidarr")))
         assertEquals(listOf("1st choice", "2nd choice", "3rd choice", "4th choice", "11th choice", "22nd choice"), listOf(1, 2, 3, 4, 11, 22).map(::rankWords))
+    }
+
+    // ---------------------------------------------------------------------
+    // Replacing a library song's copy
+    // ---------------------------------------------------------------------
+
+    private val compare = PickCompare(PickSide("FLAC", 420, "live recording"), PickSide("FLAC", 298, "the plain song"))
+
+    @Test
+    fun aBetterCopyIsAskedTheUsualWay_ThenSentOnceWithAnywayTrue() = runTest {
+        val source = FakeFind()
+        source.libraryId = "nd-1"
+        source.answer = { PickResult("ready", null, null, compare) }
+        val watch = doneWatch(source, asksFirst = true)
+        watch.pick("f1", FakeFind.copy)
+        val asked = watch.question.value!!
+        assertEquals(AskKind.Ready, asked.kind)
+        assertEquals(replaceQuestion(FakeFind.copy), asked.words)
+        assertEquals("nd-1", asked.songId)
+        assertEquals("Holocene", asked.title)
+        assertEquals(listOf<Boolean?>(false), source.anyways)
+
+        source.answer = { PickResult("queued", "Getting it.", null) }
+        assertTrue(watch.replaceAnyway(asked)!!.queued)
+        assertNull(watch.replaceAnyway(asked))
+        assertEquals(listOf<Boolean?>(false, true), source.anyways)
+        watch.close()
+    }
+
+    @Test
+    fun aCopyThatNeedsAWordCarriesTheServersSentenceAndBothSides() = runTest {
+        val source = FakeFind()
+        source.libraryId = "nd-1"
+        source.answer = { PickResult("confirm", "Yours looks like a live recording and this copy is the plain song. Replace yours anyway?", null, compare) }
+        val watch = doneWatch(source, asksFirst = true)
+        watch.pick("f1", FakeFind.copy)
+        val asked = watch.question.value!!
+        assertEquals(AskKind.Confirm, asked.kind)
+        assertEquals("Yours looks like a live recording and this copy is the plain song. Replace yours anyway?", asked.words)
+        assertEquals(listOf("Yours: FLAC, 7:00, live recording", "This copy: FLAC, 4:58, the plain song"), compareLines(asked.compare))
+        watch.close()
+    }
+
+    @Test
+    fun anOutsideSongIsPickedAtOnceEvenWhenTheServerAsksFirst() = runTest {
+        val source = FakeFind()
+        val watch = doneWatch(source, asksFirst = true)
+        assertTrue(watch.pick("f1", FakeFind.copy).queued)
+        assertNull(watch.question.value)
+        assertEquals(listOf<Boolean?>(false), source.anyways)
+        watch.close()
+    }
+
+    @Test
+    fun aComparisonLeavesOutWhatIsMissing() {
+        assertEquals(listOf("Yours: MP3 320", "This copy: 4:58, the plain song"), compareLines(PickCompare(PickSide("MP3 320", null, null), PickSide(null, 298, "the plain song"))))
+        assertEquals(emptyList<String>(), compareLines(PickCompare(PickSide(), null)))
+        assertEquals(emptyList<String>(), compareLines(null))
+    }
+
+    @Test
+    fun aCopysTagAndTheTakeLine() {
+        val same = FoundCandidate(source = "Soulseek", vsYours = "same", vsYoursText = "Same as yours")
+        assertEquals("Same as yours", vsYoursTag(same))
+        assertEquals("Compared with your copy: Same as yours", vsYoursSpoken(same))
+        assertNull(vsYoursTag(FoundCandidate(source = "Soulseek")))
+        assertEquals("Yours looks like a live recording. Pick the plain song to replace it.", takeLine(" Yours looks like a live recording. Pick the plain song to replace it. "))
+        assertNull(takeLine(" "))
+    }
+
+    private fun replacing(plain: Boolean = true) = Replacing("nd-1", "Holocene", "f1", "id:c1", plainSong = plain)
+
+    private fun job(state: String, at: String = "2026-10-11T12:05:00Z", detail: String? = null, id: String = "nd-1") =
+        Upgrade(id = id, title = "Holocene", state = state, detail = detail, updatedAt = at)
+
+    @Test
+    fun aReplacementIsFollowedUntilItIsReplaced() {
+        val all = Replacements()
+        all.start(replacing(), emptyList())
+        assertTrue(all.replacing("nd-1"))
+        assertEquals("id:c1", all.of("f1", "id:c1")?.copyKey)
+
+        // Not listed yet, then under way: still replacing.
+        assertTrue(all.update(emptyList()).isEmpty())
+        assertTrue(all.update(listOf(job("working"))).isEmpty())
+        assertTrue(all.now.value["nd-1"]!!.seen)
+
+        val ends = all.update(listOf(job("upgraded", detail = "Now FLAC.")))
+        val end = ends.single() as ReplaceEnd.Replaced
+        assertEquals("Replaced with the plain song", end.words)
+        assertFalse(all.replacing("nd-1"))
+        // Undo puts the old copy back by the song's id.
+        assertEquals(LIBRARY_ACTION_RESTORE, end.putBack.action)
+        assertEquals("nd-1", end.putBack.id)
+        assertEquals(end.putBack, end.putBack.undo)
+    }
+
+    @Test
+    fun aReplacementThatFailsSaysYourCopyWasKept_AndWhereToLook() {
+        val all = Replacements()
+        all.start(replacing(plain = false), emptyList())
+        val end = all.update(listOf(job("failed", detail = "The copy you picked was not the right recording, so it was thrown away. Your copy was kept."))).single()
+        assertTrue(end is ReplaceEnd.Kept)
+        assertEquals(
+            "The copy you picked was not the right recording, so it was thrown away. Your copy was kept. Details are in Downloads.",
+            end.words,
+        )
+        assertEquals("Replaced with the copy you picked", replacedLine(plainSong = false))
+        assertEquals("The copy you picked did not replace yours. Your copy was kept. Details are in Downloads.", keptLine(null))
+    }
+
+    @Test
+    fun anOlderJobsEndIsNotThisReplacements() {
+        val all = Replacements()
+        val older = job("upgraded", at = "2026-10-10T12:00:00Z")
+        all.start(replacing(), listOf(older))
+        // Still the older job's end, and this one never seen under way.
+        assertTrue(all.update(listOf(older)).isEmpty())
+        assertTrue(all.replacing("nd-1"))
+        // Another song's job says nothing about this one.
+        assertTrue(all.update(listOf(older, job("failed", id = "nd-2"))).isEmpty())
+        // A later end is this one's.
+        assertTrue(all.update(listOf(job("failed", at = "2026-10-11T12:05:00Z", detail = "No copy came. Your copy was kept."))).single() is ReplaceEnd.Kept)
+    }
+
+    @Test
+    fun theReplacingRowSaysTheStepThePillWould() {
+        val r = replacing()
+        val row = rowOf(Upgrade(id = "nd-1", title = "Holocene", state = "working", progress = 0.4))
+        assertEquals(row, replacingRow(r, listOf(row)))
+        assertEquals("Replacing... Searching", replacingWords(row))
+        assertEquals("Replacing...", replacingWords(null))
+        val downloading = rowOf(download("s:a", "downloading", progress = 0.42f), Upgrade(id = "nd-1", state = "working"))
+        assertEquals("Replacing... Downloading 42%", replacingWords(replacingRow(r, listOf(downloading))))
     }
 }

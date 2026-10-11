@@ -48,9 +48,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Size
@@ -60,6 +63,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
@@ -74,7 +79,6 @@ import app.winters.octo.design.GlazeCapsule
 import app.winters.octo.design.Glyph
 import app.winters.octo.design.IconAction
 import app.winters.octo.design.IconSize
-import app.winters.octo.design.MenuTitle
 import app.winters.octo.design.OctoDuration
 import app.winters.octo.design.motionScale
 import app.winters.octo.design.octoTween
@@ -113,6 +117,15 @@ import app.winters.octo.ui.downloads.FIND_DOWNLOADS
 import app.winters.octo.ui.downloads.FIND_PICK_WAIT
 import app.winters.octo.ui.downloads.KEEP_MINE
 import app.winters.octo.ui.downloads.PickQuestion
+import app.winters.octo.ui.downloads.vsYoursSpoken
+import app.winters.octo.ui.downloads.vsYoursTag
+import app.winters.octo.ui.downloads.takeLine
+import app.winters.octo.ui.downloads.replacingWords
+import app.winters.octo.ui.downloads.replacingRow
+import app.winters.octo.ui.downloads.compareLines
+import app.winters.octo.ui.downloads.replaceQuestion
+import app.winters.octo.ui.downloads.REPLACE_TITLE
+import app.winters.octo.ui.downloads.AskKind
 import app.winters.octo.ui.downloads.REPLACE_ANYWAY
 import app.winters.octo.ui.downloads.findReplaces
 import app.winters.octo.ui.family.MORE_BELOW
@@ -120,7 +133,6 @@ import kotlinx.coroutines.launch
 import app.winters.octo.ui.downloads.FIND_SONGS
 import app.winters.octo.ui.downloads.LogMark
 import app.winters.octo.ui.downloads.RowPhase
-import app.winters.octo.ui.downloads.candidateFacts
 import app.winters.octo.ui.downloads.candidateTitle
 import app.winters.octo.ui.downloads.candidateVerdict
 import app.winters.octo.ui.downloads.canPick
@@ -471,12 +483,19 @@ private fun FindSongs(app: AppState, model: DownloadsModel, view: DrawerView.Fin
     val problem by model.findProblem.collectAsState()
     val picked by model.picked.collectAsState()
     val question by model.question.collectAsState()
+    val replacing by model.replacing.collectAsState()
+    val rows by model.rows.collectAsState()
     val searching = found?.searching != false && problem == null
     val list = rememberLazyListState()
-    // A copy that is not better than the library's: the server's question,
-    // in a dialog of its own.
+    // The server's answer to a library song's pick, as a dialog: the usual
+    // question for a better copy, or the replace anyway one.
     LaunchedEffect(question) {
-        question?.let { askReplaceAnyway(app, model, it, found?.song?.title?.takeIf(String::isNotBlank) ?: view.title) }
+        val asked = question ?: return@LaunchedEffect
+        val title = asked.title.ifBlank { view.title }
+        when (asked.kind) {
+            AskKind.Ready -> askReplaceIt(app, title, asked.copy, model.asksFirst, { model.question.value == asked }, model::replaceAnyway) { model.keepMine(asked) }
+            AskKind.Confirm -> askReplaceAnyway(app, model, asked, title)
+        }
     }
     LazyColumn(modifier.scrollbar(list), list, contentPadding = PaddingValues(start = Space.L, end = Space.L, top = Space.S, bottom = Space.Xl)) {
         item(key = "bar") {
@@ -497,14 +516,33 @@ private fun FindSongs(app: AppState, model: DownloadsModel, view: DrawerView.Fin
         found?.error?.let { item(key = "error") { Txt(it, DesktopType.meta, OctoColors.SignalOrange, Modifier.padding(vertical = Space.S), maxLines = 3) } }
         picked?.takeIf { !it.queued }?.detail?.let { item(key = "picked") { Txt(it, DesktopType.meta, OctoColors.SignalOrange, Modifier.padding(vertical = Space.S), maxLines = 3) } }
         item(key = "rule") { Separator(Modifier.padding(vertical = Space.M)) }
+        // The library's copy looks like another take: said over the copies.
+        takeLine(found?.song?.take)?.let { line ->
+            item(key = "take") {
+                Row(Modifier.fillMaxWidth().padding(bottom = Space.S), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(Space.S)) {
+                    Glyph(OctoIcons.Info, size = IconSize.Inline, tint = OctoColors.TextSecondary)
+                    Txt(line, DesktopType.meta, OctoColors.TextPrimary, Modifier.weight(1f), maxLines = Int.MAX_VALUE)
+                }
+            }
+        }
         val copies = found?.candidate.orEmpty()
         if (copies.isEmpty() && !searching) item(key = "none") { Txt("Nothing found on your sources.", DesktopType.body, OctoColors.TextMuted) }
         // The list still grows while sources answer, so a copy is picked
         // only once it is done.
         if (copies.isNotEmpty() && found?.searching == true) item(key = "wait") { Txt(FIND_PICK_WAIT, DesktopType.meta, OctoColors.TextMuted, Modifier.padding(bottom = Space.S)) }
         val shown = found
+        // While a copy replaces the library's, its row says how far it is,
+        // and no other copy of the song can be picked.
+        val busy = shown?.song?.libraryId?.let { it in replacing } == true
         items(copies, key = ::copyKey) { copy ->
-            CopyLine(copy, compact = false, onPick = if (shown != null && canPick(shown, copy)) ({ pickCopy(app, model, shown, copy) }) else null)
+            val mine = replacing.values.firstOrNull { it.search == shown?.id && it.copyKey == copyKey(copy) }
+            CopyLine(
+                copy,
+                compact = false,
+                onPick = if (shown != null && !busy && canPick(shown, copy)) ({ pickCopy(app, model, shown, copy) }) else null,
+                replacing = mine?.let { replacingRow(it, rows) },
+                replacingNow = mine != null,
+            )
         }
     }
 }
@@ -516,7 +554,7 @@ private fun FindHead(view: DrawerView.Find, found: FoundSongs?, asksFirst: Boole
     Row(Modifier.fillMaxWidth().padding(top = Space.S), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.L)) {
         Cover(song?.coverArt ?: view.id, Modifier.size(HeadCover), shape = Corner.ArtMShape, placeholder = OctoIcons.Songs)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
-            Txt(song?.title?.takeIf(String::isNotBlank) ?: view.title, DesktopType.emphasis, maxLines = 2)
+            Txt(song?.title?.takeIf(String::isNotBlank) ?: view.title, DesktopType.emphasis, maxLines = Int.MAX_VALUE)
             song?.artist?.takeIf(String::isNotBlank)?.let { Txt(it, DesktopType.meta, OctoColors.TextSecondary) }
             song?.album?.takeIf(String::isNotBlank)?.let { Txt(it, DesktopType.meta, OctoColors.TextMuted) }
         }
@@ -555,7 +593,7 @@ private fun Sources(sources: List<FindSourceState>) {
 // in, its facts, and whether Octo would take it. On Find songs it can be
 // picked; the song's cover is drawn once, over the list.
 @Composable
-private fun CopyLine(copy: FoundCandidate, compact: Boolean, onPick: (() -> Unit)? = null) {
+private fun CopyLine(copy: FoundCandidate, compact: Boolean, onPick: (() -> Unit)? = null, replacing: DownloadRow? = null, replacingNow: Boolean = false) {
     val hover = remember { MutableInteractionSource() }
     val hovered by hover.collectIsHoveredAsState()
     Row(
@@ -570,6 +608,7 @@ private fun CopyLine(copy: FoundCandidate, compact: Boolean, onPick: (() -> Unit
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.S)) {
                 copyBadge(copy)?.let { Badge(it, lossless = isLosslessCopy(copy)) }
+                vsYoursTag(copy)?.let { VsYours(it, vsYoursSpoken(copy).orEmpty()) }
                 CutTxt(candidateTitle(copy), if (compact) DesktopType.table else DesktopType.tableTitle, OctoColors.TextPrimary, Modifier.weight(1f, fill = false))
             }
             val where = listOfNotNull(copy.album?.takeIf(String::isNotBlank) ?: copy.folder, copy.file?.takeIf { copy.title != null && !compact })
@@ -578,6 +617,16 @@ private fun CopyLine(copy: FoundCandidate, compact: Boolean, onPick: (() -> Unit
             // Octo's order for a copy it would try; why not, for one it would pass over.
             val verdict = copy.rank?.let(::rankWords) ?: copy.note?.let { candidateVerdict(copy) }
             verdict?.let { Txt(it, DesktopType.meta, if (copy.rank == 1) OctoColors.TextPrimary else OctoColors.TextMuted, maxLines = 2) }
+            if (replacingNow) {
+                Row(
+                    Modifier.padding(top = Space.Xxs).semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Space.S),
+                ) {
+                    ProgressRing(replacing?.fraction, size = IconSize.Inline)
+                    Txt(replacingWords(replacing), DesktopType.meta, OctoColors.TextPrimary)
+                }
+            }
         }
         if (onPick != null) {
             IconAction(OctoIcons.Download, "Get this copy", onPick, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = hovered, tint = if (hovered) OctoColors.TextPrimary else OctoColors.TextSecondary)
@@ -596,58 +645,113 @@ private fun Badge(text: String, lossless: Boolean) {
     )
 }
 
-// Picks a copy from the search `found`. Replacing a library song's copy is
-// asked first; a song not in the library is simply fetched. The question
-// goes away should another search take the list's place meanwhile.
+// How a copy stands against the library's: a quiet outlined word beside
+// its kind, read out in full.
+@Composable
+private fun VsYours(text: String, spoken: String) {
+    Txt(
+        text,
+        DesktopType.label,
+        OctoColors.TextSecondary,
+        Modifier
+            .clip(RoundedCornerShape(Corner.ArtS))
+            .border(1.dp, SeparatorColor, RoundedCornerShape(Corner.ArtS))
+            .padding(horizontal = Space.S, vertical = Space.None)
+            .semantics { contentDescription = spoken },
+    )
+}
+
+// Picks a copy from the search `found`. A server that asks first is asked
+// at once, and its answer says which question follows, if any. On an older
+// server, replacing a library song's copy is asked here first; a song not
+// in the library is simply fetched.
 private fun pickCopy(app: AppState, model: DownloadsModel, found: FoundSongs, copy: FoundCandidate) {
-    if (found.song.libraryId == null) {
+    if (found.song.libraryId == null || model.asksFirst) {
         model.pick(found.id, copy)
         return
     }
-    app.popups.showCentred { close ->
-        val now by model.found.collectAsState()
-        LaunchedEffect(now?.id) { if (now?.id != found.id) close() }
-        MenuTitle(found.song.title)
+    askReplaceIt(app, found.song.title, copy, asksFirst = false, { model.found.value?.id == found.id }, { model.pick(found.id, copy) }) {}
+}
+
+// The usual question before a better copy replaces the library's. It goes
+// away by itself once `still` turns false (another search, or the question
+// answered elsewhere); Escape or a click off it is a no.
+private fun askReplaceIt(
+    app: AppState,
+    title: String,
+    copy: FoundCandidate,
+    asksFirst: Boolean,
+    still: () -> Boolean,
+    yes: () -> Unit,
+    no: () -> Unit,
+) {
+    app.popups.showCentred(width = 420.dp, scrim = true) { close ->
+        val gone by remember { derivedStateOf { !still() } }
+        LaunchedEffect(gone) { if (gone) close() }
+        var answered by remember { mutableStateOf(false) }
+        DisposableEffect(Unit) { onDispose { if (!answered) no() } }
+        DialogTitle(REPLACE_TITLE, title)
         PopupPadding {
-            Txt(
-                "Replace your copy with ${candidateFacts(copy).take(2).joinToString(", ")}? ${findReplaces(model.asksFirst)}",
-                DesktopType.body, OctoColors.TextPrimary, maxLines = 6,
-            )
+            Txt("${replaceQuestion(copy)} ${findReplaces(asksFirst)}", DesktopType.body, OctoColors.TextPrimary, maxLines = Int.MAX_VALUE)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.M, Alignment.End)) {
                 GlazeCapsule(null, "Cancel", close)
                 GlazeCapsule(OctoIcons.Lossless, "Replace it", {
+                    answered = true
+                    yes()
                     close()
-                    model.pick(found.id, copy)
                 }, lit = true)
             }
         }
     }
 }
 
-// The server's question about a copy that is not better than the library's,
-// word for word, under the song's whole title. "Replace anyway" sends the
-// pick again to replace it all the same; "Keep mine", Escape or a click off
-// the card sends nothing. The buttons stay in place under words that
-// scroll, should they ever not fit. It goes away by itself once the
-// question does (the search replaced, or the drawer closed).
+// A dialog's question and, under it, the song it is about, in full.
+@Composable
+private fun DialogTitle(question: String, song: String) {
+    Column(
+        Modifier.fillMaxWidth().padding(start = Space.L, end = Space.L, top = Space.M, bottom = Space.S),
+        verticalArrangement = Arrangement.spacedBy(Space.Xxs),
+    ) {
+        Txt(question, DesktopType.emphasis, OctoColors.TextPrimary, Modifier.semantics { heading() }, maxLines = Int.MAX_VALUE)
+        if (song.isNotBlank()) Txt(song, DesktopType.body, OctoColors.TextSecondary, maxLines = Int.MAX_VALUE)
+    }
+}
+
+// The question before a copy that needs the person's word replaces the
+// library's: the two copies side by side, then the server's sentence word
+// for word. "Keep mine" has the keyboard first, so Enter on its own never
+// replaces anything; Tab reaches "Replace anyway". "Keep mine", Escape or
+// a click off the card sends nothing. The buttons stay in place under
+// words that scroll, should they ever not fit. It goes away by itself once
+// the question does (the search replaced, or the drawer closed).
 private fun askReplaceAnyway(app: AppState, model: DownloadsModel, asked: PickQuestion, title: String) {
-    app.popups.showCentred(width = 420.dp, scrim = true, scrollsItself = true) { close ->
+    app.popups.showCentred(width = 440.dp, scrim = true, scrollsItself = true) { close ->
         val now by model.question.collectAsState()
         LaunchedEffect(now) { if (now != asked) close() }
         var answered by remember { mutableStateOf(false) }
         DisposableEffect(Unit) { onDispose { if (!answered) model.keepMine(asked) } }
-        Txt(
-            title, DesktopType.emphasis, OctoColors.TextPrimary,
-            Modifier.padding(start = Space.L, end = Space.L, top = Space.M, bottom = Space.S).semantics { heading() },
-            maxLines = Int.MAX_VALUE,
-        )
+        val keep = remember { FocusRequester() }
+        LaunchedEffect(Unit) { runCatching { keep.requestFocus() } }
+        DialogTitle(REPLACE_TITLE, title)
         val scroll = rememberScrollState()
         Box(Modifier.weight(1f, fill = false)) {
-            Txt(
-                asked.words, DesktopType.body, OctoColors.TextPrimary,
+            Column(
                 Modifier.fillMaxWidth().verticalScroll(scroll).padding(horizontal = Space.L, vertical = Space.Xs),
-                maxLines = Int.MAX_VALUE,
-            )
+                verticalArrangement = Arrangement.spacedBy(Space.M),
+            ) {
+                val lines = compareLines(asked.compare)
+                if (lines.isNotEmpty()) {
+                    Column(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(Corner.ArtS)).background(Card).padding(Space.M).semantics(mergeDescendants = true) {},
+                        verticalArrangement = Arrangement.spacedBy(Space.Xxs),
+                    ) {
+                        lines.forEachIndexed { index, line ->
+                            Txt(line, DesktopType.body, if (index == 0) OctoColors.TextSecondary else OctoColors.TextPrimary, maxLines = Int.MAX_VALUE)
+                        }
+                    }
+                }
+                Txt(asked.words, DesktopType.body, OctoColors.TextPrimary, maxLines = Int.MAX_VALUE)
+            }
             MoreBelow(scroll, Modifier.align(Alignment.BottomCenter))
         }
         Row(
@@ -655,7 +759,7 @@ private fun askReplaceAnyway(app: AppState, model: DownloadsModel, asked: PickQu
             horizontalArrangement = Arrangement.spacedBy(Space.M, Alignment.End),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            GlazeCapsule(null, KEEP_MINE, close)
+            GlazeCapsule(null, KEEP_MINE, close, Modifier.focusRequester(keep))
             AccentButton(REPLACE_ANYWAY, {
                 answered = true
                 model.replaceAnyway()

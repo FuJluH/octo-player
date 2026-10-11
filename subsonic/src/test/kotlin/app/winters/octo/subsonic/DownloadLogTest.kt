@@ -111,6 +111,41 @@ class DownloadLogTest {
         assertEquals("a1b2c3", again.url.queryParameter("search"))
     }
 
+    private fun ok(payload: String) =
+        server.enqueue(MockResponse.Builder().body("""{"subsonic-response":{"status":"ok","version":"1.16.1",$payload}}""").build())
+
+    @Test
+    fun readsHowEachCopyStandsAgainstYours_AndTheTakeLine() = runTest {
+        ok(
+            """"foundSongs":{"id":"f1","state":"done","song":{"title":"Holocene","libraryId":"nd-1","take":"Yours looks like a live recording. Pick the plain song to replace it.","takeKind":"live"},
+            "candidate":[{"source":"Soulseek","id":"c-1","vsYours":"same","vsYoursText":"Same as yours"},{"source":"Soulseek","id":"c-2"}]}""",
+        )
+        val found = client().foundSongs("f1")
+        assertEquals("Yours looks like a live recording. Pick the plain song to replace it.", found.song.take)
+        assertEquals(TAKE_LIVE, found.song.takeKind)
+        assertEquals(listOf(VS_YOURS_SAME, null), found.candidate.map { it.vsYours })
+        assertEquals(listOf("Same as yours", null), found.candidate.map { it.vsYoursText })
+    }
+
+    @Test
+    fun aReadyAnswerCarriesBothCopies() = runTest {
+        ok(""""pick":{"state":"ready","detail":null,"key":null,"compare":{"yours":{"quality":"FLAC","length":420,"take":"live recording"},"copy":{"quality":"FLAC","length":298,"take":null}}}""")
+        val pick = client().pickFoundSong("f1", FoundCandidate(source = "Soulseek", id = "c-1"), anyway = false)
+        assertTrue(pick.ready)
+        assertFalse(pick.queued)
+        assertEquals(PickSide("FLAC", 420, "live recording"), pick.compare!!.yours)
+        assertEquals(PickSide("FLAC", 298, null), pick.compare!!.copy)
+    }
+
+    @Test
+    fun readsAReplacedSongInTheTrash() = runTest {
+        ok(""""libraryTrash":{"keepDays":30,"songs":[{"id":"nd-1","title":"Holocene","kind":"replaced","was":"FLAC 16-bit 44.1 kHz","now":"MP3 320"},{"id":"nd-2","title":"Towers"}]}""")
+        val trash = client().libraryTrash()
+        assertEquals(listOf(true, false), trash.songs.map { it.replaced })
+        assertEquals("FLAC 16-bit 44.1 kHz", trash.songs[0].was)
+        assertEquals("MP3 320", trash.songs[0].now)
+    }
+
     @Test
     fun pickingOnAServerWithoutCopyIdsSendsThePlace() = runTest {
         answer("pickFoundSong")
