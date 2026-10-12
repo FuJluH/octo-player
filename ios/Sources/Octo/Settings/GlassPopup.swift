@@ -2,12 +2,6 @@ import OctoKit
 import SwiftUI
 import UIKit
 
-/// How wide a popup's card is: as wide as its content within a range, or a set width.
-enum PopupWidth {
-    case fit(min: CGFloat, max: CGFloat)
-    case fixed(CGFloat)
-}
-
 /// One popup asked for: its title (what VoiceOver calls it), the control it opens beside, how
 /// wide it is, a heading that stays put, and the body, which scrolls when it is taller than the
 /// popup may be.
@@ -166,76 +160,14 @@ private struct PopupCard: View {
     let request: PopupRequest
     let maxWidth: CGFloat
     let maxHeight: CGFloat
-    @State private var atBottom = false
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
-        CardWidth(width: request.width, maxWidth: maxWidth, maxHeight: maxHeight) {
+        GlassPopupCard(width: request.width, maxWidth: maxWidth, maxHeight: maxHeight) {
             VStack(alignment: .leading, spacing: 0) {
                 request.header
-                ViewThatFits(in: .vertical) {
-                    request.body
-                    ScrollView {
-                        request.body
-                    }
-                    .scrollBounceBehavior(.basedOnSize)
-                    .onScrollGeometryChange(for: Bool.self) { geometry in
-                        geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height - 2
-                    } action: { _, bottom in
-                        atBottom = bottom
-                    }
-                    .overlay(alignment: .bottom) { MoreBelow().opacity(atBottom ? 0 : 1).animation(.easeOut(duration: 0.2), value: atBottom) }
-                }
+                HuggingScroll { request.body }
             }
             .padding(request.padding)
-        }
-        .glassEffect(.regular.tint(Color.black.opacity(0.52)), in: shape)
-        .shadow(color: .black.opacity(0.45), radius: 20, y: 8)
-    }
-}
-
-/// A quiet mark at the foot of a scrolling popup saying there is more under it.
-private struct MoreBelow: View {
-    var body: some View {
-        VStack(spacing: 0) {
-            LinearGradient(colors: [.clear, Color.black.opacity(0.35)], startPoint: .top, endPoint: .bottom).frame(height: 28)
-            Image(systemName: "chevron.compact.down")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(OctoColor.textSecondary)
-                .frame(maxWidth: .infinity)
-                .padding(.bottom, 4)
-                .background(Color.black.opacity(0.35))
-        }
-        .allowsHitTesting(false)
-        .accessibilityElement()
-        .accessibilityLabel("More below")
-    }
-}
-
-/// Lays its content out as wide as it would like to be within a range (or at a set width), and
-/// then as tall as it needs at that width, so wrapped lines are measured where they wrap.
-private struct CardWidth: Layout {
-    let width: PopupWidth
-    let maxWidth: CGFloat
-    let maxHeight: CGFloat
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        guard let child = subviews.first else { return .zero }
-        let w = chosenWidth(child)
-        let size = child.sizeThatFits(ProposedViewSize(width: w, height: maxHeight))
-        return CGSize(width: w, height: min(size.height, maxHeight))
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: bounds.height))
-    }
-
-    private func chosenWidth(_ child: LayoutSubview) -> CGFloat {
-        switch width {
-        case .fixed(let w): return min(w, maxWidth)
-        case .fit(let low, let high):
-            let ideal = child.sizeThatFits(.unspecified).width
-            return min(min(max(ideal, low), high), maxWidth)
         }
     }
 }

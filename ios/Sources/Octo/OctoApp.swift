@@ -8,8 +8,7 @@ struct OctoApp: App {
     @State private var lyrics: LyricsStore
     @State private var sound: SoundStore
     @State private var downloads: Downloads
-    @State private var library: Library
-    @State private var serverSync: ServerSync
+    @State private var data: DataServices
     @State private var overlays = Overlays()
     @State private var prompts = Prompts()
     @State private var presses = PressSpots()
@@ -24,20 +23,19 @@ struct OctoApp: App {
         let session = Session()
         let sound = SoundStore()
         let router = Router()
-        let library = Library.open()
-        let serverSync = ServerSync(session: session, library: library)
-        _library = State(initialValue: library)
-        _serverSync = State(initialValue: serverSync)
+        let data = DataServices(session: session) { words, done in router.show(words, done: done) }
+        _data = State(initialValue: data)
         _router = State(initialValue: router)
-        _downloads = State(initialValue: Downloads(session: session, library: library, sync: serverSync) { words, done in
-            router.show(words, done: done)
-        })
-        serverSync.start()
+        _downloads = State(initialValue: data.downloads)
         _session = State(initialValue: session)
         _sound = State(initialValue: sound)
         _player = State(initialValue: Player(session: session, sound: sound.processor))
         _lyrics = State(initialValue: LyricsStore(session: session))
         _artworkColors = State(initialValue: ArtworkColorStore(session: session))
+        data.start()
+        #if DEBUG
+        DataDrive.install(data) { router.show($0) }
+        #endif
     }
 
     var body: some Scene {
@@ -49,8 +47,7 @@ struct OctoApp: App {
                 .environment(lyrics)
                 .environment(sound)
                 .environment(downloads)
-                .environment(library)
-                .environment(serverSync)
+                .dataEnvironment(data)
                 .environment(overlays)
                 .environment(prompts)
                 .environment(presses)
