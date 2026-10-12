@@ -156,6 +156,7 @@ struct MainShell: View {
             PromptsHost().zIndex(5)
         }
         .environment(\.nowPlayingArt, art)
+        .environment(\.playerShown, playerOpen && hasTrack)
         .environment(drift)
         .task(id: drifting) { if drifting { await drift.run() } }
         .environment(\.nowMark, NowMark(songId: player.current?.id, isPlaying: player.isPlaying))

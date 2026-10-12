@@ -2,378 +2,603 @@ import OctoKit
 import SwiftUI
 import UIKit
 
-/// The full player. Every control sits on the cover's own drifting wash; the words take
-/// whichever colour reads on it. Pull down anywhere to close.
+/// The full player, over every page and the bar. Its background follows the song's artwork as
+/// the settings choose, and every word and icon takes the color that reads on it. Pull down
+/// anywhere to close; swipe the artwork sideways to skip. Upright, lyrics fold the artwork away
+/// and the controls into a bar; sideways, the artwork stays and the lyrics take the other half.
 struct NowPlayingView: View {
     let dismiss: () -> Void
     @Environment(Player.self) private var player
     @Environment(Session.self) private var session
     @Environment(Router.self) private var router
-    @State private var tone = CoverTone()
-    @State private var scrubbing: Double?
+    @Environment(LyricsStore.self) private var lyrics
+    @Environment(ArtworkColorStore.self) private var colorStore
+    @Environment(Library.self) private var library
+    @Environment(LikeStore.self) private var likes
+    @Environment(\.nowPlayingArt) private var art
+    @Environment(\.octoReduceMotion) private var calm
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var settings = AppSettings.shared
+    @State private var look = PlayerLook()
+    @State private var facts = PlayerSongFacts()
+    @State private var drive = PlayerDrive.shared
+    @State private var sleep = PlayerSleep.shared
+
+    // The way in and out.
+    @State private var dolly = 0.0
+    @State private var closing = false
+    @State private var corner: CGFloat = 50
+    @State private var rise: CGFloat = 28
+    @State private var riseAlpha = 0.0
+    @State private var fold = 0.0
+    @State private var lyricsAlpha = 0.0
+    @State private var lyricsLayer = false
+
+    // The pull and the artwork's swipe.
     @State private var pull: CGFloat = 0
-    @State private var lyricsOpen = false
+    @State private var axis: DragAxis = .undecided
+    @State private var card: CGFloat = 0
+    @State private var cardStart: CGFloat = 0
+    @State private var armed = false
+    @State private var ticks = 0
+    @State private var stage: CGRect = .zero
+    @GestureState private var dragging = false
+
+    // What opens over the player.
     @State private var showsQueue = false
     @State private var showsTime = false
-    @State private var starred: [String: Bool] = [:]
-    @State private var appeared = false
-    @State private var artDrag: CGFloat = 0
-    @State private var artCrossed = false
+    @State private var timePages = PopupPages(TimePage.sleep)
+    @State private var showsMenu = false
+    @State private var menuPages = PopupPages(PlayerMenuPage.actions)
     @State private var showsLyricsMenu = false
-    @State private var likes = 0
-    @Environment(\.accessibilityReduceMotion) private var calm
+    @State private var lyricsPages = PopupPages(LyricsMenuPage.options)
+    @State private var showsChooser = false
+
+    private static let pullShare: CGFloat = 0.45
+    private static let slop: CGFloat = 8
+    private static let skipAt: CGFloat = 88
+
+    private var colors: PlayerColors { look.colors }
+    private var ink: Color { colors.content }
+    private var muted: Color { mutedInk(ink, dark: colors.dark) }
+    private var accent: Color { accentInk(ink, dark: colors.dark) }
 
     var body: some View {
-        // The safe area is read here, then the player covers the whole screen: the wash runs to
-        // every edge and only the controls keep inside the safe area.
-        GeometryReader { safe in
-            let insets = safe.safeAreaInsets
+        GeometryReader { outer in
+            let insets = outer.safeAreaInsets
             GeometryReader { screen in
-                let cap = screen.size.height * 0.45
-                let travel = min(cap, max(0, pull))
-                let shrink = 1 - 0.06 * (travel / cap)
+                let size = screen.size
+                let area = CGSize(width: size.width - insets.leading - insets.trailing, height: size.height - insets.top - insets.bottom)
+                let sideways = area.width > area.height
+                let roomy = !sideways || area.height >= 360
+                let cap = size.height * Self.pullShare
+                let travel = min(max(pull, 0), cap)
+                let pulled = cap > 0 ? travel / cap : 0
                 ZStack {
-                    CoverWash(coverArt: player.current?.coverArt, tone: tone)
-                        .onChange(of: router.lyricsRequested, initial: true) { _, asked in
-                            guard asked else { return }
-                            router.lyricsRequested = false
-                            lyricsOpen = true
-                        }
-                    VStack(spacing: 0) {
-                        topLine
-                        if lyricsOpen {
-                            LyricsView(ink: tone.ink, muted: tone.muted)
-                                .transition(.opacity)
-                            LyricsBar(ink: tone.ink, close: { withAnimation(.easeInOut(duration: 0.36)) { lyricsOpen = false } },
-                                      menu: { showsLyricsMenu = true })
-                                .padding(.top, 12)
-                                .padding(.bottom, 16)
+                    PlayerBackground(prefs: settings.player.background, colors: colors, cover: look.cover,
+                                     coverId: player.current?.coverArt, live: settings.player.liveBackground, calm: calm,
+                                     playing: player.isPlaying, bpm: facts.bpm, dolly: dolly, closing: closing,
+                                     focused: focused)
+                    Group {
+                        if sideways {
+                            sidewaysLayout(insets, roomy: roomy)
                         } else {
-                            art(in: screen.size)
-                            controls
-                                .offset(y: appeared ? 0 : 28)
-                                .opacity(appeared ? 1 : 0)
+                            uprightLayout(insets)
                         }
                     }
-                    .padding(.top, insets.top)
-                    .padding(.bottom, max(insets.bottom, 12))
-                    .padding(.horizontal, 24)
-                    .foregroundStyle(tone.ink)
+                    .foregroundStyle(ink)
+                    .animation(.octoTween(fixed: 500), value: colors.dark)
                 }
-                .frame(width: screen.size.width, height: screen.size.height)
-                .clipShape(RoundedRectangle(cornerRadius: travel > 0 ? min(28, travel / cap * 5 * 28) : 0, style: .continuous))
-                .scaleEffect(shrink)
+                .frame(width: size.width, height: size.height)
+                .clipShape(RoundedRectangle(cornerRadius: travel > 0 ? 28 * min(pulled * 5, 1) : 0, style: .continuous))
+                .scaleEffect(1 - 0.06 * pulled)
                 .offset(y: travel)
-                .gesture(pullToClose(cap: cap))
+                .contentShape(Rectangle())
+                .gesture(playerDrag(cap: cap, folded: lyrics.open && !sideways))
             }
             .ignoresSafeArea()
         }
-        .sheet(isPresented: $showsQueue) { QueueSheet() }
-        .sheet(isPresented: $showsLyricsMenu) {
-            if let song = player.current { LyricsMenu(song: song) }
+        .background(PlayerStatusBar(dark: colors.dark))
+        .sensoryFeedback(.impact(flexibility: .rigid, intensity: 0.8), trigger: ticks)
+        .onChange(of: dragging) { _, now in
+            // A drag taken over by something else ends as if it went nowhere.
+            guard !now, axis != .undecided else { return }
+            axis = .undecided
+            armed = false
+            withAnimation(.octoSpring(0.8, 400)) {
+                pull = 0
+                card = 0
+            }
         }
-        .task(id: player.current?.coverArt) { await readTone() }
-        .onAppear {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.68).delay(0.08)) { appeared = true }
+        .onChange(of: lookAsk, initial: true) { _, ask in
+            look.follow(coverId: ask.coverId, prefs: ask.prefs, live: ask.live, artwork: ask.artwork, client: session.client)
         }
-        .statusBarHidden(false)
+        .onChange(of: factsAsk, initial: true) { _, _ in
+            facts.follow(player.current, library: library, version: library.libraryVersion + library.ratingsVersion)
+        }
+        .onChange(of: player.current?.id, initial: true) { _, id in
+            lyrics.attach(player)
+            lyrics.songChanged(id)
+        }
+        .onChange(of: router.lyricsRequested, initial: true) { _, asked in
+            guard asked else { return }
+            router.lyricsRequested = false
+            if !lyrics.open { toggleLyrics() }
+        }
+        .onChange(of: lyrics.open) { _, open in showLyrics(open, animated: true) }
+        .onChange(of: drive.request, initial: true) { _, request in
+            guard let request else { return }
+            drive.taken()
+            take(request)
+        }
+        .onAppear(perform: arrive)
+        .glassPopup(isPresented: $showsTime, title: "Sleep timer and speed", maxWidth: 340, onBack: { timePages.back() }) {
+            TimeCard(pages: timePages) { showsTime = false }
+        }
+        .glassPopup(isPresented: $showsMenu, title: "Song menu", onBack: { menuPages.back() }) {
+            if let song = player.current {
+                PlayerSongMenu(song: song, facts: facts, pages: menuPages, dismiss: { showsMenu = false }) { route in
+                    close { router.go(route) }
+                }
+            }
+        }
+        .glassPopup(isPresented: $showsLyricsMenu, title: "Lyrics", onBack: { lyricsPages.back() }) {
+            LyricsMenuContent(pages: lyricsPages, trackId: player.current?.id, dismiss: { showsLyricsMenu = false }) {
+                showsChooser = true
+            }
+        }
+        .glassPopup(isPresented: $showsChooser, title: "Choose lyrics", usesPressSpot: false, maxWidth: 440, heightShare: 0.8) {
+            if let song = player.current {
+                LyricsChooserContent(song: song) { showsChooser = false }
+            }
+        }
+        .glassSheet(isPresented: $showsQueue, scrolls: false) { QueueSheet() }
     }
 
-    // MARK: Parts
+    /// The wash slows to 10 frames a second while a card is open over it or the app is not in
+    /// front.
+    private var focused: Bool {
+        scenePhase == .active && !(showsTime || showsMenu || showsLyricsMenu || showsChooser)
+    }
+
+    // MARK: Layouts
+
+    private func uprightLayout(_ insets: EdgeInsets) -> some View {
+        let open = lyrics.open
+        return VStack(spacing: 0) {
+            topLine
+            artStage(maxSide: 312, folds: true)
+            ZStack(alignment: .bottom) {
+                if open {
+                    LyricsBar(ink: ink, close: toggleLyrics, menu: openLyricsMenu)
+                        .padding(.horizontal, -12)
+                        .padding(.bottom, 12)
+                        .transition(swap)
+                } else {
+                    controls(roomy: true)
+                        .padding(.bottom, 16)
+                        .offset(y: rise)
+                        .opacity(riseAlpha)
+                        .transition(swap)
+                }
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, insets.top)
+        .padding(.bottom, insets.bottom)
+        .overlay {
+            if lyricsLayer {
+                LyricsPane(edgeBleed: 24, ink: ink)
+                    .padding(.top, insets.top + 56 + 8)
+                    .padding(.bottom, insets.bottom + 76 + 8)
+                    .padding(.horizontal, 24)
+                    .opacity(lyricsAlpha)
+            }
+        }
+    }
+
+    private func sidewaysLayout(_ insets: EdgeInsets, roomy: Bool) -> some View {
+        HStack(spacing: 32) {
+            artStage(maxSide: 420, folds: false)
+                .padding(.vertical, 12)
+            VStack(spacing: 0) {
+                if lyrics.open {
+                    topLine
+                    LyricsPane(edgeBleed: 0, ink: ink)
+                        .padding(.vertical, 4)
+                    LyricsBar(ink: ink, close: toggleLyrics, menu: openLyricsMenu)
+                        .padding(.horizontal, -12)
+                        .padding(.bottom, 8)
+                } else {
+                    Spacer(minLength: 0)
+                    topLine
+                    controls(roomy: roomy)
+                        .offset(y: rise)
+                        .opacity(riseAlpha)
+                    Spacer(minLength: 0)
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, insets.top)
+        .padding(.bottom, insets.bottom)
+        .padding(.leading, insets.leading)
+        .padding(.trailing, insets.trailing)
+    }
+
+    /// The controls going and coming as lyrics open and close: out over 160 ms, in over 240 ms a
+    /// moment later; with less motion they change at once.
+    private var swap: AnyTransition {
+        calm ? .identity : .asymmetric(insertion: .opacity.animation(.octoTween(fixed: 240, OctoEasing.standard, delay: 120)),
+                                       removal: .opacity.animation(.octoTween(fixed: 160, OctoEasing.standard)))
+    }
+
+    // MARK: Top line
 
     private var topLine: some View {
         ZStack {
-            if let album = player.current?.album, showsAlbum {
-                Button {
-                    guard let song = player.current, let albumId = song.albumId, !song.isExternal else { return }
-                    router.go(.album(Album(id: albumId, name: album, artist: song.artist ?? "", coverArt: song.coverArt)))
-                    dismiss()
-                } label: {
-                    Text(album).font(.octoCaption).foregroundStyle(tone.muted).lineLimit(1)
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 104)
-                .accessibilityLabel("Open album")
+            if let song = player.current, let name = albumLabel(song.album, song.title, facts.albumSongs) {
+                albumName(name, song: song)
             }
-            HStack {
-                Button(action: dismiss) {
-                    Image(systemName: "chevron.down").font(.system(size: 18, weight: .semibold)).frame(width: 44, height: 44)
-                }
-                .buttonStyle(.plain)
-                .glassEffect(.clear.interactive(), in: .circle)
-                .accessibilityLabel("Close player")
-                Spacer()
-                RoutePicker(tint: UIColor(tone.ink))
-                    .frame(width: 44, height: 44)
-                    .accessibilityLabel("Play on")
-                PlayerSoundButton(ink: tone.ink) { router.go(.sound) }
+            HStack(spacing: 0) {
+                PlayerCloseButton(ink: ink) { close() }
+                Spacer(minLength: 0)
+                PlayerCastButton(ink: ink)
+                PlayerSoundButton(ink: ink) { close { router.go(.sound) } }
             }
         }
         .frame(height: 56)
     }
 
-    /// Singles and songs found online show no album name.
-    private var showsAlbum: Bool {
-        guard let song = player.current, let album = song.album, !album.isEmpty else { return false }
-        return !album.hasSuffix("- Single") && album.caseInsensitiveCompare(song.title) != .orderedSame
+    @ViewBuilder
+    private func albumName(_ name: String, song: Song) -> some View {
+        let words = Text(name)
+            .font(.octoCaption)
+            .foregroundStyle(muted)
+            .lineLimit(1)
+            .padding(.vertical, 8)
+        if let albumId = song.albumId, !albumId.isEmpty, !isFind(song.id), !albumId.hasPrefix(findPrefix) {
+            Button {
+                close { router.go(.album(Album(id: albumId, name: name, artist: song.artist ?? "", coverArt: song.coverArt))) }
+            } label: { words }
+                .buttonStyle(NoPress())
+                .accessibilityHint("Open album")
+                .padding(.horizontal, 104)
+        } else {
+            words.padding(.horizontal, 104)
+        }
     }
 
-    private func art(in size: CGSize) -> some View {
-        GeometryReader { stage in
-            let side = min(312, stage.size.width, stage.size.height - 16)
-            Cover(id: player.current?.coverArt, size: side, radius: side * 0.03)
-                .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
-                .shadow(color: .black.opacity(0.2), radius: 16, y: 8)
-                .shadow(color: .black.opacity(0.15), radius: 32, y: 16)
+    // MARK: Artwork
+
+    private func artStage(maxSide: CGFloat, folds: Bool) -> some View {
+        GeometryReader { box in
+            let side = max(0, min(maxSide, box.size.width, box.size.height))
+            let folded = folds ? fold : 0
+            let swiped = 1 - 0.5 * min(abs(card) / max(box.size.width / 2, 1), 1)
+            Cover(id: player.current?.coverArt, size: side, radius: side * corner / 100)
+                .modifier(SharedArt(namespace: art))
+                .elevation3()
                 .scaleEffect(player.isPlaying ? 1 : 0.84)
-                .animation(.spring(response: 0.36, dampingFraction: 0.6), value: player.isPlaying)
-                .offset(x: artDrag * 0.55)
-                .opacity(1 - min(0.5, abs(artDrag) / max(1, size.width)))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .contentShape(Rectangle())
-                .gesture(skipGesture(width: size.width))
-                .sensoryFeedback(.impact(weight: .light), trigger: artCrossed) { _, now in now }
-                .id(player.current?.id)
-                .transition(.asymmetric(insertion: .opacity.combined(with: .offset(x: 40)), removal: .opacity))
+                .animation(.octoSpring(0.6, 300), value: player.isPlaying)
+                .scaleEffect(1 - 0.08 * folded)
+                .opacity((1 - folded) * swiped)
+                .offset(x: card)
+                .frame(width: box.size.width, height: box.size.height)
+                .accessibilityHidden(true)
         }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { stage = $0 }
     }
 
-    private var controls: some View {
-        VStack(spacing: 0) {
-            songRow
-            Spacer().frame(height: 12)
-            progress
-            Spacer().frame(height: 12)
-            transport
-            Spacer().frame(height: 8)
-            VolumeRow(ink: tone.ink)
-            Spacer().frame(height: 12)
-            actions
-            Spacer().frame(height: 28)
-        }
-    }
+    // MARK: Controls
 
-    private var songRow: some View {
-        HStack(spacing: 4) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Marquee(text: player.current?.title ?? "", font: .system(size: 24, weight: .bold), color: tone.ink)
-                        .frame(height: 30)
-                    if player.current?.explicitStatus == "explicit" { ExplicitMark(size: 16) }
-                }
-                Button {
-                    guard let song = player.current, let artistId = song.artistId, !song.isExternal else { return }
-                    router.go(.artist(id: artistId, name: song.artist ?? ""))
-                    dismiss()
-                } label: {
-                    Text(player.current?.byline ?? "")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(tone.artist)
-                        .lineLimit(1)
-                }
-                .buttonStyle(.plain)
-            }
-            .id(player.current?.id)
-            .transition(.opacity)
-            Spacer(minLength: 8)
+    private func controls(roomy: Bool) -> some View {
+        let gap: CGFloat = roomy ? 12 : 4
+        return VStack(spacing: 0) {
             if let song = player.current {
-                if song.isExternal {
-                    AddToLibraryButton(song: song)
-                } else {
-                    Button { Task { await toggleHeart(song) } } label: {
-                        Image(systemName: isStarred(song) ? "heart.fill" : "heart")
-                            .font(.system(size: 24))
-                            .foregroundStyle(isStarred(song) ? tone.ink : tone.ink.opacity(0.6))
-                            .shadow(color: isStarred(song) ? tone.ink.opacity(0.6) : .clear, radius: 6)
-                            .keyframeAnimator(initialValue: 1.0, trigger: likes) { content, scale in
-                                content.scaleEffect(scale)
-                            } keyframes: { _ in
-                                CubicKeyframe(calm ? 1 : 1.2, duration: 0.135)
-                                CubicKeyframe(1, duration: 0.165)
-                            }
-                            .frame(width: 44, height: 44)
+                HStack(spacing: 0) {
+                    ZStack(alignment: .leading) {
+                        PlayerTitleBlock(song: song, ink: ink, accent: accent, openArtist: artistOpener(song))
+                            .id(song.id)
+                            .transition(.asymmetric(insertion: .opacity.animation(.octoTween(fixed: 250, OctoEasing.standard)),
+                                                    removal: .opacity.animation(.octoTween(fixed: 150, OctoEasing.standard))))
                     }
-                    .buttonStyle(NoPress())
-                    .accessibilityLabel("Like")
-                    .accessibilityValue(isStarred(song) ? "In Liked songs" : "Not in Liked songs")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    keeper(song)
+                    moreButton
                 }
-                Menu {
-                    SongActions(song: song)
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(tone.ink.opacity(0.6))
-                        .frame(width: 44, height: 44)
+                if facts.rating > 0 {
+                    RatingStars(rating: facts.rating)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 2)
                 }
-                .accessibilityLabel("More")
+                PlayerProgress(ink: ink, muted: muted, song: song) { openTime(.speed) }
+                    .padding(.top, 12)
+                PlayerTransport(ink: ink)
+                    .padding(.top, gap)
+                if roomy {
+                    PlayerVolume(ink: ink, muted: muted)
+                        .padding(.top, 8)
+                }
+                switches
+                    .padding(.top, gap)
+                    .padding(.bottom, gap)
             }
         }
     }
 
-    private var progress: some View {
-        VStack(spacing: 0) {
-            LineSlider(value: player.elapsed, range: 0...max(player.duration, 1), ink: tone.ink,
-                       onCommit: { player.seek(to: $0) }, dragging: $scrubbing)
-            ZStack {
-                HStack {
-                    Text(time(scrubbing ?? player.elapsed))
-                    Spacer()
-                    Text("-" + time(max(player.duration - (scrubbing ?? player.elapsed), 0)))
-                }
-                .font(.system(size: 12).monospacedDigit())
-                .foregroundStyle(tone.muted)
-                HStack(spacing: 8) {
-                    if let song = player.current { QualityBadge(song: song, ink: tone.ink) }
-                    if player.speed != 1 {
-                        Button { showsTime = true } label: {
-                            Text(speedWords(player.speed)).font(.system(size: 11, weight: .semibold))
-                                .padding(.horizontal, 10).frame(height: 24)
-                                .glassEffect(.clear, in: .capsule)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Playback speed \(speedWords(player.speed))")
-                    }
-                }
-            }
-            .offset(y: -8)
+    private func artistOpener(_ song: Song) -> (() -> Void)? {
+        guard let artistId = song.artistId, !artistId.isEmpty else { return nil }
+        return { close { router.go(.artist(id: artistId, name: song.artist ?? "")) } }
+    }
+
+    /// The heart for a library song; for a song found online, the add button.
+    @ViewBuilder
+    private func keeper(_ song: Song) -> some View {
+        if song.isExternal || isFind(song.id) {
+            AddToLibraryButton(song: song).id(song.id)
+        } else if let trackId = facts.trackId {
+            PlayerHeart(liked: likes.isLiked(trackId), ink: ink) { likes.toggle(trackId) }
+        } else {
+            Color.clear.frame(width: 44, height: 44)
         }
     }
 
-    private var transport: some View {
-        HStack {
-            Button(action: player.previous) {
-                Image(systemName: "backward.fill").font(.system(size: 34)).frame(width: 72, height: 72)
-            }
-            .buttonStyle(TransportButtonStyle(nudge: -8))
-            .accessibilityLabel("Previous")
-            Spacer()
-            Button(action: player.toggle) {
-                Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 46))
-                    .frame(width: 72, height: 72)
-                    .contentTransition(.symbolEffect(.replace))
-            }
-            .buttonStyle(TransportButtonStyle())
-            .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
-            Spacer()
-            Button(action: player.next) {
-                Image(systemName: "forward.fill").font(.system(size: 34)).frame(width: 72, height: 72)
-            }
-            .buttonStyle(TransportButtonStyle(nudge: 8))
-            .accessibilityLabel("Next")
-            .disabled(!player.hasNext)
+    private var moreButton: some View {
+        Button {
+            menuPages.reset(.actions)
+            showsMenu = true
+        } label: {
+            IconView(.more, size: 24, color: ink.opacity(0.6))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
-        .padding(.horizontal, 8)
+        .buttonStyle(NoPress())
+        .pressAnchor()
+        .accessibilityLabel("More")
     }
 
-    private var actions: some View {
+    private var switches: some View {
         HStack(spacing: 20) {
-            PlayerChromeButton(icon: "quote.bubble", label: "Lyrics", ink: tone.ink, lit: lyricsOpen) {
-                withAnimation(.easeInOut(duration: 0.36)) { lyricsOpen.toggle() }
+            PlayerSwitch(icon: .lyrics, label: "Lyrics", lit: lyrics.open, ink: ink, state: lyrics.open ? "Showing" : "Hidden",
+                         action: toggleLyrics)
+            PlayerSwitch(icon: .queue, label: "Up next", lit: false, ink: ink, state: "Off") { showsQueue = true }
+            TimelineView(.periodic(from: .now, by: 1)) { time in
+                let state = sleep.state(player, at: time.date)
+                PlayerSwitch(icon: .sleepTimer, label: "Sleep timer", lit: state != .off, ink: ink,
+                             state: PlayerRule.sleepSummary(state)) { openTime(.sleep) }
+                    .overlay(alignment: .topTrailing) {
+                        if let left = state.remaining {
+                            SleepBadge(minutes: (left + 59_999) / 60_000)
+                                .offset(x: 6, y: -4)
+                        }
+                    }
             }
-            .accessibilityValue(lyricsOpen ? "Showing" : "Hidden")
-            PlayerChromeButton(icon: "list.bullet", label: "Up next", ink: tone.ink) { showsQueue = true }
-            PlayerChromeButton(icon: "moon", label: "Sleep timer", ink: tone.ink, lit: player.sleep != nil) { showsTime = true }
-                .overlay(alignment: .topTrailing) { sleepPill }
-                .popover(isPresented: $showsTime) {
-                    TimeCard().presentationCompactAdaptation(.popover)
-                }
-            PlayerChromeButton(icon: "shuffle", label: "Shuffle", ink: tone.ink, lit: player.shuffled) { player.toggleShuffle() }
-                .accessibilityValue(player.shuffled ? "On" : "Off")
-            PlayerChromeButton(icon: player.repeatMode == .one ? "repeat.1" : "repeat", label: "Repeat", ink: tone.ink,
-                               lit: player.repeatMode != .off) { player.cycleRepeat() }
-                .accessibilityValue(player.repeatMode == .off ? "Off" : (player.repeatMode == .all ? "All songs" : "This song"))
+            PlayerSwitch(icon: .shuffle, label: "Shuffle", lit: player.shuffled, ink: ink) { player.toggleShuffle() }
+            PlayerSwitch(icon: player.repeatMode == .one ? .repeatOne : .repeatAll, label: "Repeat", lit: player.repeatMode != .off,
+                         ink: ink, state: repeatWords) { player.cycleRepeat() }
         }
         .frame(maxWidth: .infinity)
     }
 
-    @ViewBuilder
-    private var sleepPill: some View {
-        if case .at(let date) = player.sleep {
-            TimelineView(.periodic(from: .now, by: 30)) { _ in
-                Text("\(max(1, Int(date.timeIntervalSinceNow / 60) + 1))")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.black)
-                    .padding(.horizontal, 5)
-                    .frame(height: 18)
-                    .background(OctoColor.accent, in: Capsule())
-            }
-            .offset(x: 6, y: -4)
+    private var repeatWords: String {
+        switch player.repeatMode {
+        case .off: "Off"
+        case .all: "All songs"
+        case .one: "This song"
         }
+    }
+
+    // MARK: Opening and closing
+
+    private func arrive() {
+        showLyrics(lyrics.open, animated: false)
+        withAnimation(PlayerDolly.open) { dolly = 1 }
+        withAnimation(.octoSpring(1, 1500)) { corner = 3 }
+        withAnimation(.octoSpring(0.68, 400)) { rise = 0 }
+        withAnimation(.octoTween(fixed: 380, OctoEasing.standard, delay: 80)) { riseAlpha = 1 }
+    }
+
+    /// Closes the player: the background draws back and the cover rounds as it flies home. `then`
+    /// opens a page in its place, which closes the player on its way.
+    private func close(then go: (() -> Void)? = nil) {
+        guard !closing else { return }
+        closing = true
+        withAnimation(PlayerDolly.close) { dolly = 0 }
+        withAnimation(.octoSpring(1, 1500)) { corner = 50 }
+        DispatchQueue.main.async {
+            if let go {
+                go()
+            } else {
+                withAnimation(.octoSpring(1, 400)) { dismiss() }
+            }
+        }
+    }
+
+    private func toggleLyrics() {
+        withAnimation(calm ? nil : .timingCurve(0.4, 0, 0.2, 1, duration: 0.36)) { lyrics.toggle() }
+    }
+
+    /// Folds the artwork and fades the lyrics in, or the other way.
+    private func showLyrics(_ open: Bool, animated: Bool) {
+        if open { lyricsLayer = true }
+        guard animated, !calm else {
+            fold = open ? 1 : 0
+            lyricsAlpha = open ? 1 : 0
+            if !open { lyricsLayer = false }
+            return
+        }
+        withAnimation(.octoTween(fixed: 300, OctoEasing.standard)) { fold = open ? 1 : 0 }
+        if open {
+            withAnimation(.octoTween(fixed: 360, OctoEasing.standard, delay: 120)) { lyricsAlpha = 1 }
+        } else {
+            withAnimation(.octoTween(fixed: 360, OctoEasing.standard)) {
+                lyricsAlpha = 0
+            } completion: {
+                if !lyrics.open { lyricsLayer = false }
+            }
+        }
+    }
+
+    private func openTime(_ page: TimePage) {
+        timePages.reset(page)
+        showsTime = true
+    }
+
+    private func openLyricsMenu() {
+        lyricsPages.reset(.options)
+        showsLyricsMenu = true
     }
 
     // MARK: Gestures
 
-    /// The player follows the finger down, shrinks a little and rounds its corners; a quick
-    /// flick or more than half the way closes it.
-    private func pullToClose(cap: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 20)
-            .onChanged { drag in
-                guard drag.translation.height > abs(drag.translation.width) || pull > 0 else { return }
-                pull = max(0, drag.translation.height * 0.82)
+    /// A downward drag anywhere pulls the player down; a sideways one that starts on the artwork
+    /// swipes it. Nothing is decided until the finger lifts.
+    private func playerDrag(cap: CGFloat, folded: Bool) -> some Gesture {
+        DragGesture(minimumDistance: Self.slop, coordinateSpace: .global)
+            .updating($dragging) { _, state, _ in state = true }
+            .onChanged { value in
+                let dx = value.translation.width
+                let dy = value.translation.height
+                if axis == .undecided {
+                    if !folded, stage.contains(value.startLocation),
+                       dragAxis(dx, dy, slop: Self.slop) == .horizontal {
+                        axis = .horizontal
+                        cardStart = card
+                    } else if dy >= Self.slop {
+                        axis = .vertical
+                    }
+                }
+                switch axis {
+                case .vertical:
+                    pull = min(max(dy * 0.82, 0), cap)
+                case .horizontal:
+                    card = cardStart + dx * 0.55
+                    mark(abs(dx) >= Self.skipAt)
+                case .undecided:
+                    break
+                }
             }
-            .onEnded { drag in
-                let velocity = (drag.predictedEndTranslation.height - drag.translation.height) * 4
-                if velocity > 1200 || (pull > cap / 2 && velocity > -150) {
-                    dismiss()
-                } else {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { pull = 0 }
+            .onEnded { value in
+                let taken = axis
+                axis = .undecided
+                switch taken {
+                case .vertical:
+                    let speed = value.velocity.height
+                    if speed > 1200 || (pull > cap / 2 && speed > -150) {
+                        close()
+                    } else {
+                        withAnimation(.octoSpring(0.8, 400)) { pull = 0 }
+                    }
+                case .horizontal:
+                    finishSwipe(value.translation.width, value.velocity.width)
+                case .undecided:
+                    break
                 }
             }
     }
 
-    /// Sideways on the cover skips: past 88 points or a quick flick.
-    private func skipGesture(width: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 10)
-            .onChanged { drag in
-                guard abs(drag.translation.width) > abs(drag.translation.height) else { return }
-                artDrag = drag.translation.width
-                artCrossed = abs(drag.translation.width) > 88
+    /// One tick each time the finger passes the point where letting go skips.
+    private func mark(_ past: Bool) {
+        guard past != armed else { return }
+        armed = past
+        if past { ticks += 1 }
+    }
+
+    private func finishSwipe(_ offset: CGFloat, _ velocity: CGFloat) {
+        let result = swipeSkip(offset: Double(offset), velocity: Double(velocity), distance: Double(Self.skipAt), fling: 900)
+        if result != .stay && !armed { ticks += 1 }
+        armed = false
+        let width = max(stage.width, 1)
+        switch result {
+        case .stay:
+            withAnimation(.octoSpring(0.8, 400)) { card = 0 }
+        case .next, .previous:
+            let way: CGFloat = result == .next ? -1 : 1
+            withAnimation(.octoTween(fixed: 120)) {
+                card = way * width / 2
+            } completion: {
+                if result == .next { player.next() } else { player.previous() }
+                card = -way * width * 0.2
+                withAnimation(.octoSpring(0.8, 300)) { card = 0 }
             }
-            .onEnded { drag in
-                let fling = (drag.predictedEndTranslation.width - drag.translation.width) * 4
-                if drag.translation.width < -88 || fling < -900 {
-                    withAnimation(.easeOut(duration: 0.12)) { artDrag = -width / 2 }
-                    player.next()
-                } else if drag.translation.width > 88 || fling > 900 {
-                    withAnimation(.easeOut(duration: 0.12)) { artDrag = width / 2 }
-                    player.previous()
-                }
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { artDrag = 0 }
-                artCrossed = false
-            }
+        }
     }
 
-    // MARK: Helpers
+    // MARK: Following
 
-    private func readTone() async {
-        guard let coverId = player.current?.coverArt, let client = session.client,
-              let image = await Covers.shared.image(coverId, size: 300, client: client)
-        else { return }
-        let found = CoverTone.of(image)
-        withAnimation(.easeInOut(duration: 0.5)) { tone = found }
+    private struct LookAsk: Equatable {
+        let coverId: String?
+        let prefs: BackgroundPrefs
+        let live: Bool
+        let artwork: ArtworkColors?
     }
 
-    private func time(_ seconds: TimeInterval) -> String {
-        Duration.seconds(seconds.isFinite ? seconds : 0).formatted(.time(pattern: .minuteSecond))
+    private var lookAsk: LookAsk {
+        let coverId = player.current?.coverArt
+        return LookAsk(coverId: coverId, prefs: settings.player.background, live: settings.player.liveBackground,
+                       artwork: colorStore.colors(for: coverId))
     }
 
-    private func speedWords(_ speed: Float) -> String {
-        String(format: speed == speed.rounded() ? "%.0fx" : (speed * 10 == (speed * 10).rounded() ? "%.1fx" : "%.2fx"), speed)
+    private struct FactsAsk: Equatable {
+        let songId: String?
+        let library: Int
+        let ratings: Int
     }
 
-    private func isStarred(_ song: Song) -> Bool { starred[song.id] ?? song.isStarred }
+    private var factsAsk: FactsAsk {
+        FactsAsk(songId: player.current?.id, library: library.libraryVersion, ratings: library.ratingsVersion)
+    }
 
-    private func toggleHeart(_ song: Song) async {
-        guard let client = session.client else { return }
-        let next = !isStarred(song)
-        starred[song.id] = next
-        if next { likes += 1 }
-        do {
-            if next { try await client.star(songId: song.id) } else { try await client.unstar(songId: song.id) }
-        } catch {
-            starred[song.id] = !next
-            router.show(error.localizedDescription)
+    // MARK: Drive steps
+
+    private func take(_ request: PlayerDrive.Request) {
+        switch request.name {
+        case "queue": showsQueue = true
+        case "sleep":
+            if let minutes = Int(request.value) { sleep.start(minutes: minutes, player) }
+            openTime(.sleep)
+        case "speed": openTime(.speed)
+        case "speedpage":
+            timePages.reset(.sleep)
+            timePages.open(.speed)
+            showsTime = true
+        case "more":
+            menuPages.reset(.actions)
+            showsMenu = true
+        case "rate":
+            menuPages.reset(.actions)
+            menuPages.open(.rate)
+            showsMenu = true
+        case "lyricsmenu", "timing":
+            if !lyrics.open { toggleLyrics() }
+            lyricsPages.reset(.options)
+            if request.name == "timing" { lyricsPages.open(.timing) }
+            showsLyricsMenu = true
+        case "chooser":
+            if !lyrics.open { toggleLyrics() }
+            showsChooser = true
+        case "look":
+            if let style = LyricsStyle(rawValue: request.value.capitalized) { settings.setLyricsStyle(style) }
+            if !lyrics.open { toggleLyrics() }
+        case "background":
+            let modes: [String: BackgroundMode] = ["immersive": .immersive, "artwork": .artwork, "color": .color, "classic": .classic]
+            if let mode = modes[request.value] { settings.setBackground { $0.mode = mode } }
+        default: break
+        }
+    }
+}
+
+/// The cover the bar's small player and the player's card share, so it flies between them.
+private struct SharedArt: ViewModifier {
+    let namespace: Namespace.ID?
+
+    func body(content: Content) -> some View {
+        if let namespace {
+            content.matchedGeometryEffect(id: nowPlayingArtID, in: namespace)
+        } else {
+            content
         }
     }
 }

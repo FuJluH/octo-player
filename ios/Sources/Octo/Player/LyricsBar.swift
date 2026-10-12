@@ -1,77 +1,131 @@
 import OctoKit
 import SwiftUI
 
-/// While lyrics show, the controls fold into one glass bar: the song, previous, play, next and
-/// the lyrics switch, with the progress along its bottom edge.
+/// While lyrics show, the controls fold into one glass bar: the song (a tap on it leaves the
+/// lyrics), previous, play and next, the lit lyrics switch and the lyrics menu, with the song's
+/// progress along the bottom edge. A sideways drag starting along that edge scrubs.
 struct LyricsBar: View {
     let ink: Color
     let close: () -> Void
     let menu: () -> Void
     @Environment(Player.self) private var player
     @State private var scrub: Double?
+    @State private var width: CGFloat = 0
+
+    private static let height: CGFloat = 64
+    /// The progress line keeps to the capsule's straight part.
+    private static let inset: CGFloat = 32
+    private static let scrubZone: CGFloat = 22
 
     var body: some View {
         HStack(spacing: 0) {
+            BadgedCover(id: player.current?.coverArt, size: 40, radius: 10, external: player.current?.isExternal ?? false)
             Button(action: close) {
-                HStack(spacing: 10) {
-                    Cover(id: player.current?.coverArt, size: 40, radius: 10)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(player.current?.title ?? "").font(.system(size: 13.5, weight: .semibold)).lineLimit(1)
-                        Text(player.current?.byline ?? "").font(.system(size: 11)).opacity(0.6).lineLimit(1)
-                    }
-                    Spacer(minLength: 4)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(player.current?.title ?? "")
+                        .font(.octoLabel)
+                        .foregroundStyle(ink)
+                        .lineLimit(1)
+                    Text(player.current?.byline ?? "")
+                        .font(.octo(11, .regular, .caption1))
+                        .foregroundStyle(ink.opacity(0.6))
+                        .lineLimit(1)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(NoPress())
             .accessibilityLabel("Leave lyrics")
-            control("backward.fill", 22, "Previous", player.previous)
-            control(player.isPlaying ? "pause.fill" : "play.fill", 26, player.isPlaying ? "Pause" : "Play", player.toggle)
-            control("forward.fill", 22, "Next", player.next)
-            PlayerChromeButton(icon: "quote.bubble.fill", label: "Lyrics", ink: ink, action: close)
-                .accessibilityValue("Showing")
-            Button(action: menu) {
-                Image(systemName: "ellipsis").font(.system(size: 18, weight: .semibold)).foregroundStyle(ink.opacity(0.7))
-                    .frame(width: 36, height: 44)
+            control(.previous, 24, "Previous", player.previous)
+            control(player.isPlaying ? .pause : .play, 28, player.isPlaying ? "Pause" : "Play", player.toggle)
+            control(.next, 24, "Next", player.next)
+            Button(action: close) {
+                IconView(.lyrics, size: 22, color: ink)
+                    .iconGlow(true, color: ink)
+                    .frame(width: 40, height: 40)
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(NoPress())
+            .accessibilityLabel("Lyrics")
+            .accessibilityValue("Showing")
+            Button(action: menu) {
+                IconView(.more, size: 22, color: ink.opacity(0.7))
+                    .frame(width: 40, height: 40)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(NoPress())
+            .pressAnchor()
             .accessibilityLabel("Lyrics menu")
         }
         .padding(.leading, 12)
         .padding(.trailing, 6)
-        .frame(height: 64)
-        .overlay(alignment: .bottom) {
-            // Dragging along the bottom edge scrubs through the song.
-            GeometryReader { box in
-                let fraction = scrub.map { $0 / max(player.duration, 1) } ?? player.progress
-                ZStack(alignment: .leading) {
-                    Capsule().fill(ink.opacity(0.18))
-                    Capsule().fill(ink.opacity(scrub == nil ? 0.7 : 0.95)).frame(width: box.size.width * fraction)
-                }
-                .frame(height: scrub == nil ? 2 : 3)
-                .frame(maxHeight: .infinity, alignment: .bottom)
-                .contentShape(Rectangle())
-                .gesture(DragGesture(minimumDistance: 4).onChanged { drag in
-                    scrub = max(0, min(1, drag.location.x / box.size.width)) * player.duration
-                }.onEnded { _ in
-                    if let scrub { player.seek(to: scrub) }
-                    scrub = nil
-                })
-            }
-            .frame(height: 22)
-            .padding(.horizontal, 32)
-            .padding(.bottom, 4)
-        }
-        .glassEffect(.regular, in: .capsule)
-        .padding(.horizontal, -12)
+        .frame(height: Self.height)
+        .frame(maxWidth: .infinity)
+        .overlay(alignment: .bottom) { progress }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .floatingGlass(Capsule())
+        .simultaneousGesture(scrubbing)
     }
 
-    private func control(_ icon: String, _ size: CGFloat, _ label: String, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: icon).font(.system(size: size)).frame(width: 40, height: 40)
-                .contentTransition(.symbolEffect(.replace))
+    private var progress: some View {
+        TimelineView(.animation(paused: !player.isPlaying || scrub != nil)) { _ in
+            let length = max(player.duration, player.livePosition)
+            let fraction = scrub ?? (length > 0 ? min(max(player.livePosition / length, 0), 1) : 0)
+            Canvas { context, size in
+                let stroke: CGFloat = scrub == nil ? 2 : 3
+                let y = size.height - stroke / 2
+                var track = Path()
+                track.move(to: CGPoint(x: 0, y: y))
+                track.addLine(to: CGPoint(x: size.width, y: y))
+                context.stroke(track, with: .color(ink.opacity(0.18)), style: StrokeStyle(lineWidth: stroke, lineCap: .round))
+                guard fraction > 0 else { return }
+                var played = Path()
+                played.move(to: CGPoint(x: 0, y: y))
+                played.addLine(to: CGPoint(x: size.width * fraction, y: y))
+                context.stroke(played, with: .color(ink.opacity(scrub == nil ? 0.7 : 0.95)),
+                               style: StrokeStyle(lineWidth: stroke, lineCap: .round))
+            }
         }
-        .buttonStyle(.plain)
+        .frame(height: 3)
+        .padding(.horizontal, Self.inset)
+        .padding(.bottom, 4)
+        .allowsHitTesting(false)
+    }
+
+    /// A sideways drag that starts in the bottom 22 points scrubs, once the song's length is known;
+    /// the song plays from there when the finger lifts.
+    private var scrubbing: some Gesture {
+        DragGesture(minimumDistance: 8, coordinateSpace: .local)
+            .onChanged { value in
+                if scrub == nil {
+                    guard player.duration > 0, value.startLocation.y >= Self.height - Self.scrubZone,
+                          abs(value.translation.width) > abs(value.translation.height)
+                    else { return }
+                }
+                scrub = fraction(value.location.x)
+            }
+            .onEnded { value in
+                guard scrub != nil else { return }
+                let target = fraction(value.location.x)
+                scrub = nil
+                player.seek(to: target * player.duration)
+            }
+    }
+
+    private func fraction(_ x: CGFloat) -> Double {
+        let room = max(1, width - Self.inset * 2)
+        return Double(min(max((x - Self.inset) / room, 0), 1))
+    }
+
+    private func control(_ icon: OctoIcon, _ size: CGFloat, _ label: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            IconView(icon, size: size, color: ink)
+                .frame(width: 40, height: 40)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(NoPress())
         .accessibilityLabel(label)
     }
 }

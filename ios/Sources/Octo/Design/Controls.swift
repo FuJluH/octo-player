@@ -193,6 +193,8 @@ struct GlassInput<Leading: View, Trailing: View>: View {
     var onSubmit: () -> Void = {}
     @ViewBuilder var leading: Leading
     @ViewBuilder var trailing: Trailing
+    /// Takes the focus, and so opens the keyboard, as it appears.
+    var focusOnAppear = false
     @FocusState private var focused: Bool
     @Environment(\.motionScale) private var motion
 
@@ -248,6 +250,7 @@ struct GlassInput<Leading: View, Trailing: View>: View {
         .animation(.octoTween(OctoDuration.card, OctoEasing.overshoot, scale: motion), value: focused)
         .contentShape(shape)
         .onTapGesture { focused = true }
+        .onAppear { if focusOnAppear { focused = true } }
     }
 }
 

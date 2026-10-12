@@ -349,88 +349,133 @@ struct NowPlayingFace: View {
     var body: some View {
         Button(action: tap) {
             ZStack {
-                Cover(id: player.current?.coverArt, size: 44, radius: 22)
-                    .overlay(Circle().fill(.black.opacity(0.35)))
-                    .opacity(player.current == nil ? 0 : 1)
-                Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .contentTransition(.symbolEffect(.replace))
-                ProgressRing(progress: player.progress, lineWidth: 2)
-                    .padding(3)
+                if let song = player.current {
+                    Cover(id: song.coverArt, size: OctoBar.height - 12, radius: (OctoBar.height - 12) / 2)
+                        .overlay(Circle().fill(.black.opacity(0.35)))
+                }
+                if player.isPlaying {
+                    PauseGlyph(size: 22, color: .white)
+                } else {
+                    IconView(.play, size: 22, color: .white)
+                }
+                if player.current != nil {
+                    ProgressRing(lineWidth: 2).padding(3)
+                }
             }
             .frame(width: OctoBar.height, height: OctoBar.height)
             .contentShape(Circle())
         }
-        .buttonStyle(.plain)
-        .swipeToSkip(open: tap)
+        .buttonStyle(NoHighlight())
+        .background(PaceFollower())
         .accessibilityLabel("Now playing")
     }
 }
 
 /// The mini player in the bar: the cover with its progress ring, the song, and previous, play
-/// and next. Tap opens the player; swipe left or right skips; swipe up opens the player.
+/// and next. A tap anywhere else opens the player, and the cover flies up into it.
 struct MiniPlayerPill: View {
     let open: () -> Void
     @Environment(Player.self) private var player
+    @Environment(\.nowPlayingArt) private var art
+    @Environment(\.playerShown) private var playerShown
 
     var body: some View {
         HStack(spacing: 0) {
             ZStack {
-                Cover(id: player.current?.coverArt, size: 36, radius: 18)
-                ProgressRing(progress: player.progress, lineWidth: 2)
-                    .padding(1)
+                if !playerShown {
+                    BadgedCover(id: player.current?.coverArt, size: 36, radius: 18, external: player.current?.isExternal ?? false)
+                        .modifier(BarArt(namespace: art))
+                        .transition(.identity)
+                } else {
+                    Color.clear.frame(width: 36, height: 36)
+                }
+                ProgressRing(lineWidth: 2).padding(1)
             }
             .frame(width: 44, height: 44)
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 5) {
-                    Text(player.current?.title ?? "")
-                        .font(.system(size: 13.5, weight: .semibold))
-                        .lineLimit(1)
-                    if player.current?.explicitStatus == "explicit" { ExplicitMark(size: 12) }
-                }
+            VStack(alignment: .leading, spacing: 0) {
+                SongTitleLine(player.current?.title ?? "", explicit: player.current?.isExplicit ?? false, font: .octoLabel,
+                              color: .white)
                 Text(player.current?.byline ?? "")
-                    .font(.system(size: 11))
+                    .font(.octo(11, .regular, .caption1))
                     .foregroundStyle(OctoColor.textMuted)
                     .lineLimit(1)
             }
             .padding(.horizontal, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            transport("backward.fill", "Previous", action: player.previous)
-            transport(player.isPlaying ? "pause.fill" : "play.fill", player.isPlaying ? "Pause" : "Play", action: player.toggle)
-            transport("forward.fill", "Next", action: player.next)
+            transport(.previous, "Previous", action: player.previous)
+            transport(player.isPlaying ? .pause : .play, player.isPlaying ? "Pause" : "Play", action: player.toggle)
+            transport(.next, "Next", action: player.next)
         }
         .padding(.leading, 6)
         .padding(.trailing, 4)
         .contentShape(Capsule())
-        .onTapGesture(perform: open)
-        .swipeToSkip(open: open)
-        .accessibilityAction(named: "Open player", open)
+        .onTapGesture(perform: openWithFlight)
+        .background(PaceFollower())
+        .accessibilityAction(named: "Open player", openWithFlight)
     }
 
-    private func transport(_ icon: String, _ label: String, action: @escaping () -> Void) -> some View {
+    /// The cover flies from here to the player's card on the player's own spring.
+    private func openWithFlight() {
+        withAnimation(.octoSpring(1, 400)) { open() }
+    }
+
+    private func transport(_ icon: OctoIcon, _ label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 22))
+            IconView(icon, size: 28, color: .white)
                 .frame(width: 36, height: 36)
-                .contentTransition(.symbolEffect(.replace))
+                .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(NoHighlight())
         .accessibilityLabel(label)
     }
 }
 
-/// The song's progress as an accent ring that starts at twelve o'clock.
+/// The bar's cover as one end of the flight to the player's card.
+private struct BarArt: ViewModifier {
+    let namespace: Namespace.ID?
+
+    func body(content: Content) -> some View {
+        if let namespace {
+            content.matchedGeometryEffect(id: nowPlayingArtID, in: namespace)
+        } else {
+            content
+        }
+    }
+}
+
+/// The song's progress as an accent ring that starts at twelve o'clock, read every frame while
+/// the song plays.
 struct ProgressRing: View {
-    let progress: Double
     let lineWidth: CGFloat
+    @Environment(Player.self) private var player
 
     var body: some View {
-        Circle()
-            .trim(from: 0, to: max(0, min(progress, 1)))
-            .stroke(OctoColor.accent, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
-            .rotationEffect(.degrees(-90))
-            .animation(.linear(duration: 0.5), value: progress)
+        TimelineView(.animation(paused: !player.isPlaying)) { _ in
+            let length = max(player.duration, player.livePosition)
+            let progress = length > 0 ? min(max(player.livePosition / length, 0), 1) : 0
+            Circle()
+                .trim(from: 0, to: progress)
+                .stroke(OctoColor.accent, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// Keeps the player at the speed and pitch the settings hold, from start and as they change.
+struct PaceFollower: View {
+    @Environment(Player.self) private var player
+    @State private var settings = AppSettings.shared
+
+    var body: some View {
+        Color.clear
+            .allowsHitTesting(false)
+            .onChange(of: settings.player.speed, initial: true) { _, speed in
+                if player.speed != speed { player.setSpeed(speed) }
+            }
+            .onChange(of: settings.player.keepPitch, initial: true) { _, keep in
+                if player.keepsPitch != keep { player.setKeepsPitch(keep) }
+            }
     }
 }
 
