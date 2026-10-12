@@ -332,10 +332,6 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                             playerOpen = false
                             stack.add(AlbumRoute(id))
                         },
-                        onOpenSound = {
-                            playerOpen = false
-                            stack.add(SoundRoute)
-                        },
                     )
                 }
                 // Over the player, the menus frost the player rather than the page.

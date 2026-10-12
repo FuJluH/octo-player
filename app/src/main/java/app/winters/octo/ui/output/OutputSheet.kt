@@ -2,7 +2,6 @@ package app.winters.octo.ui.output
 
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,42 +11,26 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.boundsInWindow
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.roundToIntRect
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
-import app.winters.octo.design.GlassPopup
 import app.winters.octo.design.GlazeSelected
-import app.winters.octo.design.GlowIcon
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
@@ -58,7 +41,6 @@ import app.winters.octo.output.OutputFamily
 import app.winters.octo.output.Outputs
 import app.winters.octo.output.openSystemOutputs
 import app.winters.octo.player.PlayerSettings
-import app.winters.octo.ui.common.LocalHaze
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -79,50 +61,6 @@ class OutputsViewModel @Inject constructor(private val outputs: Outputs, setting
     fun stopLooking() = outputs.stopLooking()
     fun choose(device: OutputDevice) = outputs.choose(device)
     fun choosePhone() = outputs.choosePhone()
-}
-
-// The Cast button: where the music plays. It lights up while casting and
-// opens the list of devices beside itself.
-@Composable
-fun CastButton(modifier: Modifier = Modifier, model: OutputsViewModel = hiltViewModel()) {
-    val current by model.current.collectAsStateWithLifecycle()
-    var open by remember { mutableStateOf(false) }
-    var anchor by remember { mutableStateOf<IntRect?>(null) }
-    val casting = current is OutputChoice.Casting
-    val tint = LocalContentColor.current
-    Box(
-        modifier
-            .size(44.dp)
-            .onGloballyPositioned { anchor = it.boundsInWindow().roundToIntRect() }
-            .clickable(interactionSource = null, indication = null, role = Role.Button) { open = true }
-            .semantics {
-                contentDescription = "Cast"
-                stateDescription = when (val now = current) {
-                    is OutputChoice.Casting -> "Playing on ${now.device.name}"
-                    is OutputChoice.Connecting -> "Connecting to ${now.device.name}"
-                    OutputChoice.Phone -> "Playing on this phone"
-                }
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        GlowIcon(
-            painterResource(if (current is OutputChoice.Phone) OctoIcons.Cast else OctoIcons.CastConnected),
-            tint = if (casting) tint else tint.copy(alpha = 0.45f),
-            lit = casting,
-            modifier = Modifier.size(22.dp),
-        )
-    }
-    OutputSheet(open, anchor, onDismiss = { open = false }, model = model)
-}
-
-// The Cast button's card, holding the list of places to play.
-@Composable
-fun OutputSheet(visible: Boolean, anchor: IntRect?, onDismiss: () -> Unit, model: OutputsViewModel = hiltViewModel()) {
-    GlassPopup(visible = visible, anchor = anchor, onDismiss = onDismiss, backdrop = LocalHaze.current, title = "Play on") {
-        Column(Modifier.width(300.dp).verticalScroll(rememberScrollState()).padding(6.dp)) {
-            OutputList(onDone = onDismiss, model = model)
-        }
-    }
 }
 
 // The list of places music can play: this phone and its other outputs,

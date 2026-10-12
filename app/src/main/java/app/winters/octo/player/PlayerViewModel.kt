@@ -29,7 +29,6 @@ import app.winters.octo.player.immersive.WashArtwork
 import app.winters.octo.player.immersive.drawnMode
 import app.winters.octo.player.immersive.drawnRange
 import app.winters.octo.player.immersive.over
-import app.winters.octo.sound.SoundEngine
 import app.winters.octo.ui.common.Feedback
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -64,7 +63,6 @@ class PlayerViewModel @Inject constructor(
     settings: PlayerSettings,
     private val deviceVolume: DeviceVolume,
     private val sleepTimer: SleepTimer,
-    sound: SoundEngine,
     private val lyricsRepository: LyricsRepository,
     private val lyricsChoices: LyricsChoices,
     private val networkWatch: NetworkWatch,
@@ -178,11 +176,6 @@ class PlayerViewModel @Inject constructor(
     }
 
     val sleep: StateFlow<SleepState> = sleepTimer.state
-
-    // Whether the equalizer is on, for the Sound button's glow.
-    val equalizerOn: StateFlow<Boolean> = sound.current
-        .map { it.eqEnabled }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
     fun sleepIn(minutes: Int) = sleepTimer.start(minutes)
     fun sleepAtEndOfSong() = sleepTimer.startEndOfSong()
     fun sleepAfterSongs(count: Int) = sleepTimer.startAfterSongs(count)

@@ -144,7 +144,6 @@ import app.winters.octo.ui.common.rememberOpenedBeside
 import app.winters.octo.ui.common.RatingStars
 import app.winters.octo.ui.menu.LocalSongMenu
 import app.winters.octo.ui.menu.SongMenuContext
-import app.winters.octo.ui.output.CastButton
 import app.winters.octo.ui.common.asClock
 import app.winters.octo.ui.common.rememberSystemReduceMotion
 import dev.chrisbanes.haze.HazeState
@@ -167,7 +166,6 @@ fun AnimatedVisibilityScope.PlayerOverlay(
     onClose: () -> Unit,
     onOpenArtist: (String) -> Unit,
     onOpenAlbum: (String) -> Unit,
-    onOpenSound: () -> Unit,
     backdrop: HazeState = rememberHazeState(),
     model: PlayerViewModel = hiltViewModel(),
 ) {
@@ -267,7 +265,6 @@ fun AnimatedVisibilityScope.PlayerOverlay(
                         timePages.reset(TimePage.Sleep)
                         showTime = true
                     },
-                    onOpenSound = onOpenSound,
                     onOpenSpeed = {
                         timePages.reset(TimePage.Speed)
                         showTime = true
@@ -315,7 +312,6 @@ private fun AnimatedVisibilityScope.PlayerContent(
     onOpenAlbum: (String) -> Unit,
     onOpenQueue: () -> Unit,
     onOpenSleep: () -> Unit,
-    onOpenSound: () -> Unit,
     onOpenSpeed: () -> Unit,
     onChooseLyrics: () -> Unit,
 ) {
@@ -325,7 +321,7 @@ private fun AnimatedVisibilityScope.PlayerContent(
     // The player's own scope, so the controls still rise in as the player
     // opens wherever they are placed.
     val player = this
-    val header: @Composable () -> Unit = { TopLine(now, model, onClose, onOpenAlbum, onOpenSound) }
+    val header: @Composable () -> Unit = { TopLine(now, model, onClose, onOpenAlbum) }
     val controls: @Composable (Boolean) -> Unit = { roomy ->
         with(player) { Controls(now, model, lyricsOpen, onClose, onOpenArtist, onOpenQueue, onOpenSleep, onOpenSpeed, roomy) }
     }
@@ -421,7 +417,9 @@ private fun AnimatedVisibilityScope.PlayerContent(
 // screen's edges, to give the song's name more room.
 private val LyricsBarBleed = 12.dp
 
-private val TopLineHeight = 56.dp
+// The line across the top holds only the album's name, so it stays low
+// and leaves the room to the artwork.
+private val TopLineHeight = 40.dp
 
 // How long the controls take to fold away as lyrics mode opens.
 private const val LYRICS_FOLD_MS = 360
@@ -459,18 +457,18 @@ private fun LyricsLayer(now: NowPlaying, model: PlayerViewModel, open: Boolean, 
     }
 }
 
-// The line across the top: the album's name, Cast and Sound. The album
-// opens like the artist does, closing the player on the way.
+// The line across the top: the album's name, which opens the album like
+// the artist does, closing the player on the way. Cast and Sound are in the
+// song's menu.
 @Composable
 private fun TopLine(
     now: NowPlaying,
     model: PlayerViewModel,
     onClose: () -> Unit,
     onOpenAlbum: (String) -> Unit,
-    onOpenSound: () -> Unit,
 ) {
     Box(
-        Modifier.fillMaxWidth().height(56.dp),
+        Modifier.fillMaxWidth().height(TopLineHeight),
         contentAlignment = Alignment.Center,
     ) {
         val album by model.albumLabel.collectAsStateWithLifecycle()
@@ -486,7 +484,7 @@ private fun TopLine(
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
                 modifier = Modifier
-                    .padding(horizontal = 104.dp)
+                    .padding(horizontal = 16.dp)
                     .clickable(
                         enabled = albumId != null,
                         interactionSource = null,
@@ -497,10 +495,6 @@ private fun TopLine(
                     .closesPlayer(onClose)
                     .padding(vertical = 8.dp),
             )
-        }
-        Row(Modifier.align(Alignment.CenterEnd)) {
-            CastButton()
-            SoundButton(model, onOpenSound)
         }
     }
 }
@@ -1034,30 +1028,6 @@ private fun ActionButton(
     ) {
         GlowIcon(
             painterResource(icon),
-            tint = if (on) LocalContentColor.current else LocalContentColor.current.copy(alpha = 0.45f),
-            lit = on,
-            modifier = Modifier.size(22.dp),
-        )
-    }
-}
-
-// Opens the Sound page, across from the close button. It glows while the
-// equalizer is on, like the buttons under the controls.
-@Composable
-private fun SoundButton(model: PlayerViewModel, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val on by model.equalizerOn.collectAsStateWithLifecycle()
-    Box(
-        modifier
-            .size(44.dp)
-            .clickable(interactionSource = null, indication = null, role = Role.Button, onClick = onClick)
-            .semantics {
-                contentDescription = "Sound"
-                stateDescription = if (on) "Equalizer on" else "Equalizer off"
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        GlowIcon(
-            painterResource(OctoIcons.Sound),
             tint = if (on) LocalContentColor.current else LocalContentColor.current.copy(alpha = 0.45f),
             lit = on,
             modifier = Modifier.size(22.dp),
