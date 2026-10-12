@@ -24,7 +24,7 @@ import Testing
         let processor = DeckProcessor(keepActive: { true }, tap: nil, stage: nil)
         processor.configure(sampleRate: rate, channels: 1)
         processor.setSpeed(speed)
-        processor.flush(streamStartMs: Double(fromMs), entryId: entry, newSong: true, loudness: nil)
+        processor.flush(streamStartMs: Double(fromMs), entryId: entry)
         return processor
     }
 
