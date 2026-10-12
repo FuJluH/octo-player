@@ -12,6 +12,7 @@ struct OctoApp: App {
     @State private var serverDownloads: ServerDownloads
     @State private var liveLists: LiveListStore
     @State private var liveLibrary: LiveLibrary
+    @State private var artistExtras: ArtistExtrasSource
     @State private var library: Library
     @State private var serverSync: ServerSync
     @State private var overlays = Overlays()
@@ -38,12 +39,14 @@ struct OctoApp: App {
         }
         _downloads = State(initialValue: downloads)
         serverSync.start()
-        _discovery = State(initialValue: Discovery(session: session, downloads: downloads, library: library))
+        let discovery = Discovery(session: session, downloads: downloads, library: library)
+        _discovery = State(initialValue: discovery)
         let serverDownloads = ServerDownloads(session: session, router: router)
         downloads.onAsk = { serverDownloads.wake() }
         _serverDownloads = State(initialValue: serverDownloads)
         _liveLists = State(initialValue: LiveListStore(session: session))
         _liveLibrary = State(initialValue: LiveLibrary(library: library))
+        _artistExtras = State(initialValue: ArtistExtrasSource(session: session, library: library, discovery: discovery))
         _session = State(initialValue: session)
         _sound = State(initialValue: sound)
         _player = State(initialValue: Player(session: session, sound: sound.processor))
@@ -64,6 +67,7 @@ struct OctoApp: App {
                 .environment(serverDownloads)
                 .environment(liveLists)
                 .environment(liveLibrary)
+                .environment(artistExtras)
                 .environment(library)
                 .environment(serverSync)
                 .environment(overlays)
