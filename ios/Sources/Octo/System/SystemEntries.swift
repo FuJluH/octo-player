@@ -1,6 +1,8 @@
 import AVFoundation
 import Observation
+import Intents
 import OctoKit
+import OctoSystem
 import ShareInbox
 import SwiftUI
 import UIKit
@@ -34,9 +36,12 @@ final class SystemEntries {
 
     // MARK: Opened addresses
 
-    /// An address the app was opened with: a family link, a list file for Import, or an audio file.
+    /// An address the app was opened with: a widget's link, a family link, a list file for Import,
+    /// or an audio file.
     func open(_ url: URL) {
-        if url.isFileURL {
+        if let link = OctoLink(url) {
+            SystemActions.shared?.open(link)
+        } else if url.isFileURL {
             openFile(url)
         } else if url.scheme?.lowercased() == "octo", url.host?.lowercased() == "import" {
             takeShared()
@@ -117,52 +122,10 @@ final class SystemEntries {
         }
     }
 
-    /// Plays what a quick action asks for, then opens the player; with nothing to play it says so.
+    /// Plays what a quick action asks for with the widgets' lists, then opens the player; with
+    /// nothing to play it says so.
     func run(_ shortcut: LauncherShortcut) async {
-        let started: Bool
-        switch shortcut {
-        case .shuffleAll:
-            let songs = await everySong()
-            started = play(songs.shuffled(), empty: "No songs in your library yet")
-        case .liked:
-            let songs = (try? await session.client?.starred().song) ?? []
-            started = play(songs.shuffled(), empty: "No liked songs yet")
-        case .recentlyAdded:
-            started = play(await recentlyAdded(), empty: "No songs in your library yet")
-        case .resume:
-            if player.current != nil {
-                player.resume()
-            } else {
-                await player.shuffleLibrary()
-            }
-            started = true
-        }
-        if started { router.drive = .openPlayer }
-    }
-
-    private func play(_ songs: [Song], empty: String) -> Bool {
-        guard !songs.isEmpty else {
-            router.show(empty)
-            return false
-        }
-        player.play(songs, from: 0)
-        return true
-    }
-
-    /// Every song the server in use has, page by page.
-    private func everySong() async -> [Song] {
-        guard let client = session.client else { return [] }
-        return (try? await client.randomSongs(count: 500)) ?? []
-    }
-
-    /// The songs of the ten albums added last, newest first, each in album order.
-    private func recentlyAdded() async -> [Song] {
-        guard let client = session.client, let albums = try? await client.albumList(.newest, size: 10) else { return [] }
-        var songs: [Song] = []
-        for album in albums {
-            if let full = try? await client.album(album.id) { songs += full.song }
-        }
-        return songs
+        await SystemActions.shared?.run(shortcut)
     }
 
     // MARK: Clipboard
@@ -232,6 +195,27 @@ final class OctoAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
         let configuration = UISceneConfiguration(name: nil, sessionRole: session.role)
         configuration.delegateClass = OctoSceneDelegate.self
         return configuration
+    }
+
+    /// "Play Drake in Octo" asked of Siri, in the car too, is answered by the app itself.
+    func application(_ application: UIApplication, handlerFor intent: INIntent) -> Any? {
+        intent is INPlayMediaIntent ? SiriMediaHandler() : nil
+    }
+
+    /// Siri hands the request over to play, with the app started in the background if need be.
+    func application(_ application: UIApplication, handle intent: INIntent, completionHandler: @escaping (INIntentResponse) -> Void) {
+        guard let intent = intent as? INPlayMediaIntent, let actions = SystemActions.shared else {
+            completionHandler(INPlayMediaIntentResponse(code: .failure, userActivity: nil))
+            return
+        }
+        let ask = voiceAsk(SiriMediaHandler.request(intent))
+        let shuffle = intent.playShuffled == true
+        Task {
+            let words = await actions.voice(ask)
+            // "Shuffle ..." asks for the songs in a random order.
+            if words == nil, shuffle, !actions.player.shuffled { actions.player.toggleShuffle() }
+            completionHandler(INPlayMediaIntentResponse(code: words == nil ? .success : .failure, userActivity: nil))
+        }
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,

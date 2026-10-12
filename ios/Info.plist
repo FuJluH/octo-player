@@ -107,6 +107,16 @@
     </dict>
     <key>NSAppleMusicUsageDescription</key>
     <string>Octo plays the music already on your iPhone, beside your server's.</string>
+    <key>NSSiriUsageDescription</key>
+    <string>Siri hands Octo what you ask it to play.</string>
+    <key>INIntentsSupported</key>
+    <array>
+        <string>INPlayMediaIntent</string>
+    </array>
+    <key>INSupportedMediaCategories</key>
+    <array>
+        <string>INMediaCategoryMusic</string>
+    </array>
     <key>NSLocalNetworkUsageDescription</key>
     <string>Octo connects to your music server on your home network.</string>
     <key>NSAppleMusicUsageDescription</key>

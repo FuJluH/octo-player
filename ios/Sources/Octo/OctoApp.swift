@@ -72,6 +72,7 @@ struct OctoApp: App {
         let entries = SystemEntries(session: session, player: player, router: router, accounts: accounts)
         _entries = State(initialValue: entries)
         SystemEntries.shared = entries
+        SystemHooks.start(player: player, router: router)
         FamilyNotices.session = session
         AccountHooks.install(data, session: session)
         #if DEBUG
@@ -114,6 +115,7 @@ struct OctoApp: App {
                 .preferredColorScheme(.dark)
                 #if DEBUG
                 .task { PlaybackDrive.install(player: player, router: router, overlays: overlays)
+                        SystemDrive.install(router: router)
                         await Drive.run(session: session, player: player, router: router, prompts: prompts, motion: motion,
                                          overlays: overlays, ambience: ambience, selectionBar: selectionBar) }
                 #endif
