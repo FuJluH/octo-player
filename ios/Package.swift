@@ -18,8 +18,11 @@ let package = Package(
         .library(name: "Octo", targets: ["Octo"]),
     ],
     targets: [
+        // SQLite for the library database where Apple's own SQLite3 module is missing (Linux,
+        // for the tests). Apple platforms import SQLite3.
+        .systemLibrary(name: "CSQLite", path: "Sources/CSQLite"),
         // Talking to the server, the models and the queue rules. Foundation only.
-        .target(name: "OctoKit"),
+        .target(name: "OctoKit", dependencies: [.target(name: "CSQLite", condition: .when(platforms: [.linux]))]),
         .testTarget(name: "OctoKitTests", dependencies: ["OctoKit"]),
     ] + (kitOnly ? [] : [
         // The iPhone app: SwiftUI, AVFoundation and Apple's Liquid Glass.

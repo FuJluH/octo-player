@@ -1,0 +1,59 @@
+#if DEBUG
+import Foundation
+import OctoKit
+
+/// Steps for the OCTO_DRIVE launch variable that reach the library's data, each answering with a
+/// short line on screen so a run can be read from a screenshot:
+///
+/// - `catalog` shows how many songs, albums, artists, playlists and likes the library holds
+/// - `sync` copies the server's library now and shows how it went
+/// - `like:TEXT` likes (or unlikes) the first library song a search for TEXT finds
+/// - `rate:N:TEXT` rates that song N stars (0 takes the rating off)
+/// - `playlist:NAME` makes a phone playlist NAME with the first five songs of the library
+/// - `pin` pins the newest album to Home
+/// - `history` shows how many plays the history holds and the first day heading
+@MainActor
+enum DataDrive {
+    static func install(_ data: DataServices, show: @escaping @MainActor (String) -> Void) {
+        Drive.steps.append { name, value in
+            await run(data, name, value, show)
+        }
+    }
+
+    private static func run(_ data: DataServices, _ name: String, _ value: String, _ show: @MainActor (String) -> Void) async -> Bool {
+        let library = data.library
+        switch name {
+        case "catalog":
+            let line = "\(await library.trackCount()) songs, \(await library.albumCount()) albums, \(await library.artistCount()) artists, "
+                + "\(await library.playlists().count) playlists, \(await library.likedCount()) liked"
+            show(line)
+        case "sync":
+            let problem = await data.serverSync.syncNowAndWait()
+            show(problem ?? "Copied: \(data.serverSync.last?.songs ?? 0) songs")
+        case "like":
+            guard let song = await library.search(value).tracks.first else { show("No song for \(value)"); return true }
+            data.likes.toggle(song.id)
+            show("Like changed: \(song.title)")
+        case "rate":
+            let parts = value.split(separator: ":", maxSplits: 1).map(String.init)
+            guard parts.count == 2, let stars = Int(parts[0]), let song = await library.search(parts[1]).tracks.first else { return true }
+            data.ratings.rate(song.id, stars)
+            show("Rated \(song.title): \(stars)")
+        case "playlist":
+            let songs = Array(await library.tracks().prefix(5)).map(\.id)
+            data.playlists.create(value, trackIds: songs)
+            show("Made \(value) with \(songs.count) songs")
+        case "pin":
+            guard let album = await library.recentAlbums(limit: 1).first else { return true }
+            let pinned = await data.pins.pin(.album, album.id)
+            show(pinned ? "Pinned \(album.title)" : "Home is full")
+        case "history":
+            let days = await library.historyDays()
+            show("\(days.reduce(0) { $0 + $1.plays.count }) plays, \(days.first?.label ?? "none")")
+        default:
+            return false
+        }
+        return true
+    }
+}
+#endif

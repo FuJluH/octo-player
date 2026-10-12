@@ -97,11 +97,15 @@ enum Drive {
                 guard let client = session.client, let found = try? await client.search(value) else { continue }
                 let songs = found.song.filter { name == "found" ? $0.isExternal : !$0.isExternal }
                 if !songs.isEmpty { player.play(songs, from: 0) }
-            default: break
+            default:
+                for handle in steps where await handle(name, value) { break }
             }
             try? await Task.sleep(for: .milliseconds(400))
         }
     }
+
+    /// More steps, added by parts of the app: each answers whether it took the step.
+    static var steps: [@MainActor (_ name: String, _ value: String) async -> Bool] = []
 
     private static func split(_ step: String) -> (String, String) {
         guard let colon = step.firstIndex(of: ":") else { return (step, "") }

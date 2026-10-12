@@ -13,19 +13,19 @@ private let forgetMs: Int64 = 30 * 24 * 60 * 60_000
 /// asked again (it may have been updated meanwhile).
 private let recheckSupportMs: Int64 = 10 * 60_000
 
-private func nowMs() -> Int64 { Int64(Date().timeIntervalSince1970 * 1_000) }
-
 /// Downloading songs found online into the library. On Octo, starring a find from an Octo app
 /// makes the server download it; once the library has the song, the find is linked to it (not
 /// liked). A server that says how its downloads are going is asked every few seconds while any
-/// is on its way; others are looked at again on a timer.
+/// is on its way; others are looked at again on a timer. The finds are kept in the library
+/// database, under their server's source.
 @MainActor
 @Observable
 final class Downloads {
-    /// Every find asked for, and how its download is going.
+    /// Every find asked for, by its id on the server, and how its download is going.
     private(set) var phases: [String: DownloadPhase] = [:]
-    /// Each find now in the library, by the library song it became. Nil until first read, so a
-    /// row can tell a song that was already in the library from one that arrives while it is shown.
+    /// Each find now in the library, by its id on the server, and the library song it became. Nil
+    /// until first read, so a row can tell a song that was already in the library from one that
+    /// arrives while it is shown.
     private(set) var adoptions: [String: String]?
     /// Songs asked for from this phone on the server in use that have not reached the library.
     private(set) var asked: [AskedSong] = []
@@ -36,8 +36,13 @@ final class Downloads {
     private(set) var lists = true
 
     @ObservationIgnored private let session: Session
+    @ObservationIgnored private let library: Library
+    @ObservationIgnored private let sync: ServerSync
     @ObservationIgnored private let announce: @MainActor (String, Bool) -> Void
+    /// Every find asked for, as the follower reads them, kept from the library database.
     @ObservationIgnored private var rows: [FindSong] = []
+    /// Finds already in the library when last read, to tell which arrived since.
+    @ObservationIgnored private var known: Set<String>?
     @ObservationIgnored private lazy var tracker = ProgressWatch(host: DownloadsHost(self))
     @ObservationIgnored private let arrivals = Arrivals()
     @ObservationIgnored private var following = false
@@ -46,25 +51,26 @@ final class Downloads {
     @ObservationIgnored private var support: [String: (yes: Bool, at: Int64)] = [:]
     @ObservationIgnored private var failedBefore = Set<String>()
     @ObservationIgnored private var lastSource: String?
-
-    private static var storeURL: URL {
-        let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        return folder.appendingPathComponent("finds.json")
-    }
+    @ObservationIgnored private var findsWatch: Watch<Int>?
 
     /// `announce` shows a line: the words, and whether it marks something done.
-    init(session: Session, announce: @escaping @MainActor (String, Bool) -> Void) {
+    init(session: Session, library: Library, sync: ServerSync, announce: @escaping @MainActor (String, Bool) -> Void) {
         self.session = session
+        self.library = library
+        self.sync = sync
         self.announce = announce
-        if let data = try? Data(contentsOf: Self.storeURL), let saved = try? JSONDecoder().decode([FindSong].self, from: data) {
-            rows = saved
-        }
-        lastSource = session.activeId
+        lastSource = sourceInUse
         tracker.foreground = false
         tracker.changed = { [weak self] in Task { @MainActor in self?.liveChanged() } }
-        refresh()
+        findsWatch = Watch({ [weak library] in library?.findsVersion ?? 0 }) { [weak self] _ in
+            Task { await self?.reload() }
+        }
+        sync.afterSync("finds") { [weak self] in await self?.afterSync() }
+        Task { await reload() }
     }
+
+    /// The source of the server in use, while one is signed in.
+    private var sourceInUse: String? { session.client == nil ? nil : session.active?.sourceId }
 
     func phase(_ songId: String) -> DownloadPhase { phases[songId] ?? .none }
 
@@ -86,13 +92,13 @@ final class Downloads {
     /// Asks the server to download one find. Answers whether it was asked. A download that failed
     /// is asked for again the same way.
     func request(_ song: Song) async -> Bool {
-        guard song.isExternal, let client = session.client, let source = session.activeId else { return false }
+        guard song.isExternal, let client = session.client, let source = sourceInUse else { return false }
         do {
             try await client.star(songId: song.id)
         } catch {
             return false
         }
-        keep(song, source: source, requestedAt: nowMs())
+        await keep([song], source: source, requestedAt: epochNowMs())
         arrivals.askedSong(song.id, title: song.title)
         tracker.retry(song.id)
         follow()
@@ -102,15 +108,14 @@ final class Downloads {
     /// Asks the server to download a whole album found online, and follows the songs from it that
     /// are listed.
     func requestAlbum(_ albumId: String, songs: [Song], title: String = "") async -> Bool {
-        guard let client = session.client, let source = session.activeId else { return false }
+        guard let client = session.client, let source = sourceInUse else { return false }
         do {
             try await client.star(albumId: albumId)
         } catch {
             return false
         }
-        let now = nowMs()
         let finds = songs.filter(\.isExternal)
-        for song in finds { keep(song, source: source, requestedAt: now) }
+        await keep(finds, source: source, requestedAt: epochNowMs())
         let coming = finds.filter { state($0.id) != .done }
         arrivals.askedAlbum(title.isEmpty ? (coming.first?.album ?? "") : title, findIds: coming.map(\.id))
         for song in coming { tracker.retry(song.id) }
@@ -130,60 +135,74 @@ final class Downloads {
     /// At start and whenever another kept server comes into use: the last one's downloads are no
     /// longer asked about, and this one's own carry on being followed.
     func resume() async {
-        if session.activeId != lastSource {
-            lastSource = session.activeId
+        if sourceInUse != lastSource {
+            lastSource = sourceInUse
             checks?.cancel()
             checks = nil
             refresh()
         }
         guard session.client != nil else { return }
-        prune()
         if !watchedWaiting().isEmpty, await reportsProgress() { follow() }
     }
 
-    // MARK: Finds kept on the phone
+    // MARK: Finds kept in the library database
 
-    /// Keeps a find, or updates the one kept, with what the server says of it now.
-    private func keep(_ song: Song, source: String, requestedAt: Int64? = nil) {
-        if let index = rows.firstIndex(where: { $0.id == song.id && $0.sourceId == source }) {
-            if let requestedAt { rows[index].requestedAt = requestedAt }
-        } else {
-            rows.append(FindSong(id: song.id, sourceId: source, title: song.title, artist: song.artist ?? "", album: song.album ?? "",
-                                 albumId: song.albumId, durationMs: knownLengthMs(song), requestedAt: requestedAt ?? 0))
+    /// Keeps finds, or updates the ones kept with what the server says of them now, and marks them
+    /// asked for.
+    private func keep(_ songs: [Song], source: String, requestedAt: Int64) async {
+        let now = epochNowMs()
+        let finds = songs.map { $0.toFind(sourceId: source, now: now) }
+        let store = library.store
+        _ = try? await store.keepFinds(finds)
+        for find in finds { try? await store.setRequested(find.id, at: requestedAt) }
+        await reload()
+    }
+
+    /// Reads the finds asked for again, and tells of any that reached the library since.
+    private func reload() async {
+        let found = (try? await library.store.requestedFinds()) ?? []
+        rows = found.map(\.asFindSong)
+        let adopted = Set(found.filter { !$0.adoptedId.isEmpty }.map(\.nativeId))
+        if let before = known {
+            let landed = adopted.subtracting(before)
+            if !landed.isEmpty {
+                arrived += 1
+                for id in landed.sorted() { if let words = arrivals.landed(id) { announce(words, true) } }
+            }
         }
-        save()
+        known = adopted
         refresh()
     }
 
-    /// Finds not asked for, or asked for and gone, for longer than a month are let go; finds of a
-    /// server no longer kept go too.
-    private func prune() {
-        let now = nowMs()
-        let kept = Set(session.servers.map(\.id))
-        let before = rows.count
-        rows.removeAll { !kept.contains($0.sourceId) || (now - $0.requestedAt > forgetMs && $0.adoptedId.isEmpty) }
-        if rows.count != before {
-            save()
-            refresh()
+    /// After each copy of the server's library: a download that has arrived is linked to its
+    /// library song, and old finds are let go.
+    private func afterSync() async {
+        guard let source = sourceInUse else { return }
+        let store = library.store
+        let kept = session.servers.map(\.sourceId) + [source]
+        try? await store.pruneFinds(sourceId: source, kept: kept, before: epochNowMs() - forgetMs)
+        let waiting = (try? await store.waitingFinds()) ?? []
+        guard !waiting.isEmpty else { return }
+        let keys = Array(Set(waiting.flatMap { titleKeys($0.title) }))
+        let candidates = ((try? await store.tracksWithKeys(keys)) ?? []).filter { !isFind($0.id) }
+        let adopted = OctoKit.adoptions(waiting, candidates)
+        for find in waiting {
+            if let track = adopted[find.id] { try? await store.adopt(find.id, trackId: track.id) }
         }
-    }
-
-    private func save() {
-        if let data = try? JSONEncoder().encode(rows) { try? data.write(to: Self.storeURL, options: .atomic) }
     }
 
     // MARK: Following
 
-    /// The songs asked for lately on the server in use: another kept server's are followed once
-    /// it is in use again.
+    /// The songs asked for lately on the server in use: another kept server's are followed once it
+    /// is in use again.
     fileprivate func watchedWaiting() -> [FindSong] {
-        guard let here = session.activeId else { return [] }
-        let now = nowMs()
+        guard let here = sourceInUse else { return [] }
+        let now = epochNowMs()
         return rows.filter { $0.sourceId == here && $0.requestedAt > 0 && $0.adoptedId.isEmpty && now - $0.requestedAt < giveUpMs }
     }
 
     /// Follows the downloads asked for: by asking the server how they are going when it can say;
-    /// otherwise by looking at the library again a little later, and once more after that.
+    /// otherwise by copying the library again a little later, and once more after that.
     private func follow() {
         if following {
             tracker.wake()
@@ -208,19 +227,19 @@ final class Downloads {
             try? await Task.sleep(for: .milliseconds(at - waited))
             if Task.isCancelled { return }
             waited = at
-            try? await lookInLibrary()
+            sync.syncNow()
         }
     }
 
     /// Whether the server in use says how its downloads are going: from what it listed at sign-in,
     /// or by asking, since it may have been updated since.
     private func reportsProgress() async -> Bool {
-        guard let source = session.activeId, let client = session.client else { return false }
+        guard let source = sourceInUse, let client = session.client else { return false }
         if session.profile?.lists(octoAcquisitions) == true {
             lists = true
             return true
         }
-        let now = nowMs()
+        let now = epochNowMs()
         if let known = support[source], known.yes || now - known.at < recheckSupportMs { return known.yes }
         do {
             _ = try await client.acquisitions()
@@ -236,13 +255,13 @@ final class Downloads {
     }
 
     fileprivate func noteSupport(_ source: String, _ yes: Bool) {
-        support[source] = (yes, nowMs())
+        support[source] = (yes, epochNowMs())
         lists = yes
         refresh()
     }
 
     fileprivate func acquisitions() async throws -> [Acquisition]? {
-        guard let client = session.client, let source = session.activeId else { return nil }
+        guard let client = session.client, let source = sourceInUse else { return nil }
         do {
             return try await client.acquisitions()
         } catch is OctoError {
@@ -254,40 +273,24 @@ final class Downloads {
 
     /// Brings one finished song into the library by its server id: the library song it became,
     /// when the server has it in the library now.
-    fileprivate func takeIn(_ libraryId: String) async throws -> String? {
-        guard let client = session.client else { return nil }
-        let song = try await client.song(libraryId)
-        return song.isExternal ? nil : song.id
+    fileprivate func takeIn(_ libraryId: String) async -> String? {
+        await sync.takeInSong(libraryId)
     }
 
     /// Links a find to the library song it became. Downloading is not liking, so the song is not
     /// hearted; that stays the listener's call.
-    fileprivate func adopt(_ findId: String, _ trackId: String) {
-        guard let source = session.activeId,
-              let index = rows.firstIndex(where: { $0.id == findId && $0.sourceId == source }),
-              rows[index].adoptedId.isEmpty
+    fileprivate func adopt(_ serverId: String, _ trackId: String) async {
+        let store = library.store
+        guard let find = try? await store.find(findId(serverId)), find.adoptedId.isEmpty,
+              (try? await store.track(trackId)) != nil
         else { return }
-        rows[index].adoptedId = trackId
-        save()
-        arrived += 1
-        if let words = arrivals.landed(findId) { announce(words, true) }
-        refresh()
+        try? await store.adopt(find.id, trackId: trackId)
+        await reload()
     }
 
-    /// Looks for the songs still waiting in the server's library: the same song by the same artist,
-    /// of about the same length when both are known.
-    fileprivate func lookInLibrary() async throws {
-        guard let client = session.client else { return }
-        for find in watchedWaiting() {
-            let found = try await client.search("\(find.artist) \(find.title)", artists: 0, albums: 0, songs: 20)
-            let library = found.song.filter { !$0.isExternal }
-            let byTitle = TitleIndex(library, title: \.title, artist: { $0.artist ?? "" })
-            if let match = byTitle.candidates(find.title, find.artist).first(where: {
-                sameSong(find.title, find.artist, find.durationMs, $0.title, $0.artist ?? "", knownLengthMs($0))
-            }) {
-                adopt(find.id, match.id)
-            }
-        }
+    /// Copies the library again and waits for it; songs that arrived are adopted along the way.
+    fileprivate func syncAndWait() async {
+        _ = await sync.syncNowAndWait()
     }
 
     // MARK: Phases
@@ -307,11 +310,11 @@ final class Downloads {
 
     /// Works the phases out again, and again when the first ask still taken as on its way runs out.
     private func refresh() {
-        let here = session.activeId
+        let here = sourceInUse
         let mine = rows.filter { $0.sourceId == here }
         let inputs = PhaseInputs(rows: mine.filter { $0.requestedAt > 0 || !$0.adoptedId.isEmpty }, live: tracker.live,
                                  listedSince: tracker.listedSince, lists: lists, sourceId: here)
-        let now = nowMs()
+        let now = epochNowMs()
         let next = phasesOf(inputs, now: now)
         if next != phases { phases = next }
         var adopted: [String: String] = [:]
@@ -344,13 +347,16 @@ private final class DownloadsHost: AcquisitionHost, @unchecked Sendable {
 
     func takeIn(_ libraryId: String) async throws -> String? {
         guard let downloads = await MainActor.run(body: { self.downloads }) else { return nil }
-        return try await downloads.takeIn(libraryId)
+        return await downloads.takeIn(libraryId)
     }
 
-    func adopt(_ findId: String, _ trackId: String) async { await MainActor.run { downloads?.adopt(findId, trackId) } }
+    func adopt(_ findId: String, _ trackId: String) async {
+        guard let downloads = await MainActor.run(body: { self.downloads }) else { return }
+        await downloads.adopt(findId, trackId)
+    }
 
     func syncAndWait() async throws {
         guard let downloads = await MainActor.run(body: { self.downloads }) else { return }
-        try await downloads.lookInLibrary()
+        await downloads.syncAndWait()
     }
 }

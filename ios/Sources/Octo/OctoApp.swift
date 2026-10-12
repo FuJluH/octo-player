@@ -8,6 +8,7 @@ struct OctoApp: App {
     @State private var lyrics: LyricsStore
     @State private var sound: SoundStore
     @State private var downloads: Downloads
+    @State private var data: DataServices
     @State private var overlays = Overlays()
     @State private var prompts = Prompts()
     @State private var presses = PressSpots()
@@ -22,13 +23,19 @@ struct OctoApp: App {
         let session = Session()
         let sound = SoundStore()
         let router = Router()
+        let data = DataServices(session: session) { words, done in router.show(words, done: done) }
+        _data = State(initialValue: data)
         _router = State(initialValue: router)
-        _downloads = State(initialValue: Downloads(session: session) { words, done in router.show(words, done: done) })
+        _downloads = State(initialValue: data.downloads)
         _session = State(initialValue: session)
         _sound = State(initialValue: sound)
         _player = State(initialValue: Player(session: session, sound: sound.processor))
         _lyrics = State(initialValue: LyricsStore(session: session))
         _artworkColors = State(initialValue: ArtworkColorStore(session: session))
+        data.start()
+        #if DEBUG
+        DataDrive.install(data) { router.show($0) }
+        #endif
     }
 
     var body: some Scene {
@@ -40,6 +47,7 @@ struct OctoApp: App {
                 .environment(lyrics)
                 .environment(sound)
                 .environment(downloads)
+                .dataEnvironment(data)
                 .environment(overlays)
                 .environment(prompts)
                 .environment(presses)
