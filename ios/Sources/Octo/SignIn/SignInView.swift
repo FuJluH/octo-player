@@ -3,9 +3,12 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// The sign-in page: the octopus over Octo's name, one glass card with the address, username
-/// and password, then the button, the connection note and Advanced.
+/// and password, then the button, the connection note and Advanced. Joining a family swaps the
+/// username and password for the invite's sign-up or a sign-in handed over from another device.
 struct SignInView: View {
     @Environment(Session.self) private var session
+    @Environment(ServerSync.self) private var sync
+    @Environment(ServerSwitch.self) private var serverSwitch
     @Environment(\.dismiss) private var dismiss
     @State private var model: SignInModel
     @State private var reveal = false
@@ -18,6 +21,11 @@ struct SignInView: View {
     let done: (String?) -> Void
 
     enum Field: Hashable { case address, label, username, password, apiKey, home }
+
+    #if DEBUG
+    /// Set by a launch step: the next sign-in screen opens with the family QR scanner.
+    static var scanOnOpen = false
+    #endif
 
     init(form: SignInModel.Form, session: Session, done: @escaping (String?) -> Void = { _ in }) {
         _model = State(initialValue: SignInModel(form: form, session: session))
@@ -32,32 +40,27 @@ struct SignInView: View {
                     .padding(.bottom, 28)
                 card
                 if let note = model.note { ConnectionNoteView(note: note).padding(.top, 12) }
-                Button {
-                    Task { await model.submit(session) }
-                } label: {
-                    ZStack {
-                        Text(model.buttonTitle).opacity(model.busy ? 0 : 1)
-                        if model.busy { ProgressView() }
+                if model.joining {
+                    joinButtons
+                } else {
+                    AccentButton(model.buttonTitle, enabled: model.ready, loading: model.busy, fillWidth: true) {
+                        Task { await model.submit(session, sync: sync) }
                     }
-                    .font(.octoBody.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.glassProminent)
-                .controlSize(.large)
-                .disabled(!model.ready)
-                .padding(.top, 20)
-                if let error = model.error {
-                    Text(error)
-                        .font(.octoBodySmall)
-                        .foregroundStyle(OctoColor.error)
-                        .multilineTextAlignment(.center)
-                        .padding(.top, 12)
-                }
-                advancedToggle
                     .padding(.top, 20)
-                if model.advancedOpen {
-                    advanced
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    if let error = model.error { errorLine(error) }
+                    if model.offersScan {
+                        GlazeButton("Scan a family QR code", icon: .camera, size: .small) {
+                            model.startJoin()
+                            model.scanning = true
+                        }
+                        .padding(.top, 12)
+                    }
+                    advancedToggle
+                        .padding(.top, 20)
+                    if model.advancedOpen {
+                        advanced
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
                 }
             }
             .padding(.horizontal, 24)
@@ -77,17 +80,44 @@ struct SignInView: View {
             .accessibilityLabel("Back")
         }
         .animation(.snappy, value: model.advancedOpen)
+        .overlay {
+            if let question = model.question {
+                TrustSheet(question: question) {
+                    Task { await model.trust(session, sync: sync) }
+                } cancel: {
+                    model.distrust()
+                }
+                .transition(.opacity)
+            }
+        }
+        .overlay {
+            if model.scanning {
+                QrScanner { link in
+                    model.startJoin(link, session: session)
+                } cancel: {
+                    model.scanning = false
+                }
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: model.scanning)
+        .animation(.easeOut(duration: 0.2), value: model.question)
+        .onAppear {
+            model.serverSwitch = serverSwitch
+            #if DEBUG
+            if Self.scanOnOpen {
+                Self.scanOnOpen = false
+                model.startJoin()
+                model.scanning = true
+            }
+            #endif
+            if case .join(let text) = model.form, let link = parseFamilyLink(text) { model.startJoin(link, session: session) }
+        }
+        .onDisappear { model.leave() }
         .onChange(of: model.signedIn) { _, signedIn in
             if signedIn {
                 done(model.notice)
                 dismiss()
-            }
-        }
-        .sheet(item: $model.question) { question in
-            TrustSheet(question: question) {
-                Task { await model.trust(session) }
-            } cancel: {
-                model.distrust()
             }
         }
         .fileImporter(isPresented: $choosingCertificate, allowedContentTypes: [.pkcs12]) { result in
@@ -124,6 +154,7 @@ struct SignInView: View {
                 .font(.octoBodySmall)
                 .foregroundStyle(OctoColor.textSecondary)
                 .multilineTextAlignment(.center)
+                .padding(.top, 4)
         }
     }
 
@@ -142,36 +173,127 @@ struct SignInView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(model.scheme == .https ? "Encrypted, https" : "Not encrypted, http")
                 .accessibilityHint(model.scheme == .https ? "Use http" : "Use https")
-                TextField("music.example.com", text: $model.rest)
+                TextField("music.example.com", text: Binding(get: { model.rest }, set: { model.typeAddress($0, session: session) }))
                     .keyboardType(.URL)
                     .textContentType(.URL)
                     .focused($focus, equals: .address)
                     .submitLabel(.next)
                     .onSubmit { focus = .username }
             }
-            if case .add = model.form { labelField } else if case .edit = model.form { labelField }
-            GlassField {
-                FieldIcon("person")
-                TextField(model.useApiKey ? "Username (optional)" : "Username", text: $model.username)
-                    .textContentType(.username)
-                    .focused($focus, equals: .username)
-                    .submitLabel(.next)
-                    .onSubmit { focus = model.useApiKey ? nil : .password }
-            }
-            if !model.useApiKey {
+            if model.showsName { labelField }
+            if model.joining {
+                joinFields
+            } else {
                 GlassField {
-                    FieldIcon("key")
-                    SecretField(model.editing ? "Password (unchanged)" : "Password", text: $model.password, revealed: reveal)
-                        .textContentType(.password)
-                        .focused($focus, equals: .password)
-                        .submitLabel(.go)
-                        .onSubmit { Task { await model.submit(session) } }
-                    RevealToggle(revealed: $reveal)
+                    FieldIcon("person")
+                    TextField(model.useApiKey ? "Username (optional)" : "Username", text: $model.username)
+                        .textContentType(.username)
+                        .focused($focus, equals: .username)
+                        .submitLabel(.next)
+                        .onSubmit { focus = model.useApiKey ? nil : .password }
+                }
+                if !model.useApiKey {
+                    GlassField {
+                        FieldIcon("key")
+                        SecretField(model.editing ? "Password (unchanged)" : "Password", text: $model.password, revealed: reveal)
+                            .textContentType(.password)
+                            .focused($focus, equals: .password)
+                            .submitLabel(.done)
+                            .onSubmit { Task { await model.submit(session, sync: sync) } }
+                        RevealToggle(revealed: $reveal)
+                    }
                 }
             }
         }
         .padding(16)
         .glassEffect(.regular, in: .rect(cornerRadius: 22))
+    }
+
+    private func errorLine(_ text: String) -> some View {
+        Text(text)
+            .font(.octoBodySmall)
+            .foregroundStyle(OctoColor.error)
+            .multilineTextAlignment(.center)
+            .padding(.top, 12)
+    }
+
+    // MARK: Join
+
+    /// In place of the username and password: the sign-up for an invite, a sign-in handed over,
+    /// or what to do with no link yet.
+    @ViewBuilder
+    private var joinFields: some View {
+        @Bindable var model = model
+        if let handOver = model.handOver {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 12) {
+                    if model.busy { LoadingSpinner(size: 22) }
+                    Text(model.handOverStep ?? "Ready to sign in to \(shownServer(handOver.server))")
+                        .font(.octoBody)
+                        .foregroundStyle(OctoColor.textPrimary)
+                }
+                .padding(.vertical, 6)
+                Text("On your other device, tap Allow when it asks about this phone.")
+                    .font(.octoCaption)
+                    .foregroundStyle(OctoColor.textMuted)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else if let invite = model.invite {
+            Text("You're invited to \(shownServer(invite.server)). Choose your name and a password. Your login then works in Octo and any other music app.")
+                .font(.octoBodySmall)
+                .foregroundStyle(OctoColor.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            GlassField {
+                FieldIcon("person")
+                TextField("Your name", text: $model.joinName)
+                    .textInputAutocapitalization(.words)
+                    .textContentType(.name)
+                    .submitLabel(.next)
+            }
+            GlassField {
+                FieldIcon("key")
+                SecureField("Password, at least \(minPassword) characters", text: $model.joinPassword)
+                    .textContentType(.newPassword)
+                    .submitLabel(.next)
+            }
+            if let strength = model.strength {
+                Text(strength).font(.octoCaption).foregroundStyle(OctoColor.textMuted).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            GlassField {
+                FieldIcon("key")
+                SecureField("The same password again", text: $model.joinAgain)
+                    .textContentType(.newPassword)
+                    .submitLabel(.done)
+                    .onSubmit { Task { await model.signUp(session) } }
+            }
+        } else {
+            Text("Your invite, or Sign in on another device on your other phone or computer, shows a QR code. Scan it, or open its link on this phone.")
+                .font(.octoBodySmall)
+                .foregroundStyle(OctoColor.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// Under the card while joining: the step's own button, the error, the scanner and the way
+    /// back to the password form.
+    @ViewBuilder
+    private var joinButtons: some View {
+        if model.invite != nil {
+            AccentButton("Sign up", enabled: model.joinMissing == nil, loading: model.busy, fillWidth: true) {
+                Task { await model.signUp(session) }
+            }
+            .padding(.top, 20)
+        } else if model.handOver != nil, !model.busy {
+            AccentButton("Try again", fillWidth: true) { model.receive(session) }
+                .padding(.top, 20)
+        }
+        if let error = model.error { errorLine(error) }
+        if model.handOver == nil {
+            GlazeButton("Scan the QR code", icon: .camera, size: .small) { model.scanning = true }
+                .padding(.top, 12)
+        }
+        GlazeButton("Sign in with a password", size: .small) { model.stopJoin() }
+            .padding(.top, 12)
     }
 
     private var labelField: some View {
@@ -246,8 +368,7 @@ struct SignInView: View {
                         }
                     }
                 }
-                Button("Add header", action: model.addHeader)
-                    .buttonStyle(.glass)
+                GlazeButton("Add header", size: .small, action: model.addHeader)
             }
             Section("Client certificate", "For servers that ask the phone to prove itself with a certificate.") {
                 HStack {
@@ -265,11 +386,10 @@ struct SignInView: View {
                         .buttonStyle(.plain)
                     }
                 }
-                Button(model.certificate == nil && !model.hadCertificate ? "Choose certificate" : "Choose another") {
+                GlazeButton(model.certificate == nil && !model.hadCertificate ? "Choose certificate" : "Choose another", size: .small) {
                     certificateError = nil
                     choosingCertificate = true
                 }
-                .buttonStyle(.glass)
             }
         }
         .padding(.top, 6)
@@ -417,7 +537,6 @@ struct TrustSheet: View {
     let question: ServerTrust.Untrusted
     let trust: () -> Void
     let cancel: () -> Void
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -433,28 +552,19 @@ struct TrustSheet: View {
                 Text("SHA-256 fingerprint").font(.octoCaption).foregroundStyle(OctoColor.textMuted)
                 Text(question.fingerprint).font(.system(size: 13, design: .monospaced)).textSelection(.enabled)
             }
-            Spacer(minLength: 0)
-            VStack(spacing: 10) {
-                Button {
-                    dismiss()
-                    trust()
-                } label: {
-                    Text("Trust this certificate").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.glassProminent)
-                Button {
-                    dismiss()
-                    cancel()
-                } label: {
-                    Text("Cancel").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.glass)
+            HStack(spacing: 10) {
+                AccentButton("Trust this certificate", size: .medium, action: trust)
+                GlazeButton("Cancel", size: .medium, action: cancel)
             }
-            .controlSize(.large)
         }
         .padding(24)
-        .presentationDetents([.medium])
-        .interactiveDismissDisabled()
+        .frame(maxWidth: 380)
+        .glassEffect(.regular, in: .rect(cornerRadius: 20))
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black.opacity(0.45).ignoresSafeArea().onTapGesture(perform: cancel))
+        .accessibilityAddTraits(.isModal)
+        .accessibilityLabel("Trust this certificate")
     }
 }
 

@@ -1,0 +1,581 @@
+import CoreText
+import OctoKit
+import QuartzCore
+import SwiftUI
+import UIKit
+
+// The view fades in over this long once the lyrics are laid out.
+private let FADE_IN: Duration = .milliseconds(450)
+// After a resize, the lines are laid out again once it has held this long.
+private let REMEASURE_AFTER: Duration = .milliseconds(150)
+// The time stamp a long press shows stays this long.
+private let STAMP_SHOWN: Duration = .milliseconds(1500)
+// Backing vocals, the credit, and translations sit quieter than the lead.
+private let BACKGROUND_ALPHA: CGFloat = 0.6
+private let CREDIT_ALPHA: CGFloat = 0.75
+private let EXTRA_ALPHA: CGFloat = 0.7
+// Dots across and apart, in em.
+private let DOT_EM: CGFloat = 0.34
+private let DOT_GAP_EM: CGFloat = 0.22
+
+/// Everything the flowing lyrics move each frame: the engine, the lines as laid out, and the
+/// loop that runs it. The loop reads the player's position every display frame; when nothing
+/// moved, nothing plays and nobody scrolls, it slows to about 30 frames a second.
+@MainActor
+@Observable
+final class FlowingModel {
+    let lines: [SyncLine]
+    @ObservationIgnored let engine: LyricEngine
+    /// Bumped every frame the engine runs, so the view reads the engine again.
+    private(set) var frame = 0
+    private(set) var layout: LyricsLayout?
+    /// The whole view's fade as it first appears.
+    var shown = 0.0
+
+    // What each frame reads, set by the view.
+    @ObservationIgnored var position: () -> TimeInterval = { 0 }
+    @ObservationIgnored var playing = false
+    @ObservationIgnored var rate = 1.0
+    @ObservationIgnored var offsetMs = 0
+    @ObservationIgnored var outputOffsetMs = 0
+    @ObservationIgnored var ink = UIColor.white
+    @ObservationIgnored var calm = false
+
+    @ObservationIgnored private var link: CADisplayLink?
+    @ObservationIgnored private var slow = false
+    @ObservationIgnored private var measuring: Task<Void, Never>?
+    @ObservationIgnored private var measuredFor: CGSize?
+
+    init(_ lines: [SyncLine]) {
+        self.lines = lines
+        engine = LyricEngine(lines)
+    }
+
+    /// Lays the lines out for a size, off the main thread; after the first time, only once the
+    /// size has held still for a moment. Once measured, every line jumps into place.
+    func measure(_ size: CGSize, textScale: CGFloat) {
+        guard size.width > 0, size.height > 0, size != measuredFor else { return }
+        measuredFor = size
+        measuring?.cancel()
+        let first = layout == nil
+        let lines = self.lines
+        measuring = Task { [weak self] in
+            if !first { try? await Task.sleep(for: REMEASURE_AFTER) }
+            guard !Task.isCancelled else { return }
+            let measured = await Task.detached(priority: .userInitiated) { () -> LyricsLayout in
+                let spec = LyricsSpec(width: size.width, textScale: textScale)
+                return LyricsLayout(spec: spec, lines: lines.map { measureLine($0, spec) })
+            }.value
+            guard !Task.isCancelled, let self else { return }
+            self.engine.setGeometry(measured.baseHeights(), interludeIdle: Double(measured.spec.interludeIdle),
+                                    interludeFull: Double(measured.spec.interludeFull), height: Double(size.height))
+            self.layout = measured
+            if first {
+                withAnimation(.easeInOut(duration: FADE_IN.seconds)) { self.shown = 1 }
+            }
+            self.start()
+        }
+    }
+
+    /// The loop runs while the view shows and the app is in front; coming back starts it fresh.
+    func start() {
+        guard layout != nil, link == nil else { return }
+        engine.restart()
+        let link = CADisplayLink(target: DisplayTarget(self), selector: #selector(DisplayTarget.tick(_:)))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 120, preferred: 120)
+        link.add(to: .main, forMode: .common)
+        self.link = link
+        slow = false
+    }
+
+    func stop() {
+        link?.invalidate()
+        link = nil
+    }
+
+    /// The clock takes a fresh anchor: the player played, paused, seeked or changed song.
+    func anchor() { engine.clock.requestAnchor() }
+
+    fileprivate func tick(_ link: CADisplayLink) {
+        guard let layout else { return }
+        engine.look = AppSettings.shared.lyricsLook
+        engine.reduceMotion = calm
+        let nanos = Int(link.timestamp * 1e9)
+        engine.frame(
+            nanos,
+            Int((position() * 1000).rounded()),
+            playing: playing,
+            rate: rate,
+            offsetMs: offsetMs,
+            outputOffsetMs: outputOffsetMs,
+            prepare: { [lines] index in layout.prepare(index, lines[index]) },
+            release: { index in layout.release(index) }
+        )
+        frame = engine.frames
+        // Nothing moved, nothing plays and nobody scrolls: look again about every 32 ms.
+        let rest = engine.settled
+        if rest != slow {
+            slow = rest
+            link.preferredFrameRateRange = rest
+                ? CAFrameRateRange(minimum: 30, maximum: 30, preferred: 30)
+                : CAFrameRateRange(minimum: 30, maximum: 120, preferred: 120)
+        }
+    }
+}
+
+/// Holds the model weakly, so the display link never keeps it alive.
+@MainActor
+private final class DisplayTarget: NSObject {
+    weak var model: FlowingModel?
+
+    init(_ model: FlowingModel) {
+        self.model = model
+    }
+
+    @objc func tick(_ link: CADisplayLink) {
+        guard let model else {
+            link.invalidate()
+            return
+        }
+        model.tick(link)
+    }
+}
+
+private extension Duration {
+    var seconds: Double { Double(components.seconds) + Double(components.attoseconds) / 1e18 }
+}
+
+/// Synced lyrics that flow: the line being sung sits a third of the way down, the rest ripple
+/// into place around it on springs, each word fills with a soft sweep of light as it is sung, and
+/// long notes bloom letter by letter. A drag scrolls them by hand; a tap plays from a line; a long
+/// press shows when it is sung.
+struct FlowingLyricsView: View {
+    let model: FlowingModel
+    let songOffsetMs: Int
+    let outputOffsetMs: Int
+    let ink: Color
+    let calm: Bool
+    let seek: (TimeInterval) -> Void
+    @Environment(Player.self) private var player
+    @Environment(\.scenePhase) private var phase
+    @State private var stamp: Int?
+    @State private var stampToken = 0
+
+    var body: some View {
+        GeometryReader { box in
+            let _ = model.frame
+            ZStack(alignment: .topLeading) {
+                if let layout = model.layout {
+                    lines(layout, width: box.size.width)
+                    if let stamp, model.engine.states.indices.contains(stamp) {
+                        TimeStampPill(engine: model.engine, index: stamp, spec: layout.spec,
+                                      text: asClock(max(heardAt(Int((model.lines[stamp].start * 1000).rounded()), songOffsetMs + outputOffsetMs), 0) / 1000))
+                    }
+                }
+            }
+            .frame(width: box.size.width, height: box.size.height, alignment: .topLeading)
+            .contentShape(Rectangle())
+            .opacity(model.shown)
+            .gesture(scroll)
+            .onAppear { model.measure(box.size, textScale: UIFontMetrics.default.scaledValue(for: 1)) }
+            .onChange(of: box.size) { _, size in model.measure(size, textScale: UIFontMetrics.default.scaledValue(for: 1)) }
+        }
+        .clipped()
+        .onAppear(perform: sync)
+        .onChange(of: songOffsetMs) { _, _ in sync() }
+        .onChange(of: outputOffsetMs) { _, _ in sync() }
+        .onChange(of: calm) { _, _ in sync() }
+        .onChange(of: player.isPlaying) { _, _ in sync(); model.anchor() }
+        .onChange(of: player.current?.id) { _, _ in model.anchor() }
+        .onChange(of: player.speed) { _, _ in sync(); model.anchor() }
+        .onChange(of: phase) { _, now in
+            if now == .active { model.start() } else { model.stop() }
+        }
+        .onDisappear { model.stop() }
+        .onChange(of: held) { _, now in if !now { endDrag() } }
+        .task(id: stampToken) {
+            guard stamp != nil else { return }
+            try? await Task.sleep(for: STAMP_SHOWN)
+            if !Task.isCancelled { stamp = nil }
+        }
+    }
+
+    /// Hands the frame loop what it reads every frame.
+    private func sync() {
+        let player = self.player
+        model.position = { player.livePosition }
+        model.playing = player.isPlaying
+        model.rate = Double(player.speed)
+        model.offsetMs = songOffsetMs
+        model.outputOffsetMs = outputOffsetMs
+        model.ink = UIColor(ink)
+        model.calm = calm
+        if phase == .active { model.start() }
+    }
+
+    @ViewBuilder
+    private func lines(_ layout: LyricsLayout, width: CGFloat) -> some View {
+        let engine = model.engine
+        let range = engine.shown
+        if !range.isEmpty {
+            ForEach(range.first...range.last, id: \.self) { index in
+                let state = engine.states[index]
+                let box = layout.lines[index]
+                let line = model.lines[index]
+                let height = line.isInterlude ? layout.spec.interludeFull : box.height
+                LineDrawing(model: model, index: index, version: state.drawVersion, ink: ink, calm: calm)
+                    .equatable()
+                    .frame(width: width, height: height)
+                    .blur(radius: Self.blurRadius(shownBlur(state.blur)), opaque: false)
+                    .modifier(LinePlace(transform: Self.place(engine, state, box, nodeHeight: height), opacity: state.opacity))
+                    .modifier(LineTouch(line: line, engine: engine, index: index, tap: tap, hold: hold))
+            }
+        }
+    }
+
+    /// The spread a platform blur gives for this radius.
+    private static func blurRadius(_ radius: Double) -> CGFloat {
+        radius <= 0 ? 0 : CGFloat(radius * 0.57735 + 0.5)
+    }
+
+    /// A line's place, size and turn for this frame, about its own text's start edge.
+    private static func place(_ engine: LyricEngine, _ st: LineState, _ box: LineBox, nodeHeight: CGFloat) -> CATransform3D {
+        let look = engine.look
+        let inactive = look.fraction(.inactiveScale)
+        var scale = inactive + (1 - inactive) * st.grown.value()
+        scale *= 1 - (1 - PRESSED_SCALE) * st.press
+        let y = st.y.value() + engine.scrollOffset
+        let pivot = CGPoint(x: box.pivotX, y: nodeHeight / 2)
+        var translateX = 0.0
+        var yaw = 0.0
+        if look.arc && onScreen(y, height: st.height, viewHeight: engine.viewHeight) {
+            let pose = arcPose(centre: y + st.height / 2, viewHeight: engine.viewHeight, side: st.line.alignRight ? -1 : 1)
+            translateX = pose.translationX
+            yaw = pose.rotationY
+            scale *= pose.scale
+        }
+        var t = CATransform3DMakeTranslation(-pivot.x, -pivot.y, 0)
+        t = CATransform3DConcat(t, CATransform3DMakeScale(scale, scale, 1))
+        if yaw != 0 {
+            t = CATransform3DConcat(t, CATransform3DMakeRotation(yaw, 0, 1, 0))
+            var perspective = CATransform3DIdentity
+            perspective.m34 = -1 / CGFloat(ARC_PERSPECTIVE)
+            t = CATransform3DConcat(t, perspective)
+        }
+        return CATransform3DConcat(t, CATransform3DMakeTranslation(pivot.x + translateX, pivot.y + y, 0))
+    }
+
+    /// A vertical drag anywhere scrolls by hand. There is no fling: the lyrics follow the song
+    /// again a moment after the finger lifts.
+    private var scroll: some Gesture {
+        DragGesture(minimumDistance: 10)
+            .updating($held) { _, held, _ in held = true }
+            .onChanged { drag in
+                let engine = model.engine
+                if !dragging {
+                    dragging = true
+                    lastDrag = 0
+                    engine.dragStart()
+                }
+                engine.dragBy(Double(drag.translation.height - lastDrag))
+                lastDrag = drag.translation.height
+            }
+            .onEnded { _ in endDrag() }
+    }
+
+    @State private var lastDrag: CGFloat = 0
+    @State private var dragging = false
+    @GestureState private var held = false
+
+    private func endDrag() {
+        guard dragging else { return }
+        dragging = false
+        lastDrag = 0
+        model.engine.dragEnd()
+    }
+
+    private func tap(_ index: Int) {
+        let line = model.lines[index]
+        // A line faded right out is not there to tap.
+        guard !line.isCredit, model.engine.states[index].opacity >= 0.05 else { return }
+        // Played from where it is heard, with both timings, so the line is just starting when
+        // the tap lands.
+        let target = heardAt(Int((line.start * 1000).rounded()), totalOffset(songMs: songOffsetMs, outputMs: outputOffsetMs))
+        model.engine.tapped(index, playerTarget: Double(target) / 1000)
+        seek(Double(target) / 1000)
+        UIAccessibility.post(notification: .announcement, argument: "Playing from \(asClock(max(target, 0) / 1000))")
+    }
+
+    private func hold(_ index: Int) {
+        stamp = index
+        stampToken += 1
+    }
+}
+
+/// Moves, scales, turns and fades one line.
+private struct LinePlace: ViewModifier {
+    let transform: CATransform3D
+    let opacity: Double
+
+    func body(content: Content) -> some View {
+        content
+            .projectionEffect(ProjectionTransform(transform))
+            .opacity(min(max(opacity, 0), 1))
+    }
+}
+
+/// A finger on a line presses it in; a tap plays from it; a long press shows when it is sung.
+/// Every line but the credit takes them.
+private struct LineTouch: ViewModifier {
+    let line: SyncLine
+    let engine: LyricEngine
+    let index: Int
+    let tap: (Int) -> Void
+    let hold: (Int) -> Void
+
+    func body(content: Content) -> some View {
+        if line.isCredit {
+            content.accessibilityElement().accessibilityLabel(described)
+        } else {
+            content
+                .contentShape(Rectangle())
+                .onTapGesture { tap(index) }
+                .onLongPressGesture(minimumDuration: 0.5, maximumDistance: 10) {
+                    hold(index)
+                } onPressingChanged: { pressing in
+                    engine.press(index, down: pressing)
+                }
+                .accessibilityElement()
+                .accessibilityLabel(described)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction(named: "Play from \(asClock(max(Int((line.start * 1000).rounded()), 0) / 1000))") { tap(index) }
+        }
+    }
+
+    /// What a line reads as, aloud.
+    private var described: String {
+        if line.isInterlude { return "Instrumental" }
+        return [line.text, line.translation].compactMap { $0 }.joined(separator: ". ")
+    }
+}
+
+/// The time a long-pressed line starts, in a small pill just above it, following the line but
+/// not scaled, blurred or faded with it.
+private struct TimeStampPill: View {
+    let engine: LyricEngine
+    let index: Int
+    let spec: LyricsSpec
+    let text: String
+
+    var body: some View {
+        let st = engine.states[index]
+        let top = st.y.value() + engine.scrollOffset
+        let right = st.line.alignRight
+        Text(text)
+            .font(.system(size: 11.52, weight: .bold).monospacedDigit())
+            .foregroundStyle(.white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Color(hex: 0x121214, opacity: Double(0x52) / 255), in: Capsule())
+            .overlay(Capsule().stroke(.white.opacity(0.16), lineWidth: 0.5))
+            .fixedSize()
+            .frame(width: spec.width - (right ? spec.right : spec.left), height: 0, alignment: right ? .bottomTrailing : .bottomLeading)
+            .offset(x: right ? 0 : spec.left, y: top - 4)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
+
+/// One line's drawing: its dots, its words with their fill, lift and bloom, or its text whole,
+/// then any translation or romanization under it. It draws again only when the engine says what
+/// it shows changed.
+private struct LineDrawing: View, Equatable {
+    let model: FlowingModel
+    let index: Int
+    let version: Int
+    let ink: Color
+    let calm: Bool
+
+    nonisolated static func == (a: LineDrawing, b: LineDrawing) -> Bool {
+        a.model === b.model && a.index == b.index && a.version == b.version && a.ink == b.ink && a.calm == b.calm
+    }
+
+    var body: some View {
+        let layout = model.layout
+        let engine = model.engine
+        let ink = UIColor(self.ink)
+        let index = self.index
+        let calm = self.calm
+        Canvas { context, _ in
+            guard let layout else { return }
+            context.withCGContext { cg in
+                LyricPainter(engine: engine, layout: layout, index: index, ink: ink, calm: calm).draw(cg)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+/// Draws one flowing line with Core Text.
+private struct LyricPainter {
+    let engine: LyricEngine
+    let layout: LyricsLayout
+    let index: Int
+    let ink: UIColor
+    let calm: Bool
+
+    func draw(_ cg: CGContext) {
+        let st = engine.states[index]
+        let line = st.line
+        let box = layout.lines[index]
+        if line.isInterlude {
+            drawDots(cg, st)
+            return
+        }
+        let pair = st.brightness()
+        let voice: CGFloat = line.isBackground ? BACKGROUND_ALPHA : 1
+        if let piece = box.block {
+            let alpha = line.isCredit ? CREDIT_ALPHA : CGFloat(pair.bright) * voice
+            drawBlock(cg, piece, alpha: alpha)
+        }
+        if !box.words.isEmpty {
+            drawWords(cg, st, box, bright: CGFloat(pair.bright) * voice, dark: CGFloat(pair.dark) * voice)
+        }
+        for extra in box.extras { drawBlock(cg, extra, alpha: EXTRA_ALPHA) }
+    }
+
+    private func drawBlock(_ cg: CGContext, _ piece: TextPiece, alpha: CGFloat) {
+        cg.saveGState()
+        cg.textMatrix = .identity
+        cg.translateBy(x: piece.x, y: piece.y + piece.block.size.height + 1)
+        cg.scaleBy(x: 1, y: -1)
+        cg.setFillColor(ink.withAlphaComponent(alpha).cgColor)
+        CTFrameDraw(piece.block.frame, cg)
+        cg.restoreGState()
+    }
+
+    private func drawWords(_ cg: CGContext, _ st: LineState, _ box: LineBox, bright: CGFloat, dark: CGFloat) {
+        let line = st.line
+        let look = engine.look
+        let t = engine.lyricTime
+        // Sung long ago: drawn bright and risen, with nothing left to move.
+        let cold = st.status == .passed && !st.live
+        let lift = calm ? 0 : look.fraction(.lift)
+        let letters = calm || !st.live ? nil : box.glyphs
+        let lastGroup = (line.words.dropLast().lastIndex { $0.trailingSpace } ?? -1) + 1
+        for (j, word) in line.words.enumerated() where j < box.words.count {
+            let wb = box.words[j]
+            var rise = 0.0
+            if lift != 0 {
+                rise = cold ? -(line.isBackground ? BACKGROUND_LIFT_EM : LIFT_EM) * lift
+                    : liftEm(t, start: word.start, end: word.end, background: line.isBackground, lift: lift)
+            }
+            let riseY = CGFloat(rise) * box.em
+            let shape = maskShape(wordWidth: Double(wb.width), lineHeight: Double(wb.rowHeight), softness: look.fraction(.fade))
+            let progress = cold ? 1.0 : fillProgress(t, start: word.start, end: word.end, edge: shape.edge)
+            let glyphs = letters.flatMap { j < $0.count ? $0[j] : nil }
+            let bloom = glyphs.flatMap { found in
+                emphasisFor(word.end - word.start, glyphs: found.count, last: j >= lastGroup,
+                            emphasis: look.fraction(.emphasis), glow: look.fraction(.glow))
+            }
+            let paint: (CGFloat) -> Void = { alpha in
+                paintWord(cg, wb, glyphs, bloom, word, t: t, rise: riseY, em: box.em, lift: lift, background: line.isBackground, alpha: alpha)
+            }
+            if progress <= 0 {
+                paint(dark)
+            } else if progress >= 1 {
+                paint(bright)
+            } else {
+                fillWord(cg, wb, em: box.em, progress: progress, shape: shape, rtl: line.rtl, bright: bright, dark: dark, paint: paint)
+            }
+        }
+    }
+
+    /// A word part sung: drawn in full into its own layer, then an alpha mask slid across it
+    /// keeps the sung side bright and the rest dark.
+    private func fillWord(_ cg: CGContext, _ wb: WordBox, em: CGFloat, progress: Double, shape: MaskShape, rtl: Bool,
+                          bright: CGFloat, dark: CGFloat, paint: (CGFloat) -> Void) {
+        guard wb.width > 0 else { return }
+        let margin = 0.5 * em
+        let area = CGRect(x: wb.x - margin, y: wb.rowTop - margin, width: wb.width + 2 * margin, height: wb.rowHeight + 2 * margin)
+        let left = CGFloat(maskLeft(progress, wordLeft: Double(wb.x), wordWidth: Double(wb.width), shape: shape, rtl: rtl))
+        let right = left + CGFloat(shape.size) * wb.width
+        let near = CGFloat(shape.brightStop), far = CGFloat(shape.darkStop)
+        let lit = UIColor.black.withAlphaComponent(bright).cgColor
+        let unlit = UIColor.black.withAlphaComponent(dark).cgColor
+        let colors = rtl ? [unlit, unlit, lit, lit] : [lit, lit, unlit, unlit]
+        guard let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors as CFArray, locations: [0, near, far, 1]) else {
+            paint(bright)
+            return
+        }
+        cg.saveGState()
+        cg.beginTransparencyLayer(in: area, auxiliaryInfo: nil)
+        paint(1)
+        cg.setBlendMode(.destinationIn)
+        cg.clip(to: area)
+        cg.drawLinearGradient(gradient, start: CGPoint(x: left, y: 0), end: CGPoint(x: right, y: 0),
+                              options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+        cg.endTransparencyLayer()
+        cg.restoreGState()
+    }
+
+    /// A word at one brightness: whole, or letter by letter while it blooms.
+    private func paintWord(_ cg: CGContext, _ wb: WordBox, _ glyphs: [GlyphBox]?, _ bloom: Emphasis?, _ word: SyncWord,
+                           t: Double, rise: CGFloat, em: CGFloat, lift: Double, background: Bool, alpha: CGFloat) {
+        guard let glyphs, let bloom else {
+            drawRun(cg, wb.run, x: wb.x, top: wb.top + rise, alpha: alpha, glow: nil)
+            return
+        }
+        for (k, glyph) in glyphs.enumerated() {
+            let pose = glyphPose(t, wordStart: word.start, emphasis: bloom, i: k, glyphs: glyphs.count)
+            let bob = CGFloat(bobEm(t, wordStart: word.start, emphasis: bloom, i: k, lift: lift, background: background)) * em
+            let x = wb.x + glyph.x + CGFloat(pose.dxEm) * em
+            let y = wb.top + rise + CGFloat(pose.dyEm) * em + bob
+            let radius = CGFloat(bloom.glowRadiusEm) * em
+            let glow: (CGFloat, CGFloat)? = pose.glowAlpha > 0.01 && radius > 0.5 ? (radius, CGFloat(min(pose.glowAlpha, 1))) : nil
+            let scale = CGFloat(pose.scale)
+            cg.saveGState()
+            cg.translateBy(x: x + glyph.width / 2, y: y + glyph.run.height / 2)
+            cg.scaleBy(x: scale, y: scale)
+            drawRun(cg, glyph.run, x: -glyph.width / 2, top: -glyph.run.height / 2, alpha: alpha, glow: glow)
+            cg.restoreGState()
+        }
+    }
+
+    /// One run of text with its top-left at (`x`, `top`), in the ink at `alpha`, with a white
+    /// glow around it when asked.
+    private func drawRun(_ cg: CGContext, _ run: TextRun, x: CGFloat, top: CGFloat, alpha: CGFloat, glow: (radius: CGFloat, alpha: CGFloat)?) {
+        cg.saveGState()
+        if let glow {
+            // White even on a pale background.
+            cg.setShadow(offset: .zero, blur: glow.radius, color: UIColor.white.withAlphaComponent(glow.alpha).cgColor)
+        }
+        cg.textMatrix = .identity
+        cg.translateBy(x: x, y: top + run.ascent)
+        cg.scaleBy(x: 1, y: -1)
+        cg.textPosition = .zero
+        cg.setFillColor(ink.withAlphaComponent(alpha).cgColor)
+        CTLineDraw(run.line, cg)
+        cg.restoreGState()
+    }
+
+    /// The three dots of an interlude, centered in its current height.
+    private func drawDots(_ cg: CGContext, _ st: LineState) {
+        guard st.status == .active else { return }
+        let line = st.line
+        let spec = layout.spec
+        let pose = calm ? StillDots : dotsPose(engine.lyricTime - line.start, f: line.end - line.start, grown: st.grownIn)
+        let dot = DOT_EM * spec.em
+        let gap = DOT_GAP_EM * spec.em
+        let across = 3 * dot + 2 * gap
+        let startX = line.alignRight ? spec.left + spec.available - across : spec.left
+        let middle = CGFloat(st.height / 2)
+        for k in 0..<3 {
+            let radius = dot / 2 * CGFloat(pose.scale)
+            let alpha = CGFloat(min(max(pose.opacity * pose.lights[k], 0), 1))
+            let center = CGPoint(x: startX + dot / 2 + CGFloat(k) * (dot + gap), y: middle)
+            cg.setFillColor(ink.withAlphaComponent(alpha).cgColor)
+            cg.fillEllipse(in: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
+        }
+    }
+}

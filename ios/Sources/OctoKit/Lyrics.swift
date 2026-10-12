@@ -6,31 +6,32 @@ import FoundationNetworking
 /// Every copy of a song's lyrics an Octo server's sources hold (the octoLyrics extension), and
 /// what the song is set to: "auto", "none", or the id of the copy pinned. The choice holds for
 /// the whole server, so every app and every listener sees it.
-public struct LyricsCandidates: Decodable, Sendable {
+public struct LyricsCandidates: Decodable, Sendable, Equatable {
     public var id: String
     public var choice: String
-    public var candidate: [LyricsCandidate]
+    public var candidate: [ServerLyricsCandidate]
 
     enum CodingKeys: String, CodingKey { case id, choice, candidate }
+
+    public init(id: String = "", choice: String = LYRICS_AUTO, candidate: [ServerLyricsCandidate] = []) {
+        self.id = id
+        self.choice = choice
+        self.candidate = candidate
+    }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = c.string(.id) ?? ""
-        choice = c.string(.choice) ?? LyricsChoice.auto
-        candidate = (try? c.decodeIfPresent([LyricsCandidate].self, forKey: .candidate)) ?? []
+        choice = c.string(.choice) ?? LYRICS_AUTO
+        candidate = (try? c.decodeIfPresent([ServerLyricsCandidate].self, forKey: .candidate)) ?? []
     }
 }
 
-public enum LyricsChoice {
-    /// The server finds the lyrics itself.
-    public static let auto = "auto"
-    /// The song's lyrics are hidden.
-    public static let none = "none"
-}
-
-/// One copy of a song's lyrics. The id names its source before the colon ("kugou:123").
-public struct LyricsCandidate: Decodable, Sendable, Identifiable, Equatable {
+/// One copy the server found. The id names its source before the colon ("kugou:123"), and is
+/// what a pin sends back.
+public struct ServerLyricsCandidate: Decodable, Sendable, Equatable {
     public var id: String
+    /// Where it was found, as the server names it: "kugou", "lrclib" and so on.
     public var source: String
     public var title: String
     public var artist: String
@@ -39,14 +40,28 @@ public struct LyricsCandidate: Decodable, Sendable, Identifiable, Equatable {
     public var duration: Int?
     /// "word", "line", "plain" or "instrumental".
     public var kind: String
-    /// The server is sure it is this song, going by title, artist and length.
+    /// Whether the server is sure it is this song, going by title, artist and length.
     public var sameSong: Bool
+    /// Whether it is the copy pinned now.
     public var chosen: Bool
+    /// Its first lines with words.
     public var preview: [String]
-    /// For copies found by the phone itself (lrclib), the lyrics themselves.
-    public var lyrics: StructuredLyrics?
 
     enum CodingKeys: String, CodingKey { case id, source, title, artist, album, duration, kind, sameSong, chosen, preview }
+
+    public init(id: String = "", source: String = "", title: String = "", artist: String = "", album: String? = nil,
+                duration: Int? = nil, kind: String = "", sameSong: Bool = false, chosen: Bool = false, preview: [String] = []) {
+        self.id = id
+        self.source = source
+        self.title = title
+        self.artist = artist
+        self.album = album
+        self.duration = duration
+        self.kind = kind
+        self.sameSong = sameSong
+        self.chosen = chosen
+        self.preview = preview
+    }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -61,78 +76,68 @@ public struct LyricsCandidate: Decodable, Sendable, Identifiable, Equatable {
         chosen = c.bool(.chosen) ?? false
         preview = (try? c.decodeIfPresent([String].self, forKey: .preview)) ?? []
     }
+}
 
-    public init(id: String, source: String, title: String, artist: String, album: String?, duration: Int?, kind: String,
-                sameSong: Bool, chosen: Bool, preview: [String], lyrics: StructuredLyrics?) {
-        self.id = id
-        self.source = source
-        self.title = title
-        self.artist = artist
-        self.album = album
-        self.duration = duration
-        self.kind = kind
-        self.sameSong = sameSong
-        self.chosen = chosen
-        self.preview = preview
-        self.lyrics = lyrics
-    }
+/// What setLyricsChoice answers: the song and what it is set to now.
+struct LyricsChoiceAnswer: Decodable {
+    var choice: String?
+}
+
+/// The whole answer to setLyricsChoice, which may leave its part out.
+struct LyricsChoiceBody: Decodable {
+    var lyricsChoice: LyricsChoiceAnswer?
+}
+
+/// What the older lyrics call answers with.
+struct PlainLyricsBody: Decodable {
+    var value: String?
+}
+
+/// The whole answer to the older lyrics call, which may leave its part out.
+struct PlainLyricsAnswer: Decodable {
+    var lyrics: PlainLyricsBody?
+}
+
+/// What asking for a song's lyrics copies sends. A title or artist typed by hand searches for
+/// those instead of the song's own tags.
+public func lyricsCandidatesParams(_ id: String, _ title: String?, _ artist: String?) -> [(String, String)] {
+    var params = [("id", id)]
+    if let title = title?.trimWhitespace(), !title.isEmpty { params.append(("title", title)) }
+    if let artist = artist?.trimWhitespace(), !artist.isEmpty { params.append(("artist", artist)) }
+    return params
 }
 
 extension SubsonicClient {
-    /// The copies an Octo server finds; a title or artist typed by hand searches for those.
-    public func lyricsCandidates(songId: String, title: String? = nil, artist: String? = nil) async throws -> LyricsCandidates {
-        var params = [("id", songId)]
-        if let title = title?.trimmingCharacters(in: .whitespaces), !title.isEmpty { params.append(("title", title)) }
-        if let artist = artist?.trimmingCharacters(in: .whitespaces), !artist.isEmpty { params.append(("artist", artist)) }
-        return try await get("getLyricsCandidates", params, key: "lyricsCandidates", timeout: 60)
+    /// Every set of lyrics the server has for a song. Only for servers that list the songLyrics
+    /// extension. Enhanced (version 2) adds word timings, who sings each line, and translations.
+    public func lyricsBySongId(_ id: String, enhanced: Bool) async throws -> [StructuredLyrics] {
+        let params = enhanced ? [("id", id), ("enhanced", "true")] : [("id", id)]
+        let body: LyricsListBody = try await get("getLyricsBySongId", params, key: "lyricsList")
+        return body.structuredLyrics
     }
 
-    /// Pins a copy, or sets the song back to "auto", or hides it with "none".
-    public func setLyricsChoice(songId: String, candidate: String) async throws {
-        try await call("setLyricsChoice", [("id", songId), ("candidate", candidate)])
-    }
-}
-
-/// lrclib.net, the open lyrics library the other apps ask last. Every call goes through
-/// OnlineLyrics, so lookups, matching and ranking are the same as on the other apps.
-public enum LrcLib {
-    /// The best match for a song, by title, artist, album and length (whole seconds).
-    public static func find(title: String, artist: String, album: String?, duration: Int?, userAgent: String,
-                            session: URLSession = .shared) async throws -> StructuredLyrics? {
-        let library = OnlineLyrics(session: session, userAgent: userAgent)
-        let found = try await library.find(title, artist: artist, album: album ?? "", durationMs: (duration ?? 0) * 1000)
-        return found.map(StructuredLyrics.init(lyrics:))
+    /// Every copy of a song's lyrics the server's sources hold, and what the song is set to. Only
+    /// for servers that list the octoLyrics extension. A title or artist given searches for those
+    /// instead of the song's tags.
+    public func lyricsCandidates(_ id: String, title: String? = nil, artist: String? = nil) async throws -> LyricsCandidates {
+        try await get("getLyricsCandidates", lyricsCandidatesParams(id, title, artist), key: "lyricsCandidates", timeout: 60)
     }
 
-    /// Every copy lrclib holds of a title and artist, any version of it, for the chooser: timed
-    /// copies first.
-    public static func search(title: String, artist: String, userAgent: String, session: URLSession = .shared) async throws -> [LyricsCandidate] {
-        let library = OnlineLyrics(session: session, userAgent: userAgent)
-        return try await library.copiesOf(title, artist: artist, album: "", durationMs: 0).map { candidate($0, artist: artist) }
+    /// Sets a song's lyrics on the server to one copy from lyricsCandidates, to "none" to hide
+    /// them, or to "auto" to let the server find them again. It holds for every app and user on
+    /// the server. Answers with what the song is set to now.
+    @discardableResult
+    public func setLyricsChoice(_ id: String, candidate: String) async throws -> String {
+        let body: LyricsChoiceBody = try await get("setLyricsChoice", [("id", id), ("candidate", candidate)], key: nil)
+        return body.lyricsChoice?.choice ?? candidate
     }
 
-    /// One copy by its lrclib id ("lrclib:123" or "123").
-    public static func copy(_ id: String, userAgent: String, session: URLSession = .shared) async throws -> StructuredLyrics? {
-        guard let number = id.split(separator: ":").last.flatMap({ Int($0) }) else { return nil }
-        let library = OnlineLyrics(session: session, userAgent: userAgent)
-        return try await library.byId(number).map(StructuredLyrics.init(lyrics:))
-    }
-
-    static func candidate(_ copy: OnlineCopy, artist: String) -> LyricsCandidate {
-        let lyrics = StructuredLyrics(lyrics: copy.lyrics)
-        let kind: String
-        if copy.lyrics.instrumental {
-            kind = "instrumental"
-        } else if !copy.lyrics.synced {
-            kind = "plain"
-        } else {
-            kind = copy.lyrics.lines.contains { !$0.words.isEmpty } ? "word" : "line"
-        }
-        return LyricsCandidate(
-            id: "lrclib:\(copy.id)", source: "lrclib", title: copy.title, artist: copy.artist.isEmpty ? artist : copy.artist,
-            album: copy.album.isEmpty ? nil : copy.album, duration: copy.durationMs > 0 ? copy.durationMs / 1000 : nil,
-            kind: kind, sameSong: false, chosen: false,
-            preview: Array(lyrics.line.map(\.value).filter { !$0.isEmpty }.prefix(3)), lyrics: lyrics)
+    /// The older lyrics call, found by artist and title: plain text, or nil when the server has
+    /// none.
+    public func lyrics(artist: String, title: String) async throws -> String? {
+        let body: PlainLyricsAnswer = try await get("getLyrics", [("artist", artist), ("title", title)], key: nil)
+        guard let value = body.lyrics?.value, !value.isBlankText else { return nil }
+        return value
     }
 }
 

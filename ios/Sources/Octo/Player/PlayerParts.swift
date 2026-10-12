@@ -1,238 +1,422 @@
+import AVFoundation
 import AVKit
-import CoreImage
 import MediaPlayer
+import Observation
 import OctoKit
 import SwiftUI
 import UIKit
 
-/// The player's background: the cover, blurred and oversized, slowly drifting, dimmed just
-/// enough for the words on it to read.
-struct CoverWash: View {
-    let coverArt: String?
-    let tone: CoverTone
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+// MARK: Top line
 
-    var body: some View {
-        // Sized by the screen, never by the oversized covers inside it.
-        Color.clear.overlay {
-            TimelineView(.animation(minimumInterval: 1 / 30, paused: reduceMotion)) { time in
-                waves(time.date.timeIntervalSinceReferenceDate)
-            }
-        }
-        .clipped()
-        .ignoresSafeArea()
-        .animation(.easeInOut(duration: 0.5), value: coverArt)
-    }
-
-    private func waves(_ t: TimeInterval) -> some View {
-            ZStack {
-                OctoColor.background
-                Cover(id: coverArt, size: 700, radius: 0)
-                    .scaleEffect(1.5 + 0.08 * sin(t / 9))
-                    .rotationEffect(.degrees(reduceMotion ? 0 : 8 * sin(t / 13)))
-                    .offset(x: reduceMotion ? 0 : 40 * cos(t / 11), y: reduceMotion ? 0 : 30 * sin(t / 7))
-                    .blur(radius: 70)
-                Cover(id: coverArt, size: 700, radius: 0)
-                    .scaleEffect(1.3 + 0.06 * cos(t / 8))
-                    .rotationEffect(.degrees(reduceMotion ? 180 : 180 + 10 * cos(t / 10)))
-                    .offset(x: reduceMotion ? 0 : -50 * sin(t / 12), y: reduceMotion ? 0 : 40 * cos(t / 9))
-                    .blur(radius: 90)
-                    .opacity(0.6)
-                Color.black.opacity(tone.dim)
-            }
-            .saturation(1.6)
-    }
-}
-
-/// How light a cover is, and so what colour the words over it take.
-struct CoverTone: Equatable {
-    /// 0 for black, 1 for white.
-    var luminance: Double = 0.2
-
-    /// Light covers get dark words; dark ones white words over a light dim.
-    var isLight: Bool { luminance > 0.62 }
-    var ink: Color { isLight ? Color(hex: 0x141416) : .white }
-    var muted: Color { isLight ? Color(hex: 0x141416).opacity(0.6) : OctoColor.accent.opacity(0.8) }
-    var artist: Color { isLight ? Color(hex: 0x141416).opacity(0.75) : OctoColor.accent }
-    var dim: Double { isLight ? 0.05 : max(0.15, (luminance - 0.2) * 0.9 + 0.15) }
-
-    /// The average lightness of a cover.
-    static func of(_ image: UIImage) -> CoverTone {
-        guard let input = CIImage(image: image),
-              let filter = CIFilter(name: "CIAreaAverage", parameters: [kCIInputImageKey: input, kCIInputExtentKey: CIVector(cgRect: input.extent)]),
-              let output = filter.outputImage
-        else { return CoverTone() }
-        var pixel = [UInt8](repeating: 0, count: 4)
-        CIContext(options: [.workingColorSpace: NSNull()]).render(output, toBitmap: &pixel, rowBytes: 4,
-                                                                   bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
-                                                                   format: .RGBA8, colorSpace: nil)
-        let r = Double(pixel[0]) / 255, g = Double(pixel[1]) / 255, b = Double(pixel[2]) / 255
-        return CoverTone(luminance: 0.2126 * r + 0.7152 * g + 0.0722 * b)
-    }
-}
-
-/// The glowing line the song's progress runs along. It thickens and shows a thumb while held,
-/// and only seeks when the finger lifts.
-struct LineSlider: View {
-    let value: Double
-    let range: ClosedRange<Double>
+/// The close chevron on clear glass that frosts the background behind it.
+struct PlayerCloseButton: View {
     let ink: Color
-    let onCommit: (Double) -> Void
-    @Binding var dragging: Double?
+    let action: () -> Void
 
     var body: some View {
-        GeometryReader { box in
-            let width = box.size.width
-            let shown = dragging ?? value
-            let fraction = range.upperBound > range.lowerBound ? (shown - range.lowerBound) / (range.upperBound - range.lowerBound) : 0
-            let held = dragging != nil
-            ZStack(alignment: .leading) {
-                Capsule().fill(ink.opacity(0.24)).frame(height: held ? 8 : 3.5)
-                Capsule()
-                    .fill(ink)
-                    .frame(width: max(0, min(width, width * fraction)), height: held ? 8 : 3.5)
-                    .shadow(color: ink.opacity(0.6), radius: 4)
-                    .shadow(color: ink.opacity(0.3), radius: 10)
-                if held {
-                    Circle().fill(ink).frame(width: 9 * 1.6, height: 9 * 1.6)
-                        .offset(x: max(0, min(width, width * fraction)) - 7)
-                }
-            }
-            .frame(height: 48)
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { drag in
-                        let f = max(0, min(1, drag.location.x / width))
-                        dragging = range.lowerBound + f * (range.upperBound - range.lowerBound)
-                    }
-                    .onEnded { _ in
-                        if let target = dragging { onCommit(target) }
-                        dragging = nil
-                    }
-            )
-            .animation(.spring(response: 0.25, dampingFraction: 0.5), value: held)
+        Button(action: action) {
+            IconView(.collapse, size: 20, color: ink)
+                .frame(width: 44, height: 44)
+                .contentShape(Circle())
         }
-        .frame(height: 48)
-        .accessibilityElement()
-        .accessibilityLabel("Position")
-        .accessibilityValue(Duration.seconds(value).formatted(.time(pattern: .minuteSecond)))
-        .accessibilityAdjustableAction { direction in
-            let step = (range.upperBound - range.lowerBound) / 20
-            onCommit(min(range.upperBound, max(range.lowerBound, value + (direction == .increment ? step : -step))))
-        }
+        .buttonStyle(NoPress())
+        .octoGlass(Circle(), film: .clear)
+        .accessibilityLabel("Close player")
     }
 }
 
-/// A title too long for its room scrolls slowly from start to end and back.
-struct Marquee: View {
+/// Where the music plays: the cast mark, lit while it plays on another device. A tap opens the
+/// phone's own list of AirPlay speakers, TVs and headphones.
+struct PlayerCastButton: View {
+    let ink: Color
+    @State private var route = AudioRoute()
+
+    var body: some View {
+        let away = route.elsewhere != nil
+        ZStack {
+            IconView(away ? .castConnected : .cast, size: 22, color: away ? ink : ink.opacity(0.45))
+                .iconGlow(away, color: ink)
+            // The system picker takes the tap; its own icon is kept clear.
+            RoutePicker(tint: .clear)
+                .frame(width: 44, height: 44)
+        }
+        .frame(width: 44, height: 44)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Cast")
+        .accessibilityValue(route.elsewhere.map { "Playing on \($0)" } ?? "Playing on this phone")
+        .accessibilityAddTraits(.isButton)
+    }
+}
+
+/// The device the phone's sound goes to when it is not the phone itself or something worn.
+@MainActor
+@Observable
+final class AudioRoute {
+    private(set) var elsewhere: String?
+    @ObservationIgnored private var watch: NSObjectProtocol?
+
+    init() {
+        read()
+        watch = NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.read() }
+        }
+    }
+
+    private func read() {
+        let away: Set<AVAudioSession.Port> = [.airPlay, .HDMI, .carAudio]
+        elsewhere = AVAudioSession.sharedInstance().currentRoute.outputs.first { away.contains($0.portType) }?.portName
+    }
+}
+
+/// The system's AirPlay and Bluetooth picker.
+struct RoutePicker: UIViewRepresentable {
+    var tint: UIColor = .white
+
+    func makeUIView(context: Context) -> AVRoutePickerView {
+        let view = AVRoutePickerView()
+        view.tintColor = tint
+        view.activeTintColor = tint
+        view.prioritizesVideoDevices = false
+        return view
+    }
+
+    func updateUIView(_ view: AVRoutePickerView, context: Context) {
+        view.tintColor = tint
+        view.activeTintColor = tint
+    }
+}
+
+// MARK: Title
+
+/// A line too long for its room scrolls sideways three times, waiting 1.2 s before each run, at
+/// 30 points a second, with a third of the room between the end and the start again.
+struct PlayerMarquee: View {
     let text: String
     let font: Font
     let color: Color
     @State private var textWidth: CGFloat = 0
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var room: CGFloat = 0
+    @State private var started = Date()
+
+    private static let runs = 3
+    private static let pause = 1.2
+    private static let speed: CGFloat = 30
 
     var body: some View {
-        GeometryReader { box in
-            let overflow = max(0, textWidth - box.size.width)
-            TimelineView(.animation(paused: overflow == 0 || reduceMotion)) { time in
-                let cycle = 4 + Double(overflow) / 30
-                let phase = time.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: cycle * 2) / cycle
-                let travel = phase < 1 ? min(1, max(0, (phase - 0.2) / 0.6)) : min(1, max(0, (1.8 - phase) / 0.6))
-                Text(text)
-                    .font(font)
-                    .foregroundStyle(color)
-                    .fixedSize()
-                    .background(GeometryReader { Color.clear.preference(key: WidthKey.self, value: $0.size.width) })
-                    .offset(x: -overflow * travel)
+        Text(text)
+            .font(font)
+            .lineLimit(1)
+            .hidden()
+            .overlay(alignment: .leading) {
+                let gap = room / 3
+                let distance = textWidth + gap
+                let moving = textWidth > room + 0.5 && room > 0
+                TimelineView(.animation(paused: !moving)) { time in
+                    let x = moving ? offset(time.date, distance) : 0
+                    HStack(spacing: gap) {
+                        line
+                        if moving { line }
+                    }
+                    .offset(x: x)
+                    .frame(width: max(room, 1), alignment: .leading)
+                }
+                .clipped()
             }
-            .frame(width: box.size.width, alignment: .leading)
-            .clipped()
-            .mask(LinearGradient(stops: overflow > 0 ? [.init(color: .clear, location: 0), .init(color: .black, location: 0.03),
-                                                        .init(color: .black, location: 0.97), .init(color: .clear, location: 1)]
-                                                     : [.init(color: .black, location: 0), .init(color: .black, location: 1)],
-                                 startPoint: .leading, endPoint: .trailing))
-        }
-        .onPreferenceChange(WidthKey.self) { textWidth = $0 }
-        .accessibilityLabel(text)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { room = $0 }
+            .background {
+                line.fixedSize().hidden()
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { textWidth = $0 }
+            }
+            .onChange(of: text) { _, _ in started = Date() }
+            .accessibilityElement()
+            .accessibilityLabel(text)
     }
 
-    private struct WidthKey: PreferenceKey {
-        static let defaultValue: CGFloat = 0
-        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+    private var line: some View {
+        Text(text).font(font).foregroundStyle(color).lineLimit(1).fixedSize()
+    }
+
+    private func offset(_ now: Date, _ distance: CGFloat) -> CGFloat {
+        let cycle = Self.pause + Double(distance / Self.speed)
+        let t = now.timeIntervalSince(started)
+        let run = Int(t / cycle)
+        guard run < Self.runs else { return 0 }
+        let local = t - Double(run) * cycle
+        guard local > Self.pause else { return 0 }
+        return -min(CGFloat(local - Self.pause) * Self.speed, distance)
     }
 }
 
-/// The song's quality on clear glass; tapping it spells it out for four seconds.
+/// The song's title (24 bold, scrolling when long, the explicit mark kept still after it) and
+/// its artist, who opens their page.
+struct PlayerTitleBlock: View {
+    let song: Song
+    let ink: Color
+    let accent: Color
+    let openArtist: (() -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                PlayerMarquee(text: song.title, font: .octo(24, .bold, .title1), color: ink)
+                if song.isExplicit {
+                    ExplicitMark(size: 14, color: accent).fixedSize()
+                }
+            }
+            Group {
+                if let openArtist {
+                    Button(action: openArtist) { artist }
+                        .buttonStyle(NoPress())
+                } else {
+                    artist
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var artist: some View {
+        Text(song.byline)
+            .font(.octoBody)
+            .foregroundStyle(accent)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// The heart for a library song: filled, full and glowing while liked; an outline at 60%
+/// otherwise. Liking it gives a small beat.
+struct PlayerHeart: View {
+    let liked: Bool
+    let ink: Color
+    let toggle: () -> Void
+    @State private var beats = 0
+
+    var body: some View {
+        Button {
+            if !liked { beats += 1 }
+            toggle()
+        } label: {
+            IconView(liked ? .liked : .like, size: 24, color: liked ? ink : ink.opacity(0.6))
+                .iconGlow(liked, color: ink)
+                .iconAccent(.pulse, trigger: beats)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(NoPress())
+        .accessibilityLabel("Like")
+        .accessibilityValue(liked ? "In Liked songs" : "Not in Liked songs")
+    }
+}
+
+// MARK: Progress
+
+/// The song's place: a glowing line that seeks where it is tapped or where a drag ends, the time
+/// gone and the time left under it, and between them the quality badge and, when the speed is
+/// not 1x, the speed. The position is read every frame while the song plays.
+struct PlayerProgress: View {
+    let ink: Color
+    let muted: Color
+    let song: Song
+    let openSpeed: () -> Void
+    @Environment(Player.self) private var player
+    @State private var settings = AppSettings.shared
+
+    var body: some View {
+        VStack(spacing: 0) {
+            TimelineView(.animation(paused: !player.isPlaying)) { _ in
+                let position = player.livePosition
+                let length = max(player.duration, position)
+                OctoSlider(value: length > 0 ? min(max(position / length, 0), 1) : 0, onChange: { fraction in
+                    let target = fraction * max(player.duration, player.livePosition)
+                    player.seek(to: target)
+                }, color: ink, trackColor: ink.opacity(0.24))
+                .accessibilityHidden(true)
+            }
+            ZStack {
+                TimelineView(.periodic(from: .now, by: 1)) { _ in
+                    let length = max(player.duration, player.livePosition)
+                    let gone = Int(min(max(player.livePosition, 0), length))
+                    let left = max(Int(length) - gone, 0)
+                    HStack {
+                        Text(asClock(gone))
+                        Spacer()
+                        Text("-" + asClock(left))
+                    }
+                    .font(.octoCaption.monospacedDigit())
+                    .foregroundStyle(muted)
+                }
+                HStack(spacing: 8) {
+                    QualityBadge(song: song, ink: ink)
+                    let speed = settings.player.speed
+                    if speed != 1 {
+                        Button(action: openSpeed) {
+                            Text(Pace.speedLabel(speed))
+                                .font(.octo(10.5, .semibold, .caption2).monospacedDigit())
+                                .foregroundStyle(ink)
+                                .lineLimit(1)
+                                .padding(4)
+                        }
+                        .buttonStyle(NoPress())
+                        .accessibilityLabel("Playback speed \(Pace.speedLabel(speed))")
+                    }
+                }
+            }
+            .padding(.top, -8)
+        }
+    }
+}
+
+/// How the song is encoded, on clear glass once it is known. A tap spells it out for 4 s, or
+/// until tapped again; a new song starts it closed.
 struct QualityBadge: View {
     let song: Song
     let ink: Color
-    @State private var expanded = false
+    @Environment(Player.self) private var player
+    @State private var open = false
+    @State private var closing: Task<Void, Never>?
 
     var body: some View {
-        if let label = song.qualityLabel {
-            Button {
-                withAnimation(.snappy) { expanded = true }
-                Task {
-                    try? await Task.sleep(for: .seconds(4))
-                    withAnimation(.snappy) { expanded = false }
+        Group {
+            if let quality = player.quality {
+                Button(action: toggle) {
+                    HStack(spacing: 5) {
+                        if quality.lossless { IconView(.lossless, size: 13, color: ink) }
+                        Text(open ? quality.full : quality.label.uppercased())
+                            .font(open ? .octo(11, .regular, .caption2) : .octo(10.5, .semibold, .caption2))
+                            .tracking(open ? 0 : 1)
+                            .foregroundStyle(ink)
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(height: 24)
+                    .contentShape(Capsule())
                 }
-            } label: {
-                HStack(spacing: 4) {
-                    if song.isLossless { Image(systemName: "waveform").font(.system(size: 11, weight: .semibold)) }
-                    Text(expanded ? (song.qualityDetail ?? label) : label)
-                        .font(.system(size: expanded ? 11 : 10.5, weight: .semibold))
-                        .tracking(expanded ? 0 : 1)
-                }
-                .foregroundStyle(ink)
-                .padding(.horizontal, 10)
-                .frame(height: 24)
-                .glassEffect(.clear, in: .capsule)
+                .buttonStyle(NoPress())
+                .octoGlass(Capsule(), film: .clear)
+                .animation(.octoSpring(0.8, 400), value: open)
+                .accessibilityLabel("\(quality.label), \(quality.full)")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("\(label), \(song.qualityDetail ?? label)")
+        }
+        .task(id: song.id) {
+            open = false
+            closing?.cancel()
+        }
+    }
+
+    private func toggle() {
+        closing?.cancel()
+        open.toggle()
+        guard open else { return }
+        closing = Task {
+            try? await Task.sleep(for: .seconds(4))
+            if !Task.isCancelled { open = false }
         }
     }
 }
 
-/// The system volume, as Octo's line between two speakers. The line drives a hidden system
-/// volume view, which is the only way an app may set the volume; the hardware buttons move
-/// the line too.
-struct VolumeRow: View {
+// MARK: Transport
+
+/// Previous, play or pause, and next, spread across the row.
+struct PlayerTransport: View {
     let ink: Color
-    @State private var volume = SystemVolume()
-    @State private var dragging: Double?
+    @Environment(Player.self) private var player
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "speaker.fill").font(.system(size: 15)).foregroundStyle(ink.opacity(0.85))
-                .frame(width: 20)
-            GeometryReader { box in
-                let fraction = dragging ?? Double(volume.level)
-                ZStack(alignment: .leading) {
-                    Capsule().fill(ink.opacity(0.24)).frame(height: dragging == nil ? 4 : 7)
-                    Capsule().fill(ink.opacity(0.85)).frame(width: box.size.width * fraction, height: dragging == nil ? 4 : 7)
-                }
-                .frame(maxHeight: .infinity)
-                .contentShape(Rectangle())
-                .gesture(DragGesture(minimumDistance: 0).onChanged { drag in
-                    let value = max(0, min(1, drag.location.x / box.size.width))
-                    dragging = value
-                    volume.set(Float(value))
-                }.onEnded { _ in dragging = nil })
-                .animation(.spring(response: 0.25, dampingFraction: 0.6), value: dragging == nil)
+        HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            TransportButton(nudge: -8, label: "Previous", action: player.previous) {
+                IconView(.previous, size: 44, color: ink)
             }
-            .frame(height: 30)
-            Image(systemName: "speaker.wave.3.fill").font(.system(size: 15)).foregroundStyle(ink.opacity(0.85))
-                .frame(width: 24)
+            Spacer(minLength: 0)
+            TransportButton(nudge: 0, label: player.isPlaying ? "Pause" : "Play", action: player.toggle) {
+                ZStack {
+                    if player.isPlaying {
+                        IconView(.pause, size: 56, color: ink).transition(PlayPop.transition)
+                    } else {
+                        IconView(.play, size: 56, color: ink).transition(PlayPop.transition)
+                    }
+                }
+                .animation(.octoTween(fixed: 150), value: player.isPlaying)
+            }
+            Spacer(minLength: 0)
+            TransportButton(nudge: 8, label: "Next", action: player.next) {
+                IconView(.next, size: 44, color: ink)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+/// The play and pause swap: the new one grows in from 0.6 over 150 ms, the old one shrinks away
+/// over 100 ms.
+private enum PlayPop {
+    static var transition: AnyTransition {
+        .asymmetric(insertion: .scale(scale: 0.6).combined(with: .opacity).animation(.octoTween(fixed: 150)),
+                    removal: .scale(scale: 0.6).combined(with: .opacity).animation(.octoTween(fixed: 100)))
+    }
+}
+
+/// One transport control in a 72 point box: it shrinks while held and springs back; previous and
+/// next nudge the way they go on every tap.
+private struct TransportButton<Icon: View>: View {
+    let nudge: CGFloat
+    let label: String
+    let action: () -> Void
+    @ViewBuilder var icon: Icon
+    @State private var shift: CGFloat = 0
+    @Environment(\.motionScale) private var motion
+
+    var body: some View {
+        Button {
+            action()
+            guard nudge != 0 else { return }
+            withAnimation(.octoTween(fixed: 90)) { shift = CGFloat(motion.travel(Double(nudge))) }
+            Task {
+                try? await Task.sleep(for: .milliseconds(90))
+                withAnimation(.octoSpring(0.5, 400)) { shift = 0 }
+            }
+        } label: {
+            icon
+                .offset(x: shift)
+                .frame(width: 72, height: 72)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(TransportPress())
+        .accessibilityLabel(label)
+    }
+}
+
+private struct TransportPress: ButtonStyle {
+    @Environment(\.motionScale) private var motion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? motion.scale(0.82) : 1)
+            .animation(.octoSpring(0.45, 600), value: configuration.isPressed)
+    }
+}
+
+// MARK: Volume
+
+/// The phone's volume as a line between two speakers. Every step of a drag sets it at once; the
+/// hardware buttons and other apps move it too. A hidden system volume view sets it, so no
+/// system volume panel shows.
+struct PlayerVolume: View {
+    let ink: Color
+    let muted: Color
+    @State private var volume = SystemVolume()
+
+    var body: some View {
+        HStack(spacing: 0) {
+            IconView(.volumeDown, size: 20, color: muted)
+            OctoSlider(value: Double(volume.level), onChange: { volume.set(Float($0)) }, live: true,
+                       color: ink.opacity(0.85), trackColor: ink.opacity(0.24))
+                .padding(.horizontal, 10)
+                .accessibilityLabel("Volume")
+            IconView(.volumeUp, size: 20, color: muted)
         }
         .background(HiddenVolumeView(volume: volume).frame(width: 1, height: 1).opacity(0.01))
-        .accessibilityElement()
-        .accessibilityLabel("Volume")
-        .accessibilityValue("\(Int(volume.level * 100)) percent")
-        .accessibilityAdjustableAction { direction in
-            volume.set(max(0, min(1, volume.level + (direction == .increment ? 0.0625 : -0.0625))))
-        }
     }
 }
 
@@ -274,53 +458,42 @@ private struct HiddenVolumeView: UIViewRepresentable {
     }
 }
 
-/// The system's AirPlay and Bluetooth picker.
-struct RoutePicker: UIViewRepresentable {
-    var tint: UIColor = .white
+// MARK: Switches
 
-    func makeUIView(context: Context) -> AVRoutePickerView {
-        let view = AVRoutePickerView()
-        view.tintColor = tint
-        view.activeTintColor = UIColor(OctoColor.accentHover)
-        view.prioritizesVideoDevices = false
-        return view
-    }
-
-    func updateUIView(_ view: AVRoutePickerView, context: Context) {
-        view.tintColor = tint
-    }
-}
-
-/// A round glass button for the player's chrome.
-struct PlayerChromeButton: View {
-    let icon: String
+/// One of the row of switches: full and glowing while on, at 45% while off.
+struct PlayerSwitch: View {
+    let icon: OctoIcon
     let label: String
+    let lit: Bool
     let ink: Color
-    var lit = true
+    var state: String?
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(ink.opacity(lit ? 1 : 0.45))
-                .shadow(color: lit ? ink.opacity(0.5) : .clear, radius: lit ? 6 : 0)
+            IconView(icon, size: 22, color: lit ? ink : ink.opacity(0.45))
+                .iconGlow(lit, color: ink)
                 .frame(width: 44, height: 44)
-                .contentShape(Circle())
+                .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(NoPress())
         .accessibilityLabel(label)
+        .accessibilityValue(state ?? (lit ? "On" : "Off"))
     }
 }
 
-/// A transport control: the icon squeezes while pressed and nudges the way it goes.
-struct TransportButtonStyle: ButtonStyle {
-    var nudge: CGFloat = 0
+/// The minutes left on a countdown, in a small accent pill on the sleep button's corner.
+struct SleepBadge: View {
+    let minutes: Int
 
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.82 : 1)
-            .offset(x: configuration.isPressed ? nudge : 0)
-            .animation(.spring(response: 0.18, dampingFraction: 0.45), value: configuration.isPressed)
+    var body: some View {
+        Text("\(minutes)")
+            .font(.octo(10, .semibold, .caption2).monospacedDigit())
+            .foregroundStyle(.white)
+            .padding(.horizontal, 6)
+            .frame(height: 18)
+            .background(Capsule().fill(OctoColor.accentFill))
+            .octoGlass(Capsule(), film: .clear)
+            .accessibilityHidden(true)
     }
 }

@@ -325,15 +325,122 @@ struct SongRow: View {
     /// the same space empty when `addSpace` so lengths line up.
     var offersAdd = false
     var addSpace = false
-    var lead: SongLead?
+    /// A place in a ranking, shown before the artwork.
+    var rank: Int?
+    /// The words under the title for the song the row shows, in place of `subtitle`, so a find
+    /// that turns into its library song says the library song's.
+    var describe: ((Song) -> String)?
+    /// Stars the album's main song.
+    var highlight = false
+    /// Every row has a mark after its number: a check for a library song, the add button for a
+    /// find.
+    var ownership = false
+    /// What a tap does in place of playing `list` from this song.
+    var tap: (() -> Void)?
+    /// Where the row's menu was opened from.
     var context = SongMenuContext()
     @Environment(Player.self) private var player
+    @Environment(Router.self) private var router
+    @Environment(Downloads.self) private var downloads
     @Environment(LibraryActions.self) private var actions
 
     var body: some View {
-        TrackRow(track: actions.state.provisional(song), lead: lead ?? (showsCover ? .artwork : .number(number)), subtitle: subtitle,
-                 context: context, offersAdd: offersAdd, addSpace: addSpace) {
-            player.play(list, from: position)
+        if song.isExternal {
+            FindSwap(find: song, offersAdd: offersAdd) { shown in line(shown) }
+        } else {
+            line(song)
+        }
+    }
+
+    private func line(_ shown: Song) -> some View {
+        Button {
+            if let tap { tap() } else { player.play(list, from: position) }
+        } label: {
+            HStack(spacing: 12) {
+                lead(shown)
+                if ownership { OwnershipMark(song: shown) }
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        if highlight {
+                            IconView(.starFilled, size: 14, color: OctoColor.accent)
+                                .accessibilityLabel("Most popular")
+                        }
+                        Text(shown.title)
+                            .font(.octoBodySmall)
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                        if shown.explicitStatus == "explicit" { ExplicitMark() }
+                    }
+                    let words = describe?(shown) ?? subtitle ?? songSubtitle(shown)
+                    if !words.isEmpty {
+                        Text(words)
+                            .font(.octoCaption)
+                            .foregroundStyle(OctoColor.textMuted)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 8)
+                let seconds = shown.isExternal ? Int(knownLengthMs(shown) / 1_000) : shown.duration
+                Text(seconds > 0 ? Duration.seconds(seconds).formatted(.time(pattern: .minuteSecond)) : "")
+                    .font(.octoCaption.monospacedDigit())
+                    .foregroundStyle(OctoColor.textMuted)
+                switch rowEnd(sign(shown), librarySpace: addSpace, hasTrailing: false) {
+                case .addButton: AddToLibraryButton(song: shown, size: 40, iconSize: 22)
+                case .addSpace: Color.clear.frame(width: 40, height: 40)
+                case .trailing: EmptyView()
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 4)
+            .frame(minHeight: 56)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(SqueezeStyle())
+        .longPressMenu {
+            actions.openMenu(.song(SongSubject(track: actions.state.provisional(shown), song: shown, context: context)))
+        }
+        .rowSwipe(.playNext { actions.playNextUndoable(shown) }, enabled: true)
+        .accessibilityAction(named: "Play next") { actions.playNextUndoable(shown) }
+        .accessibilityAction(named: "Add to queue") { player.append([shown]) }
+    }
+
+    /// How the row says its song is not in the library.
+    private func sign(_ shown: Song) -> AddSign {
+        rowAddSign(isFind: shown.isExternal, adopted: downloads.phase(shown.id) == .done, offersAdd: offersAdd)
+    }
+
+    private func isCurrent(_ shown: Song) -> Bool { player.current?.id == shown.id || player.current?.id == song.id }
+
+    @ViewBuilder
+    private func lead(_ shown: Song) -> some View {
+        if showsCover {
+            HStack(spacing: 10) {
+                if let rank {
+                    Text("\(rank)")
+                        .font(.octoCaption.monospacedDigit())
+                        .foregroundStyle(OctoColor.textMuted)
+                        .frame(width: 20, alignment: .trailing)
+                }
+                BadgedCover(id: shown.coverArt, size: 44, radius: OctoRadius.artS, external: sign(shown) == .mark)
+                    .overlay {
+                        if isCurrent(shown) {
+                            RoundedRectangle(cornerRadius: OctoRadius.artS).fill(.black.opacity(0.5))
+                            NowPlayingBars(playing: player.isPlaying)
+                        }
+                    }
+            }
+        } else {
+            let isCurrent = isCurrent(shown)
+            ZStack(alignment: .trailing) {
+                if isCurrent {
+                    NowPlayingBars(playing: player.isPlaying, size: 14)
+                } else if let number {
+                    Text("\(number)")
+                        .font(.octoBodySmall.monospacedDigit())
+                        .foregroundStyle(OctoColor.textMuted)
+                }
+            }
+            .frame(width: 28, alignment: .trailing)
         }
     }
 }

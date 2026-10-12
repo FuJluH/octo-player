@@ -1,36 +1,7 @@
 import Foundation
 
-// The server calls behind the library pages' extras: folders, artist biographies and the actions
-// an Octo server takes on its files.
-
-/// What the server says about an artist: the biography and artists like them.
-public struct ArtistAbout: Decodable, Sendable {
-    public struct Similar: Decodable, Sendable, Hashable {
-        public var id: String
-        public var name: String
-        public var coverArt: String?
-
-        enum CodingKeys: String, CodingKey { case id, name, coverArt }
-
-        public init(from decoder: Decoder) throws {
-            let c = try decoder.container(keyedBy: CodingKeys.self)
-            id = c.string(.id) ?? ""
-            name = c.string(.name) ?? ""
-            coverArt = c.string(.coverArt)
-        }
-    }
-
-    public var biography: String?
-    public var similarArtist: [Similar]
-
-    enum CodingKeys: String, CodingKey { case biography, similarArtist }
-
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        biography = c.string(.biography)
-        similarArtist = (try? c.decodeIfPresent([Similar].self, forKey: .similarArtist)) ?? []
-    }
-}
+// The server calls behind the library pages' folders and the actions an Octo server takes on its
+// files.
 
 /// A folder on the server, as its folder calls list it.
 public struct ServerFolderRef: Sendable, Hashable, Identifiable {
@@ -193,11 +164,6 @@ private struct IndexesBody: Decodable {
 }
 
 extension SubsonicClient {
-    /// An artist's biography and artists like them.
-    public func artistAbout(_ id: String, similar: Int = 20) async throws -> ArtistAbout {
-        try await get("getArtistInfo2", [("id", id), ("count", "\(similar)")], key: "artistInfo2")
-    }
-
     /// The server's folders from the top: its music folders' indexes, then loose songs.
     public func folderTop() async throws -> ServerFolderListing {
         let body: IndexesBody = try await get("getIndexes", key: "indexes")

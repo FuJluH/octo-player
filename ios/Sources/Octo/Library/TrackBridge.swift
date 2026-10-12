@@ -10,67 +10,29 @@ extension LibraryTrack {
         return isServerSource(sourceId) ? nativeId : nil
     }
 
-    /// The cover's id on the server, when the artwork is the server's.
-    var coverId: String? {
-        if case .server(_, let coverId, _, _) = ArtworkRef.decode(artwork) { return coverId }
-        return nil
-    }
-
-    /// The song as the player takes it: the server's copy, by the server's id.
-    var asSong: Song {
-        var song = Song(id: serverSongId ?? nativeId, title: title, artist: artist, album: album,
-                        albumId: serverAlbumId, duration: Int(durationMs / 1_000), coverArt: coverId,
-                        suffix: mimeType.flatMap { $0.split(separator: "/").last.map(String.init) }, isExternal: isFind(id))
-        song.track = trackNo
-        song.discNumber = discNo
-        song.year = year
-        song.contentType = mimeType
-        song.genre = genre.isEmpty ? nil : genre
-        song.explicitStatus = explicit == true ? "explicit" : (explicit == false ? "clean" : nil)
-        song.artistId = serverArtistId
+    /// The song as the queue takes it: by its library id, so the player picks the best copy (a
+    /// download, the phone's file, or the server's stream). A find keeps its own id.
+    var queueSong: Song {
+        var song = asSong
+        if !isFind(id) { song.id = id }
         return song
     }
 
     /// The album's id on the server, from the library's "<source>:<id>".
-    var serverAlbumId: String? { isServerSource(sourceId) ? serverAlbumIdOf(sourceId, albumId) : nil }
+    var serverAlbumId: String? { serverId(of: albumId, sourceId: sourceId) }
 
     /// The artist's id on the server, from the library's "<source>:<id>".
-    var serverArtistId: String? {
-        guard isServerSource(sourceId), artistId.hasPrefix(sourceId + ":") else { return nil }
-        let rest = String(artistId.dropFirst(sourceId.count + 1))
-        return rest.isEmpty || rest.hasPrefix("album:") ? nil : rest
-    }
+    var serverArtistId: String? { serverId(of: artistId, sourceId: sourceId) }
 
     /// Whether a song row offers the song as found online, not in the library.
     var isFound: Bool { isFind(id) }
 }
 
 extension LibraryAlbum {
-    var coverId: String? {
-        if case .server(_, let coverId, _, _) = ArtworkRef.decode(artwork) { return coverId }
-        return nil
-    }
-
-    /// The album as routes and cards take it.
-    var asAlbum: Album {
-        var album = Album(id: id, name: title, artist: artist, coverArt: coverId)
-        album.artistId = artistId
-        album.year = year
-        album.songCount = songCount
-        album.duration = Int(durationMs / 1_000)
-        return album
-    }
-
     /// The release types, one a line as kept.
     var types: [String] { releaseTypes.split(separator: "\n").map(String.init).filter { !$0.isEmpty } }
 }
 
-extension LibraryArtist {
-    var coverId: String? {
-        if case .server(_, let coverId, _, _) = ArtworkRef.decode(artwork) { return coverId }
-        return nil
-    }
-}
 
 /// A picture from the library's artwork: a server's cover, or the stand-in tile while it loads
 /// or when there is none.

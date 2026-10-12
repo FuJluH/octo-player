@@ -196,6 +196,8 @@ private struct SongActionsPage: View {
 
     private var track: LibraryTrack { subject.track }
     private var song: Song { subject.song }
+    /// The song as the queue takes it: a library song by its library id, a find as it is.
+    private var queued: Song { track.isFound ? song : track.queueSong }
     private var state: LibraryState { actions.state }
 
     var body: some View {
@@ -239,11 +241,11 @@ private struct SongActionsPage: View {
     private func row(_ action: SongAction) -> some View {
         switch action {
         case .playNext:
-            GlassMenuAction(.playNext, "Play next") { close { player.playNext([song]) } }
+            GlassMenuAction(.playNext, "Play next") { close { player.playNext([queued]) } }
         case .addToQueue:
-            GlassMenuAction(.addToQueue, "Add to queue") { close { player.append([song]) } }
+            GlassMenuAction(.addToQueue, "Add to queue") { close { player.append([queued]) } }
         case .startRadio:
-            GlassMenuAction(.radio, "Start radio") { close { Task { await actions.startRadio([song]) } } }
+            GlassMenuAction(.radio, "Start radio") { close { Task { await actions.startRadio(queued) } } }
         case .download:
             let state = downloads.state(song.id)
             GlassMenuAction(state == .done ? .check : .addToLibrary, downloadLabel(state), enabled: state == .none) {
@@ -296,7 +298,7 @@ private struct SongActionsPage: View {
             }
         case .goToAlbum:
             GlassMenuAction(.album, "Go to album", enabled: !track.albumId.isEmpty) {
-                close { router.go(.album(Album(id: track.albumId, name: track.album, artist: track.artist, coverArt: track.coverId))) }
+                close { router.go(.album(Album(id: track.albumId, name: track.album, artist: track.artist, coverArt: coverId(of: track.artwork)))) }
             }
         case .goToArtist:
             GlassMenuAction(.artist, "Go to artist", enabled: !track.artistId.isEmpty) {

@@ -46,9 +46,9 @@ final class Backups {
     /// The library's part, once the part of the app that keeps the library is in.
     weak var library: BackupLibrary?
 
-    /// The server's queue sync and new playlists choices, as the Server page keeps them.
-    private let queueSyncStore = UserDefaults(suiteName: "server_queue") ?? .standard
-    private let playlistSyncStore = UserDefaults(suiteName: "playlist_sync") ?? .standard
+    /// The server's queue sync and new playlists choices, where the Server page and
+    /// PlaylistSync keep them.
+    private let syncChoices = ServerSyncChoices()
 
     private init() {}
 
@@ -65,8 +65,8 @@ final class Backups {
         }
         b.library = LibraryBackup(
             excludedFolders: settings.excludedFolders.sorted(),
-            syncQueue: queueSyncStore.object(forKey: "sync_on") as? Bool ?? true,
-            newPlaylistsOnServer: playlistSyncStore.object(forKey: "new_on_server") as? Bool ?? false
+            syncQueue: syncChoices.syncQueue,
+            newPlaylistsOnServer: syncChoices.newPlaylistsOnServer
         )
         if let active = session.active, session.client != nil {
             b.server = ServerBackup(address: BackupFile.plainAddress(active.address.absoluteString), username: active.username)
@@ -134,8 +134,8 @@ final class Backups {
         SoundStore.live?.restorePresets(backup.presets.map { EqPreset(name: $0.name, gains: $0.gains) })
         if let library = backup.library {
             settings.setExcludedFolders(Set(library.excludedFolders))
-            queueSyncStore.set(library.syncQueue, forKey: "sync_on")
-            playlistSyncStore.set(library.newPlaylistsOnServer, forKey: "new_on_server")
+            syncChoices.setSyncQueue(library.syncQueue)
+            syncChoices.setNewPlaylistsOnServer(library.newPlaylistsOnServer)
         }
         if let lb = backup.listenBrainz {
             ListenBrainzSync.shared.restoreChoices(enabled: lb.enabled, sendPlays: lb.sendPlays, nowPlaying: lb.nowPlaying)

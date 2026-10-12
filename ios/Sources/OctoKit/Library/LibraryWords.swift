@@ -19,15 +19,12 @@ public let lengthSlotSample = "00:00"
 /// The album a row names. A song found online often has its own title for an album, which says
 /// nothing new, so that is left off.
 public func rowAlbum(title: String, album: String, find: Bool) -> String {
-    if find, album.trimmingCharacters(in: .whitespaces).caseInsensitiveCompare(title.trimmingCharacters(in: .whitespaces)) == .orderedSame {
-        return ""
-    }
-    return album
+    rowAlbum(Song(id: "", title: title, album: album, isExternal: find))
 }
 
 /// "Artist • Album" under a song's title.
 public func songSubtitle(title: String, artist: String, album: String, find: Bool) -> String {
-    [artist, rowAlbum(title: title, album: album, find: find)].filter { !$0.isEmpty }.joined(separator: " • ")
+    songSubtitle(Song(id: "", title: title, artist: artist, album: album, isExternal: find))
 }
 
 /// "120 of 2,835 songs", for a filtered list.

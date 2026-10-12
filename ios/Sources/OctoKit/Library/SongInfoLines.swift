@@ -137,22 +137,6 @@ public func infoLines(_ facts: SongInfoFacts, zone: TimeZone = .current, locale:
 
 private let losslessCodecs: Set<String> = ["FLAC", "ALAC", "WAV"]
 
-/// A codec's name from a MIME type, as the quality badge names it.
-public func codecName(_ mime: String?) -> String? {
-    switch mime?.lowercased() {
-    case nil: nil
-    case "audio/flac", "audio/x-flac": "FLAC"
-    case "audio/alac": "ALAC"
-    case "audio/mpeg": "MP3"
-    case "audio/mp4a-latm", "audio/mp4", "audio/x-m4a", "audio/m4a", "audio/aac-adts": "AAC"
-    case "audio/opus": "Opus"
-    case "audio/vorbis": "Vorbis"
-    case "audio/ogg", "application/ogg": "Ogg"
-    case "audio/wav", "audio/raw", "audio/x-wav", "audio/wave": "WAV"
-    default: nil
-    }
-}
-
 /// The codec, from the file's type, and whether it is lossless.
 public func formatName(_ mimeType: String?) -> String? {
     guard let codec = codecName(mimeType) else { return nil }

@@ -79,7 +79,7 @@ final class LibraryActions {
         selection.deleteFromPhone = { [weak self] songs in self?.deleteFromPhone(state.tracks(for: songs)) }
         selection.deletableFromDisk = { [weak self] songs in
             guard let self else { return [] }
-            return state.tracks(for: songs).filter(self.canDeleteFromDisk).map { $0.asSong.id }
+            return state.tracks(for: songs).filter(self.canDeleteFromDisk).map(\.id)
         }
         selection.askDeleteFromDisk = { [weak self] songs in self?.askDeleteFromDisk(state.tracks(for: songs)) }
         selection.setLiked = { [weak self] songs, on in self?.setLiked(state.tracks(for: songs), on) }
@@ -121,64 +121,49 @@ final class LibraryActions {
 
     // MARK: Playing
 
-    /// Plays library songs from one of them.
+    /// Plays library songs from one of them, by their library ids, so the player takes each one's
+    /// best copy.
     func play(_ tracks: [LibraryTrack], from start: Int = 0, shuffled: Bool = false) {
-        Task {
-            var songs = await state.playable(tracks)
-            guard !songs.isEmpty else { return }
-            if shuffled {
-                songs.shuffle()
-                player.play(songs, from: 0)
-            } else {
-                let first = tracks.indices.contains(start) ? tracks[start].asSong.title : nil
-                let index = songs.firstIndex { $0.title == first } ?? min(start, songs.count - 1)
-                player.play(songs, from: max(index, 0))
-            }
-        }
+        guard !tracks.isEmpty else { return }
+        player.play(ids: tracks.map(\.id), from: start, shuffled: shuffled)
     }
 
     func playNext(_ tracks: [LibraryTrack]) {
-        Task {
-            let songs = await state.playable(tracks)
-            if !songs.isEmpty { player.playNext(songs) }
-        }
+        if !tracks.isEmpty { player.playNext(tracks.map(\.queueSong)) }
     }
 
     func addToQueue(_ tracks: [LibraryTrack]) {
-        Task {
-            let songs = await state.playable(tracks)
-            if !songs.isEmpty { player.append(songs) }
-        }
+        if !tracks.isEmpty { player.append(tracks.map(\.queueSong)) }
     }
 
     /// Plays a song next, from a swipe or a screen reader, with an Undo that takes that one song
     /// back out.
     func playNextUndoable(_ song: Song) {
-        let before = player.snapshot
-        let had = player.current != nil
-        player.playNext([song])
-        if had { router.show("Playing next", action: "Undo") { [player] in player.restore(before) } }
+        let router = router
+        player.playNextUndoable([song]) { undo in
+            router.show("Playing next", action: "Undo") { undo() }
+        }
     }
 
-    /// Plays the first seed then up to 50 songs like it, in place of the queue. Nothing found
-    /// says so. `exclude` keeps songs out, like the rest of an album.
-    func startRadio(_ seeds: [Song], exclude: Set<String> = []) async {
+    /// Plays the song then up to 50 songs like it, in place of the queue.
+    func startRadio(_ song: Song) async {
+        await player.startRadio(from: song)
+    }
+
+    /// Plays `seed`, then songs like the seeds, in place of the queue. Nothing found says so.
+    private func radio(_ seeds: [LibraryTrack], exclude: Set<String>) async {
         guard let seed = seeds.first else { return }
-        guard let client = session.client else {
+        let ids = await LibraryRadio(data: data).songsLike(seeds, count: 50, exclude: exclude)
+        if ids.isEmpty {
             router.show("No similar songs found")
             return
         }
-        let similar = ((try? await client.radio(from: seed.id, count: 50)) ?? [])
-            .filter { $0.id != seed.id && !exclude.contains($0.id) }
-        if similar.isEmpty {
-            router.show("No similar songs found")
-        } else {
-            player.play([seed] + similar, from: 0, radio: seed)
-        }
+        let first = seed.queueSong
+        player.play([first] + ids.map { Song(id: $0, title: "") }, from: 0, radio: first)
     }
 
-    /// A radio from an album: its most played song here, else its first, then songs like the
-    /// album, leaving the rest of the album out.
+    /// A radio from an album: its most played song here, else its first, then the album's songs as
+    /// seeds; songs like the album play, leaving the rest of the album out.
     func startAlbumRadio(_ albumId: String) async {
         let tracks = await library.albumTracks(albumId)
         let played = await library.playedTracks().filter { $0.track.albumId == albumId }
@@ -186,12 +171,11 @@ final class LibraryActions {
             router.show("No songs to start a radio from")
             return
         }
-        let songs = await state.playable([seed])
-        let exclude = Set(await state.playable(tracks).map(\.id))
-        await startRadio(songs, exclude: exclude.subtracting(songs.map(\.id)))
+        await radio([seed] + tracks.filter { $0.id != seed.id }, exclude: Set(tracks.map(\.id)))
     }
 
-    /// A radio from an artist's most played song, or their first, then songs like theirs.
+    /// A radio from an artist: their most played song, else their first, then up to 200 of their
+    /// songs as seeds; songs like theirs play, theirs among them.
     func startArtistRadio(_ artistId: String) async {
         let played = await library.playedTracks().filter { $0.track.artistId == artistId }
         let tracks = await state.songs(of: .artist(artistId))
@@ -199,7 +183,7 @@ final class LibraryActions {
             router.show("No songs to start a radio from")
             return
         }
-        await startRadio(await state.playable([seed]))
+        await radio([seed] + tracks.filter { $0.id != seed.id }.prefix(200), exclude: [seed.id])
     }
 
     // MARK: Likes, ratings, favorites and pins

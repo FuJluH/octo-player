@@ -57,7 +57,7 @@ struct AlbumView: View {
             }
         }
         .barClearance()
-        .pageArtwork(.album(album), shown?.coverId ?? album.coverArt)
+        .pageArtwork(.album(album), shown.flatMap { coverId(of: $0.artwork) } ?? album.coverArt)
         .backStopsPicking()
         .selectableSongs(state.pickables(listed))
         .libraryRefreshable {}
@@ -323,6 +323,7 @@ struct ArtistView: View {
     @Environment(LibraryActions.self) private var actions
     @Environment(Session.self) private var session
     @Environment(Downloads.self) private var downloads
+    @Environment(ArtistExtrasSource.self) private var extrasSource
     @State private var artist: LibraryArtist?
     @State private var songs: [LibraryTrack] = []
     @State private var albums: [LibraryAlbum] = []
@@ -353,7 +354,7 @@ struct ArtistView: View {
             .onChange(of: order) { _, _ in proxy.scrollTo("albums", anchor: .top) }
         }
         .barClearance()
-        .pageArtwork(.artist(id: id, name: name), artist?.coverId)
+        .pageArtwork(.artist(id: id, name: name), artist.flatMap { coverId(of: $0.artwork) })
         .backStopsPicking()
         .selectableSongs(state.pickables(songs))
         .libraryRefreshable {}
@@ -379,32 +380,18 @@ struct ArtistView: View {
 
     /// Top songs, the biography and similar artists, from the server.
     private func readExtras() async {
-        guard let client = session.client else { return }
-        let serverId = artist.flatMap { a in a.id.hasPrefix(a.sourceId + ":") ? String(a.id.dropFirst(a.sourceId.count + 1)) : nil } ?? id
-        let named = artist?.name ?? name
-        let ranked: [Song]
-        if session.profile?.has("octoTopSongs") == true, let list = try? await client.artistTopSongs(artist: named, id: serverId, count: 10) {
-            ranked = list.songs
-        } else {
-            ranked = ((try? await client.topSongs(artist: named, count: 10)) ?? []).filter { sameArtist($0.artist ?? "", named) }
+        guard let artist, var extras = await extrasSource.forArtist(artist) else { return }
+        if AppSettings.shared.player.libraryOnly { extras = extras.inLibraryOnly() }
+        top = extras.topSongs
+        offersAdd = top.contains(where: \.isFound)
+        biography = extras.about
+        var people: [(id: String, name: String, coverArt: String?, library: LibraryArtist?)] = []
+        for other in extras.similar {
+            var mine: LibraryArtist?
+            if let id = other.libraryId { mine = await library.artist(id) }
+            people.append((mine?.id ?? other.serverId, mine?.name ?? other.name, coverId(of: mine?.artwork ?? other.artwork), mine))
         }
-        let held = Dictionary((await library.libraryTracks(for: ranked.filter { !$0.isExternal })).map { ($0.nativeId, $0) },
-                              uniquingKeysWith: { a, _ in a })
-        let libraryOnly = AppSettings.shared.player.libraryOnly
-        top = Array(ranked.prefix(10)).map { held[$0.id] ?? state.provisional($0) }.filter { !libraryOnly || !$0.isFound }
-        if top.contains(where: \.isFound) { offersAdd = true }
-        if let about = try? await client.artistAbout(serverId) {
-            biography = about.biography.flatMap(cleanBiography)
-            var seen = Set<String>()
-            var people: [(id: String, name: String, coverArt: String?, library: LibraryArtist?)] = []
-            for other in about.similarArtist where !other.id.isEmpty && other.name.caseInsensitiveCompare(named) != .orderedSame {
-                guard seen.insert(other.id).inserted else { continue }
-                let mine = await library.resolveArtist(other.id, name: other.name)
-                if libraryOnly, mine == nil { continue }
-                people.append((mine?.id ?? other.id, mine?.name ?? other.name, mine?.coverId ?? other.coverArt, mine))
-            }
-            similar = people
-        }
+        similar = people
     }
 
     private var header: some View {
@@ -420,9 +407,7 @@ struct ArtistView: View {
             HStack(spacing: 0) {
                 if !songs.isEmpty {
                     QuietAction(icon: .radio, text: "Radio") {
-                        Task {
-                            await actions.startRadio(await state.playable(Array(songs.prefix(1))))
-                        }
+                        if let artist { Task { await actions.startArtistRadio(artist.id) } }
                     }
                     .padding(.leading, -10)
                 }
@@ -525,51 +510,6 @@ struct ArtistView: View {
     }
 }
 
-/// A biography as plain text: the "Read more" link servers add at the end is dropped, then every
-/// tag, and the rest is written out as characters with tidy spacing. Nothing when no words are left.
-func cleanBiography(_ html: String) -> String? {
-    var text = html.trimmingCharacters(in: .whitespacesAndNewlines)
-    func replace(_ pattern: String, _ with: String, options: NSRegularExpression.Options = [.caseInsensitive]) {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else { return }
-        text = regex.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: with)
-    }
-    replace(#"<a\b[^>]*>\s*read more\b[^<]*</a>\s*\.?\s*$"#, "")
-    replace(#"<br\s*/?>|</p\s*>"#, "\n")
-    replace(#"<[^>]*>"#, "", options: [])
-    if let numbered = try? NSRegularExpression(pattern: "&#(x[0-9a-fA-F]+|[0-9]+);") {
-        var out = ""
-        var last = text.startIndex
-        for match in numbered.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
-            guard let whole = Range(match.range, in: text), let code = Range(match.range(at: 1), in: text) else { continue }
-            out += text[last..<whole.lowerBound]
-            let digits = String(text[code])
-            let value = digits.hasPrefix("x") ? UInt32(digits.dropFirst(), radix: 16) : UInt32(digits)
-            if let value, let scalar = Unicode.Scalar(value) { out.unicodeScalars.append(scalar) } else { out += text[whole] }
-            last = whole.upperBound
-        }
-        out += text[last...]
-        text = out
-    }
-    for (name, character) in [("&quot;", "\""), ("&apos;", "'"), ("&lt;", "<"), ("&gt;", ">"), ("&nbsp;", " ")] {
-        text = text.replacingOccurrences(of: name, with: character, options: .caseInsensitive)
-    }
-    text = text.replacingOccurrences(of: "&amp;", with: "&", options: .caseInsensitive)
-    replace("[ \t\u{00A0}]+", " ", options: [])
-    if let gaps = try? NSRegularExpression(pattern: #"\s*\n\s*(\n\s*)*"#) {
-        var out = ""
-        var last = text.startIndex
-        for match in gaps.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
-            guard let whole = Range(match.range, in: text) else { continue }
-            out += text[last..<whole.lowerBound]
-            out += text[whole].filter { $0 == "\n" }.count > 1 ? "\n\n" : "\n"
-            last = whole.upperBound
-        }
-        out += text[last...]
-        text = out
-    }
-    text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-    return text.isEmpty ? nil : text
-}
 
 // MARK: Playlists
 

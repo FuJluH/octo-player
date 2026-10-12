@@ -106,19 +106,22 @@ final class LibraryState {
     /// A library song as a plain server song shows it, before the library is asked: enough for
     /// its row and its menu. Anything that changes it reads the library's own row first.
     func provisional(_ song: Song) -> LibraryTrack {
-        let source = library.serverInUse ?? ""
+        let onPhone = song.id.hasPrefix(deviceSource + ":")
+        let source = onPhone ? deviceSource : library.serverInUse ?? ""
+        let id = libraryId(song) ?? song.id
+        let native = isFind(id) ? String(id.dropFirst(findPrefix.count)) : Octo.serverId(of: id, sourceId: source) ?? song.id
         let prefixed: (String?) -> String = { id in
             guard let id, !id.isEmpty else { return "" }
             return id.hasPrefix(source + ":") ? id : "\(source):\(id)"
         }
         let art = song.coverArt.flatMap { $0.isEmpty ? nil : ArtworkRef.server(sourceId: source, coverId: $0, online: song.isExternal).encode() }
         return LibraryTrack(
-            id: libraryId(song) ?? song.id, sourceId: source, nativeId: song.id, title: song.title,
+            id: id, sourceId: source, nativeId: native, title: song.title,
             searchKey: searchKey(song.title), sortKey: sortKey(song.title), artist: song.artist ?? song.byline,
             artistId: song.isExternal ? "" : prefixed(song.artistId), album: song.album ?? "",
             albumId: song.isExternal ? "" : prefixed(song.albumId), trackNo: song.track, discNo: song.discNumber, year: song.year,
             durationMs: Int64(song.duration) * 1_000, addedAt: 0,
-            mimeType: mimeTypeOf(contentType: song.contentType, suffix: song.suffix), artwork: art, onPhone: false,
+            mimeType: mimeTypeOf(contentType: song.contentType, suffix: song.suffix), artwork: art, onPhone: onPhone,
             rating: 0, explicit: song.explicitStatus.map { $0 == "explicit" })
     }
 
@@ -133,8 +136,10 @@ final class LibraryState {
         OctoKit.pinSpot(pins.map { "\($0.kind)|\($0.itemId)" }, "\(kind)|\(id)")
     }
 
-    /// The library id a plain server song has here.
+    /// The library id a plain song has here. A song that carries one already (as the queue's do)
+    /// keeps it.
     func libraryId(_ song: Song) -> String? {
+        if isServerSource(song.id) || song.id.hasPrefix(deviceSource + ":") || isFind(song.id) { return song.id }
         if song.isExternal { return findId(song.id) }
         return library.serverInUse.map { "\($0):\(song.id)" }
     }
@@ -145,7 +150,7 @@ final class LibraryState {
     /// song's id). The bar's songs are found again by `tracks(for:)`.
     func pickables(_ tracks: [LibraryTrack], key: (LibraryTrack) -> String = \.id) -> [Pickable] {
         tracks.map { track in
-            let song = track.asSong
+            let song = track.queueSong
             bySongId[song.id] = track
             return Pickable(key: key(track), song: song)
         }
@@ -153,7 +158,7 @@ final class LibraryState {
 
     func pickables(_ rows: [PlaylistTrack]) -> [Pickable] {
         rows.map { row in
-            let song = row.track.asSong
+            let song = row.track.queueSong
             bySongId[song.id] = row.track
             return Pickable(key: String(row.itemId), song: song)
         }
@@ -227,20 +232,6 @@ final class LibraryState {
         return serverSongId(copies: await library.copies(track.id), serverInUse: server)
     }
 
-    /// Plain songs for library songs, by their server copies; songs with no copy there are left out.
-    func playable(_ tracks: [LibraryTrack]) async -> [Song] {
-        var out: [Song] = []
-        for track in tracks {
-            if track.serverSongId != nil {
-                out.append(track.asSong)
-            } else if let id = await serverId(track) {
-                var song = track.asSong
-                song.id = id
-                out.append(song)
-            }
-        }
-        return out
-    }
 }
 
 /// What a collection menu or a list of collections is about.
