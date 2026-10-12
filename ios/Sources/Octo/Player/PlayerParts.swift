@@ -173,12 +173,13 @@ struct PlayerHeart: View {
 
 /// The song's place: a glowing line that seeks where it is tapped or where a drag ends, the time
 /// gone and the time left under it, and between them the quality badge and, when the speed is
-/// not 1x, the speed. The position is read every frame while the song plays.
+/// not 1x, the speed, which opens the speed card in a popover. The position is read every frame
+/// while the song plays.
 struct PlayerProgress: View {
     let ink: Color
     let muted: Color
     let song: Song
-    let openSpeed: () -> Void
+    @Binding var speedOpen: Bool
     @Environment(Player.self) private var player
     @State private var settings = AppSettings.shared
 
@@ -210,7 +211,7 @@ struct PlayerProgress: View {
                     QualityBadge(song: song, ink: ink)
                     let speed = settings.player.speed
                     if speed != 1 {
-                        Button(action: openSpeed) {
+                        Button { speedOpen = true } label: {
                             Text(Pace.speedLabel(speed))
                                 .font(.octo(10.5, .semibold, .caption2).monospacedDigit())
                                 .foregroundStyle(ink)
@@ -220,6 +221,9 @@ struct PlayerProgress: View {
                         .buttonStyle(NoPress())
                         .accessibilityLabel("Playback speed \(Pace.speedLabel(speed))")
                     }
+                }
+                .glassPopover(isPresented: $speedOpen) {
+                    TimeCard(start: .speed) { speedOpen = false }
                 }
             }
             .padding(.top, -8)

@@ -28,20 +28,18 @@ private let queueRowHeight: CGFloat = 56
 private let comingFill = OctoColor.background.mix(with: OctoColor.accent, by: 0.05)
 private let nowFill = Color(hex: 0x1A1A1B).mix(with: OctoColor.accent, by: 0.12)
 
-/// Up next: the songs already played, the song on now in its own card, and the songs to come in
-/// the order they play. A song to come can be dragged by its handle to another place (not while
-/// shuffle is on) or swiped left to take it out; a long press on any song offers more.
+/// Up next, in a sheet: the songs already played, the song on now in its own card, and the songs
+/// to come in the order they play. A song to come can be dragged by its handle to another place
+/// (not while shuffle is on) or swiped left to take it out; a long press on any song opens its
+/// context menu.
 struct QueueSheet: View {
     @Environment(Player.self) private var player
     @Environment(Router.self) private var router
     @Environment(\.dataServices) private var data
     @State private var removed: Set<String> = []
     @State private var drag: QueueDrag?
-    @State private var menuEntry: QueueEntry?
-    @State private var showsMenu = false
     @State private var saving = false
     @State private var ticks = 0
-    @State private var presses = 0
     @State private var position = ScrollPosition(edge: .top)
     @State private var scrollOffset: CGFloat = 0
     @State private var maxOffset: CGFloat = 0
@@ -101,6 +99,8 @@ struct QueueSheet: View {
                 }
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { viewport = $0 }
             }
+            .padding(.top, 24)
+            .frame(maxHeight: .infinity, alignment: .top)
             .onAppear {
                 guard let now else { return }
                 DispatchQueue.main.async { reader.scrollTo(now.id, anchor: .top) }
@@ -116,17 +116,8 @@ struct QueueSheet: View {
                 }
             }
         }
-        .sensoryFeedback(.impact(weight: .medium), trigger: presses)
         .onChange(of: player.upNextSlots) { _, _ in removed = [] }
         .onChange(of: player.playedSlots) { _, _ in removed = [] }
-        .glassPopup(isPresented: $showsMenu, title: "Song in the queue") {
-            if let menuEntry { QueueRowMenu(entry: menuEntry, dismiss: { showsMenu = false }, remove: remove) }
-        }
-        .glassPopup(isPresented: $saving, title: "Save as playlist") {
-            PopupNameForm(title: "New playlist", placeholder: "Playlist name", action: "Create") { name in
-                save(name)
-            }
-        }
     }
 
     // MARK: Heading and tools
@@ -149,6 +140,9 @@ struct QueueSheet: View {
                 tool("Clear", enabled: hasOthers) { clear() }
                 tool("Remove played", enabled: hasPlayed) { removePlayed() }
                 tool("Save as playlist", enabled: now != nil) { saving = true }
+                    .namePopover(isPresented: $saving, title: "New playlist", placeholder: "Playlist name", action: "Create") { name in
+                        save(name)
+                    }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
@@ -177,11 +171,11 @@ struct QueueSheet: View {
         QueueSongRow(song: entry.song)
             .opacity(0.5)
             .padding(.horizontal, 20)
+            .contentShape(.contextMenuPreview, Rectangle())
             .contentShape(Rectangle())
             .onTapGesture { player.jump(toKey: entry.id) }
-            .onLongPressGesture { openMenu(entry) }
+            .contextMenu { QueueRowMenu(entry: entry, remove: remove) }
             .accessibilityAction(named: "Play") { player.jump(toKey: entry.id) }
-            .accessibilityAction(named: "Song options") { openMenu(entry) }
             .id(entry.id)
     }
 
@@ -190,11 +184,10 @@ struct QueueSheet: View {
             .padding(.horizontal, 8)
             .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(nowFill))
             .octoGlass(RoundedRectangle(cornerRadius: 12, style: .continuous), film: .clear)
+            .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .contextMenu { QueueRowMenu(entry: entry, remove: remove) }
             .padding(.horizontal, 12)
             .padding(.vertical, 4)
-            .contentShape(Rectangle())
-            .onLongPressGesture { openMenu(entry) }
-            .accessibilityAction(named: "Song options") { openMenu(entry) }
             .id(entry.id)
     }
 
@@ -212,15 +205,15 @@ struct QueueSheet: View {
             }
             .padding(.horizontal, 20)
             .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(comingFill))
+            .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 12, style: .continuous))
             .contentShape(Rectangle())
             .onTapGesture { player.jump(toKey: entry.id) }
-            .onLongPressGesture { openMenu(entry) }
+            .contextMenu { QueueRowMenu(entry: entry, remove: remove) }
         }
         .elevation3Shape(moving)
         .offset(y: moving ? (drag?.lift ?? 0) : 0)
         .zIndex(moving ? 1 : 0)
         .accessibilityAction(named: "Play") { player.jump(toKey: entry.id) }
-        .accessibilityAction(named: "Song options") { openMenu(entry) }
         .accessibilityAction(named: "Remove") { remove(entry) }
         .id(entry.id)
     }
@@ -312,12 +305,6 @@ struct QueueSheet: View {
     }
 
     // MARK: Edits
-
-    private func openMenu(_ entry: QueueEntry) {
-        presses += 1
-        menuEntry = entry
-        showsMenu = true
-    }
 
     /// Takes the song out by its key: it leaves the list at once, then the queue.
     private func remove(_ entry: QueueEntry) {
@@ -512,40 +499,27 @@ extension View {
     }
 }
 
-/// The menu for one song in the queue: what can be done with it where it stands.
+/// The context menu for one song in the queue: what can be done with it where it stands. The
+/// row itself, lifted above the menu, shows which song it is.
 private struct QueueRowMenu: View {
     let entry: QueueEntry
-    let dismiss: () -> Void
     let remove: (QueueEntry) -> Void
     @Environment(Player.self) private var player
     @Environment(Router.self) private var router
 
     var body: some View {
         let place = place
-        GlassMenuPage {
-            GlassMenuHeader(title: entry.song.title, subtitle: entry.song.byline) {
-                BadgedCover(id: entry.song.coverArt, size: 40, radius: 6, external: entry.song.isExternal)
-            }
-            GlassMenuSeparator()
-        } content: {
+        Section {
             if place != .now {
-                GlassMenuAction(.playNext, "Play next") {
-                    playNext()
-                    dismiss()
-                }
+                Button("Play next", systemImage: OctoIcon.playNext.symbol) { playNext() }
             }
             if place != .played {
-                GlassMenuAction(.sleepTimer, "Stop after this song") {
-                    stopAfter(place)
-                    dismiss()
-                }
+                Button("Stop after this song", systemImage: OctoIcon.sleepTimer.symbol) { stopAfter(place) }
             }
-            if place != .now {
-                GlassMenuSeparator()
-                GlassMenuAction(.delete, "Remove from queue") {
-                    remove(entry)
-                    dismiss()
-                }
+        }
+        if place != .now {
+            Section {
+                Button("Remove from queue", systemImage: OctoIcon.delete.symbol, role: .destructive) { remove(entry) }
             }
         }
     }

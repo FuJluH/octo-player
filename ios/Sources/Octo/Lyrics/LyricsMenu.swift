@@ -1,76 +1,47 @@
 import OctoKit
 import SwiftUI
 
-/// What the lyrics menu shows: its options, or the timing control in their place.
-enum LyricsMenuPage: Equatable { case options, timing }
-
-/// The lyrics menu, a glass card beside the lyrics bar's "..." button: where the lyrics came
-/// from, then other lyrics to choose, the timing, and hiding them for this song, or showing them
-/// again. It opens on its first page each time; back goes back a page before closing.
-struct LyricsMenuContent: View {
-    let pages: PopupPages<LyricsMenuPage>
+/// The lyrics menu, the system menu of the lyrics bar's "..." button: where the lyrics came
+/// from heads it, then other lyrics to choose, the timing, and hiding them for this song, or
+/// showing them again.
+struct LyricsMenuItems: View {
     let trackId: String?
-    let dismiss: () -> Void
+    let openTiming: () -> Void
     let chooseOther: () -> Void
     @Environment(LyricsStore.self) private var store
 
     var body: some View {
         if let trackId {
-            PopupPager(pages: pages) { page, _ in
-                VStack(alignment: .leading, spacing: 0) {
-                    switch page {
-                    case .options: options(trackId)
-                    case .timing:
-                        GlassMenuBack(title: "Lyrics timing") { pages.back() }
-                        TimingControl(trackId: trackId)
+            let state = store.state
+            Section(sourceLine(state)) {
+                if state == .hiddenForSong {
+                    Button("Show lyrics again", systemImage: "eye") { Task { await store.show(trackId) } }
+                    Button("Choose other lyrics", systemImage: "text.badge.checkmark", action: chooseOther)
+                } else {
+                    let lyrics = state.lyrics
+                    Button(action: chooseOther) {
+                        Label {
+                            Text(lyrics == nil ? "Find lyrics" : "Choose other lyrics")
+                            Text("Every copy that can be found for this song")
+                        } icon: { Image(systemName: lyrics == nil ? "magnifyingglass" : "text.badge.checkmark") }
+                    }
+                    if let lyrics, lyrics.synced, !lyrics.instrumental {
+                        let output = LyricsOutput.timing
+                        let moved = timingSummary(LyricsSongTiming.shared.offset(trackId), output.ms, LyricsOutput.current.label,
+                                                  outputAutomatic: output.automatic)
+                        Button(action: openTiming) {
+                            Label {
+                                Text("Adjust timing")
+                                Text(moved ?? "Move the words earlier or later")
+                            } icon: { Image(systemName: "clock.arrow.2.circlepath") }
+                        }
+                    }
+                    if lyrics != nil {
+                        Button("Hide lyrics for this song", systemImage: "eye.slash") { Task { await store.hide(trackId) } }
                     }
                 }
-                .frame(width: 280)
-                .padding(6)
             }
         }
-    }
-
-    @ViewBuilder
-    private func options(_ trackId: String) -> some View {
-        let state = store.state
-        let entries = entries(state, trackId)
-        GlassMenuTitle(sourceLine(state))
-        GlassMenuOptions(options: entries.map(\.0), selected: -1) { entries[$0].1() }
-    }
-
-    private func entries(_ state: LyricsState, _ trackId: String) -> [(Choice, () -> Void)] {
-        if state == .hiddenForSong {
-            return [
-                (Choice("Show lyrics again"), {
-                    Task { await store.show(trackId) }
-                    dismiss()
-                }),
-                (Choice("Choose other lyrics"), chooseAway),
-            ]
-        }
-        let lyrics = state.lyrics
-        var list: [(Choice, () -> Void)] = [
-            (Choice(lyrics == nil ? "Find lyrics" : "Choose other lyrics", detail: "Every copy that can be found for this song"), chooseAway),
-        ]
-        if let lyrics, lyrics.synced, !lyrics.instrumental {
-            let output = LyricsOutput.timing
-            let moved = timingSummary(LyricsSongTiming.shared.offset(trackId), output.ms, LyricsOutput.current.label,
-                                      outputAutomatic: output.automatic)
-            list.append((Choice("Adjust timing", detail: moved ?? "Move the words earlier or later"), { pages.open(.timing) }))
-        }
-        if lyrics != nil {
-            list.append((Choice("Hide lyrics for this song"), {
-                Task { await store.hide(trackId) }
-                dismiss()
-            }))
-        }
-        return list
-    }
-
-    private func chooseAway() {
-        dismiss()
-        chooseOther()
     }
 
     /// Where the lyrics came from, in plain words, at the top of the menu.
@@ -85,8 +56,30 @@ struct LyricsMenuContent: View {
     }
 }
 
+/// Lyrics timing, in a popover beside the lyrics bar's "..." button: its heading, then the
+/// control.
+struct TimingCard: View {
+    let trackId: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Lyrics timing")
+                .font(.octoLabel)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.top, 14)
+                .padding(.bottom, 8)
+                .accessibilityAddTraits(.isHeader)
+            TimingControl(trackId: trackId)
+        }
+        .padding(.horizontal, 6)
+        .padding(.bottom, 6)
+        .frame(width: 292)
+    }
+}
+
 /// Moves the lyrics earlier or later a twentieth of a second a tap, while they keep playing
-/// behind the menu: for this song, and for every song on the output playing now.
+/// behind the card: for this song, and for every song on the output playing now.
 struct TimingControl: View {
     let trackId: String
     @State private var songs = LyricsSongTiming.shared
