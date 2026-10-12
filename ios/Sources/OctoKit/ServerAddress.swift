@@ -1,0 +1,57 @@
+import Foundation
+
+/// Turns whatever someone typed into a server's base address, the way the other Octo apps do
+/// (`subsonic/.../ServerUrl.kt`, `ServerScheme.kt`): "192.168.50.21:5274",
+/// "https://music.example.com/" and ".../rest" all work. With no scheme typed, plain http on
+/// the home network, where servers seldom have a certificate, and https anywhere else.
+public enum ServerAddress {
+    public static func parse(_ typed: String) -> URL? {
+        var text = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        if !text.contains("://") {
+            guard let probe = normalize("http://" + text) else { return nil }
+            text = (isPrivate(probe) ? "http://" : "https://") + text
+        }
+        return normalize(text)
+    }
+
+    /// The base address: no name or password, no query, and a pasted `/rest` or `/app` dropped.
+    static func normalize(_ text: String) -> URL? {
+        guard var parts = URLComponents(string: text),
+              let scheme = parts.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              let host = parts.host, !host.isEmpty
+        else { return nil }
+        parts.scheme = scheme
+        parts.user = nil
+        parts.password = nil
+        parts.query = nil
+        parts.fragment = nil
+        var segments = parts.path.split(separator: "/").map(String.init)
+        if let last = segments.last, last == "rest" || last == "app" { segments.removeLast() }
+        parts.path = segments.isEmpty ? "" : "/" + segments.joined(separator: "/")
+        return parts.url
+    }
+
+    /// True when the address stays inside a home network, going only by the address itself.
+    public static func isPrivate(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return false }
+        if host == "localhost" || host.hasSuffix(".local") || host.hasSuffix(".lan") || host.hasSuffix(".home.arpa") {
+            return true
+        }
+        if host.contains(":") {
+            return host == "::1" || host.hasPrefix("fc") || host.hasPrefix("fd") || host.hasPrefix("fe80")
+        }
+        let parts = host.split(separator: ".").compactMap { Int($0) }
+        guard parts.count == 4 else { return false }
+        let (a, b) = (parts[0], parts[1])
+        return a == 10 || a == 127 || (a == 172 && (16...31).contains(b))
+            || (a == 192 && b == 168) || (a == 169 && b == 254)
+    }
+
+    /// An address as people read it: no slash at the end.
+    public static func shown(_ url: URL) -> String {
+        var text = url.absoluteString
+        while text.hasSuffix("/") { text.removeLast() }
+        return text
+    }
+}
