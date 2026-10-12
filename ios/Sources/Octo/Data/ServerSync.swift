@@ -212,6 +212,8 @@ final class ServerSync {
                 if Task.isCancelled { break }
                 await step.run()
             }
+            // A copy cut short saves nothing of itself, so it is made again.
+            try Task.checkCancellation()
             prefs.set(sourceId, "source_id", account.id)
             prefs.set(epochNowMs(), "synced_at", account.id)
             prefs.set(catalog.tracks.count, "songs", account.id)

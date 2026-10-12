@@ -30,7 +30,7 @@ struct BadgedCover: View {
     var external = false
 
     var body: some View {
-        Cover(id: id, size: size, radius: radius)
+        Cover(id: id, size: size, radius: radius, online: external)
             .overlay(alignment: .bottomTrailing) {
                 if external { NotInLibraryMark(artSize: size, round: radius >= size / 2) }
             }
@@ -779,7 +779,7 @@ extension LibraryState {
             guard let id, !id.isEmpty else { return "" }
             return id.hasPrefix(source + ":") ? id : "\(source):\(id)"
         }
-        let art = album.coverArt.flatMap { $0.isEmpty ? nil : ArtworkRef.server(sourceId: source, coverId: $0).encode() }
+        let art = artworkOf(cover: album.coverArt, source: source)
         let isLibraryId = album.id.hasPrefix(source + ":") || source.isEmpty
         return LibraryAlbum(
             id: isLibraryId ? album.id : prefixed(album.id), sourceId: source,

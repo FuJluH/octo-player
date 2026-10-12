@@ -182,14 +182,18 @@ final class DeviceLibrary {
                 let title = item.title ?? ""
                 let added = Int64(item.dateAdded.timeIntervalSince1970)
                 let year = (item.value(forProperty: MPMediaItemPropertyReleaseDate) as? Date).map { Calendar(identifier: .gregorian).component(.year, from: $0) }
-                files.append(DeviceFile.scanned(
+                var file = DeviceFile.scanned(
                     id: Int64(bitPattern: item.persistentID), uri: url.absoluteString,
                     fileName: title.isEmpty ? url.lastPathComponent : "\(title).\(ext)", folder: musicAppFolder + "/",
                     modifiedSeconds: added, sizeBytes: 0, durationMs: Int64((item.playbackDuration * 1000).rounded()),
                     addedSeconds: added, nowSeconds: nowSeconds, mimeType: mimeFor(ext),
                     title: item.title, artist: item.artist, albumArtist: item.albumArtist, album: item.albumTitle,
                     track: item.albumTrackNumber > 0 ? item.albumTrackNumber : nil, disc: item.discNumber > 0 ? item.discNumber : nil,
-                    year: year, genre: item.genre))
+                    year: year, genre: item.genre)
+                // The Music app gives no time a song last changed, so what it says of the song
+                // stands in: a song tagged anew and synced again has its own tags read again.
+                file.modifiedAt = changeMark(item)
+                files.append(file)
             }
         }
         let root = filesFolder
@@ -212,6 +216,17 @@ final class DeviceLibrary {
             }
         }
         return Found(files: files, protected: protected)
+    }
+
+    /// A mark that changes whenever the Music app's reading of a song does.
+    nonisolated private static func changeMark(_ item: MPMediaItem) -> Int64 {
+        let reading = [item.title, item.artist, item.albumArtist, item.albumTitle, item.genre, item.composer].map { $0 ?? "" }
+            + ["\(item.albumTrackNumber)", "\(item.discNumber)", "\(Int(item.playbackDuration * 1000))",
+               "\((item.value(forProperty: MPMediaItemPropertyReleaseDate) as? Date)?.timeIntervalSince1970 ?? 0)"]
+        let bytes = Hashes.sha1(Array(reading.joined(separator: "\u{1F}").utf8))
+        var value: UInt64 = 0
+        for byte in bytes.prefix(8) { value = value << 8 | UInt64(byte) }
+        return Int64(bitPattern: value)
     }
 
     /// Kinds of file Apple's player opens.
@@ -289,13 +304,24 @@ final class DeviceLibrary {
         .commonKeyTitle: "TITLE", .commonKeyArtist: "ARTIST", .commonKeyAlbumName: "ALBUM", .commonKeyCreationDate: "DATE",
     ]
 
-    /// An item's tag name: its key as text, a four-character code read as letters.
+    /// An item's tag name: its key as text, a four-character code read as letters (© kept). A
+    /// user-defined ID3 frame goes by its description, and an iTunes free-form tag by its name,
+    /// in the forms the tag reader knows ("TXXX:NAME", "----:com.apple.iTunes:NAME").
     nonisolated private static func tagKey(_ item: AVMetadataItem) async -> String? {
-        if let text = item.key as? String { return text }
+        if let text = item.key as? String {
+            if text == "TXXX", let extra = try? await item.load(.extraAttributes), let description = extra[.info] as? String,
+               !description.isEmpty {
+                return "TXXX:" + description
+            }
+            for form in ["com.apple.iTunes:", "com.apple.iTunes."] where text.hasPrefix(form) {
+                return "----:com.apple.iTunes:" + text.dropFirst(form.count)
+            }
+            return text
+        }
         if let number = item.key as? NSNumber {
             let code = number.uint32Value
             let bytes = [UInt8(code >> 24 & 0xFF), UInt8(code >> 16 & 0xFF), UInt8(code >> 8 & 0xFF), UInt8(code & 0xFF)]
-            return String(decoding: bytes, as: UTF8.self)
+            return String(bytes: bytes, encoding: .isoLatin1)
         }
         return nil
     }
@@ -348,7 +374,7 @@ final class DeviceLibrary {
     /// app's library can only be removed in the Music app. Answers the words to show, if any.
     func delete(_ trackIds: [String]) async -> String? {
         let copies = (try? await library.store.copies(of: trackIds)) ?? []
-        guard let plan = deletePlan(trackIds, phoneFiles(copies)) else { return nil }
+        guard let plan = deletePlan(trackIds, phoneFiles(copies, ownFolder: Self.filesFolder.absoluteString)) else { return nil }
         var kept = 0
         for uri in plan.uris {
             guard let url = URL(string: uri), url.isFileURL else {
@@ -368,7 +394,7 @@ final class DeviceLibrary {
     func shareFiles(_ trackIds: [String]) async -> [URL] {
         let copies = (try? await library.store.copies(of: trackIds)) ?? []
         var urls: [URL] = []
-        for file in filesToShare(trackIds, phoneFiles(copies)) {
+        for file in filesToShare(trackIds, phoneFiles(copies, ownFolder: Self.filesFolder.absoluteString)) {
             guard let url = URL(string: file.uri) else { continue }
             if url.isFileURL {
                 urls.append(url)

@@ -48,7 +48,7 @@ final class CoverFlight {
     /// The cover's picture at the card's size, made ready while the small player shows, so the
     /// flight never starts on an empty tile.
     func prepare(_ coverId: String?, size: Int, client: SubsonicClient?) async {
-        guard let coverId, let client else { return }
+        guard let coverId else { return }
         if image?.coverId == coverId { return }
         guard let picture = await Covers.shared.image(coverId, size: size, client: client) else { return }
         image = (coverId, picture)

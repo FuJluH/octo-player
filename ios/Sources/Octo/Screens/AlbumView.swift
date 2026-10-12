@@ -84,20 +84,16 @@ struct AlbumView: View {
                 let ya = a.year ?? 0, yb = b.year ?? 0
                 return ya != yb ? ya > yb : a.sortKey < b.sortKey
             }
-        guard let client = session.client, isServerSource(found.sourceId) else { return }
-        if let full = try? await client.fullAlbum(found.nativeId) {
+        // The album as an Octo server lists it now: from the server album most of its songs came
+        // from, with the songs the library lacks as finds in the server's order.
+        if let (sent, resolved) = try? await state.data.discovery.libraryAlbum(tracks.map(\.id)) {
+            let server = outsideAlbumSongs(sent, resolved)
+            whole = server.contains(where: { isFind($0.id) }) ? wholeAlbum(tracks, server: server, adoptions: await library.adoptions()) : nil
+        } else {
+            whole = nil
+        }
+        if let client = session.client, isServerSource(found.sourceId), let full = try? await client.fullAlbum(found.nativeId) {
             discTitles = Dictionary(full.discTitles.map { ($0.disc, $0.title) }, uniquingKeysWith: { a, _ in a })
-            let songs = full.song.map(\.plain)
-            if songs.contains(where: \.isExternal) {
-                let held = Dictionary((await library.libraryTracks(for: songs.filter { !$0.isExternal })).map { ($0.nativeId, $0) },
-                                      uniquingKeysWith: { a, _ in a })
-                var listedTracks = songs.map { song in held[song.id] ?? state.provisional(song) }
-                let listedIds = Set(listedTracks.map(\.id))
-                listedTracks += tracks.filter { !listedIds.contains($0.id) }
-                whole = listedTracks
-            } else {
-                whole = nil
-            }
         }
         highlight = await mainSong(found)
     }

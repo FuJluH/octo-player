@@ -217,10 +217,10 @@ struct PlayableItems {
         return song
     }
 
-    /// The server's cover id inside a stored artwork reference.
+    /// The server's cover id inside a stored artwork reference; a picture from the phone keeps
+    /// its reference, which covers draw as it is.
     static func coverId(_ artwork: String?) -> String? {
-        guard let ref = ArtworkRef.decode(artwork) else { return artwork }
-        if case .server(_, let coverId, _, _) = ref { return coverId }
-        return nil
+        guard ArtworkRef.decode(artwork) != nil else { return artwork }
+        return Octo.coverId(of: artwork)
     }
 }

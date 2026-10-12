@@ -19,13 +19,15 @@ public struct PhoneFile: Sendable, Hashable {
 public let mediaLibraryPrefixes = ["content://media/", "ipod-library://"]
 
 /// The phone files among these copies: phone copies already merged into a song, at an address in
-/// the phone's own media library. One file per address.
-public func phoneFiles(_ copies: [SourceTrack]) -> [PhoneFile] {
+/// the phone's own media library, or inside the app's own music folder (`ownFolder`, a file
+/// address) when it has one. One file per address.
+public func phoneFiles(_ copies: [SourceTrack], ownFolder: String? = nil) -> [PhoneFile] {
     var seen = Set<String>()
+    let prefixes = mediaLibraryPrefixes + [ownFolder].compactMap { $0 }.filter { !$0.isEmpty }
     return copies
         .filter { copy in
             copy.sourceId == deviceSource && !copy.mergedId.isEmpty
-                && mediaLibraryPrefixes.contains { (copy.uri ?? "").hasPrefix($0) }
+                && prefixes.contains { (copy.uri ?? "").hasPrefix($0) }
         }
         .map { PhoneFile(trackId: $0.mergedId, uri: $0.uri ?? "", mimeType: $0.mimeType) }
         .filter { seen.insert($0.uri).inserted }

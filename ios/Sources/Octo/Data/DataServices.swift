@@ -61,6 +61,11 @@ final class DataServices {
                                     favorites: favoriteSync, playlists: playlistSync)
         let offline = offline
         serverSwitch.onForgetDownloads { sourceId in await offline.forgetSource(sourceId) }
+        // Covers named by a bare id are the server in use's.
+        Covers.signedInSource.withLock { $0 = session.inUse?.sourceId }
+        watches.append(Watch({ [weak session] in session?.inUse?.sourceId }) { source in
+            Covers.signedInSource.withLock { $0 = source }
+        })
     }
 
     /// Starts the work that runs on its own: the phone's music, copying the server's library,

@@ -118,11 +118,11 @@ private struct BlurredCover: View {
             }
         }
         .task(id: coverId) {
-            guard let coverId, let client = session.client else {
+            guard let coverId else {
                 image = nil
                 return
             }
-            let loaded = await Covers.shared.image(coverId, size: WashSize, client: client)
+            let loaded = await Covers.shared.image(coverId, size: WashSize, client: session.client)
             withAnimation(.easeOut(duration: 0.3)) { image = loaded }
         }
     }
