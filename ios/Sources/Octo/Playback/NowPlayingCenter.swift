@@ -126,8 +126,18 @@ final class NowPlayingCenter {
             return .success
         }
         commands.togglePlayPauseCommand.addTarget { [weak self] _ in
-            MainActor.assumeIsolated { self?.player.toggle() }
-            return .success
+            MainActor.assumeIsolated {
+                guard let player = self?.player else { return .commandFailed }
+                // A headset or the lock screen brings back what was kept, never a shuffle of
+                // everything: with nothing to resume, it says so.
+                if player.engine.queue.isEmpty {
+                    if !player.restoring { return .noActionableNowPlayingItem }
+                    player.resume()
+                    return .success
+                }
+                player.toggle()
+                return .success
+            }
         }
         commands.nextTrackCommand.addTarget { [weak self] _ in
             MainActor.assumeIsolated { self?.player.next() }
