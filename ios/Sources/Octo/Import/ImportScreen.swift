@@ -38,6 +38,8 @@ struct ImportScreen: View {
             model?.watch()
         }
         .task(id: "\(model?.overview != nil)|\(accounts.imports.waiting != nil)") { takeShared() }
+        .opensWhenAsked("paste_list") { pasting = true }
+        .opensWhenAsked("remove_list") { removing = model?.overview?.lists.first?.id }
         .fileImporter(isPresented: $picking, allowedContentTypes: ImportFiles.pickTypes) { result in
             guard case .success(let url) = result, let model else { return }
             ImportFiles.send(.file(ImportFiles.read(url), name: url.lastPathComponent, type: ImportFiles.type(of: url)), to: model)

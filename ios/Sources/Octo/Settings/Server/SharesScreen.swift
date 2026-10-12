@@ -39,6 +39,7 @@ struct SharesScreen: View {
         .barClearance()
         .background(OctoColor.background)
         .task { await load() }
+        .opensWhenAsked("delete_link") { if case .ready(let list) = shares { deleting = list.first } }
     }
 
     private func row(_ share: ServerShare, now: Int64) -> some View {

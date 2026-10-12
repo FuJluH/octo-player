@@ -123,6 +123,12 @@ struct LiveListView: View {
         .task(id: PickKey(version: liveLibrary.version, query: list?.query)) { if let list { await liveLibrary.pick(list.query) } }
         // Leaves the page once the list is deleted.
         .onChange(of: list == nil) { _, gone in if gone { dismiss() } }
+        .opensWhenAsked("rename_live_list") {
+            guard let list else { return }
+            newName = list.name
+            renaming = true
+        }
+        .opensWhenAsked("delete_live_list") { if list != nil { deleting = true } }
     }
 
     /// The live list's options, under its name.

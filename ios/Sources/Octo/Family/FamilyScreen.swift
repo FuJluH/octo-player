@@ -42,6 +42,7 @@ struct FamilyScreen: View {
         .background(OctoColor.background)
         .onAppear { model.watch() }
         .onDisappear { model.stop() }
+        .opensWhenAsked("reset_password") { resetting = model.info?.manager?.members.first }
         .sheet(isPresented: Binding(get: { model.handOver.sheet != nil }, set: { if !$0 { model.handOver.close() } })) {
             HandOverSheetHost(hub: hub).familySheet()
         }

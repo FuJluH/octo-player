@@ -118,6 +118,7 @@ struct QueueSheet: View {
         }
         .onChange(of: player.upNextSlots) { _, _ in removed = [] }
         .onChange(of: player.playedSlots) { _, _ in removed = [] }
+        .opensWhenAsked("save_playlist") { if !player.upNextSlots.isEmpty { saving = true } }
     }
 
     // MARK: Heading and tools

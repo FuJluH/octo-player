@@ -48,6 +48,11 @@ struct RadioStationsScreen: View {
         .barClearance()
         .background(OctoColor.background)
         .task { await reload() }
+        .opensWhenAsked("add_station") {
+            guard controls.isAdmin else { return }
+            problem = nil
+            draft = StationDraft()
+        }
         .sheet(isPresented: Binding(get: { draft != nil }, set: { if !$0, !saving { draft = nil } })) {
             if let draft {
                 StationForm(draft: draft, saving: saving, problem: problem, save: save, delete: delete)

@@ -24,6 +24,7 @@ struct ServersSection: View {
             }
         }
         .task(id: CheckKey(inUse: inUse?.id, count: session.servers.count)) { await checkAll() }
+        .opensWhenAsked("remove_server") { removing = session.servers.first }
     }
 
     private struct CheckKey: Hashable {
