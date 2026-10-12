@@ -98,6 +98,13 @@ public final class DeckProcessor: DeckSound, @unchecked Sendable {
 
     private var tapStarted = false
 
+    /// Audio thread: the frames handed on next are at `ms` in the song, after a stretch left
+    /// out (a skipped silence). The stage carries on as it was.
+    public func moveSongTime(toMs ms: Double) {
+        streamStartMs = ms
+        framesOut = 0
+    }
+
     /// Audio thread: shapes `frames` frames of `input` into `output` (which may be the same
     /// buffers). Answers the frames written: fewer than went in only while the stage's delay
     /// fills at the start of a stream.

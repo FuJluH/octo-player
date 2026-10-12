@@ -76,11 +76,6 @@ public func openedFileOf(_ id: String) -> OpenedFile? {
     return OpenedFile(uri: uri, title: parts.count > 1 ? javaDecode(parts[1]) : "", artist: parts.count > 2 ? javaDecode(parts[2]) : "")
 }
 
-/// A song found online, as the library knows it.
-public let findPrefix = "find:"
-
-public func isFind(_ id: String) -> Bool { id.hasPrefix(findPrefix) }
-
 /// The song a find plays as: the library song it became once downloaded, while the library has
 /// it, or else the find itself, streamed.
 public func playsAs(findId: String, adoptedId: String, library: Set<String>) -> String {

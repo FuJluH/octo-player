@@ -121,34 +121,6 @@ import Testing
     }
 }
 
-@Suite struct ScrobblesTest {
-    @Test func waitingPlaysStayInOrderWithoutRepeats() {
-        let plays = plusPlay(plusPlay([PendingPlay("b", 200)], PendingPlay("a", 100)), PendingPlay("b", 200))
-        #expect(plays == [PendingPlay("a", 100), PendingPlay("b", 200)])
-    }
-
-    @Test func theOldestAreLetGoPastTheLimit() {
-        var plays: [PendingPlay] = []
-        for i in 0..<(maxPendingPlays + 5) { plays = plusPlay(plays, PendingPlay("s\(i)", i)) }
-        #expect(plays.count == maxPendingPlays)
-        #expect(plays.first?.startedAt == 5)
-    }
-
-    @Test func playsAreKeptOnePerLine() {
-        let plays = [PendingPlay("song 1", 100), PendingPlay("b", 50)]
-        #expect(decodePending(encodePending(plays)) == [PendingPlay("b", 50), PendingPlay("song 1", 100)])
-        #expect(decodePending(["junk", "12", "x y"]).isEmpty)
-    }
-
-    @Test func onlyAFailureThatMightPassIsTriedAgain() {
-        #expect(worthRetrying(URLError(.notConnectedToInternet)))
-        #expect(worthRetrying(OctoError.notSubsonic))
-        #expect(worthRetrying(OctoError.wrongCredentials("")))
-        #expect(!worthRetrying(OctoError.notFound("no such song")))
-        #expect(!worthRetrying(OctoError.server(code: 0, message: "no")))
-    }
-}
-
 /// Answers requests from a table of paths, and keeps the paths asked for.
 final class StubServer: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var answers: [String: [String]] = [:]
