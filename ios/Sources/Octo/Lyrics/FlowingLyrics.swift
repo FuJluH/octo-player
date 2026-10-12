@@ -44,20 +44,18 @@ final class FlowingModel {
     @ObservationIgnored private var link: CADisplayLink?
     @ObservationIgnored private var slow = false
     @ObservationIgnored private var measuring: Task<Void, Never>?
-    /// The size and text scale last laid out for.
-    @ObservationIgnored private var measuredFor: (size: CGSize, textScale: CGFloat)?
+    @ObservationIgnored private var measuredFor: CGSize?
 
     init(_ lines: [SyncLine]) {
         self.lines = lines
         engine = LyricEngine(lines)
     }
 
-    /// Lays the lines out for a size and text scale, off the main thread; after the first time,
-    /// only once they have held still for a moment. Once measured, every line jumps into place.
+    /// Lays the lines out for a size, off the main thread; after the first time, only once the
+    /// size has held still for a moment. Once measured, every line jumps into place.
     func measure(_ size: CGSize, textScale: CGFloat) {
-        guard size.width > 0, size.height > 0 else { return }
-        if let measuredFor, measuredFor.size == size, measuredFor.textScale == textScale { return }
-        measuredFor = (size, textScale)
+        guard size.width > 0, size.height > 0, size != measuredFor else { return }
+        measuredFor = size
         measuring?.cancel()
         let first = layout == nil
         let lines = self.lines
@@ -73,7 +71,7 @@ final class FlowingModel {
                                     interludeFull: Double(measured.spec.interludeFull), height: Double(size.height))
             self.layout = measured
             if first {
-                withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: FADE_IN.seconds)) { self.shown = 1 }
+                withAnimation(.easeInOut(duration: FADE_IN.seconds)) { self.shown = 1 }
             }
             self.start()
         }
@@ -164,7 +162,6 @@ struct FlowingLyricsView: View {
     let seek: (TimeInterval) -> Void
     @Environment(Player.self) private var player
     @Environment(\.scenePhase) private var phase
-    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var stamp: Int?
     @State private var stampToken = 0
 
@@ -186,7 +183,6 @@ struct FlowingLyricsView: View {
             .gesture(scroll)
             .onAppear { model.measure(box.size, textScale: UIFontMetrics.default.scaledValue(for: 1)) }
             .onChange(of: box.size) { _, size in model.measure(size, textScale: UIFontMetrics.default.scaledValue(for: 1)) }
-            .onChange(of: typeSize) { _, _ in model.measure(box.size, textScale: UIFontMetrics.default.scaledValue(for: 1)) }
         }
         .clipped()
         .onAppear(perform: sync)
@@ -196,11 +192,8 @@ struct FlowingLyricsView: View {
         .onChange(of: player.isPlaying) { _, _ in sync(); model.anchor() }
         .onChange(of: player.current?.id) { _, _ in model.anchor() }
         .onChange(of: player.speed) { _, _ in sync(); model.anchor() }
-        .onChange(of: player.timeEvents) { _, _ in model.anchor() }
-        // The loop rests only while the app is out of sight; Control Center and the like leave
-        // it running.
         .onChange(of: phase) { _, now in
-            if now == .background { model.stop() } else { model.start() }
+            if now == .active { model.start() } else { model.stop() }
         }
         .onDisappear { model.stop() }
         .onChange(of: held) { _, now in if !now { endDrag() } }
@@ -221,7 +214,7 @@ struct FlowingLyricsView: View {
         model.outputOffsetMs = outputOffsetMs
         model.ink = UIColor(ink)
         model.calm = calm
-        if phase != .background { model.start() }
+        if phase == .active { model.start() }
     }
 
     @ViewBuilder

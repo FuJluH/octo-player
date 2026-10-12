@@ -48,19 +48,18 @@ final class TextRun: @unchecked Sendable {
 }
 
 /// A block of text drawn whole and wrapped to a width: a line timed by line, the credit, or a
-/// translation or romanization under a line. `rtl` nil lets the text's own first strong letter
-/// set its direction.
+/// translation or romanization under a line.
 final class TextBlock: @unchecked Sendable {
     let text: NSAttributedString
     let frame: CTFrame
     let size: CGSize
 
-    init(_ string: String, font: UIFont, width: CGFloat, lineHeight: CGFloat, alignRight: Bool, rtl: Bool?) {
+    init(_ string: String, font: UIFont, width: CGFloat, lineHeight: CGFloat, alignRight: Bool, rtl: Bool) {
         let paragraph = NSMutableParagraphStyle()
         paragraph.minimumLineHeight = lineHeight
         paragraph.maximumLineHeight = lineHeight
         paragraph.alignment = alignRight ? .right : .left
-        paragraph.baseWritingDirection = rtl.map { $0 ? .rightToLeft : .leftToRight } ?? .natural
+        paragraph.baseWritingDirection = rtl ? .rightToLeft : .leftToRight
         paragraph.lineBreakMode = .byWordWrapping
         text = NSAttributedString(string: string, attributes: [.font: font, .paragraphStyle: paragraph, fromContext: true])
         let setter = CTFramesetterCreateWithAttributedString(text)
@@ -209,7 +208,7 @@ func measureLine(_ line: SyncLine, _ spec: LyricsSpec) -> LineBox {
     for text in [line.romanization, line.translation].compactMap({ $0 }) {
         bottom += EXTRA_GAP_EM * em
         let piece = TextBlock(text, font: extraFont, width: spec.available, lineHeight: EXTRA_LINE_HEIGHT * EXTRA_SIZE_EM * em,
-                              alignRight: line.alignRight, rtl: nil)
+                              alignRight: line.alignRight, rtl: line.rtl)
         extras.append(TextPiece(block: piece, x: spec.left, y: bottom))
         bottom += piece.size.height
     }
