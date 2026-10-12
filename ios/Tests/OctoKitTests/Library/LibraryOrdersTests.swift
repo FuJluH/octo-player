@@ -5,13 +5,13 @@ import Testing
 /// A library song with only what an order looks at.
 func track(_ id: String, _ title: String, artist: String = "A", album: String = "Al", albumId: String = "al",
            disc: Int = 1, number: Int = 0, year: Int? = nil, seconds: Int = 0, added: Int64 = 0, rating: Int = 0,
-           likedAt: Int64? = nil, plays: Int = 0, lastPlayedAt: Int64 = 0, genre: String? = nil) -> LibraryTrack {
+           likedAt: Int64? = nil, plays: Int = 0, lastPlayedAt: Int64 = 0, genre: String? = nil) -> ShownSong {
     var song = Song(id: id, title: title, artist: artist, album: album, albumId: albumId, duration: seconds)
     song.track = number
     song.discNumber = disc
     song.year = year
     song.genre = genre
-    return LibraryTrack(song: song, addedAt: added, rating: rating, plays: plays, lastPlayedAt: lastPlayedAt, likedAt: likedAt)
+    return ShownSong(song: song, addedAt: added, rating: rating, plays: plays, lastPlayedAt: lastPlayedAt, likedAt: likedAt)
 }
 
 @Suite struct LibraryOrdersTests {
@@ -77,10 +77,10 @@ func track(_ id: String, _ title: String, artist: String = "A", album: String = 
     }
 
     @Test func albumsByYearPutTheUndatedLast() {
-        func album(_ id: String, _ name: String, year: Int?) -> LibraryAlbum {
+        func album(_ id: String, _ name: String, year: Int?) -> ShownAlbum {
             var a = Album(id: id, name: name, artist: "X")
             a.year = year
-            return LibraryAlbum(album: a)
+            return ShownAlbum(album: a)
         }
         let albums = [album("1", "a", year: nil), album("2", "b", year: 1999), album("3", "c", year: 2010)]
         let sorted = sortAlbums(albums, ListOrder(.album(.year), descending: true))
@@ -90,7 +90,7 @@ func track(_ id: String, _ title: String, artist: String = "A", album: String = 
     }
 
     @Test func artistsByNameHaveHeadings() {
-        let artists = [LibraryArtist(id: "1", name: "The Who", songCount: 3), LibraryArtist(id: "2", name: "ABBA", songCount: 9)]
+        let artists = [ShownArtist(id: "1", name: "The Who", songCount: 3), ShownArtist(id: "2", name: "ABBA", songCount: 9)]
         let byName = sortArtists(artists, ListOrder(.artist(.name), descending: false))
         #expect(byName.items.map(\.id) == ["2", "1"])
         #expect(byName.headings == ["abba", "who"])
@@ -98,22 +98,10 @@ func track(_ id: String, _ title: String, artist: String = "A", album: String = 
     }
 
     @Test func playlistsByChangeThenName() {
-        let lists = [LibraryPlaylist(id: "1", name: "b", updatedAt: 5), LibraryPlaylist(id: "2", name: "a", updatedAt: 5),
-                     LibraryPlaylist(id: "3", name: "c", updatedAt: 9)]
+        let lists = [ShownPlaylist(id: "1", name: "b", updatedAt: 5), ShownPlaylist(id: "2", name: "a", updatedAt: 5),
+                     ShownPlaylist(id: "3", name: "c", updatedAt: 9)]
         #expect(sortPlaylists(lists, SortList.playlists.defaultOrder).map(\.id) == ["3", "2", "1"])
         #expect(sortPlaylists(lists, ListOrder(.playlist(.name), descending: true)).map(\.id) == ["3", "1", "2"])
-    }
-
-    @Test func groupsPlayInTheirOrderEachInTheOrderGiven() {
-        let places = [track("1", "x", albumId: "a"), track("2", "y", albumId: "b"), track("3", "z", albumId: "a")]
-        #expect(songsInGroupOrder(places, group: \.albumId, groups: ["b", "a", "b"]).map(\.id) == ["2", "1", "3"])
-    }
-
-    @Test func artistSongsMostPlayedFirstOnceAnyIsPlayed() {
-        let tracks = [track("1", "a"), track("2", "b", plays: 1, lastPlayedAt: 9), track("3", "c", plays: 1, lastPlayedAt: 20)]
-        #expect(artistSongOrder(tracks).map(\.id) == ["3", "2", "1"])
-        #expect(artistSongOrder([track("1", "a"), track("2", "b")]).map(\.id) == ["1", "2"])
-        #expect(byPlayCount(tracks, limit: 1).map(\.id) == ["3"])
     }
 
     @Test func albumListeningAddsSongsAndTheServersAlbumHistory() {

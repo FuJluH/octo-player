@@ -2,7 +2,7 @@ import Foundation
 
 /// One song in the library, with what its pages sort, filter and show by. `song` is what plays
 /// and what rows draw; the rest is kept beside it.
-public struct LibraryTrack: Sendable, Hashable, Identifiable {
+public struct ShownSong: Sendable, Hashable, Identifiable {
     public var song: Song
     /// The title's sort key.
     public var sortKey: String
@@ -83,7 +83,7 @@ public struct LibraryTrack: Sendable, Hashable, Identifiable {
 }
 
 /// One album in the library.
-public struct LibraryAlbum: Sendable, Hashable, Identifiable {
+public struct ShownAlbum: Sendable, Hashable, Identifiable {
     /// What opens its page and draws its card.
     public var album: Album
     public var sortKey: String
@@ -120,7 +120,7 @@ public struct LibraryAlbum: Sendable, Hashable, Identifiable {
 }
 
 /// One artist in the library.
-public struct LibraryArtist: Sendable, Hashable, Identifiable {
+public struct ShownArtist: Sendable, Hashable, Identifiable {
     public var id: String
     public var name: String
     public var sortKey: String
@@ -149,7 +149,7 @@ public struct LibraryArtist: Sendable, Hashable, Identifiable {
 }
 
 /// A playlist as the Playlists page lists it.
-public struct LibraryPlaylist: Sendable, Hashable, Identifiable {
+public struct ShownPlaylist: Sendable, Hashable, Identifiable {
     public var id: String
     public var name: String
     public var songCount: Int
@@ -182,15 +182,15 @@ public struct LibraryPlaylist: Sendable, Hashable, Identifiable {
 }
 
 /// One row of a playlist: the song and its own id in the list, since a song can be there twice.
-public struct PlaylistRow: Sendable, Hashable, Identifiable {
+public struct ShownPlaylistRow: Sendable, Hashable, Identifiable {
     public var itemId: Int64
-    public var track: LibraryTrack
+    public var track: ShownSong
     /// A song the playlist names that this library does not hold.
     public var missing: Bool
 
     public var id: Int64 { itemId }
 
-    public init(itemId: Int64, track: LibraryTrack, missing: Bool = false) {
+    public init(itemId: Int64, track: ShownSong, missing: Bool = false) {
         self.itemId = itemId
         self.track = track
         self.missing = missing
@@ -198,7 +198,7 @@ public struct PlaylistRow: Sendable, Hashable, Identifiable {
 }
 
 /// A genre on the Genres page: its name, how many songs, and a cover from one of its songs.
-public struct LibraryGenre: Sendable, Hashable, Identifiable {
+public struct ShownGenre: Sendable, Hashable, Identifiable {
     public var name: String
     public var songCount: Int
     public var albumCount: Int
