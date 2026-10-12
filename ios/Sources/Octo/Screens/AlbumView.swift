@@ -27,9 +27,15 @@ struct AlbumView: View {
     /// The songs the page lists: the whole album with its finds, unless only the library's are
     /// wanted.
     private var listed: [LibraryTrack] {
-        if let whole, !onlyMine { return whole }
+        if let whole, !onlyMine, !libraryOnly { return whole }
         return tracks
     }
+
+    /// The setting that leaves songs found online out everywhere.
+    private var libraryOnly: Bool { AppSettings.shared.player.libraryOnly }
+
+    /// Whether the page lists songs found online among the library's.
+    private var mixed: Bool { whole != nil && !onlyMine && !libraryOnly }
 
     private var finds: [LibraryTrack] { (whole ?? []).filter(\.isFound) }
 
@@ -118,8 +124,8 @@ struct AlbumView: View {
     }
 
     private func details(_ album: LibraryAlbum) -> String {
-        let count = whole != nil && !onlyMine ? listed.count : album.songCount
-        let length = whole != nil && !onlyMine ? Int(listed.reduce(0) { $0 + $1.durationMs } / 1_000) : Int(album.durationMs / 1_000)
+        let count = mixed ? listed.count : album.songCount
+        let length = mixed ? Int(listed.reduce(0) { $0 + $1.durationMs } / 1_000) : Int(album.durationMs / 1_000)
         return [album.year.map(String.init), songsCount(count), asLength(length)].compactMap { $0 }.joined(separator: " • ")
     }
 
@@ -198,7 +204,9 @@ struct AlbumView: View {
         if !finds.isEmpty {
             HStack(spacing: 0) {
                 addMissing
-                QuietAction(icon: "music.note.house", text: "Only my songs", checked: onlyMine) { onlyMine.toggle() }
+                if !libraryOnly {
+                    QuietAction(icon: "music.note.house", text: "Only my songs", checked: onlyMine) { onlyMine.toggle() }
+                }
                 Spacer(minLength: 0)
                 if let note = albumLibraryNote(inLibrary: tracks.count, songs: (whole ?? tracks).count) {
                     Text(note).font(.octoCaption).foregroundStyle(OctoColor.textMuted).lineLimit(1)
@@ -267,7 +275,7 @@ struct AlbumView: View {
                 let track = list[position]
                 TrackRow(track: track, lead: .number(track.trackNo), subtitle: track.artist == album.artist ? "" : track.artist,
                          context: SongMenuContext(albumId: album.id, selecting: selection.active, selectKey: track.id),
-                         selection: selection, ownership: whole != nil && !onlyMine, highlighted: track.id == highlight) {
+                         selection: selection, ownership: mixed, highlighted: track.id == highlight) {
                     actions.play(list, from: position)
                 }
             }
@@ -386,7 +394,8 @@ struct ArtistView: View {
         }
         let held = Dictionary((await library.libraryTracks(for: ranked.filter { !$0.isExternal })).map { ($0.nativeId, $0) },
                               uniquingKeysWith: { a, _ in a })
-        top = Array(ranked.prefix(10)).map { held[$0.id] ?? state.provisional($0) }
+        let libraryOnly = AppSettings.shared.player.libraryOnly
+        top = Array(ranked.prefix(10)).map { held[$0.id] ?? state.provisional($0) }.filter { !libraryOnly || !$0.isFound }
         if top.contains(where: \.isFound) { offersAdd = true }
         if let about = try? await client.artistAbout(serverId) {
             biography = about.biography.flatMap(cleanBiography)
@@ -395,6 +404,7 @@ struct ArtistView: View {
             for other in about.similarArtist where !other.id.isEmpty && other.name.caseInsensitiveCompare(named) != .orderedSame {
                 guard seen.insert(other.id).inserted else { continue }
                 let mine = await library.resolveArtist(other.id, name: other.name)
+                if libraryOnly, mine == nil { continue }
                 people.append((mine?.id ?? other.id, mine?.name ?? other.name, mine?.coverId ?? other.coverArt, mine))
             }
             similar = people

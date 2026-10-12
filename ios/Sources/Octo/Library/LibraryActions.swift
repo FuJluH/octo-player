@@ -81,7 +81,13 @@ final class LibraryActions {
         self.router = router
         self.session = session
         Self.current = self
+        let backups = LibraryBackups(actions: self)
+        self.backups = backups
+        Backups.shared.library = backups
     }
+
+    /// The library's part of a backup, kept here since backups hold it weakly.
+    @ObservationIgnored private var backups: LibraryBackups?
 
     private var library: Library { state.library }
 
