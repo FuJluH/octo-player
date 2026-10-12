@@ -25,8 +25,9 @@ enum AppTab: String, CaseIterable, Hashable {
     }
 }
 
-/// Where a tap goes inside a tab.
-enum Route: Hashable {
+/// Where a tap goes inside a tab. Routes are plain values, so every tab's stack can be kept
+/// when the system ends the app in the background and brought back as it was.
+enum Route: Hashable, Codable {
     case album(Album)
     case artist(id: String, name: String)
     case playlist(Playlist)
@@ -94,6 +95,8 @@ struct MainShell: View {
     @SceneStorage("bar.player") private var barPlayer = false
     @SceneStorage("player.open") private var playerOpen = false
     @State private var paths: [AppTab: [Route]] = [:]
+    /// Every tab's stack, kept with the scene.
+    @SceneStorage("paths") private var savedPaths: Data?
     /// The tab that was in front before the last change, still drawn full size while it fades.
     @State private var leaving: AppTab?
     @State private var reselects: [AppTab: Int] = [:]
@@ -138,6 +141,7 @@ struct MainShell: View {
             PromptsHost().zIndex(5)
         }
         .environment(\.nowPlayingArt, art)
+        .environment(\.nowMark, NowMark(songId: player.current?.id, isPlaying: player.isPlaying))
         .onChange(of: router.route) { _, route in
             guard let route else { return }
             closePlayer()
@@ -164,6 +168,11 @@ struct MainShell: View {
             }
             if request == .lyrics { router.lyricsRequested = true }
         }
+        .onAppear(perform: restorePaths)
+        .onChange(of: paths) { _, now in
+            let byName = Dictionary(uniqueKeysWithValues: now.map { ($0.key.rawValue, $0.value) })
+            savedPaths = try? JSONEncoder().encode(byName)
+        }
         .task(id: session.activeId) { await downloads.resume() }
         .onChange(of: session.client == nil) { _, _ in Task { await downloads.resume() } }
         .onChange(of: scenePhase, initial: true) { _, phase in downloads.setForeground(phase == .active) }
@@ -184,6 +193,7 @@ struct MainShell: View {
                 NavigationStack(path: path(item)) {
                     root(item)
                         .background { PageBackdrop(page: item.rootPage, route: nil) }
+                        .pageMotion()
                         .routes()
                         .environment(\.tabReselects, reselects[item, default: 0])
                         .background(ScrollTopProbe(signal: reselects[item, default: 0]))
@@ -199,6 +209,17 @@ struct MainShell: View {
                 .simultaneousGesture(homeEdge, including: front ? .all : .subviews)
             }
         }
+    }
+
+    /// Brings every tab's stack back as it was when the scene was last kept.
+    private func restorePaths() {
+        guard paths.isEmpty, let savedPaths,
+              let byName = try? JSONDecoder().decode([String: [Route]].self, from: savedPaths) else { return }
+        var restored: [AppTab: [Route]] = [:]
+        for (name, stack) in byName {
+            if let item = AppTab(rawValue: name) { restored[item] = stack }
+        }
+        paths = restored
     }
 
     @ViewBuilder

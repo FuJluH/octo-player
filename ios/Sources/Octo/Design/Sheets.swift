@@ -39,6 +39,10 @@ struct GlassSheetFrame<Content: View>: View {
                     .animation(.octoTween(OctoDuration.card, scale: motion), value: shown)
                     .contentShape(Rectangle())
                     .onTapGesture { if visible { onDismiss() } }
+                    // The screen's left edge still goes back, closing the sheet.
+                    .gesture(DragGesture(minimumDistance: 20).onEnded { drag in
+                        if visible, drag.startLocation.x < 24, drag.translation.width > 60 { onDismiss() }
+                    })
                     .accessibilityLabel("Close")
                     .accessibilityAddTraits(.isButton)
                 panel(most: most, bottomInset: box.safeAreaInsets.bottom)

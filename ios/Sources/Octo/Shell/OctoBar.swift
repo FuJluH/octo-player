@@ -439,20 +439,26 @@ extension View {
     func swipeToSkip(open: @escaping () -> Void) -> some View { self }
 }
 
-/// The explicit mark: a small rounded square with an E cut out of it.
+/// The small E after the title of a song marked explicit: a muted tile with the letter cut out
+/// of it, so whatever is behind shows through. As tall as a line of small text, so it grows with
+/// the text size. Screen readers hear "Explicit".
 struct ExplicitMark: View {
     var size: CGFloat = 14
+    var color: Color = OctoColor.textMuted
+    @ScaledMetric(relativeTo: .caption) private var grow: CGFloat = 1
 
     var body: some View {
-        RoundedRectangle(cornerRadius: size * 3 / 14, style: .continuous)
-            .fill(OctoColor.textMuted)
-            .frame(width: size, height: size)
+        let side = size * grow
+        RoundedRectangle(cornerRadius: side * 3 / 14, style: .continuous)
+            .fill(color)
+            .frame(width: side, height: side)
             .overlay {
                 Text("E")
-                    .font(.system(size: size * 0.68, weight: .bold))
+                    .font(.system(size: side * 9.5 / 14, weight: .bold))
                     .blendMode(.destinationOut)
             }
             .compositingGroup()
+            .accessibilityElement()
             .accessibilityLabel("Explicit")
     }
 }
