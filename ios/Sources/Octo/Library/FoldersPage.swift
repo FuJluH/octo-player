@@ -44,21 +44,20 @@ struct FoldersPage: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                if !phoneRead {
-                    LibrarySpinner().padding(.top, detailTopGap)
-                } else if !hasPhone && !hasServer {
-                    ScreenTitle("Folders").padding(.top, detailTopGap)
-                    EmptyLibraryNote(text: "Folders show here once there is music on this phone or a server is signed in.")
-                } else {
-                    folderHeader
-                    content
-                }
+        LibraryList {
+            if !phoneRead {
+                LibrarySpinner().padding(.top, detailTopGap)
+            } else if !hasPhone && !hasServer {
+                ScreenTitle("Folders").padding(.top, detailTopGap).bigTitle()
+                EmptyLibraryNote(text: "Folders show here once there is music on this phone or a server is signed in.")
+            } else {
+                folderHeader
+                content
             }
-            .padding(.bottom, 20)
+            Color.clear.frame(height: 20)
         }
         .barClearance()
+        .inlineTitle(shownNames.last ?? "Folders")
         .backAction(trail.isEmpty ? nil : { goUp() })
         .backStopsPicking()
         .selectableSongs(state.pickables(shownSongs))
@@ -115,11 +114,16 @@ struct FoldersPage: View {
         serverName(isOcto: session.isOcto, type: session.profile?.info.type, host: session.client?.baseURL.host ?? "")
     }
 
-    private var folderHeader: some View {
+    /// The path's names as the header shows them: "Folders" first only with both sources.
+    private var shownNames: [String] {
         let names = ["Folders"] + placeNames
-        let shown = hasPhone && hasServer ? names : Array(names.dropFirst())
+        return hasPhone && hasServer ? names : Array(names.dropFirst())
+    }
+
+    private var folderHeader: some View {
+        let shown = shownNames
         return VStack(alignment: .leading, spacing: 0) {
-            ScreenTitle(shown.last ?? "Folders")
+            ScreenTitle(shown.last ?? "Folders").bigTitle()
             if shown.count > 1 {
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal) {

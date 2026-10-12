@@ -181,8 +181,7 @@ struct SongsPage: View {
         let order = state.order(.songs)
         let list = shown ?? []
         ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
+            LibraryList {
                     TitleWithButtons(title: "Songs") {
                         if let sorted, !sorted.items.isEmpty {
                             GlassIconButton(icon: searching ? .close : .search,
@@ -193,6 +192,7 @@ struct SongsPage: View {
                         SortButton(list: .songs)
                     }
                     .padding(.top, detailTopGap)
+                    .bigTitle()
                     if searching { searchPanel.transition(.opacity.combined(with: .move(edge: .top))) }
                     if let sorted {
                         if sorted.items.isEmpty {
@@ -220,13 +220,18 @@ struct SongsPage: View {
                     } else {
                         LibrarySpinner()
                     }
-                }
-                .animation(.spring(response: 0.35, dampingFraction: 0.9), value: searching)
             }
-            .letterRail(shownHeadings, count: list.count, byName: order.by.byName) { index in proxy.scrollTo("run-\(index)", anchor: .top) }
+            .animation(.spring(response: 0.35, dampingFraction: 0.9), value: searching)
+            .letterRail(shownHeadings, count: list.count, byName: order.by.byName) { index in
+                let runs = letterRuns(shownHeadings ?? [])
+                if runs.indices.contains(index), list.indices.contains(runs[index].start) {
+                    proxy.scrollTo(list[runs[index].start].id, anchor: .top)
+                }
+            }
             .onChange(of: order) { _, _ in if let first = list.first { proxy.scrollTo(first.id, anchor: .top) } }
         }
         .barClearance()
+        .inlineTitle("Songs")
         .backAction(searching ? { closeSearch() } : nil)
         .backStopsPicking()
         .selectableSongs(state.pickables(list))
@@ -393,7 +398,7 @@ struct GenresPage: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                ScreenTitle("Genres").padding(.top, detailTopGap)
+                ScreenTitle("Genres").padding(.top, detailTopGap).bigTitle()
                 if let genres {
                     if genres.isEmpty {
                         MutedNote("None of your songs has a genre yet")
@@ -419,6 +424,7 @@ struct GenresPage: View {
             .padding(.bottom, 20)
         }
         .barClearance()
+        .inlineTitle("Genres")
         .libraryRefreshable {}
         .task(id: library.stamp(.library)) { genres = await library.genres() }
     }
@@ -437,10 +443,9 @@ struct GenrePage: View {
     var body: some View {
         let order = state.order(.genreSongs)
         ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
+            LibraryList {
                     VStack(spacing: 0) {
-                        Text(name).font(.octoTitle).multilineTextAlignment(.center).frame(maxWidth: .infinity)
+                        Text(name).font(.octoTitle).multilineTextAlignment(.center).frame(maxWidth: .infinity).bigTitle()
                         Text("\(albumsCount(albums.count)) • \(songsCount(songs.count))")
                             .font(.octoCaption)
                             .foregroundStyle(OctoColor.textMuted)
@@ -456,12 +461,12 @@ struct GenrePage: View {
                     ForEach(Array(songs.enumerated()), id: \.element.id) { position, track in
                         TrackRow(track: track) { actions.play(songs, from: position) }
                     }
-                }
-                .padding(.bottom, 20)
+                    Color.clear.frame(height: 20)
             }
             .onChange(of: order) { _, _ in proxy.scrollTo("songs", anchor: .top) }
         }
         .barClearance()
+        .inlineTitle(name)
         .backStopsPicking()
         .selectableSongs(state.pickables(songs))
         .libraryRefreshable {}
@@ -516,16 +521,15 @@ struct HistoryPage: View {
     }()
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ScreenTitle("History").padding(.top, detailTopGap)
-                GlassSegments(options: [(false, "Recently played"), (true, "Most played")], selection: $mostPlayed)
-                    .padding(.horizontal, 20)
-                if mostPlayed { mostPlayedList } else { recentList }
-            }
-            .padding(.bottom, 20)
+        LibraryList {
+            ScreenTitle("History").padding(.top, detailTopGap).bigTitle()
+            GlassSegments(options: [(false, "Recently played"), (true, "Most played")], selection: $mostPlayed)
+                .padding(.horizontal, 20)
+            if mostPlayed { mostPlayedList } else { recentList }
+            Color.clear.frame(height: 20)
         }
         .barClearance()
+        .inlineTitle("History")
         .task(id: library.stamp(.plays, .library)) {
             days = await library.historyDays(limit: 500)
         }
@@ -625,21 +629,21 @@ struct DownloadsPage: View {
         let rows = offline.rows
         let shown = sortDownloads(rows, order, done: { $0.state == .done }, title: \.title, id: \.trackId, size: \.sizeBytes,
                                   addedAt: \.addedAt)
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                TitleWithButtons(title: "Downloads") { if !rows.isEmpty { SortButton(list: .downloads) } }
-                    .padding(.top, detailTopGap)
-                if rows.isEmpty {
-                    MutedNote("Songs you download play without a connection. Long press a song and choose Download, or keep a playlist downloaded from its page.")
-                } else {
-                    summary(rows)
-                    ForEach(shown) { row in downloadRow(row, shown) }
-                }
+        LibraryList {
+            TitleWithButtons(title: "Downloads") { if !rows.isEmpty { SortButton(list: .downloads) } }
+                .padding(.top, detailTopGap)
+                .bigTitle()
+            if rows.isEmpty {
+                MutedNote("Songs you download play without a connection. Long press a song and choose Download, or keep a playlist downloaded from its page.")
+            } else {
+                summary(rows)
+                ForEach(shown) { row in downloadRow(row, shown) }
             }
-            .padding(.bottom, 20)
-            .animation(.spring(response: 0.35, dampingFraction: 0.9), value: shown.map(\.id))
+            Color.clear.frame(height: 20)
         }
+        .animation(.spring(response: 0.35, dampingFraction: 0.9), value: shown.map(\.id))
         .barClearance()
+        .inlineTitle("Downloads")
         .sensoryFeedback(.impact, trigger: removals)
         .task(id: library.stamp(.playlists)) {
             playlistNames = Dictionary((await library.playlists()).map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
@@ -720,7 +724,7 @@ struct DownloadsPage: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(SqueezeStyle())
-        .rowSwipe(.remove { remove(row) }, enabled: byHand)
+        .songSwipes(.remove { remove(row) }, enabled: byHand)
         .contextMenu {
             if byHand {
                 Button("Remove download", systemImage: OctoIcon.delete.symbol, role: .destructive) { remove(row) }

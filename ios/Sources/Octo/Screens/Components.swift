@@ -154,7 +154,7 @@ struct TrackRow: View {
         }
         .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: OctoRadius.row))
         .contextMenu { SongMenuItems(subject: menuSubject) }
-        .rowSwipe(rowSwipe, enabled: !selecting)
+        .songSwipes(rowSwipe, enabled: !selecting)
         .accessibilityAddTraits(selecting && picked ? .isSelected : [])
         .accessibilityAction(named: "Play next") { actions.playNextUndoable(song) }
         .accessibilityAction(named: "Add to queue") { player.append([song]) }
@@ -399,7 +399,7 @@ struct SongRow: View {
         .buttonStyle(SqueezeStyle())
         .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: OctoRadius.row))
         .contextMenu { SongMenuItems(subject: SongSubject(track: actions.state.provisional(shown), song: shown, context: context)) }
-        .rowSwipe(.playNext { actions.playNextUndoable(shown) }, enabled: true)
+        .songSwipes(.playNext { actions.playNextUndoable(shown) }, enabled: true)
         .accessibilityAction(named: "Play next") { actions.playNextUndoable(shown) }
         .accessibilityAction(named: "Add to queue") { player.append([shown]) }
     }

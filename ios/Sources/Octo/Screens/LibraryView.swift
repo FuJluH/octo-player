@@ -31,7 +31,7 @@ struct LibraryView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                ScreenTitle("Library")
+                ScreenTitle("Library").bigTitle()
                 ForEach(Array(librarySections.enumerated()), id: \.offset) { index, section in
                     if index > 0 { LibraryHairline() }
                     NavigationLink(value: section.route) {
@@ -64,6 +64,7 @@ struct LibraryView: View {
                 }
             }
         }
+        .inlineTitle("Library")
         .barClearance()
         .libraryRefreshable {}
         .task(id: library.stamp(.library)) { recent = await library.recentAlbums(limit: 20) }
@@ -139,21 +140,31 @@ struct LetterRuns<Item, Row: View>: View {
     let id: (Item) -> String
     @ViewBuilder let row: (Int, Item) -> Row
 
+    /// One row's place in the list and its id.
+    private struct Entry: Identifiable {
+        let position: Int
+        let id: String
+    }
+
+    private func entries(_ positions: Range<Int>) -> [Entry] {
+        positions.map { Entry(position: $0, id: id(items[$0])) }
+    }
+
     var body: some View {
         if let headings, headings.count == items.count {
             let runs = letterRuns(headings)
             ForEach(Array(runs.enumerated()), id: \.offset) { index, run in
                 Section {
-                    ForEach(run.start..<(run.start + run.count), id: \.self) { position in
-                        row(position, items[position]).id(id(items[position]))
+                    ForEach(entries(run.start..<(run.start + run.count))) { entry in
+                        row(entry.position, items[entry.position]).id(entry.id)
                     }
                 } header: {
-                    LetterHeading(letter: run.letter).id("run-\(index)")
+                    LetterHeading(letter: run.letter).plainListRow().id("run-\(index)")
                 }
             }
         } else {
-            ForEach(Array(items.enumerated()), id: \.offset) { position, item in
-                row(position, item).id(id(item))
+            ForEach(entries(items.indices)) { entry in
+                row(entry.position, items[entry.position]).id(entry.id)
             }
         }
     }
@@ -200,6 +211,7 @@ struct AlbumsView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     TitleWithButtons(title: "Albums") { SortButton(list: .albums) }
                         .padding(.top, detailTopGap)
+                        .bigTitle()
                     if let sorted {
                         if sorted.items.isEmpty {
                             EmptyLibraryNote()
@@ -235,6 +247,7 @@ struct AlbumsView: View {
             .onChange(of: order) { _, _ in if let first = sorted?.items.first { proxy.scrollTo(first.id, anchor: .top) } }
         }
         .barClearance()
+        .inlineTitle("Albums")
         .libraryRefreshable {}
         .task(id: "\(library.stamp(.library, .plays))|\(order.by.id)|\(order.descending)") {
             sorted = await library.sortedAlbums(order)
@@ -267,6 +280,7 @@ struct ArtistsView: View {
                 LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
                     TitleWithButtons(title: "Artists") { SortButton(list: .artists) }
                         .padding(.top, detailTopGap)
+                        .bigTitle()
                     if let sorted {
                         if sorted.items.isEmpty {
                             EmptyLibraryNote()
@@ -292,6 +306,7 @@ struct ArtistsView: View {
             .onChange(of: order) { _, _ in if let first = sorted?.items.first { proxy.scrollTo(first.id, anchor: .top) } }
         }
         .barClearance()
+        .inlineTitle("Artists")
         .libraryRefreshable {}
         .task(id: "\(library.stamp(.library, .plays))|\(order.by.id)|\(order.descending)") {
             sorted = await library.sortedArtists(order)
@@ -324,41 +339,58 @@ struct FavoritesView: View {
 
     private let columns = [GridItem(.adaptive(minimum: 150), spacing: 14)]
 
+    /// Liked songs sit in a list, for their swipes; albums and artists in a plain scroll.
     var body: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    TitleWithButtons(title: "Favorites") {
-                        switch segment {
-                        case .songs: SortButton(list: .liked)
-                        case .albums, .artists: SortButton(list: .favorites)
-                        case nil: EmptyView()
-                        }
+            Group {
+                if segment == .songs {
+                    LibraryList {
+                        top
+                        songsSegment
+                        Color.clear.frame(height: 20)
                     }
-                    .padding(.top, detailTopGap)
-                    if let segment {
-                        GlassSegments(options: FavoriteSegment.allCases.map { ($0, $0.rawValue) },
-                                      selection: Binding(get: { segment }, set: { self.segment = $0 }))
-                            .padding(.horizontal, 20)
-                            .padding(.bottom, 12)
-                        switch segment {
-                        case .songs: songsSegment
-                        case .albums: albumsSegment
-                        case .artists: artistsSegment
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            top
+                            switch segment {
+                            case .albums: albumsSegment
+                            case .artists: artistsSegment
+                            case .songs, nil: LibrarySpinner()
+                            }
                         }
-                    } else {
-                        LibrarySpinner()
                     }
                 }
             }
             .onChange(of: state.order(.liked)) { _, _ in proxy.scrollTo("liked-top", anchor: .top) }
         }
         .barClearance()
+        .inlineTitle("Favorites")
         .backStopsPicking()
         .selectableSongs(state.pickables(songs ?? []))
         .libraryRefreshable {}
         .task(id: "\(library.stamp(.library, .likes, .favorites))|\(state.order(.liked).by.id)|\(state.order(.liked).descending)|\(state.order(.favorites).by.id)|\(state.order(.favorites).descending)") {
             await read()
+        }
+    }
+
+    /// The title with its sort button, then the segments.
+    @ViewBuilder
+    private var top: some View {
+        TitleWithButtons(title: "Favorites") {
+            switch segment {
+            case .songs: SortButton(list: .liked)
+            case .albums, .artists: SortButton(list: .favorites)
+            case nil: EmptyView()
+            }
+        }
+        .padding(.top, detailTopGap)
+        .bigTitle()
+        if let segment {
+            GlassSegments(options: FavoriteSegment.allCases.map { ($0, $0.rawValue) },
+                          selection: Binding(get: { segment }, set: { self.segment = $0 }))
+                .padding(.horizontal, 20)
+                .padding(.bottom, 12)
         }
     }
 
