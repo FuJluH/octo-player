@@ -203,13 +203,16 @@ struct HuggingScroll<Content: View>: View {
     }
 }
 
-/// Takes `height`, or less when less is offered; as wide as offered, or as its content.
+/// Takes its lines' height, or less when less is offered; as wide as offered, or as its content.
 private struct HugHeight: Layout {
     let height: CGFloat
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let width = proposal.width ?? subviews.first?.sizeThatFits(.unspecified).width ?? 0
-        return CGSize(width: width, height: min(height, proposal.height ?? .infinity))
+        // The scroll view's own height for its lines, at once; the measured height once known.
+        let ideal = subviews.first?.sizeThatFits(ProposedViewSize(width: width, height: nil)).height ?? 0
+        let natural = max(ideal, height)
+        return CGSize(width: width, height: min(natural, proposal.height ?? natural))
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {

@@ -82,7 +82,13 @@ struct GlassSheetFrame<Content: View>: View {
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
             let first = panelHeight == 0
             panelHeight = height
-            if first && visible { appear() }
+            // Its lines measure themselves a moment later; it rises once they have.
+            if first && visible {
+                Task {
+                    try? await Task.sleep(for: .milliseconds(20))
+                    appear()
+                }
+            }
         }
         .accessibilityAddTraits(.isModal)
     }
