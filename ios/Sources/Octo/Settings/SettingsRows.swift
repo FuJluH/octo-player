@@ -519,14 +519,21 @@ struct CategoryRow: View {
     let icon: String
     let title: String
     let summary: String
-    var route: SettingsRoute?
+    var route: CategoryDestination?
     var action: (() -> Void)?
 
     init(icon: String, title: String, summary: String, to route: SettingsRoute) {
         self.icon = icon
         self.title = title
         self.summary = summary
-        self.route = route
+        self.route = .settings(route)
+    }
+
+    init(icon: String, title: String, summary: String, to route: Route) {
+        self.icon = icon
+        self.title = title
+        self.summary = summary
+        self.route = .app(route)
     }
 
     init(icon: String, title: String, summary: String, action: @escaping () -> Void) {
@@ -537,7 +544,9 @@ struct CategoryRow: View {
     }
 
     var body: some View {
-        if let route {
+        if case .settings(let route) = route {
+            NavigationLink(value: route) { label }.buttonStyle(SettingsRowPress())
+        } else if case .app(let route) = route {
             NavigationLink(value: route) { label }.buttonStyle(SettingsRowPress())
         } else {
             Button { action?() } label: { label }.buttonStyle(SettingsRowPress())
@@ -564,6 +573,12 @@ struct CategoryRow: View {
             }
         }
     }
+}
+
+/// Where a category row goes: a settings page, or a page of the app's own routes.
+enum CategoryDestination {
+    case settings(SettingsRoute)
+    case app(Route)
 }
 
 /// A row's icon on a small tinted tile, so a list of pages reads at a glance.

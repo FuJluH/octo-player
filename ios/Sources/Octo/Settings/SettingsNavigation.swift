@@ -70,15 +70,15 @@ final class SettingsNavigator {
     }
 }
 
-/// Opens the page a settings route names. Sound and Server and sync are built by their own
-/// parts of the app; until they are in, these pages stand in for them.
+/// Opens the page a settings route names. Server and sync is built by its own part of the app;
+/// until it is in, a page stands in for it.
 struct SettingsDestination: View {
     let route: SettingsRoute
 
     var body: some View {
         switch route.page {
         case .playback: PlaybackSettingsPage(highlight: route.highlight)
-        case .sound: SoundPageStandIn()
+        case .sound: SoundPage().detailPage()
         case .appearance: AppearanceSettingsPage(highlight: route.highlight)
         case .library: LibrarySettingsPage(highlight: route.highlight)
         case .server: ServerPageStandIn(highlight: route.highlight)
@@ -101,17 +101,6 @@ extension View {
         .navigationDestination(for: SettingsSideRoute.self) { route in
             switch route {
             case .downloads: DownloadsStandIn()
-            }
-        }
-    }
-}
-
-/// Where the Sound page goes once its part of the app is in.
-private struct SoundPageStandIn: View {
-    var body: some View {
-        SettingsPageFrame(title: SettingsPage.sound.title) {
-            SettingsGroup {
-                NoteRow("The equalizer, loudness, balance and headphone correction for each output.")
             }
         }
     }

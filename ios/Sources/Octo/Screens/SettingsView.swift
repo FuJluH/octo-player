@@ -113,14 +113,13 @@ struct SettingsView: View {
         SettingsGroup {
             if found.isEmpty { NoteRow("No settings match.") }
             ForEach(found) { entry in
-                LinkRow(nil, title: entry.title, helper: entry.place, to: Self.route(entry.page, highlight: entry.id))
+                if entry.page == .sound {
+                    LinkRow(nil, title: entry.title, helper: entry.place, to: Route.sound)
+                } else {
+                    LinkRow(nil, title: entry.title, helper: entry.place, to: SettingsRoute(entry.page, highlight: entry.id))
+                }
             }
         }
-    }
-
-    /// Where a setting's page is: Sound has a page of its own, opened without a highlight.
-    private static func route(_ page: SettingsPage, highlight: String? = nil) -> SettingsRoute {
-        page == .sound ? SettingsRoute(.sound) : SettingsRoute(page, highlight: highlight)
     }
 
     // MARK: Categories
@@ -136,7 +135,7 @@ struct SettingsView: View {
                 CategoryRow(icon: SettingsIcon.playback, title: SettingsPage.playback.title,
                             summary: SettingsSummaries.playback(player), to: SettingsRoute(.playback))
                 CategoryRow(icon: SettingsIcon.sound, title: SettingsPage.sound.title,
-                            summary: SoundEdits.soundSummary(sound.settings), to: SettingsRoute(.sound))
+                            summary: SoundEdits.soundSummary(sound.current), to: Route.sound)
                 CategoryRow(icon: SettingsIcon.appearance, title: SettingsPage.appearance.title,
                             summary: SettingsSummaries.appearance(player.ambient, liveBackground: player.liveBackground),
                             to: SettingsRoute(.appearance))

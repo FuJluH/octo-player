@@ -171,14 +171,6 @@ import Testing
 }
 
 @Suite struct OutputTimingTests {
-    @Test func outputsAreKnownByKindAndName() {
-        #expect(AudioOutputName.of(.speaker, name: "Speaker") == .phoneSpeaker)
-        #expect(AudioOutputName.of(.wired, name: "Headphones") == AudioOutputName(key: "wired", label: "Headphones"))
-        #expect(AudioOutputName.of(.bluetooth, name: "Pods") == AudioOutputName(key: "bluetooth:Pods", label: "Pods"))
-        #expect(AudioOutputName.of(.bluetooth, name: "").label == "Bluetooth")
-        #expect(AudioOutputName.of(.usb, name: "").label == "USB audio")
-    }
-
     @Test func automaticTimingDependsOnBluetooth() {
         #expect(LyricsOutputTiming.automatic("bluetooth:Pods") == -500)
         #expect(LyricsOutputTiming.automatic("speaker") == -300)

@@ -95,15 +95,7 @@ public enum SettingsIndex {
                                                      section: "Casting")
 
     // Sound, which has a page of its own
-    public static let soundPerOutput = SettingEntry("sound_per_output", .sound, "Sound for each output", "Headphones and speakers keep their own sound",
-                                                    ["bluetooth", "speaker", "device", "output"])
-    public static let equalizer = SettingEntry("sound_equalizer", .sound, "Equalizer", "Shape the sound, with presets",
-                                               ["eq", "bass", "treble", "presets", "bands", "filters"])
-    public static let loudness = SettingEntry("sound_loudness", .sound, "Loudness", "Even out the volume between songs",
-                                              ["volume", "levelling", "leveling", "normalize", "replaygain", "preamp"])
-    public static let balance = SettingEntry("sound_balance", .sound, "Balance", "Left and right", ["left", "right", "channel", "mono"])
-    public static let headphoneCorrection = SettingEntry("sound_correction", .sound, "Headphone correction", "A correction for the headphones in use",
-                                                         ["headphones", "correction", "profile", "tuning"])
+    public static let sound: [SettingEntry] = SoundSearchEntry.all.map { SettingEntry($0.id, .sound, $0.title, $0.summary, $0.keywords) }
 
     // Appearance
     public static let ambient = SettingEntry("ambient", .appearance, "Ambient color from the artwork", "The artwork's colors glowing behind the pages",
@@ -306,7 +298,7 @@ public enum SettingsIndex {
         crossfade, crossfadeLength, smartTransitions, filterSweeps, matchTempo, speed, skipSilence, autoplay,
         radioDiscovery, radioAdventure, radioVariety, radioFavorites, resumeWired, resumeBluetooth, resumeAlways,
         castKeepPlaying,
-        soundPerOutput, equalizer, loudness, balance, headphoneCorrection,
+    ] + sound + [
         ambient, ambientHome, ambientLibrary, ambientSearch, ambientSettings, ambientBar, ambientPageArtwork,
         playerBackground, liveBackground, backgroundBrightnessCap, backgroundSaturation, backgroundContrast, backgroundUseBpm,
         backgroundSpeed, backgroundFps, playlistCovers, reduceMotion,

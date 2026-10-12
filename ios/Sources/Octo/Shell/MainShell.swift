@@ -30,6 +30,8 @@ enum Route: Hashable {
     case artist(id: String, name: String)
     case playlist(Playlist)
     case artists, albums, playlists, favorites
+    /// The Sound page: equalizer, loudness, balance and headphone correction.
+    case sound
 }
 
 /// The app's frame: every tab's pages, kept alive while another tab is in front, the floating
@@ -149,6 +151,7 @@ extension View {
                 case .albums: AlbumsView()
                 case .playlists: PlaylistsView()
                 case .favorites: FavoritesView()
+                case .sound: SoundPage()
                 }
             }
             .detailPage()

@@ -364,26 +364,24 @@ public enum BackupFile {
     }
 
     static func filterJSON(_ f: EqFilter) -> OrderedJSON {
-        .object([("type", .string(capitalized(f.type.rawValue))), ("frequency", .double(f.frequency)), ("gainDb", .double(f.gainDb)),
+        .object([("type", .string(f.type.rawValue)), ("frequency", .double(f.frequency)), ("gainDb", .double(f.gainDb)),
                  ("q", .double(f.q)), ("enabled", .bool(f.enabled))])
     }
 
     static func settingsJSON(_ s: SoundSettings) -> OrderedJSON {
         .fields([
-            ("eqEnabled", .bool(s.eqEnabled)), ("mode", .string(capitalized(s.mode.rawValue))),
+            ("eqEnabled", .bool(s.eqEnabled)), ("mode", .string(s.mode.rawValue)),
             ("graphicGains", .array(s.graphicGains.map { .double($0) })), ("filters", .array(s.filters.map(filterJSON))),
             ("preset", s.preset.map { .string($0) }), ("preampDb", .double(s.preampDb)), ("autoPreamp", .bool(s.autoPreamp)),
             ("correction", s.correction.map { c in
                 .object([("name", .string(c.name)), ("source", .string(c.source)), ("preampDb", .double(c.preampDb)),
                          ("filters", .array(c.filters.map(filterJSON)))])
             }),
-            ("replayGain", .string(capitalized(s.replayGain.rawValue))), ("replayGainPreampDb", .double(s.replayGainPreampDb)),
+            ("replayGain", .string(s.replayGain.rawValue)), ("replayGainPreampDb", .double(s.replayGainPreampDb)),
             ("replayGainFallbackDb", .double(s.replayGainFallbackDb)), ("preventClipping", .bool(s.preventClipping)),
             ("limiter", .bool(s.limiter)), ("balance", .double(s.balance)), ("mono", .bool(s.mono)),
         ])
     }
-
-    static func capitalized(_ name: String) -> String { name.prefix(1).uppercased() + name.dropFirst() }
 
     // MARK: Reading
 
@@ -440,43 +438,9 @@ public enum BackupFile {
     static func soundBackup(_ o: [String: Any]) -> SoundBackup {
         var profiles: [String: SoundSettings] = [:]
         for (key, value) in o["profiles"] as? [String: Any] ?? [:] {
-            if let settings = value as? [String: Any] { profiles[key] = soundSettings(settings) }
+            if let settings = part(value, SoundSettings.self) { profiles[key] = settings }
         }
         return SoundBackup(perOutput: o["perOutput"] as? Bool ?? false, profiles: profiles)
-    }
-
-    /// Sound settings from the other apps' shape, each field its default when missing or unknown.
-    static func soundSettings(_ o: [String: Any]) -> SoundSettings {
-        var s = SoundSettings()
-        func lower(_ key: String) -> String? { (o[key] as? String).map { $0.prefix(1).lowercased() + $0.dropFirst() } }
-        func double(_ key: String) -> Double? { (o[key] as? NSNumber)?.doubleValue }
-        if let on = o["eqEnabled"] as? Bool { s.eqEnabled = on }
-        if let mode = lower("mode").flatMap(EqMode.init(rawValue:)) { s.mode = mode }
-        if let gains = o["graphicGains"] as? [NSNumber], gains.count == s.graphicGains.count { s.graphicGains = gains.map(\.doubleValue) }
-        if let filters = o["filters"] as? [[String: Any]] { s.filters = filters.compactMap(filter) }
-        if o.keys.contains("preset") { s.preset = o["preset"] as? String } else { s.preset = "Flat" }
-        if let db = double("preampDb") { s.preampDb = db }
-        if let auto = o["autoPreamp"] as? Bool { s.autoPreamp = auto }
-        if let c = o["correction"] as? [String: Any], let name = c["name"] as? String {
-            s.correction = HeadphoneCorrection(name: name, source: c["source"] as? String ?? "",
-                                               preampDb: (c["preampDb"] as? NSNumber)?.doubleValue ?? 0,
-                                               filters: (c["filters"] as? [[String: Any]] ?? []).compactMap(filter))
-        }
-        if let mode = lower("replayGain").flatMap(ReplayGainMode.init(rawValue:)) { s.replayGain = mode }
-        if let db = double("replayGainPreampDb") { s.replayGainPreampDb = db }
-        if let db = double("replayGainFallbackDb") { s.replayGainFallbackDb = db }
-        if let on = o["preventClipping"] as? Bool { s.preventClipping = on }
-        if let on = o["limiter"] as? Bool { s.limiter = on }
-        if let b = double("balance") { s.balance = min(max(b, -1), 1) }
-        if let on = o["mono"] as? Bool { s.mono = on }
-        return s
-    }
-
-    static func filter(_ o: [String: Any]) -> EqFilter? {
-        guard let frequency = (o["frequency"] as? NSNumber)?.doubleValue else { return nil }
-        let type = (o["type"] as? String).map { $0.prefix(1).lowercased() + $0.dropFirst() }.flatMap(FilterType.init(rawValue:)) ?? .peak
-        return EqFilter(type: type, frequency: frequency, gainDb: (o["gainDb"] as? NSNumber)?.doubleValue ?? 0,
-                        q: (o["q"] as? NSNumber)?.doubleValue ?? 1.41, enabled: o["enabled"] as? Bool ?? true)
     }
 
     /// A server address with nothing but where it is: no user name or password written into it,
@@ -715,11 +679,8 @@ public enum BackupPlanner {
             backup.sortOrders.isEmpty ? nil : "sort orders",
         ].compactMap { $0 }
         if !settings.isEmpty { lines.append("Settings: " + settings.joined(separator: ", ")) }
-        if let sound = backup.sound {
-            let outputs = sound.profiles.keys.filter { $0 != "all" }.count
-            if sound.perOutput && outputs > 0 { lines.append(plural(outputs, "output with its own sound", "outputs with their own sound")) }
-        }
-        if !backup.presets.isEmpty { lines.append(plural(backup.presets.count, "equalizer preset", "equalizer presets")) }
+        lines += SoundBackupWords.lines(perOutput: backup.sound?.perOutput ?? false, profiles: backup.sound?.profiles,
+                                        presets: backup.presets.map { EqPreset(name: $0.name, gains: $0.gains) })
         if !backup.playlists.isEmpty {
             lines.append(plural(backup.playlists.count, "playlist", "playlists") + ", "
                 + plural(backup.playlists.reduce(0) { $0 + $1.songs.count }, "song", "songs"))

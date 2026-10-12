@@ -1,4 +1,3 @@
-import AVFoundation
 import OctoKit
 import SwiftUI
 
@@ -8,11 +7,11 @@ struct LyricsSettingsPage: View {
     var highlight: String?
     @Environment(LyricsStore.self) private var lyrics
     @State private var settings = AppSettings.shared
-    @State private var output = CurrentOutput.shared
+    @Environment(SoundStore.self) private var sound
 
     var body: some View {
         let look = settings.lyricsLook
-        let name = output.name
+        let name = sound.output
         let timing = settings.outputTiming(name.key)
         SettingsPageFrame(title: SettingsPage.lyrics.title, highlight: highlight) {
             SettingsGroup {
@@ -112,39 +111,5 @@ private struct TimingButtons: View {
             .disabled(!canReset)
             .frame(maxWidth: .infinity, minHeight: 44)
         }
-    }
-}
-
-/// The output playing now, followed as it changes: the phone's speaker, a cable, a Bluetooth or
-/// USB device, or an AirPlay receiver.
-@MainActor
-@Observable
-final class CurrentOutput {
-    static let shared = CurrentOutput()
-    private(set) var name = AudioOutputName.phoneSpeaker
-
-    private init() {
-        read()
-        NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { CurrentOutput.shared.read() }
-        }
-    }
-
-    private func read() {
-        guard let port = AVAudioSession.sharedInstance().currentRoute.outputs.first else {
-            name = .phoneSpeaker
-            return
-        }
-        let kind: OutputKind = switch port.portType {
-        case .builtInSpeaker, .builtInReceiver: .speaker
-        case .headphones, .lineOut: .wired
-        case .usbAudio: .usb
-        case .bluetoothA2DP, .bluetoothLE, .bluetoothHFP: .bluetooth
-        case .airPlay: .airPlay
-        case .carAudio: .carPlay
-        default: .other
-        }
-        let next = AudioOutputName.of(kind, name: port.portName)
-        if next != name { name = next }
     }
 }

@@ -5,9 +5,11 @@ import Foundation
 
 /// A bump or dip around one frequency, or a lift or cut of everything below or above one.
 public enum FilterType: String, Codable, Sendable, CaseIterable {
-    case peak, lowShelf, highShelf
+    case peak = "Peak", lowShelf = "LowShelf", highShelf = "HighShelf"
 }
 
+/// One filter on the curve. Stored with the same field names as the other apps, and without
+/// the fields that hold their usual value.
 public struct EqFilter: Codable, Sendable, Equatable, Identifiable {
     public var id = UUID()
     public var type: FilterType
@@ -26,17 +28,37 @@ public struct EqFilter: Codable, Sendable, Equatable, Identifiable {
 
     enum CodingKeys: String, CodingKey { case type, frequency, gainDb, q, enabled }
 
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        type = try c.decodeIfPresent(FilterType.self, forKey: .type) ?? .peak
+        frequency = try c.decode(Double.self, forKey: .frequency)
+        gainDb = try c.decode(Double.self, forKey: .gainDb)
+        q = try c.decodeIfPresent(Double.self, forKey: .q) ?? graphicQ
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        if type != .peak { try c.encode(type, forKey: .type) }
+        try c.encode(frequency, forKey: .frequency)
+        try c.encode(gainDb, forKey: .gainDb)
+        if q != graphicQ { try c.encode(q, forKey: .q) }
+        if !enabled { try c.encode(enabled, forKey: .enabled) }
+    }
+
     public static func == (a: EqFilter, b: EqFilter) -> Bool {
         a.type == b.type && a.frequency == b.frequency && a.gainDb == b.gainDb && a.q == b.q && a.enabled == b.enabled
     }
 }
 
 /// Ten sliders at fixed frequencies, or filters moved freely on the curve.
-public enum EqMode: String, Codable, Sendable { case graphic, parametric }
+public enum EqMode: String, Codable, Sendable { case graphic = "Graphic", parametric = "Parametric" }
 
 /// Evening out loudness between songs: off, per song, per album, or per album only while an
 /// album plays in order.
-public enum ReplayGainMode: String, Codable, Sendable, CaseIterable { case off, track, album, smart }
+public enum ReplayGainMode: String, Codable, Sendable, CaseIterable {
+    case off = "Off", track = "Track", album = "Album", smart = "Smart"
+}
 
 /// The ten standard octave bands, in hertz.
 public let graphicBands: [Double] = [31, 62, 125, 250, 500, 1_000, 2_000, 4_000, 8_000, 16_000]
@@ -54,9 +76,18 @@ public struct HeadphoneCorrection: Codable, Sendable, Equatable {
     public var source: String
     public var preampDb: Double
     public var filters: [EqFilter]
+
+    public init(name: String, source: String, preampDb: Double, filters: [EqFilter]) {
+        self.name = name
+        self.source = source
+        self.preampDb = preampDb
+        self.filters = filters
+    }
 }
 
-/// Everything that shapes the sound on one output.
+/// Everything that shapes the sound on one output. Stored with the same field names as the other
+/// apps; a field left out reads as its default, and a field at its default is left out. So a
+/// stored set with no "preset" is "Flat", while `"preset": null` is a curve made by hand.
 public struct SoundSettings: Codable, Sendable, Equatable {
     public var eqEnabled = false
     public var mode: EqMode = .graphic
@@ -81,6 +112,53 @@ public struct SoundSettings: Codable, Sendable, Equatable {
 
     public init() {}
 
+    enum CodingKeys: String, CodingKey {
+        case eqEnabled, mode, graphicGains, filters, preset, preampDb, autoPreamp, correction, replayGain
+        case replayGainPreampDb, replayGainFallbackDb, preventClipping, limiter, balance, mono
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = SoundSettings()
+        eqEnabled = try c.decodeIfPresent(Bool.self, forKey: .eqEnabled) ?? d.eqEnabled
+        mode = try c.decodeIfPresent(EqMode.self, forKey: .mode) ?? d.mode
+        graphicGains = try c.decodeIfPresent([Double].self, forKey: .graphicGains) ?? d.graphicGains
+        filters = try c.decodeIfPresent([EqFilter].self, forKey: .filters) ?? d.filters
+        preset = c.contains(.preset) ? try c.decodeIfPresent(String.self, forKey: .preset) : d.preset
+        preampDb = try c.decodeIfPresent(Double.self, forKey: .preampDb) ?? d.preampDb
+        autoPreamp = try c.decodeIfPresent(Bool.self, forKey: .autoPreamp) ?? d.autoPreamp
+        correction = try c.decodeIfPresent(HeadphoneCorrection.self, forKey: .correction)
+        replayGain = try c.decodeIfPresent(ReplayGainMode.self, forKey: .replayGain) ?? d.replayGain
+        replayGainPreampDb = try c.decodeIfPresent(Double.self, forKey: .replayGainPreampDb) ?? d.replayGainPreampDb
+        replayGainFallbackDb = try c.decodeIfPresent(Double.self, forKey: .replayGainFallbackDb) ?? d.replayGainFallbackDb
+        preventClipping = try c.decodeIfPresent(Bool.self, forKey: .preventClipping) ?? d.preventClipping
+        limiter = try c.decodeIfPresent(Bool.self, forKey: .limiter) ?? d.limiter
+        balance = try c.decodeIfPresent(Double.self, forKey: .balance) ?? d.balance
+        mono = try c.decodeIfPresent(Bool.self, forKey: .mono) ?? d.mono
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        let d = SoundSettings()
+        if eqEnabled != d.eqEnabled { try c.encode(eqEnabled, forKey: .eqEnabled) }
+        if mode != d.mode { try c.encode(mode, forKey: .mode) }
+        if graphicGains != d.graphicGains { try c.encode(graphicGains, forKey: .graphicGains) }
+        if filters != d.filters { try c.encode(filters, forKey: .filters) }
+        if preset != d.preset {
+            if let preset { try c.encode(preset, forKey: .preset) } else { try c.encodeNil(forKey: .preset) }
+        }
+        if preampDb != d.preampDb { try c.encode(preampDb, forKey: .preampDb) }
+        if autoPreamp != d.autoPreamp { try c.encode(autoPreamp, forKey: .autoPreamp) }
+        if let correction { try c.encode(correction, forKey: .correction) }
+        if replayGain != d.replayGain { try c.encode(replayGain, forKey: .replayGain) }
+        if replayGainPreampDb != d.replayGainPreampDb { try c.encode(replayGainPreampDb, forKey: .replayGainPreampDb) }
+        if replayGainFallbackDb != d.replayGainFallbackDb { try c.encode(replayGainFallbackDb, forKey: .replayGainFallbackDb) }
+        if preventClipping != d.preventClipping { try c.encode(preventClipping, forKey: .preventClipping) }
+        if limiter != d.limiter { try c.encode(limiter, forKey: .limiter) }
+        if balance != d.balance { try c.encode(balance, forKey: .balance) }
+        if mono != d.mono { try c.encode(mono, forKey: .mono) }
+    }
+
     /// The filters the equalizer applies now: the headphone correction first, then the
     /// listener's own curve.
     public func activeFilters() -> [EqFilter] {
@@ -102,9 +180,14 @@ public struct SoundSettings: Codable, Sendable, Equatable {
 }
 
 /// A named curve for the ten bands.
-public struct EqPreset: Sendable, Equatable {
+public struct EqPreset: Codable, Sendable, Equatable {
     public var name: String
     public var gains: [Double]
+
+    public init(name: String, gains: [Double]) {
+        self.name = name
+        self.gains = gains
+    }
 }
 
 /// The built-in curves.
@@ -251,6 +334,17 @@ public final class FilterBank: @unchecked Sendable {
         z1 = other.z1
         z2 = other.z2
     }
+
+    /// Forgets the filters' memory.
+    public func clear() {
+        for i in z1.indices { z1[i] = 0 }
+        for i in z2.indices { z2[i] = 0 }
+    }
+}
+
+/// The coefficients of the filters that run at this sample rate.
+public func bandCoefficients(_ filters: [EqFilter], sampleRate: Double) -> [Coefficients] {
+    filters.filter { $0.frequency < sampleRate * highestBandShare }.map { coefficients($0, sampleRate: sampleRate) }
 }
 
 /// A song's loudness tags: how far to turn it up or down to reach the common level, in
@@ -414,8 +508,10 @@ public final class AlbumRun: @unchecked Sendable {
 /// Keeps peaks under a ceiling just below full scale. The sound runs a moment late, so the
 /// limiter sees a peak coming and turns the level down in time instead of clipping it, then
 /// lets the level back up slowly so the change is not heard. All channels move together, so
-/// the stereo picture stays put. Each buffer is processed in place: what comes out is the
-/// sound `latency` frames ago.
+/// the stereo picture stays put. Samples are one buffer per channel.
+///
+/// The delay holds back the first moment of each stream and hands it out at the end, so nothing
+/// is lost or added between songs.
 public final class Limiter: @unchecked Sendable {
     public let channels: Int
     /// Frames of delay.
@@ -424,19 +520,23 @@ public final class Limiter: @unchecked Sendable {
     public var enabled = true
     private let ceiling: Float
     private let release: Float
-    /// The delayed frames, oldest at `head`.
+    /// The delayed frames, oldest first from `head`, one frame after another.
     private var held: [Float]
     private var head = 0
+    private var heldFrames = 0
     /// The level each frame needs, kept as a rising queue so the lowest one in the lookahead
     /// window is always at the front.
     private var need: [Float]
     private var needAt: [Int]
     private var needFront = 0
     private var needSize = 0
-    /// Frames taken in.
+    /// Frames in and out, to know which needs are still in view.
     private var inCount = 0
+    private var outCount = 0
     /// The level applied now.
     private var gain: Float = 1
+    /// One incoming frame, read before anything is written over it.
+    private var incoming: [Float]
 
     public init(channels: Int, sampleRate: Double, ceilingDb: Double = -1, lookaheadMs: Double = 1.5, releaseMs: Double = 100) {
         self.channels = channels
@@ -446,43 +546,87 @@ public final class Limiter: @unchecked Sendable {
         held = Array(repeating: 0, count: latency * channels)
         need = Array(repeating: 1, count: latency + 2)
         needAt = Array(repeating: 0, count: latency + 2)
+        incoming = Array(repeating: 0, count: channels)
     }
 
     public var ceilingLevel: Float { ceiling }
 
-    /// Runs `frames` frames through the delay, in place, one buffer per channel.
-    public func process(_ buffers: [UnsafeMutablePointer<Float>], frames: Int) {
-        guard buffers.count == channels else { return }
+    /// Takes `frames` frames from `input` and writes the frames that come out of the delay to
+    /// `output`, which may be the same buffers. Returns how many frames came out: fewer than
+    /// went in only while the delay is filling.
+    public func process(_ input: [UnsafeMutablePointer<Float>], frames: Int, output: [UnsafeMutablePointer<Float>]) -> Int {
+        guard input.count == channels, output.count == channels else { return 0 }
+        var written = 0
         for i in 0..<frames {
             var peak: Float = 0
-            for ch in 0..<channels { peak = max(peak, abs(buffers[ch][i])) }
+            for ch in 0..<channels {
+                let sample = input[ch][i]
+                incoming[ch] = sample
+                peak = max(peak, abs(sample))
+            }
             pushNeed(enabled && peak > ceiling ? ceiling / peak : 1)
             inCount += 1
-            // The frame leaving the delay now came in `latency` frames ago; it is turned down as
-            // far as any frame still in view needs. Down is instant; back up is slow.
-            let leaving = inCount - 1 - latency
-            while needSize > 0 && needAt[needFront] < leaving { popFront() }
-            let target = needSize > 0 ? need[needFront] : 1
-            gain = target < gain ? target : gain + (target - gain) * release
-            let slot = head * channels
-            for ch in 0..<channels {
-                let incoming = buffers[ch][i]
-                var y = held[slot + ch] * gain
-                if enabled { y = min(ceiling, max(-ceiling, y)) }
-                held[slot + ch] = incoming
-                buffers[ch][i] = y
+            if heldFrames < latency {
+                let slot = ((head + heldFrames) % latency) * channels
+                for ch in 0..<channels { held[slot + ch] = incoming[ch] }
+                heldFrames += 1
+            } else {
+                // The oldest frame leaves and the new one takes its place.
+                emit(output, at: written)
+                let slot = head * channels
+                for ch in 0..<channels { held[slot + ch] = incoming[ch] }
+                head = (head + 1) % latency
+                written += 1
             }
-            head = (head + 1) % latency
         }
+        return written
+    }
+
+    /// Runs `frames` frames through the delay in place, the same number out as in: while the
+    /// delay fills, what it holds back comes out as silence at the start.
+    public func process(_ buffers: [UnsafeMutablePointer<Float>], frames: Int) {
+        guard buffers.count == channels else { return }
+        let written = process(buffers, frames: frames, output: buffers)
+        shiftToEnd(buffers, frames: frames, written: written)
+    }
+
+    /// Hands out every frame still in the delay, at the end of a stream. `output` needs room
+    /// for `latency` frames.
+    public func drain(_ output: [UnsafeMutablePointer<Float>]) -> Int {
+        guard output.count == channels else { return 0 }
+        let count = heldFrames
+        for index in 0..<count {
+            emit(output, at: index)
+            head = (head + 1) % latency
+            heldFrames -= 1
+        }
+        head = 0
+        return count
     }
 
     /// Forgets the sound in the delay, after a jump to another place. The level is kept.
     public func clear() {
-        for i in held.indices { held[i] = 0 }
         head = 0
+        heldFrames = 0
         needFront = 0
         needSize = 0
         inCount = 0
+        outCount = 0
+    }
+
+    /// Writes the oldest held frame, turned down as far as any frame in view needs. Down is
+    /// instant; back up is slow.
+    private func emit(_ output: [UnsafeMutablePointer<Float>], at index: Int) {
+        while needSize > 0 && needAt[needFront] < outCount { popFront() }
+        let target = needSize > 0 ? need[needFront] : 1
+        gain = target < gain ? target : gain + (target - gain) * release
+        let from = head * channels
+        for ch in 0..<channels {
+            var y = held[from + ch] * gain
+            if enabled { y = min(ceiling, max(-ceiling, y)) }
+            output[ch][index] = y
+        }
+        outCount += 1
     }
 
     /// Anything asking for more level than this one can never be the lowest while this one is
@@ -544,10 +688,13 @@ public enum ParametricEqFile {
 
     /// The file's name without its extension and the "ParametricEQ" such files end in.
     public static func name(from fileName: String) -> String {
-        let bare = (fileName as NSString).deletingPathExtension.trimmingCharacters(in: .whitespaces)
+        let base = fileName.lastIndex(of: ".").map { String(fileName[..<$0]) } ?? fileName
+        let bare = base.trimmingCharacters(in: .whitespacesAndNewlines)
         var short = bare
-        if short.hasSuffix("ParametricEQ") { short = String(short.dropLast("ParametricEQ".count)) }
-        short = short.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "-_")).trimmingCharacters(in: .whitespaces)
+        if short.hasSuffix("ParametricEQ") { short.removeLast("ParametricEQ".count) }
+        short = short.trimmingCharacters(in: .whitespacesAndNewlines)
+        while let last = short.last, last == "-" || last == "_" { short.removeLast() }
+        short = short.trimmingCharacters(in: .whitespacesAndNewlines)
         return short.isEmpty ? (bare.isEmpty ? "Correction" : bare) : short
     }
 

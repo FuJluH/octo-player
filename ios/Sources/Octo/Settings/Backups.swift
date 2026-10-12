@@ -46,9 +46,6 @@ final class Backups {
     /// The library's part, once the part of the app that keeps the library is in.
     weak var library: BackupLibrary?
 
-    /// Where the sound settings and the listener's equalizer presets are kept.
-    private let soundKey = "sound.byOutput"
-    private let presetsKey = "sound.userPresets"
     /// The server's queue sync and new playlists choices, as the Server page keeps them.
     private let queueSyncStore = UserDefaults(suiteName: "server_queue") ?? .standard
     private let playlistSyncStore = UserDefaults(suiteName: "playlist_sync") ?? .standard
@@ -62,8 +59,10 @@ final class Backups {
         b.createdAt = Int64(now.timeIntervalSince1970 * 1000)
         b.player = settings.player
         b.streaming = settings.stream
-        b.sound = SoundBackup(perOutput: true, profiles: savedSound())
-        b.presets = savedPresets()
+        if let sound = SoundStore.live {
+            b.sound = SoundBackup(perOutput: sound.backup.perOutput, profiles: sound.backup.profiles)
+            b.presets = sound.presets.map { PresetBackup($0.name, $0.gains) }
+        }
         b.library = LibraryBackup(
             excludedFolders: settings.excludedFolders.sorted(),
             syncQueue: queueSyncStore.object(forKey: "sync_on") as? Bool ?? true,
@@ -131,8 +130,8 @@ final class Backups {
             settings.restore(player: backup.player ?? settings.player, stream: backup.streaming ?? settings.stream)
             lyricsStore?.online = settings.player.lyricsOnline
         }
-        if let sound = backup.sound { restoreSound(sound.profiles) }
-        restorePresets(backup.presets)
+        if let sound = backup.sound { SoundStore.live?.restore(perOutput: sound.perOutput, profiles: sound.profiles) }
+        SoundStore.live?.restorePresets(backup.presets.map { EqPreset(name: $0.name, gains: $0.gains) })
         if let library = backup.library {
             settings.setExcludedFolders(Set(library.excludedFolders))
             queueSyncStore.set(library.syncQueue, forKey: "sync_on")
@@ -176,36 +175,5 @@ final class Backups {
             let id = pin.kind == .playlist ? playlistIds[pin.target.lowercased()] : pin.target
             if let id { await library?.pin(pin.kind, id: id) }
         }
-    }
-
-    // MARK: Sound
-
-    private func savedSound() -> [String: SoundSettings] {
-        UserDefaults.standard.data(forKey: soundKey).flatMap { try? JSONDecoder().decode([String: SoundSettings].self, from: $0) } ?? [:]
-    }
-
-    /// Each output named in the backup gets the backup's settings; outputs not named keep theirs.
-    private func restoreSound(_ profiles: [String: SoundSettings]) {
-        var saved = savedSound()
-        for (output, settings) in profiles { saved[output] = settings }
-        UserDefaults.standard.set(try? JSONEncoder().encode(saved), forKey: soundKey)
-    }
-
-    private func savedPresets() -> [PresetBackup] {
-        let saved = UserDefaults.standard.dictionary(forKey: presetsKey) as? [String: [Double]] ?? [:]
-        return saved.keys.sorted().map { PresetBackup($0, saved[$0] ?? []) }
-    }
-
-    /// Presets with a blank name or not ten gains are dropped; each other one replaces a preset of
-    /// the same name (case aside), and the rest are kept.
-    private func restorePresets(_ presets: [PresetBackup]) {
-        var saved = UserDefaults.standard.dictionary(forKey: presetsKey) as? [String: [Double]] ?? [:]
-        for preset in presets {
-            let name = preset.name.trimmingCharacters(in: .whitespaces)
-            guard !name.isEmpty, preset.gains.count == 10 else { continue }
-            for key in saved.keys where key.trimmingCharacters(in: .whitespaces).lowercased() == name.lowercased() { saved[key] = nil }
-            saved[name] = preset.gains
-        }
-        UserDefaults.standard.set(saved, forKey: presetsKey)
     }
 }

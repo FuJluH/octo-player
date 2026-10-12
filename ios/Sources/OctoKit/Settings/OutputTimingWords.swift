@@ -1,39 +1,5 @@
 import Foundation
 
-/// The kind of output music goes to, as the phone reports it.
-public enum OutputKind: Sendable, Equatable {
-    case speaker, wired, usb, bluetooth, airPlay, carPlay, other
-}
-
-/// Where the sound is going: the phone's speaker, a cable, one Bluetooth or USB device, or an
-/// AirPlay receiver. Each keeps its own lyrics timing under its key.
-public struct AudioOutputName: Sendable, Equatable {
-    public var key: String
-    public var label: String
-
-    public init(key: String, label: String) {
-        self.key = key
-        self.label = label
-    }
-
-    public static let phoneSpeaker = AudioOutputName(key: "speaker", label: "Phone speaker")
-
-    /// The start of a Bluetooth output's key; the rest is the device's name.
-    public static let bluetoothPrefix = "bluetooth:"
-
-    /// The output for a device of this kind and name. A Bluetooth device is known by its name.
-    public static func of(_ kind: OutputKind, name: String) -> AudioOutputName {
-        switch kind {
-        case .speaker, .other: phoneSpeaker
-        case .wired: AudioOutputName(key: "wired", label: "Headphones")
-        case .usb: AudioOutputName(key: "usb:\(name)", label: name.isEmpty ? "USB audio" : name)
-        case .bluetooth: AudioOutputName(key: bluetoothPrefix + name, label: name.isEmpty ? "Bluetooth" : name)
-        case .airPlay: AudioOutputName(key: "airplay:\(name)", label: name.isEmpty ? "AirPlay" : name)
-        case .carPlay: AudioOutputName(key: "carplay", label: name.isEmpty ? "CarPlay" : name)
-        }
-    }
-}
-
 /// How an output's lyrics timing reads in the settings, and where it starts when never set.
 public enum LyricsOutputTiming {
     /// A tap moves the timing by this much.
@@ -49,7 +15,7 @@ public enum LyricsOutputTiming {
     public static let keyPrefix = "lyrics_output_offset:"
 
     public static func automatic(_ outputKey: String) -> Int {
-        outputKey.hasPrefix(AudioOutputName.bluetoothPrefix) ? bluetoothMs : wiredMs
+        outputKey.hasPrefix(AudioOutput.bluetoothPrefix) ? bluetoothMs : wiredMs
     }
 
     /// The timing after moving it some steps: later is up, earlier is down.
@@ -64,7 +30,7 @@ public enum LyricsOutputTiming {
 
     /// What the automatic timing is, in words.
     public static func automaticNote(_ outputKey: String) -> String {
-        outputKey.hasPrefix(AudioOutputName.bluetoothPrefix)
+        outputKey.hasPrefix(AudioOutput.bluetoothPrefix)
             ? "Automatic: \(label(bluetoothMs)), the usual for Bluetooth."
             : "Automatic: \(label(wiredMs)), the usual for a speaker or a cable."
     }
