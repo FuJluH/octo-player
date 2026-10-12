@@ -406,17 +406,20 @@ final class Session {
             await chooseAddress()
             guard let client, activeId == id, let read = try? await client.profile() else { return }
             profile = read
-            refreshExtensions(read.extensions, for: id)
+            refreshDetails(read, for: id)
         }
     }
 
-    /// A server gains extensions over time, so each start asks again and keeps what it says when
-    /// it lists some and they differ from the saved ones.
-    private func refreshExtensions(_ fresh: [String], for id: String) {
-        guard !fresh.isEmpty, activeId == id, let index = servers.firstIndex(where: { $0.id == id }),
-              Set(fresh) != Set(servers[index].extensions)
-        else { return }
-        servers[index].extensions = fresh
+    /// A server is updated over time, so each start asks again: its kind and version, and its
+    /// extensions when it lists some and they differ from the saved ones.
+    private func refreshDetails(_ read: ServerProfile, for id: String) {
+        guard activeId == id, let index = servers.firstIndex(where: { $0.id == id }) else { return }
+        var server = servers[index]
+        if let type = read.info.type, !type.isEmpty { server.serverType = type }
+        if let version = read.info.serverVersion, !version.isEmpty { server.serverVersion = version }
+        if !read.extensions.isEmpty, Set(read.extensions) != Set(server.extensions) { server.extensions = read.extensions }
+        guard server != servers[index] else { return }
+        servers[index] = server
         save()
     }
 
