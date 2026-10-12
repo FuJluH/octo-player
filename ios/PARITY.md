@@ -82,3 +82,10 @@ native controls; the layout, behaviour, features and words are Octo's.
 ## Settings
 
 - [ ] Every Android settings page (to be read from Android)
+
+## Widgets and voice
+
+- [~] Now playing widget (small, medium, large): cover, title, artist, play or pause, previous and next, fed by the app
+- [~] Quick play widget: Liked songs, Recently added, Album mix, Resume
+- [~] Siri: "Play Drake in Octo" (SiriKit media request, in the car too), and App Shortcuts for play, shuffle all, resume, liked songs, recently added, album mix and radio
+- [~] Home Screen quick actions play Quick play's lists
