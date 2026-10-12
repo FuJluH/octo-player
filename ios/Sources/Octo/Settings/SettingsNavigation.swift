@@ -110,8 +110,7 @@ final class SettingsNavigator {
     #endif
 }
 
-/// Opens the page a settings route names. Server and sync is built by its own part of the app;
-/// until it is in, a page stands in for it.
+/// Opens the page a settings route names.
 struct SettingsDestination: View {
     let route: SettingsRoute
 
@@ -121,7 +120,7 @@ struct SettingsDestination: View {
         case .sound: SoundPage().detailPage()
         case .appearance: AppearanceSettingsPage(highlight: route.highlight)
         case .library: LibrarySettingsPage(highlight: route.highlight)
-        case .server: ServerPageStandIn(highlight: route.highlight)
+        case .server: ServerPage(highlight: route.highlight)
         case .streaming: StreamingSettingsPage(highlight: route.highlight)
         case .audioQuality: AudioQualitySettingsPage(highlight: route.highlight)
         case .lyrics: LyricsSettingsPage(highlight: route.highlight)
@@ -143,6 +142,7 @@ extension View {
             case .downloads: DownloadsStandIn()
             }
         }
+        .accountRoutes()
     }
 }
 

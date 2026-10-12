@@ -5,7 +5,9 @@ import OctoKit
 import UIKit
 
 /// The servers kept on this phone and the one in use. Octo works with no server at all (the
-/// music on the phone); a server is an add-on whose music joins the library.
+/// music on the phone); a server is an add-on whose music joins the library. Several can be
+/// kept, with one in use: signing in, adding another, switching between them, editing, signing
+/// out and removing all go through here. Secrets live only in the keychain.
 @MainActor
 @Observable
 final class Session {
@@ -19,17 +21,38 @@ final class Session {
         didSet { Self.store(quality) }
     }
 
-    var active: StoredServer? { servers.first { $0.id == activeId } }
-    var isOcto: Bool { profile?.isOcto ?? active?.isOcto ?? false }
-    var serverName: String { active?.name ?? "" }
-
     /// Runs before the server in use changes to another (its id) or none, while the old one is
     /// still the one in use: what plays stops and counts for it, and its queue is put away.
     @ObservationIgnored var leaving: (@MainActor (_ from: StoredServer, _ to: String?) async -> Void)?
 
+    var active: StoredServer? { servers.first { $0.id == activeId } }
+    var isOcto: Bool { profile?.isOcto ?? active?.isOcto ?? false }
+    var serverName: String { active?.name ?? "" }
+
+    /// The extensions the server in use lists, as last read.
+    var extensions: [String] { active?.extensions ?? profile?.extensions ?? [] }
+
+    /// Whether the server in use runs Octo: its status page answered at sign-in, it calls itself
+    /// Octo, or it lists an Octo extension.
+    var runsOcto: Bool {
+        guard let active else { return false }
+        return isOctoServer(probed: active.isOcto, serverType: active.serverType ?? profile?.info.type, extensions: extensions)
+    }
+
+    /// Whether the server in use has Family on.
+    var family: Bool { client != nil && extensions.contains("\(octoFamily):1") }
+
+    /// Where the server in use is reached from, when it has a home address.
+    var place: ServerPlace? {
+        guard client != nil, active?.homeAddress != nil else { return nil }
+        return atHome ? .home : .away
+    }
+
     @ObservationIgnored private let trust = ServerTrust.shared
     @ObservationIgnored private let network = NWPathMonitor()
     @ObservationIgnored private var onLocalNetwork = false
+    @ObservationIgnored private var lastFailureCheck = Date.distantPast
+    @ObservationIgnored private let prefs = UserDefaults.standard
 
     private static let serversKey = "servers"
     private static let activeKey = "servers.active"
@@ -45,14 +68,17 @@ final class Session {
         load()
         network.pathUpdateHandler = { [weak self] path in
             let local = path.usesInterfaceType(.wifi) || path.usesInterfaceType(.wiredEthernet)
+            let lost = path.status != .satisfied
             Task { @MainActor in
-                guard let self, local != self.onLocalNetwork else { return }
-                self.onLocalNetwork = local
-                await self.chooseAddress()
+                guard let self else { return }
+                if lost || local != self.onLocalNetwork {
+                    self.onLocalNetwork = local
+                    await self.chooseAddress()
+                }
             }
         }
         network.start(queue: DispatchQueue(label: "app.winters.octo.network"))
-        if let server = active, !server.signedOut { connect(server) }
+        restore()
     }
 
     // MARK: Signing in
@@ -61,6 +87,7 @@ final class Session {
     struct Form {
         var address: URL
         var homeAddress: URL?
+        /// The name to give the server; nil keeps the saved one, and empty clears it.
         var label: String?
         var username: String
         /// Empty keeps the saved one, when editing.
@@ -72,63 +99,102 @@ final class Session {
     }
 
     enum Purpose: Equatable {
+        /// Signs in and makes the server the one in use.
         case signIn
+        /// Keeps another server without leaving the one in use.
         case add
+        /// Changes a kept server; the one in use is signed in to again.
         case edit(String)
     }
 
-    /// Checks the server and keeps it. Returns the words to show after, if any.
+    /// What a finished keep came to: the server kept, and whether its main address changed.
+    struct Kept {
+        var server: StoredServer
+        var addressChanged: Bool
+    }
+
+    /// Checks the server and keeps it. Throws `SignInFailure` with words, or the certificate
+    /// question as `ServerTrust.Untrusted`.
     @discardableResult
     func keep(_ form: Form, for purpose: Purpose) async throws -> String? {
-        let editing: StoredServer? = if case .edit(let id) = purpose { servers.first { $0.id == id } } else { nil }
-        if let editing, form.address != editing.address || form.username != editing.username,
-           let other = servers.first(where: { $0.id != editing.id && $0.address == form.address && $0.username == form.username }) {
-            throw SignInFailure.words(SignInWords.alreadyKept(other.name))
+        let kept = try await keepServer(form, for: purpose)
+        switch purpose {
+        case .add: return "Added \(kept.server.name). Switch to it whenever you like."
+        case .edit: return "Saved \(kept.server.name)."
+        case .signIn: return nil
         }
-        let existing = editing ?? servers.first { $0.address == form.address && $0.username == form.username }
-        let id = existing?.id ?? UUID().uuidString
+    }
+
+    func keepServer(_ form: Form, for purpose: Purpose) async throws -> Kept {
+        var base: StoredServer?
+        if case .edit(let id) = purpose {
+            guard let found = servers.first(where: { $0.id == id }) else { throw SignInFailure.words(SignInWords.gone) }
+            base = found
+        }
+        let main = form.address
+        let home = form.homeAddress.flatMap { $0 == main ? nil : $0 }
+        let username = form.username.trimmingCharacters(in: .whitespacesAndNewlines)
+        let twin = servers.first { $0.address == main && $0.username == username && $0.id != base?.id }
+        if base != nil, let twin { throw SignInFailure.words(SignInWords.alreadyKept(twin.name)) }
+        let before = base ?? twin
 
         var secret = form.secret
-        if secret.isEmpty, let existing, Self.sameKind(existing.mode, form.mode) {
-            secret = Keychain.read(for: Self.secretAccount(id)) ?? ""
+        if secret.isEmpty, let before, Self.sameKind(before.mode, form.mode), !before.signedOut {
+            secret = Keychain.read(for: Self.secretAccount(before.id)) ?? ""
         }
         guard !secret.isEmpty else { throw SignInFailure.words(SignInWords.missingSecret) }
 
-        var headers: [String: String] = [:]
-        let savedHeaders = existing.map { Self.headers(for: $0.id) } ?? [:]
-        for header in form.headers {
-            headers[header.name] = header.value ?? savedHeaders[header.name]
-        }
+        let headers = Self.cleanHeaders(form.headers, saved: before.map { Self.headers(for: $0.id) } ?? [:])
         if let certificate = form.certificate {
             try trust.useClientCertificate(certificate.data, password: certificate.password)
         } else if form.removesCertificate {
             try? trust.useClientCertificate(nil, password: "")
-        } else if let existing, existing.hasClientCertificate {
-            loadCertificate(for: existing.id)
+        } else if let before, before.hasClientCertificate {
+            loadCertificate(for: before.id)
         }
 
-        let credentials = Credentials(username: form.username, password: secret, mode: form.mode)
-        var client = makeClient(form.address, credentials, headers)
-        var profile: ServerProfile
+        let use: Bool = switch purpose {
+        case .signIn: true
+        case .add: false
+        case .edit(let id): id == activeId && client != nil
+        }
+        var credentials = Credentials(username: username, password: secret, mode: form.mode)
+        var client = makeClient(main, credentials, headers)
+        let profile: ServerProfile
         do {
-            profile = try await reach(client)
-        } catch where Self.isUnreachable(error) && form.homeAddress != nil {
-            client = client.at(form.homeAddress!)
-            profile = try await reach(client)
+            let reached = try await reach(client, main: main, home: home)
+            client = reached.0
+            profile = reached.1
+            // A home address with a certificate the phone does not trust is asked about now.
+            if let home, client.baseURL != home {
+                do {
+                    _ = try await makeClient(home, credentials, headers, timeout: 2).ping()
+                } catch {
+                    if case .unreachable = SubsonicError(error), let question = trust.rejection(for: home.host) { throw question }
+                }
+            }
+        } catch {
+            restoreSecurity()
+            throw error
         }
-        var username = form.username
-        if form.mode == .apiKey {
-            username = try await client.tokenInfo()
-            client = client.with(credentials.named(username))
+        if form.mode == .apiKey, let owner = try? await client.tokenInfo(), !owner.isEmpty {
+            credentials = credentials.named(owner)
+            client = client.with(credentials)
         }
-        let octo = await Self.probeOcto(client)
-
+        let probed = await Self.probeOcto(client)
+        let taken = Set(servers.map(\.id)).subtracting([before?.id].compactMap { $0 })
+        let id: String = if let before, before.username == credentials.username {
+            before.id
+        } else {
+            freshServerId(username: credentials.username, address: ServerAddress.written(main), taken: taken)
+        }
+        let label = form.label.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } ?? before?.label
         let server = StoredServer(
-            id: id, label: form.label ?? existing?.label, address: form.address, homeAddress: form.homeAddress,
-            username: username, mode: form.mode, headerNames: form.headers.map(\.name),
-            hasClientCertificate: form.certificate != nil || (existing?.hasClientCertificate == true && !form.removesCertificate),
+            id: id, label: label, address: main, homeAddress: home,
+            username: credentials.username, mode: form.mode, headerNames: Array(headers.keys).sorted(),
+            hasClientCertificate: form.certificate != nil || (before?.hasClientCertificate == true && !form.removesCertificate),
             serverType: profile.info.type, serverVersion: profile.info.serverVersion,
-            isOcto: profile.isOcto || octo, extensions: profile.extensions)
+            isOcto: probed, extensions: profile.extensions)
         Keychain.save(secret, for: Self.secretAccount(id))
         Keychain.saveData(try JSONEncoder().encode(headers), for: Self.headersAccount(id))
         if let certificate = form.certificate {
@@ -137,77 +203,142 @@ final class Session {
         } else if form.removesCertificate {
             Keychain.delete(for: Self.certificateAccount(id))
             Keychain.delete(for: Self.certificatePasswordAccount(id))
+        } else if let before, before.id != id, before.hasClientCertificate {
+            Keychain.saveData(Keychain.readData(for: Self.certificateAccount(before.id)) ?? Data(), for: Self.certificateAccount(id))
+            Keychain.save(Keychain.read(for: Self.certificatePasswordAccount(before.id)) ?? "", for: Self.certificatePasswordAccount(id))
         }
-        let previous = active
-        if let index = servers.firstIndex(where: { $0.id == id }) { servers[index] = server } else { servers.append(server) }
+        if let before, before.id != id { forgetSecrets(before.id) }
+        let addressChanged = before.map { $0.address != main } ?? false
+        if addressChanged { prefs.removeObject(forKey: Self.folderKey(id)) }
 
-        switch purpose {
-        case .add:
+        guard use else {
+            restoreSecurity()
+            if let before, let index = servers.firstIndex(where: { $0.id == before.id }) { servers[index] = server } else { servers.append(server) }
             save()
-            return "Added \(server.name). Switch to it whenever you like."
-        case .edit where activeId != id:
-            save()
-            return "Saved \(server.name)."
-        default:
-            if let previous, previous.id != id, !previous.signedOut, self.client != nil { await leaving?(previous, id) }
-            activeId = id
-            save()
-            self.client = client
-            self.profile = profile
-            atHome = client.baseURL == server.homeAddress
-            Task { await chooseAddress() }
-            guard let previous, previous.id != id else { return nil }
-            return "Now on \(server.name)."
+            return Kept(server: server, addressChanged: addressChanged)
         }
+        let from = self.client == nil ? nil : active.flatMap { $0.id == id || $0.id == before?.id || $0.signedOut ? nil : $0 }
+        if let from { await leaving?(from, id) }
+        if let before, let index = servers.firstIndex(where: { $0.id == before.id }) { servers[index] = server } else { servers.append(server) }
+        activate(server, client: client, profile: profile)
+        return Kept(server: server, addressChanged: addressChanged)
     }
 
-    /// Uses a kept server, checking it first with its saved password.
-    func switchTo(_ id: String) async throws {
-        guard let server = servers.first(where: { $0.id == id }) else {
-            throw SignInFailure.words("That server isn't in your list any more.")
-        }
-        guard !server.signedOut, let secret = Keychain.read(for: Self.secretAccount(id)) else {
-            throw SignInFailure.needsPassword(id, "\(server.name) didn't take the saved password. It may have been changed.")
+    /// Gives a kept server a name of its own; an empty one shows its host.
+    func rename(_ id: String, label: String) {
+        guard let index = servers.firstIndex(where: { $0.id == id }) else { return }
+        servers[index].label = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        save()
+    }
+
+    // MARK: Switching
+
+    /// How moving to another kept server went.
+    enum SwitchResult: Equatable {
+        case done
+        /// Its password is not kept here, or the server no longer takes it.
+        case needsPassword(StoredServer, String?)
+        case failed(String)
+    }
+
+    /// Makes another kept server the one in use, signed in with its saved secret. It is asked
+    /// first with a client of its own, so one out of reach leaves everything as it was.
+    private func switchServer(_ id: String) async -> SwitchResult {
+        guard let server = servers.first(where: { $0.id == id }) else { return .failed(SignInWords.gone) }
+        let from = client == nil ? nil : active
+        if from?.id == id { return .done }
+        guard !server.signedOut, let secret = Keychain.read(for: Self.secretAccount(id)), !secret.isEmpty else {
+            return .needsPassword(server, nil)
         }
         if server.hasClientCertificate { loadCertificate(for: id) }
-        let client = makeClient(server.address, Credentials(username: server.username, password: secret, mode: server.mode),
-                                Self.headers(for: id))
+        let headers = Self.headers(for: id)
+        let credentials = Credentials(username: server.username, password: secret, mode: server.mode)
+        let own = makeClient(server.address, credentials, headers, timeout: 6)
+        let reached: (SubsonicClient, ServerProfile)
         do {
-            profile = try await reach(client)
-        } catch OctoError.wrongCredentials {
-            throw SignInFailure.needsPassword(id, "\(server.name) didn't take the saved password. It may have been changed.")
+            reached = try await reach(own, main: server.address, home: server.homeAddress, timeout: 6)
         } catch {
-            throw SignInFailure.words("Couldn't switch to \(server.name). \(SignInWords.describe(error))")
+            restoreSecurity()
+            if case .wrongCredentials = SubsonicError(error) {
+                return .needsPassword(server, serverSwitchPasswordRefusedWords(server.name))
+            }
+            return .failed(serverSwitchFailedWords(server.name, why: userMessage(plainError(error))))
         }
-        if let previous = active, previous.id != id, !previous.signedOut, self.client != nil { await leaving?(previous, id) }
-        activeId = id
-        self.client = client
-        atHome = false
-        save()
-        await chooseAddress()
+        var fresh = server
+        fresh.serverType = reached.1.info.type ?? server.serverType
+        fresh.serverVersion = reached.1.info.serverVersion ?? server.serverVersion
+        if !reached.1.extensions.isEmpty { fresh.extensions = reached.1.extensions }
+        if let from, !from.signedOut { await leaving?(from, id) }
+        if let index = servers.firstIndex(where: { $0.id == id }) { servers[index] = fresh }
+        let client = makeClient(server.address, credentials, headers).at(reached.0.baseURL)
+        activate(fresh, client: client, profile: reached.1)
+        return .done
     }
 
-    /// Keeps the server in the list but forgets its password.
-    func signOut(_ id: String) {
-        guard let index = servers.firstIndex(where: { $0.id == id }) else { return }
+    /// Uses a kept server, checking it first with its saved password. The servers list switches
+    /// through `ServerSwitch`, which says how it went.
+    func switchTo(_ id: String) async throws {
+        switch await switchServer(id) {
+        case .done: return
+        case .needsPassword(let server, let note): throw SignInFailure.needsPassword(server.id, note ?? serverSwitchPasswordRefusedWords(server.name))
+        case .failed(let words): throw SignInFailure.words(words)
+        }
+    }
+
+    /// How a kept server answers a quick look, with a client of its own. One signed out of is not asked.
+    func check(_ id: String) async -> ServerCheck {
+        guard let server = servers.first(where: { $0.id == id }) else { return ServerCheck(.unknown) }
+        let asked: SubsonicClient
+        if id == activeId, let client {
+            asked = client
+        } else {
+            guard !server.signedOut, let secret = Keychain.read(for: Self.secretAccount(id)), !secret.isEmpty else { return ServerCheck(.unknown) }
+            asked = makeClient(server.address, Credentials(username: server.username, password: secret, mode: server.mode),
+                               Self.headers(for: id), timeout: 6)
+        }
+        let start = Date()
+        do {
+            _ = try await asked.ping()
+            return ServerCheck(.answers, Int64(Date().timeIntervalSince(start) * 1_000))
+        } catch {
+            if case .wrongCredentials = SubsonicError(error) { return ServerCheck(.wrongPassword) }
+            return ServerCheck(.unreachable)
+        }
+    }
+
+    // MARK: Signing out and removing
+
+    /// Signs out of a kept server, the one in use when `id` is nil. It stays in the list without
+    /// its password, so signing in again needs only that; its header values stay. What plays is
+    /// put away first by `ServerSwitch`, which the pages sign out through.
+    func signOut(_ id: String? = nil) {
+        guard let id = id ?? activeId, let index = servers.firstIndex(where: { $0.id == id }) else { return }
         servers[index].signedOut = true
         Keychain.delete(for: Self.secretAccount(id))
-        if activeId == id {
-            client = nil
-            profile = nil
-            atHome = false
-        }
+        if id == activeId { leaveSession() }
         save()
     }
 
-    func remove(_ id: String) {
-        signOut(id)
+    /// Takes a server off the list, with its password. Its music and playlists stay on the server.
+    /// Answers the server removed, if it was kept. `ServerSwitch` puts away what plays first and
+    /// removes its copy of the library after.
+    @discardableResult
+    func remove(_ id: String) -> StoredServer? {
+        guard let server = servers.first(where: { $0.id == id }) else { return nil }
         servers.removeAll { $0.id == id }
-        for account in [Self.headersAccount(id), Self.certificateAccount(id), Self.certificatePasswordAccount(id)] {
-            Keychain.delete(for: account)
-        }
-        if activeId == id { activeId = nil }
+        forgetSecrets(id)
+        prefs.removeObject(forKey: Self.folderKey(id))
+        if id == activeId { leaveSession() }
         save()
+        return server
+    }
+
+    private func leaveSession() {
+        activeId = nil
+        client = nil
+        profile = nil
+        atHome = false
+        restoreSecurity()
     }
 
     /// Saved custom header names for a server, to show on the edit form.
@@ -215,31 +346,124 @@ final class Session {
         Array(Self.headers(for: id).keys).sorted()
     }
 
+    // MARK: The server in use
+
+    /// Changes the signed-in user's password on the server. The current one is checked first; on
+    /// success the new one is kept in place of the old, and the client signs in with it.
+    func changePassword(current: String, new: String, family: Bool = false) async -> PasswordChange {
+        guard let client, let id = activeId else { return .failed("Connect a server first.") }
+        let result = await changeOwnPassword(client, current: current, new: new, family: family)
+        guard result == .changed else { return result }
+        Keychain.save(new, for: Self.secretAccount(id))
+        if self.activeId == id, let now = self.client {
+            self.client = now.with(Credentials(username: now.credentials.username, password: new, mode: now.credentials.mode))
+        }
+        return result
+    }
+
+    /// How quickly the server in use answers, in milliseconds, and how its folders scan stands.
+    func look() async -> (answerMs: Int64?, scan: ServerScanStatus?) {
+        guard let client else { return (nil, nil) }
+        let start = Date()
+        let answered = (try? await client.ping()) != nil
+        let ms = answered ? Int64(Date().timeIntervalSince(start) * 1_000) : nil
+        return (ms, try? await client.serverScanStatus())
+    }
+
+    /// The music folder the library is limited to on a kept server, when one is chosen.
+    func folder(for id: String) -> (id: String, name: String)? {
+        guard let saved = prefs.array(forKey: Self.folderKey(id)) as? [String], saved.count == 2 else { return nil }
+        return (saved[0], saved[1])
+    }
+
+    /// Keeps the chosen folder's name to show; nil for all of them.
+    func setFolder(_ folder: ServerMusicFolder?, for id: String) {
+        if let folder { prefs.set([folder.id, folder.name], forKey: Self.folderKey(id)) } else { prefs.removeObject(forKey: Self.folderKey(id)) }
+    }
+
     // MARK: Connecting
 
-    private func connect(_ server: StoredServer) {
-        guard let secret = Keychain.read(for: Self.secretAccount(server.id)) else { return }
+    /// At app start, the server in use signs in again with its saved secret. One whose secret can
+    /// no longer be read stays in the list signed out, and nothing is in use.
+    private func restore() {
+        guard let server = active else { return }
+        if server.signedOut {
+            activeId = nil
+            save()
+            return
+        }
+        guard let secret = Keychain.read(for: Self.secretAccount(server.id)), !secret.isEmpty else {
+            if let index = servers.firstIndex(where: { $0.id == server.id }) { servers[index].signedOut = true }
+            activeId = nil
+            save()
+            return
+        }
         if server.hasClientCertificate { loadCertificate(for: server.id) }
         client = makeClient(server.address, Credentials(username: server.username, password: secret, mode: server.mode),
                             Self.headers(for: server.id))
+        let id = server.id
         Task {
             await chooseAddress()
-            if let client { profile = try? await client.profile() }
+            guard let client, activeId == id, let read = try? await client.profile() else { return }
+            profile = read
+            refreshExtensions(read.extensions, for: id)
         }
+    }
+
+    /// A server gains extensions over time, so each start asks again and keeps what it says when
+    /// it lists some and they differ from the saved ones.
+    private func refreshExtensions(_ fresh: [String], for id: String) {
+        guard !fresh.isEmpty, activeId == id, let index = servers.firstIndex(where: { $0.id == id }),
+              Set(fresh) != Set(servers[index].extensions)
+        else { return }
+        servers[index].extensions = fresh
+        save()
+    }
+
+    private func activate(_ server: StoredServer, client: SubsonicClient, profile: ServerProfile) {
+        activeId = server.id
+        self.client = client
+        self.profile = profile
+        atHome = server.homeAddress != nil && client.baseURL == server.homeAddress
+        save()
+        Task { await chooseAddress() }
     }
 
     /// On Wi-Fi or Ethernet the home network address is used when it answers within two
     /// seconds; anywhere else, or when it does not answer, the main address.
     func chooseAddress() async {
         guard let server = active, let client else { return }
-        var target = server.address
-        if onLocalNetwork, let home = server.homeAddress {
-            let probe = makeClient(home, client.credentials, client.customHeaders, timeout: 2)
-            if (try? await probe.profile()) != nil { target = home }
+        var answered = false
+        if onLocalNetwork, let home = server.homeAddress, home != server.address {
+            answered = await Self.answers(makeClient(home, client.credentials, client.customHeaders, timeout: 2))
         }
-        guard target != client.baseURL else { return }
-        self.client = client.at(target)
-        atHome = target == server.homeAddress
+        let place = choosePlace(hasHome: server.homeAddress != nil, onLocalNetwork: onLocalNetwork, homeAnswered: answered)
+        let target = place == .home ? server.homeAddress ?? server.address : server.address
+        guard self.client != nil, activeId == server.id else { return }
+        if target != client.baseURL { self.client = client.at(target) }
+        atHome = place == .home
+    }
+
+    /// After a call to the server could not connect: looks at the home address again, at most
+    /// once every five seconds.
+    func callFailedToConnect() {
+        guard Date().timeIntervalSince(lastFailureCheck) >= 5 else { return }
+        lastFailureCheck = Date()
+        Task { await chooseAddress() }
+    }
+
+    /// Whether an address answers like the server: an error from the server itself still means
+    /// it is there; only no connection, or not a music server, is a no.
+    private static func answers(_ client: SubsonicClient) async -> Bool {
+        do {
+            _ = try await client.ping()
+            return true
+        } catch {
+            switch SubsonicError(error) {
+            case .unreachable, .notSubsonic: return false
+            default: return true
+            }
+        }
     }
 
     private func makeClient(_ address: URL, _ credentials: Credentials, _ headers: [String: String],
@@ -248,22 +472,41 @@ final class Session {
                        customHeaders: headers, session: trust.session, timeout: timeout)
     }
 
-    /// Pings and reads extensions. An untrusted certificate becomes a question for the person.
-    private func reach(_ client: SubsonicClient) async throws -> ServerProfile {
+    /// Pings the main address and reads extensions; when it cannot connect and there is a home
+    /// address, the home one instead. An untrusted certificate becomes a question for the person.
+    private func reach(_ client: SubsonicClient, main: URL, home: URL?, timeout: TimeInterval? = nil) async throws -> (SubsonicClient, ServerProfile) {
         do {
-            return try await client.profile()
-        } catch let error as URLError where Self.isCertificateFailure(error) {
-            if let question = trust.rejection(for: client.baseURL.host) { throw question }
-            throw error
+            return (client, try await client.profile())
+        } catch let error as URLError {
+            if isCertificateFailure(error, host: main.host) {
+                if let question = trust.rejection(for: main.host) { throw question }
+                throw error
+            }
+            guard let home else { throw error }
+            let atHome = client.at(home)
+            do {
+                return (atHome, try await atHome.profile())
+            } catch let homeError as URLError where isCertificateFailure(homeError, host: home.host) {
+                if let question = trust.rejection(for: home.host) { throw question }
+                throw error
+            } catch {
+                throw error
+            }
         }
+    }
+
+    /// A refused certificate shows as the call being cancelled, since the trust check cancels it.
+    private func isCertificateFailure(_ error: URLError, host: String?) -> Bool {
+        SubsonicError.isCertificate(error) || (error.code == .cancelled && trust.rejection(for: host) != nil)
     }
 
     /// Octo's own page answers with an "octo" key; only on the home network, usually.
     private static func probeOcto(_ client: SubsonicClient) async -> Bool {
-        let url = client.signed(client.baseURL.appendingPathComponent("api/admin/status"))
+        let url = client.baseURL.appendingPathComponent("api/admin/status")
         var request = URLRequest(url: url, timeoutInterval: 5)
         for (name, value) in client.headers { request.setValue(value, forHTTPHeaderField: name) }
-        guard let (data, _) = try? await ServerTrust.shared.session.data(for: request),
+        guard let (data, response) = try? await ServerTrust.shared.session.data(for: request),
+              (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? false,
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return false }
         return json["octo"] != nil
@@ -274,14 +517,14 @@ final class Session {
         try? trust.useClientCertificate(data, password: Keychain.read(for: Self.certificatePasswordAccount(id)) ?? "")
     }
 
-    private static func isUnreachable(_ error: Error) -> Bool {
-        guard let error = error as? URLError else { return false }
-        return !isCertificateFailure(error)
-    }
-
-    private static func isCertificateFailure(_ error: URLError) -> Bool {
-        [.serverCertificateUntrusted, .serverCertificateHasBadDate, .serverCertificateHasUnknownRoot,
-         .serverCertificateNotYetValid, .secureConnectionFailed, .cancelled].contains(error.code)
+    /// Puts the client certificate of the server in use back, so a failed or side try never
+    /// disturbs it.
+    private func restoreSecurity() {
+        if let active, client != nil, active.hasClientCertificate {
+            loadCertificate(for: active.id)
+        } else {
+            try? trust.useClientCertificate(nil, password: "")
+        }
     }
 
     /// A password serves token and legacy sign-in; a key serves only a key.
@@ -289,54 +532,76 @@ final class Session {
         (a == .apiKey) == (b == .apiKey)
     }
 
+    /// The headers worth keeping: named, with a value, each name once (the last one typed wins).
+    /// A saved header left without a value keeps its saved one.
+    static func cleanHeaders(_ typed: [(name: String, value: String?)], saved: [String: String]) -> [String: String] {
+        var out: [String: String] = [:]
+        var order: [String: String] = [:]
+        for header in typed {
+            let name = header.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let savedValue = saved.first { $0.key.caseInsensitiveCompare(name) == .orderedSame }?.value
+            let value = (header.value ?? savedValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard HeaderRules.isValidName(name), !value.isEmpty, HeaderRules.isValidValue(value) else { continue }
+            if let earlier = order[name.lowercased()] { out[earlier] = nil }
+            order[name.lowercased()] = name
+            out[name] = value
+        }
+        return out
+    }
+
     // MARK: Storage
 
     private func load() {
-        let defaults = UserDefaults.standard
-        if let data = defaults.data(forKey: Self.serversKey),
+        if let data = prefs.data(forKey: Self.serversKey),
            let kept = try? JSONDecoder().decode([StoredServer].self, from: data) {
             servers = kept
         }
-        activeId = defaults.string(forKey: Self.activeKey)
+        activeId = prefs.string(forKey: Self.activeKey)
         migrateFirstSignIn()
     }
 
     /// The first builds kept one server under single keys; it becomes the first kept server.
     private func migrateFirstSignIn() {
-        let defaults = UserDefaults.standard
-        guard servers.isEmpty, let text = defaults.string(forKey: "server.address"), let address = URL(string: text),
-              let username = defaults.string(forKey: "server.username")
+        guard servers.isEmpty, let text = prefs.string(forKey: "server.address"), let address = URL(string: text),
+              let username = prefs.string(forKey: "server.username")
         else { return }
         let oldAccount = "\(username)@\(ServerAddress.shown(address))"
-        let server = StoredServer(address: address, username: username,
-                                  mode: defaults.bool(forKey: "server.legacyPassword") ? .legacyPassword : .token)
+        let server = StoredServer(id: freshServerId(username: username, address: ServerAddress.written(address), taken: []),
+                                  address: address, username: username,
+                                  mode: prefs.bool(forKey: "server.legacyPassword") ? .legacyPassword : .token)
         if let secret = Keychain.read(for: oldAccount) {
             Keychain.save(secret, for: Self.secretAccount(server.id))
             Keychain.delete(for: oldAccount)
         }
         servers = [server]
         activeId = server.id
-        for key in ["server.address", "server.username", "server.legacyPassword"] { defaults.removeObject(forKey: key) }
+        for key in ["server.address", "server.username", "server.legacyPassword"] { prefs.removeObject(forKey: key) }
         save()
     }
 
     private func save() {
-        let defaults = UserDefaults.standard
-        defaults.set(try? JSONEncoder().encode(servers), forKey: Self.serversKey)
-        defaults.set(activeId, forKey: Self.activeKey)
+        prefs.set(try? JSONEncoder().encode(servers), forKey: Self.serversKey)
+        prefs.set(activeId, forKey: Self.activeKey)
+    }
+
+    private func forgetSecrets(_ id: String) {
+        for account in [Self.secretAccount(id), Self.headersAccount(id), Self.certificateAccount(id), Self.certificatePasswordAccount(id)] {
+            Keychain.delete(for: account)
+        }
     }
 
     private static func secretAccount(_ id: String) -> String { "server.\(id).secret" }
     private static func headersAccount(_ id: String) -> String { "server.\(id).headers" }
     private static func certificateAccount(_ id: String) -> String { "server.\(id).certificate" }
     private static func certificatePasswordAccount(_ id: String) -> String { "server.\(id).certificate.password" }
+    private static func folderKey(_ id: String) -> String { "server.folder@\(id)" }
 
     private static func headers(for id: String) -> [String: String] {
         Keychain.readData(for: headersAccount(id)).flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:]
     }
 
     /// This install, as the server knows it: an id made once, and the phone's name.
-    private static func device() -> DeviceIdentity {
+    static func device() -> DeviceIdentity {
         let defaults = UserDefaults.standard
         let id = defaults.string(forKey: deviceKey) ?? {
             let made = UUID().uuidString.lowercased()
@@ -370,4 +635,8 @@ enum SignInFailure: LocalizedError {
         case .words(let text), .needsPassword(_, let text): text
         }
     }
+}
+
+extension SignInWords {
+    static let gone = "That server isn't in your list any more."
 }

@@ -29,6 +29,7 @@ import SwiftUI
 ///   open the Sound page in that state (see `SoundDrive`)
 /// - `settings:PAGE`, `settings:PAGE@ROW`, `settings-search:TEXT`, `popup:ROW`, `whatsnew`,
 ///   `settings-state:NAME`: see `SettingsNavigator.drive`
+/// - `account:WHAT`: the account pages, sheets, sign-in modes and ways in; see `AccountDrive`
 @MainActor
 enum Drive {
     static func run(session: Session, player: Player, router: Router, prompts: Prompts, motion: MotionSettings,
