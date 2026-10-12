@@ -251,8 +251,8 @@ Path prefixes used in the citations:
 - [x] A find as a song: id "find:<server id>", no library album or artist to open, track/disc/year null, addedAt 0, not on the phone; album, artist, cover, mime type (contentType else by suffix: m4a/mp4/aac audio/mp4, mp3 audio/mpeg, flac audio/flac, ogg/oga/opus audio/ogg, wav audio/wav), bitrate when above 0, explicit flag. (app/discovery/LibraryMatching.kt:50-91, core/discovery/Matching.kt:124-132)
 - [x] Which radio source suggested a song is remembered from the server's `octoSuggestedBy` (trimmed, non-empty), up to 5,000 songs, each believed 12 hours, oldest dropped first, a re-suggestion moving to the newest end; not saved. (app/discovery/Discovery.kt:84-88, 228-233, 317-346; app/discovery/LibraryMatching.kt:18-22)
 - [x] Radio from a song: the song's server id (a find's own, the library song's server copy, else a search "<artist> <title>" for 40 songs taking the same recording first, else the same song in any version); then getSimilarSongs2 with count 50 and octoMix=client; seed first, then the similar songs, each once. (app/discovery/Discovery.kt:35-36, 137-143, 270-285; subsonic/SubsonicClient.kt:425-432)
-- [ ] Library album as the server lists it now: from the album's songs' copies on this server, the album most of them belong to, fetched by its native id; only songs the server marks external stay finds, numbered as the album numbers them (0 or less means none); unmarked missing songs are dropped (the next copy brings them). (app/discovery/Discovery.kt:185-194, app/discovery/WholeAlbum.kt:13-20)
-- [ ] A whole library album: the server's order, each library song as the library has it, each adopted find as its library song, then library songs the server did not list (a phone-only copy) in their own order; with no finds it is the library's album unchanged. (app/discovery/WholeAlbum.kt:28-39)
+- [x] Library album as the server lists it now: from the album's songs' copies on this server, the album most of them belong to, fetched by its native id; only songs the server marks external stay finds, numbered as the album numbers them (0 or less means none); unmarked missing songs are dropped (the next copy brings them). (app/discovery/Discovery.kt:185-194, app/discovery/WholeAlbum.kt:13-20)
+- [x] A whole library album: the server's order, each library song as the library has it, each adopted find as its library song, then library songs the server did not list (a phone-only copy) in their own order; with no finds it is the library's album unchanged. (app/discovery/WholeAlbum.kt:28-39)
 
 ## 21. Online album page
 
@@ -275,7 +275,7 @@ Path prefixes used in the citations:
 
 ## 22. Online artist page
 
-- [ ] Opened from a search artist circle under "Not in your library", the online album page's artist name, or a library artist page's similar artist that the library does not have. (app/ui/search/SearchScreen.kt:452, app/ui/online/OnlineAlbumScreen.kt:169, app/ui/artist/ArtistScreen.kt:370)
+- [x] Opened from a search artist circle under "Not in your library", the online album page's artist name, or a library artist page's similar artist that the library does not have. (app/ui/search/SearchScreen.kt:452, app/ui/online/OnlineAlbumScreen.kt:169, app/ui/artist/ArtistScreen.kt:370)
 - [x] Loads getArtist; same loading and failure states as the online album page. (app/ui/online/OnlineArtistScreen.kt:49-52, app/discovery/Discovery.kt:196-203)
 - [x] Grid of albums, adaptive 150dp columns, 14dp horizontal and 18dp vertical gaps; header spans the grid. (app/ui/online/OnlineArtistScreen.kt:73-81, app/ui/artist/ArtistScreen.kt:381-397) (iPhone: columns worked out from 150 pt cards)
 - [x] Header: artwork (clean, no mark), name, and "<n> albums • Not in your library" (n = albums listed; "1 album"). (app/ui/online/OnlineArtistScreen.kt:74-77)
@@ -507,34 +507,34 @@ Path prefixes used in the citations:
 
 ## 38. Live list page
 
-- [ ] Header: title, song count, total length, Play (from the first), Shuffle, More (live list options). Artwork 240dp: a mosaic of the songs' covers, or the live mark tile when none; cover line for live lists. (app/ui/livelists/LiveListScreen.kt:108-121)
+- [x] Header: title, song count, total length, Play (from the first), Shuffle, More (live list options). Artwork 240dp: a mosaic of the songs' covers, or the live mark tile when none; cover line for live lists. (app/ui/livelists/LiveListScreen.kt:108-121)
 - [x] Under the header, centered caption (TextSecondary, 32dp sides, 12dp bottom): the summary of its rules without a count. (app/ui/livelists/LiveListScreen.kt:122-130)
-- [ ] No songs: the note "No songs match right now. As songs are added, played and liked, the ones that match show up here.". (app/ui/livelists/LiveListScreen.kt:131-133, 144)
-- [ ] Rows: plain song rows; tap plays the list from that song with the list's name as the playing source; multi-select available. (app/ui/livelists/LiveListScreen.kt:104-136, 75-77)
+- [x] No songs: the note "No songs match right now. As songs are added, played and liked, the ones that match show up here.". (app/ui/livelists/LiveListScreen.kt:131-133, 144)
+- [x] Rows: plain song rows; tap plays the list from that song with the list's name as the playing source; multi-select available. (app/ui/livelists/LiveListScreen.kt:104-136, 75-77)
 - [x] The page leaves itself when the list is deleted. (app/ui/livelists/LiveListScreen.kt:96-98)
 - [x] Live mark tile: accent at 16% fill, filter icon at 42% of the size in the accent. (app/ui/livelists/LiveListParts.kt:35-42) (iPhone: SF Symbol line.3.horizontal.decrease)
-- [ ] Options menu titled with the list name: "Edit rules", "Rename" (popup "Rename live list", field "Live list name", "Save"), "Duplicate" (toast "Made a copy: <copy name>"), "Save a copy as a playlist" (toast "Saved a copy of <name> as a playlist, <n> songs" with thousands separators, or ""<name>" has no songs right now, so there is nothing to copy."), "Delete" (destructive, confirm). (app/ui/playlist/PlaylistSheets.kt:195-225, 306-337; app/ui/livelists/LiveListEditing.kt:56-60)
-- [ ] In the playlists list a live list shows its mark, its name and "Live list"; "New live list" / "Songs picked by rules, always up to date" opens the editor. (app/ui/livelists/LiveListParts.kt:44-58)
+- [x] Options menu titled with the list name: "Edit rules", "Rename" (popup "Rename live list", field "Live list name", "Save"), "Duplicate" (toast "Made a copy: <copy name>"), "Save a copy as a playlist" (toast "Saved a copy of <name> as a playlist, <n> songs" with thousands separators, or ""<name>" has no songs right now, so there is nothing to copy."), "Delete" (destructive, confirm). (app/ui/playlist/PlaylistSheets.kt:195-225, 306-337; app/ui/livelists/LiveListEditing.kt:56-60) (iPhone: system menu; rename in a popover, delete in a system dialog)
+- [x] In the playlists list a live list shows its mark, its name and "Live list"; "New live list" / "Songs picked by rules, always up to date" opens the editor. (app/ui/livelists/LiveListParts.kt:44-58) (iPhone: a long press gives a live list's options as a system context menu)
 
 ## 39. Live list editor
 
-- [ ] Title "New live list" or "Edit live list". Starts from the saved list, a page's filters, or nothing picked with newest-first order. (app/ui/livelists/LiveListEditScreen.kt:209, app/ui/livelists/LiveListEditing.kt:14-20)
+- [x] Title "New live list" or "Edit live list". Starts from the saved list, a page's filters, or nothing picked with newest-first order. (app/ui/livelists/LiveListEditScreen.kt:209, app/ui/livelists/LiveListEditing.kt:14-20)
 - [x] Name field with the placeholder made from the rules (one rule; the first two rules joined; the words capitalized; else "New live list"). (app/ui/livelists/LiveListEditScreen.kt:210-212, core/livelists/LiveListWords.kt:32-43)
 - [x] About text: "Picks songs from your whole library that match these rules, and keeps up as songs are added, played and liked.". (app/ui/livelists/LiveListEditScreen.kt:213-220)
 - [x] Words field placeholder "With these words". (app/ui/livelists/LiveListEditScreen.kt:221-223)
 - [x] Rules as on chips (tap takes one off) and an off chip "Add a rule" (or "Add another rule"), flow-wrapped 8dp apart. (app/ui/livelists/LiveListEditScreen.kt:224-233) (iPhone: Add a rule is a system menu drawn as the off chip)
 - [x] With two or more rules: "A song needs to match" with chips "All of these" and "Any of these". (app/ui/livelists/LiveListEditScreen.kt:234-242, core/livelists/LiveListRules.kt:27-29)
-- [ ] "Order" button: the order in words, first letter capitalized, or "In library order"; opens the sort sheet over: Recently added, Most played, Recently played, Rating, Title, Artist, Album, Year, Length. (app/ui/livelists/LiveListEditScreen.kt:243-250, core/livelists/LiveListRules.kt:92-95)
+- [x] "Order" button: the order in words, first letter capitalized, or "In library order"; opens the sort sheet over: Recently added, Most played, Recently played, Rating, Title, Artist, Album, Year, Length. (app/ui/livelists/LiveListEditScreen.kt:243-250, core/livelists/LiveListRules.kt:92-95) (iPhone: system menu: the two directions on top, then the orders)
 - [x] "How many" button: "All songs" or "The first <n>"; sheet "How many songs" with All songs, 25, 50, 100, 250, 500. (app/ui/livelists/LiveListEditScreen.kt:251-256, core/livelists/LiveListRules.kt:87-89) (iPhone: system menu with checkmarks)
-- [ ] Buttons: accent "Make live list" (new) or "Save", and glaze "Cancel" (goes back). A new list then opens its page in place of the editor; an edited one returns. (app/ui/livelists/LiveListEditScreen.kt:259-264, app/ui/nav/MainShell.kt:392-398)
+- [x] Buttons: accent "Make live list" (new) or "Save", and glaze "Cancel" (goes back). A new list then opens its page in place of the editor; an edited one returns. (app/ui/livelists/LiveListEditScreen.kt:259-264, app/ui/nav/MainShell.kt:392-398)
 - [x] The saved name is the typed name trimmed, else the generated name. (core/livelists/LiveListWords.kt:73-85)
 - [x] Starters ("Or start with one of these") show only on a new, empty editor while the listener has no live lists and it was not opened with filters: "Recently added", "Not played in a year", "Most played this month" (limit 50), "Lossless favorites", each with its detail line; a tap makes it as it is. (app/ui/livelists/LiveListEditing.kt:22-25, core/livelists/LiveListRules.kt:114-146, app/ui/livelists/LiveListEditScreen.kt:265-270)
-- [ ] Preview: "<n> songs match right now" ("1 song matches right now", thousands separators), or "No songs match these rules yet. Take a rule off, or pick Any of these so a song needs to match only one."; then the songs, tap plays from that one with the draft name as source. (app/ui/livelists/LiveListEditScreen.kt:271-282, 288; core/livelists/LiveListWords.kt:64-65)
+- [x] Preview: "<n> songs match right now" ("1 song matches right now", thousands separators), or "No songs match these rules yet. Take a rule off, or pick Any of these so a song needs to match only one."; then the songs, tap plays from that one with the draft name as source. (app/ui/livelists/LiveListEditScreen.kt:271-282, 288; core/livelists/LiveListWords.kt:64-65)
 - [x] Add a rule, first page: Added, Played, Times played, Length, Rating, Genre, Artist, Year, Favorites, Lossless. (app/ui/livelists/LiveListEditing.kt:38-45)
 - [x] Groups: Added (In the last week / month / year); Played (In the last week, In the last month, Never, Not in the last 6 months, Not in the last year); Times played (At least once, 5, 10, 25 times or more); Length (3 minutes or shorter, 6 minutes or longer, 10 minutes or longer). (core/livelists/LiveListRules.kt:41-84)
-- [ ] Rating page: "5 stars", "4 stars or more" ... "1 star or more". Genre and Artist pages list the library's values A to Z; Year lists decades newest first as "The 1990s". An empty page is not shown. The current pick is ticked. (app/ui/livelists/LiveListEditing.kt:50-54, app/ui/livelists/LiveListEditScreen.kt:177-205)
+- [x] Rating page: "5 stars", "4 stars or more" ... "1 star or more". Genre and Artist pages list the library's values A to Z; Year lists decades newest first as "The 1990s". An empty page is not shown. The current pick is ticked. (app/ui/livelists/LiveListEditing.kt:50-54, app/ui/livelists/LiveListEditScreen.kt:177-205)
 - [x] Picking a rule already on takes it off; genre, artist, album artist, composer and year rules add up; any other replaces the rule on its field. (core/livelists/LiveListRules.kt:12-25)
-- [ ] A page's filters become a live list with the page's own rule first, then its filters; match All when the page has a rule; the page's order or newest first; the filters' limit. (core/livelists/LiveListRules.kt:100-112)
+- [x] A page's filters become a live list with the page's own rule first, then its filters; match All when the page has a rule; the page's order or newest first; the filters' limit. (core/livelists/LiveListRules.kt:100-112)
 
 ## 40. Live list summary words
 
@@ -563,7 +563,7 @@ Path prefixes used in the citations:
 - [x] The server's artist id: the library's own id when it came from this server (not a library-made "artist:" id); else a server artist of the same name merged into it; else the first search hit (5 artists) with the same name. (app/discovery/ArtistExtras.kt:96-106, 137-141)
 - [x] Top songs by id only when the server lists "topSongsByArtistId"; asked by name, songs by someone else of a similar name are dropped. (app/discovery/ArtistExtras.kt:28-29, 76-80, 143-146)
 - [x] Biography made plain: the trailing "Read more" link dropped, breaks and paragraph ends made new lines, tags removed, entities decoded, paragraphs separated by one empty line; nothing when empty. (core/discovery/Biography.kt:6-31)
-- [ ] Similar artists: not the same name as this artist, with an id; each opens in the library when there (library name and artwork) else as an online artist; each once. (app/discovery/ArtistExtras.kt:108-122)
+- [x] Similar artists: not the same name as this artist, with an id; each opens in the library when there (library name and artwork) else as an online artist; each once. (app/discovery/ArtistExtras.kt:108-122)
 - [x] With "Library songs only": top songs keep only library songs, similar artists only library ones. (app/discovery/ArtistExtras.kt:43-46)
 
 ## Shared logic to port line for line

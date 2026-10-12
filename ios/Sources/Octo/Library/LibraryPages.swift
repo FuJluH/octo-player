@@ -97,6 +97,25 @@ struct SongFilters: Equatable {
         !words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !quick.isEmpty || rating != nil || genre != nil || decade != nil
     }
 
+    /// The filters as the rules of a query, for a live list made from them.
+    var query: LibraryQuery {
+        var rules: [QueryRule] = quick.map { filter in
+            switch filter {
+            case .favorites: FilterPresets.favorites
+            case .week: FilterPresets.addedThisWeek
+            case .month: FilterPresets.addedThisMonth
+            case .year: FilterPresets.addedThisYear
+            case .neverPlayed: FilterPresets.neverPlayed
+            case .notLately: FilterPresets.notPlayedLately
+            case .lossless: FilterPresets.lossless
+            }
+        }
+        if let rating { rules.append(FilterPresets.ratingAtLeast(rating)) }
+        if let genre { rules.append(FilterPresets.genre(genre)) }
+        if let decade { rules.append(FilterPresets.decade(decade)) }
+        return LibraryQuery(rules, text: words.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
     /// A quick filter on takes the place of any other on the same field; on again takes it off.
     mutating func toggle(_ filter: QuickFilter) {
         if quick.contains(filter) {
@@ -166,6 +185,7 @@ struct SongsPage: View {
     @Environment(Library.self) private var library
     @Environment(LibraryState.self) private var state
     @Environment(LibraryActions.self) private var actions
+    @Environment(Router.self) private var router
     @State private var sorted: Sorted<LibraryTrack>?
     @State private var shown: [LibraryTrack]?
     @State private var shownHeadings: [String]?
@@ -325,11 +345,10 @@ struct SongsPage: View {
                 HStack(spacing: 8) {
                     if filters.any {
                         FilterChip(text: "Clear all", on: false) { filters = SongFilters() }
-                        if let open = LiveListHook.newLiveList {
-                            FilterChip(text: "Save as live list", on: false) {
-                                open(LiveListSeed(words: filters.words.trimmingCharacters(in: .whitespacesAndNewlines),
-                                                  rules: chipWords, order: state.order(.songs)))
-                            }
+                        FilterChip(text: "Save as live list", on: false) {
+                            let order = state.order(.songs)
+                            let start = liveListQueryFrom([], filters: filters.query, order: QuerySort(by: order.by.id, descending: order.descending))
+                            router.go(.liveListEditor(id: nil, start: start.toJSON()))
                         }
                     }
                     ForEach(QuickFilter.allCases, id: \.self) { filter in
@@ -354,15 +373,6 @@ struct SongsPage: View {
         }
         .padding(.top, 2)
         .padding(.bottom, 10)
-    }
-
-    /// The words of every filter on, for a live list made from them.
-    private var chipWords: [String] {
-        var out = filters.quick.map(\.label)
-        if let rating = filters.rating { out.append("Rating at least \(rating)") }
-        if let genre = filters.genre { out.append("Genre is \(genre)") }
-        if let decade = filters.decade { out.append("From the \(decade)s") }
-        return out
     }
 
     /// A chip that asks a question when off and reads as its filter when on; a tap on it then

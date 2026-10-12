@@ -84,20 +84,18 @@ struct AlbumView: View {
                 let ya = a.year ?? 0, yb = b.year ?? 0
                 return ya != yb ? ya > yb : a.sortKey < b.sortKey
             }
-        guard let client = session.client, isServerSource(found.sourceId) else { return }
-        if let full = try? await client.fullAlbum(found.nativeId) {
+        // The album as Octo lists it now, found from its songs' copies there: the songs it marks as
+        // outside the library join the library's in the server's order.
+        if let listing = try? await state.data.discovery.libraryAlbum(tracks.map(\.id)) {
+            let server = outsideAlbumSongs(listing.sent, listing.resolved)
+            var adoptions: [String: String] = [:]
+            for (serverId, trackId) in downloads.adoptions ?? [:] { adoptions[findId(serverId)] = trackId }
+            whole = server.contains(where: \.isFound) ? wholeAlbum(tracks, server: server, adoptions: adoptions) : nil
+        } else {
+            whole = nil
+        }
+        if let client = session.client, isServerSource(found.sourceId), let full = try? await client.fullAlbum(found.nativeId) {
             discTitles = Dictionary(full.discTitles.map { ($0.disc, $0.title) }, uniquingKeysWith: { a, _ in a })
-            let songs = full.song.map(\.plain)
-            if songs.contains(where: \.isExternal) {
-                let held = Dictionary((await library.libraryTracks(for: songs.filter { !$0.isExternal })).map { ($0.nativeId, $0) },
-                                      uniquingKeysWith: { a, _ in a })
-                var listedTracks = songs.map { song in held[song.id] ?? state.provisional(song) }
-                let listedIds = Set(listedTracks.map(\.id))
-                listedTracks += tracks.filter { !listedIds.contains($0.id) }
-                whole = listedTracks
-            } else {
-                whole = nil
-            }
         }
         highlight = await mainSong(found)
     }
@@ -498,8 +496,12 @@ struct ArtistView: View {
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: 14) {
                     ForEach(similar, id: \.id) { other in
-                        ArtistCircle(id: other.id, name: other.name, coverArt: other.coverArt, external: other.library == nil,
-                                     library: other.library)
+                        // One the library does not have opens as the server shows it.
+                        if let mine = other.library {
+                            ArtistCircle(id: other.id, name: other.name, coverArt: other.coverArt, library: mine)
+                        } else {
+                            OnlineArtistCircle(id: other.id, name: other.name, coverArt: other.coverArt)
+                        }
                     }
                 }
                 .padding(.horizontal, 20)
@@ -519,6 +521,8 @@ struct PlaylistsView: View {
     @Environment(LibraryState.self) private var state
     @Environment(LibraryActions.self) private var actions
     @Environment(ServerSync.self) private var sync
+    @Environment(LiveListStore.self) private var liveLists
+    @Environment(LiveLibrary.self) private var liveLibrary
     @State private var playlists: [PlaylistSummary]?
     @State private var importing = false
     @State private var importNote: ImportNote?
@@ -543,19 +547,19 @@ struct PlaylistsView: View {
                         PlaylistLine(name: "New playlist") { LeadTile(icon: .addToLibrary) }
                     }
                     .buttonStyle(SqueezeStyle())
-                    if let open = LiveListHook.newLiveList {
-                        Button { open(nil) } label: {
-                            PlaylistLine(name: "New live list", subtitle: "Songs picked by rules, always up to date") {
-                                LeadTile(icon: .filter, tinted: true)
-                            }
+                    NavigationLink(value: Route.liveListEditor(id: nil)) {
+                        PlaylistLine(name: "New live list", subtitle: "Songs picked by rules, always up to date") {
+                            LeadTile(icon: .filter, tinted: true)
                         }
-                        .buttonStyle(SqueezeStyle())
                     }
+                    .buttonStyle(SqueezeStyle())
                     Button { importing = true } label: {
                         PlaylistLine(name: "Import a playlist file", subtitle: "M3U or M3U8") { LeadTile(icon: .folder) }
                     }
                     .buttonStyle(SqueezeStyle())
                     if let importNote { importNoteView(importNote) }
+                    // The live lists, in the order they were made, above the playlists.
+                    ForEach(liveLists.lists, id: \.id) { list in LiveListRow(list: list).id("live:\(list.id)") }
                     ForEach(sortPlaylists(playlists ?? [], order)) { playlist in
                         NavigationLink(value: Route.library(.playlist(id: playlist.id))) {
                             PlaylistLine(name: playlist.name, subtitle: songsCount(playlist.songCount), onServer: playlist.onServer) {
@@ -576,6 +580,8 @@ struct PlaylistsView: View {
         }
         .inlineTitle("Playlists")
         .barClearance()
+        // The live lists' songs, for their covers.
+        .task(id: library.stamp(.library, .likes, .plays)) { if !liveLists.lists.isEmpty { await liveLibrary.read() } }
         .libraryRefreshable {}
         .task { sync.syncAgain() }
         .task(id: library.stamp(.playlists, .library)) { playlists = await library.playlists() }
@@ -643,20 +649,6 @@ private struct LeadTile: View {
             .overlay { RoundedRectangle(cornerRadius: OctoRadius.artS).strokeBorder(.white.opacity(0.1), lineWidth: 1) }
             .frame(width: 56, height: 56)
     }
-}
-
-/// Where the live list editor plugs in: set by the app once it has one.
-@MainActor
-enum LiveListHook {
-    /// Opens the live list editor, for a new list or with a page's filters to start from.
-    static var newLiveList: ((LiveListSeed?) -> Void)?
-}
-
-/// What a page's filters give a new live list to start from.
-struct LiveListSeed {
-    var words: String
-    var rules: [String]
-    var order: ListOrder?
 }
 
 // MARK: Playlist
