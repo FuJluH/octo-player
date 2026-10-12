@@ -62,8 +62,8 @@ final class AppSettings {
         listenBrainz = readListenBrainz()
         migrateOldQuality()
         network.pathUpdateHandler = { [weak self] path in
+            // Mobile data is any connection that is neither Wi-Fi nor a cable.
             let mobile = path.status == .satisfied && !path.usesInterfaceType(.wifi) && !path.usesInterfaceType(.wiredEthernet)
-                && path.usesInterfaceType(.cellular)
             Task { @MainActor in
                 guard let self, self.onMobileData != mobile else { return }
                 self.onMobileData = mobile
@@ -99,15 +99,22 @@ final class AppSettings {
     }
 
     /// The first builds kept one stream size; it becomes this app's size on Wi-Fi and on mobile
-    /// data, once.
+    /// data, once ever. The old value is still written as the size in use changes, so it is
+    /// never read again after the first start that looks.
     private func migrateOldQuality() {
         let old = UserDefaults.standard
-        guard playerStore.string(forKey: Keys.streamWifi) == nil, old.object(forKey: "stream.quality") != nil else { return }
-        let kbps = old.integer(forKey: "stream.quality")
-        let quality: StreamQuality = kbps > 0 ? .mp3(kbps: kbps) : .original
+        let moved = old.bool(forKey: Self.oldQualityMovedKey)
+        let stored = old.object(forKey: Self.oldQualityKey) != nil ? old.integer(forKey: Self.oldQualityKey) : nil
+        let chosen = playerStore.string(forKey: Keys.streamWifi) != nil || playerStore.string(forKey: Keys.streamMobile) != nil
+        let quality = movedStreamQuality(oldKbps: stored, alreadyMoved: moved, sizesChosen: chosen)
+        if !moved { old.set(true, forKey: Self.oldQualityMovedKey) }
+        guard let quality else { return }
         setStreamWifi(quality)
         setStreamMobile(quality)
     }
+
+    private static let oldQualityKey = "stream.quality"
+    private static let oldQualityMovedKey = "stream.quality.moved"
 
     // MARK: Player
 

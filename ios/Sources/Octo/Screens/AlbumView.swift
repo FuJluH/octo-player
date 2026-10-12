@@ -22,6 +22,8 @@ struct AlbumView: View {
     @State private var highlight: String?
     @State private var onlyMine = false
     @State private var online: Album?
+    /// The server album the page shares, once the look-up finds one.
+    @State private var shareAlbumId: String?
 
     /// The songs the page lists: the whole album with its finds, unless only the library's are
     /// wanted.
@@ -61,6 +63,7 @@ struct AlbumView: View {
         .selectableSongs(state.pickables(listed))
         .libraryRefreshable {}
         .task(id: "\(album.id)|\(library.stamp(.library, .ratings, .finds))") { await read() }
+        .task(id: "\(shown?.id ?? "")|\(state.canShare)") { await lookUpShareAlbum() }
         .onChange(of: downloads.arrived) { _, _ in
             guard !finds.isEmpty else { return }
             Task {
@@ -68,6 +71,15 @@ struct AlbumView: View {
                 await read()
             }
         }
+    }
+
+    /// Finds the server album most of the page's songs came from; "Share" is hidden while it
+    /// looks and when it finds none.
+    private func lookUpShareAlbum() async {
+        shareAlbumId = nil
+        guard state.canShare, let id = shown?.id else { return }
+        let found = await state.data.controls.shareableAlbumId(id)
+        if !Task.isCancelled { shareAlbumId = found }
     }
 
     private func read() async {
@@ -172,14 +184,17 @@ struct AlbumView: View {
     @ViewBuilder
     private func quietActions(_ album: LibraryAlbum) -> some View {
         let serverOnly = tracks.filter { !$0.onPhone }
-        let canShare = state.canShare && isServerSource(album.sourceId)
+        let canShare = state.canShare && shareAlbumId != nil
         if canShare || !serverOnly.isEmpty {
             HStack(spacing: 0) {
                 if canShare {
                     Menu {
                         ShareLinkItems(target: .album(album.id), title: album.title)
                     } label: {
-                        QuietActionLabel(icon: .share, text: "Share")
+                        HStack(spacing: 0) {
+                            QuietActionLabel(icon: .share, text: "Share")
+                            if actions.makingLink?.target == .album(album.id) { LoadingSpinner(size: 18) }
+                        }
                     }
                     .buttonStyle(.plain)
                 }
@@ -359,7 +374,9 @@ struct ArtistView: View {
         .backStopsPicking()
         .selectableSongs(state.pickables(songs))
         .libraryRefreshable {}
-        .task(id: "\(id)|\(library.stamp(.library, .plays))|\(order.by.id)|\(order.descending)") { await readAll() }
+        .task(id: "\(id)|\(library.stamp(.library, .plays))|\(order.by.id)|\(order.descending)|\(AppSettings.shared.player.libraryOnly)") {
+            await readAll()
+        }
         .onChange(of: downloads.arrived) { _, _ in
             Task {
                 try? await Task.sleep(for: .milliseconds(1_500))

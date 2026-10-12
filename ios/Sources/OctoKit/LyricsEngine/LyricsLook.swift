@@ -148,10 +148,11 @@ public struct LyricsLook: Equatable, Sendable, Codable {
 
     enum CodingKeys: String, CodingKey { case style, emphasis, glow, lift, speed, inactiveScale, fade, cascade, keepCompleted, arc }
 
-    // A saved look may leave out any field; it takes its default.
+    // A saved look may leave out any field, and in a backup name a style this app does not know;
+    // either takes its default.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        style = try c.decodeIfPresent(LyricsStyle.self, forKey: .style) ?? .flowing
+        style = try c.choice(LyricsStyle.self, forKey: .style, decoder) ?? .flowing
         emphasis = try c.decodeIfPresent(Int.self, forKey: .emphasis) ?? LookDial.emphasis.default
         glow = try c.decodeIfPresent(Int.self, forKey: .glow) ?? LookDial.glow.default
         lift = try c.decodeIfPresent(Int.self, forKey: .lift) ?? LookDial.lift.default

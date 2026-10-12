@@ -34,10 +34,10 @@ struct SharesScreen: View {
                     ForEach(list) { share in row(share, now: now) }
                 }
             }
-            .padding(.top, detailTopGap)
+            .padding(.top, 8 + detailTopGap)
         }
         .barClearance()
-        .background(OctoColor.background)
+        .background { PageBackdrop(page: .shares, route: nil) }
         .task { await load() }
         .opensWhenAsked("delete_link") { if case .ready(let list) = shares { deleting = list.first } }
     }
@@ -210,12 +210,10 @@ struct ShareCard: View {
         Task {
             do {
                 let share = try await controls.createShare(request.ids, description: request.title, expiry: expiry)
-                if let share, share.url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if share.url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     problem = "The server made the link but did not say where it is."
-                } else if let share {
-                    close(share.url)
                 } else {
-                    problem = "The server made no share"
+                    close(share.url)
                 }
             } catch {
                 problem = sharingUnavailable(error) ? "Sharing is switched off on this server." : userMessage(plainError(error))

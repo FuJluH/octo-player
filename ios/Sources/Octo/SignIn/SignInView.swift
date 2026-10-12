@@ -69,7 +69,7 @@ struct SignInView: View {
             .frame(maxWidth: .infinity)
         }
         .scrollDismissesKeyboard(.interactively)
-        .background(OctoColor.background)
+        .background { PageBackdrop(page: model.ambientPage, route: nil) }
         .overlay(alignment: .topLeading) {
             Button { dismiss() } label: {
                 Image(systemName: "chevron.left").font(.system(size: 17, weight: .semibold)).frame(width: 44, height: 44)
@@ -166,9 +166,9 @@ struct SignInView: View {
                     HStack(spacing: 4) {
                         Image(systemName: model.scheme == .https ? "lock.fill" : "lock.open.fill")
                             .font(.system(size: 13, weight: .semibold))
-                        Text(model.scheme.prefix).font(.octoBody)
+                            .foregroundStyle(model.scheme == .https ? OctoColor.accent : OctoColor.textMuted)
+                        Text(model.scheme.prefix).font(.octoBody).foregroundStyle(OctoColor.textMuted)
                     }
-                    .foregroundStyle(OctoColor.textMuted)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(model.scheme == .https ? "Encrypted, https" : "Not encrypted, http")
@@ -372,21 +372,21 @@ struct SignInView: View {
             }
             Section("Client certificate", "For servers that ask the phone to prove itself with a certificate.") {
                 HStack {
-                    Text(model.certificate?.name ?? (model.hadCertificate && !model.removesCertificate ? "Saved certificate" : "None"))
+                    Text(model.certificateShown ?? "None")
                         .font(.octoBodySmall)
-                        .foregroundStyle(OctoColor.textPrimary)
+                        .foregroundStyle(model.certificateShown == nil ? OctoColor.textMuted : OctoColor.textPrimary)
                     Spacer()
-                    if model.certificate != nil || (model.hadCertificate && !model.removesCertificate) {
+                    if model.certificateShown != nil {
                         Button("Remove") {
                             model.certificate = nil
                             model.removesCertificate = model.hadCertificate
                         }
                         .font(.system(size: 13.5, weight: .semibold))
-                        .foregroundStyle(OctoColor.destructive)
+                        .foregroundStyle(OctoColor.accent)
                         .buttonStyle(.plain)
                     }
                 }
-                GlazeButton(model.certificate == nil && !model.hadCertificate ? "Choose certificate" : "Choose another", size: .small) {
+                GlazeButton(model.certificateShown == nil ? "Choose certificate" : "Choose another", size: .small) {
                     certificateError = nil
                     choosingCertificate = true
                 }
@@ -398,7 +398,8 @@ struct SignInView: View {
     private func takeCertificate() {
         guard let pending = pendingCertificate else { return }
         do {
-            try ServerTrust.shared.useClientCertificate(pending.data, password: certificatePassword)
+            // Only checked here: the server in use keeps its certificate until this one is saved.
+            try CertificateCheck.validate(pending.data, password: certificatePassword)
             model.certificate = (pending.name, pending.data, certificatePassword)
             model.removesCertificate = false
             pendingCertificate = nil
@@ -458,7 +459,7 @@ private struct RevealToggle: View {
     var body: some View {
         Button(revealed ? "Hide" : "Show") { revealed.toggle() }
             .font(.system(size: 13.5, weight: .semibold))
-            .foregroundStyle(OctoColor.textSecondary)
+            .foregroundStyle(OctoColor.accent)
             .buttonStyle(.plain)
     }
 }
@@ -516,11 +517,21 @@ struct ConnectionNoteView: View {
             Image(systemName: icon).font(.system(size: 12, weight: .semibold))
             Text(words).font(.octoCaption).multilineTextAlignment(.center)
         }
-        .foregroundStyle(note == .legacyInTheOpen ? OctoColor.error : OctoColor.textMuted)
+        .foregroundStyle(color)
         .frame(maxWidth: .infinity)
     }
 
     private var icon: String { note == .encrypted ? "lock.fill" : "lock.open.fill" }
+
+    /// Red when the password itself travels in the open, secondary for other plain traffic
+    /// across the internet, muted otherwise.
+    private var color: Color {
+        switch note {
+        case .legacyInTheOpen: OctoColor.error
+        case .tokenInTheOpen: OctoColor.textSecondary
+        case .encrypted, .homeNetwork: OctoColor.textMuted
+        }
+    }
 
     private var words: String {
         switch note {
@@ -538,7 +549,24 @@ struct TrustSheet: View {
     let trust: () -> Void
     let cancel: () -> Void
 
+    /// Sized to its content when it fits, and scrolling when large text or a small screen would
+    /// push the buttons off.
     var body: some View {
+        ViewThatFits(in: .vertical) {
+            content
+            ScrollView { content }
+                .scrollBounceBehavior(.basedOnSize)
+        }
+        .frame(maxWidth: 380)
+        .glassEffect(.regular, in: .rect(cornerRadius: 20))
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black.opacity(0.45).ignoresSafeArea().onTapGesture(perform: cancel))
+        .accessibilityAddTraits(.isModal)
+        .accessibilityLabel("Trust this certificate")
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Trust this certificate?").font(.octoHeadline)
             Text("This phone doesn't trust the certificate the server showed. If it's your own server's, check the fingerprint matches before you trust it. Octo will trust this one certificate, and only for this host.")
@@ -558,13 +586,7 @@ struct TrustSheet: View {
             }
         }
         .padding(24)
-        .frame(maxWidth: 380)
-        .glassEffect(.regular, in: .rect(cornerRadius: 20))
-        .padding(16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black.opacity(0.45).ignoresSafeArea().onTapGesture(perform: cancel))
-        .accessibilityAddTraits(.isModal)
-        .accessibilityLabel("Trust this certificate")
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

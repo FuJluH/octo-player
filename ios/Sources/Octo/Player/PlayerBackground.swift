@@ -72,20 +72,21 @@ private struct StillArtwork: View {
     let cover: WashCover?
     let dolly: Double
     @State private var lastChange: Int?
-    @State private var fadeMs = 0
+    /// The cover drawn, swapped in with the fade worked out for that very change.
+    @State private var shown: WashCover?
 
     var body: some View {
         GeometryReader { box in
             ZStack {
-                if let cover, let image = cover.image {
+                if let shown, let image = shown.image {
                     Image(decorative: image, scale: 1)
                         .resizable()
                         .scaledToFill()
                         .frame(width: box.size.width, height: box.size.height)
                         .clipped()
                         .blur(radius: platformBlur(80), opaque: true)
-                        .id(cover.key)
-                        .transition(.opacity.animation(.timingCurve(0.65, 0, 0.35, 1, duration: Double(fadeMs) / 1000)))
+                        .id(shown.key)
+                        .transition(.opacity)
                 }
             }
             .scaleEffect(1.12 * CGFloat(dollyScale(Float(dolly))))
@@ -93,8 +94,13 @@ private struct StillArtwork: View {
         }
         .onChange(of: cover?.key, initial: true) { _, _ in
             let now = Int(Date().timeIntervalSince1970 * 1000)
-            fadeMs = coverFadeMs(lastChange, now)
+            let fadeMs = coverFadeMs(lastChange, now)
             lastChange = now
+            if fadeMs == 0 {
+                shown = cover
+            } else {
+                withAnimation(.timingCurve(0.65, 0, 0.35, 1, duration: Double(fadeMs) / 1000)) { shown = cover }
+            }
         }
     }
 }

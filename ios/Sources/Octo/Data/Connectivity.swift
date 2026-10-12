@@ -2,8 +2,8 @@ import Foundation
 import Network
 import Observation
 
-/// Whether the phone has a connection now, and whether it is Wi-Fi (or wired), which costs
-/// nothing to use. Parts that wait for a connection hear when one comes back.
+/// Whether the phone has a connection now, and whether it is Wi-Fi or a cable rather than
+/// mobile data. Parts that wait for a connection hear when one comes back.
 @MainActor
 @Observable
 final class Connectivity {
@@ -16,7 +16,8 @@ final class Connectivity {
     init() {
         monitor.pathUpdateHandler = { [weak self] path in
             let online = path.status == .satisfied
-            let wifi = online && (path.usesInterfaceType(.wifi) || path.usesInterfaceType(.wiredEthernet)) && !path.isExpensive
+            // Any Wi-Fi counts, a personal hotspot too; anything else is mobile data.
+            let wifi = online && (path.usesInterfaceType(.wifi) || path.usesInterfaceType(.wiredEthernet))
             Task { @MainActor in self?.update(online: online, wifi: wifi) }
         }
         monitor.start(queue: DispatchQueue(label: "app.winters.octo.connectivity"))

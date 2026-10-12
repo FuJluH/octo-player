@@ -50,3 +50,15 @@ public func prefetchAhead(playOrder: [Int], current: Int, repeatMode: PrefetchRe
     }
     return places
 }
+
+/// How the player's repeat setting reads for fetching ahead.
+public func prefetchRepeat(_ mode: RepeatMode) -> PrefetchRepeat {
+    switch mode {
+    case .off: .off
+    case .one: .one
+    case .all: .all
+    }
+}
+
+/// Whether a queue address is a server song's, the only kind fetched ahead.
+public func prefetchIsServerStream(_ uri: String) -> Bool { parseStreamUri(uri) != nil }

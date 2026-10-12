@@ -1,8 +1,9 @@
 import Foundation
 import OctoKit
 
-/// The library's part of a backup: playlists made on the phone, likes, ratings, favorites, pins
-/// and sort orders, read from the library and put back through the same writes the pages use.
+/// The library's part of a backup: playlists made on the phone, likes, ratings, favorites, pins,
+/// sort orders and each song's lyrics timing, read from the library and put back through the
+/// same writes the pages use.
 @MainActor
 final class LibraryBackups: BackupLibrary {
     private unowned let actions: LibraryActions
@@ -14,6 +15,12 @@ final class LibraryBackups: BackupLibrary {
 
     private func key(_ track: LibraryTrack) -> SongKey {
         SongKey(relinkKey: track.relinkKey, title: track.title, artist: track.artist, album: track.album, durationMs: track.durationMs)
+    }
+
+    /// A song as the library last knew it; the texts are empty and the length 0 once it is gone.
+    private func key(_ row: SongKeyRow) -> SongKey {
+        SongKey(relinkKey: row.relinkKey, title: row.title ?? "", artist: row.artist ?? "", album: row.album ?? "",
+                durationMs: row.durationMs ?? 0)
     }
 
     func tracks() async -> [BackupTrack] {
@@ -30,65 +37,73 @@ final class LibraryBackups: BackupLibrary {
         await library.artists().map { NamedItem(id: $0.id, relinkKey: $0.searchKey, name: $0.name) }
     }
 
-    func playlistNames() async -> [String] { await library.playlists().map(\.name) }
+    func playlistRows() async -> [PlaylistRow] { (try? await library.store.playlists()) ?? [] }
 
     func phonePlaylists() async -> [PlaylistBackup] {
         let rows = ((try? await library.store.phonePlaylists()) ?? []).sorted { $0.createdAt < $1.createdAt }
-        var out: [PlaylistBackup] = []
-        for row in rows {
-            out.append(PlaylistBackup(row.name, await library.playlistTracks(row.id).map { key($0.track) }))
-        }
-        return out
+        let songs = Dictionary(grouping: (try? await library.store.phonePlaylistSongKeys()) ?? []) { $0.playlistId ?? "" }
+        return rows.map { row in PlaylistBackup(row.name, (songs[row.id] ?? []).map { key($0) }) }
     }
 
-    func likes() async -> [SongKey] { await library.likedTracks().map(key) }
+    func likes() async -> [SongKey] { ((try? await library.store.likedSongKeys()) ?? []).map { key($0) } }
 
     func ratings() async -> [RatedSong] {
-        let rated = (try? await library.store.ratings()) ?? []
-        let tracks = Dictionary((await library.tracks(ids: rated.map(\.trackId))).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        return rated.filter { $0.rating > 0 }.map { rating in
-            if let track = tracks[rating.trackId] { return RatedSong(key(track), rating.rating) }
-            return RatedSong(SongKey(relinkKey: rating.relinkKey), rating.rating)
-        }
+        ((try? await library.store.ratedSongKeys()) ?? []).compactMap { row in row.rating.map { RatedSong(key(row), $0) } }
     }
 
     func favoriteAlbums() async -> [HeldKey] {
-        await library.likedAlbums().map { HeldKey(relinkKey: $0.album.searchKey, name: $0.album.title, artist: $0.album.artist) }
+        let rows = ((try? await library.store.likedAlbumRows()) ?? []).sorted { $0.likedAt < $1.likedAt }
+        let albums = await albumsById()
+        return rows.map { albumKey($0.relinkKey, albums[$0.albumId]) }
     }
 
     func favoriteArtists() async -> [HeldKey] {
-        await library.likedArtists().map { HeldKey(relinkKey: $0.artist.searchKey, name: $0.artist.name) }
+        let rows = ((try? await library.store.likedArtistRows()) ?? []).sorted { $0.likedAt < $1.likedAt }
+        let artists = await artistsById()
+        return rows.map { artistKey($0.relinkKey, artists[$0.artistId]) }
     }
 
     func pins() async -> [PinBackup] {
-        var out: [PinBackup] = []
-        let playlists = await library.playlists()
-        for pin in await library.shownPins() {
-            switch pin.kind {
-            case "album":
-                if let album = await library.album(pin.itemId) {
-                    out.append(PinBackup(pin.kind, HeldKey(relinkKey: pin.relinkKey, name: album.title, artist: album.artist)))
-                }
-            case "artist":
-                if let artist = await library.artist(pin.itemId) {
-                    out.append(PinBackup(pin.kind, HeldKey(relinkKey: pin.relinkKey, name: artist.name)))
-                }
-            default:
-                if let playlist = playlists.first(where: { $0.id == pin.itemId }) {
-                    out.append(PinBackup(pin.kind, HeldKey(relinkKey: pin.relinkKey, name: playlist.name)))
-                }
+        let rows = (try? await library.store.pins()) ?? []
+        let albums = await albumsById()
+        let artists = await artistsById()
+        let playlists = Dictionary((await playlistRows()).map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
+        return rows.compactMap { pin in
+            let item: HeldKey? = switch PinKind.of(pin.kind) {
+            case .album: albumKey(pin.relinkKey, albums[pin.itemId])
+            case .artist: artistKey(pin.relinkKey, artists[pin.itemId])
+            case .playlist: playlists[pin.itemId].map { HeldKey(name: $0) }
+            case nil: nil
             }
+            return item.map { PinBackup(pin.kind, $0) }
         }
-        return out
+    }
+
+    private func albumsById() async -> [String: LibraryAlbum] {
+        Dictionary((await library.albums()).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    private func artistsById() async -> [String: LibraryArtist] {
+        Dictionary((await library.artists()).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    /// An album by its kept key, with empty names when the library no longer has it.
+    private func albumKey(_ relinkKey: String, _ album: LibraryAlbum?) -> HeldKey {
+        HeldKey(relinkKey: relinkKey, name: album?.title ?? "", artist: album?.artist ?? "")
+    }
+
+    private func artistKey(_ relinkKey: String, _ artist: LibraryArtist?) -> HeldKey {
+        HeldKey(relinkKey: relinkKey, name: artist?.name ?? "")
     }
 
     func sortOrders() async -> [String: String] { state.savedOrders() }
 
-    /// Each song's lyrics timing is kept by the lyrics, not the library.
-    func lyricsOffsets() async -> [LyricsOffsetBackup] { [] }
-
-    func playlistNamesById() async -> [String: String] {
-        Dictionary((await library.playlists()).map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
+    /// Each moved song the library still has, with its timing.
+    func lyricsOffsets() async -> [LyricsOffsetBackup] {
+        let offsets = LyricsSongTiming.shared.offsets
+        return await library.tracks(ids: Array(offsets.keys)).compactMap { track in
+            offsets[track.id].map { LyricsOffsetBackup(key(track), Int64($0)) }
+        }
     }
 
     func makePlaylist(_ name: String, trackIds: [String]) async -> String? {
@@ -113,19 +128,8 @@ final class LibraryBackups: BackupLibrary {
 
     func favorite(artist id: String) async { state.data.favorites.set(.artist, id, favorite: true) }
 
-    func pin(_ kind: PinKind, id: String) async {
-        switch kind {
-        case .album, .artist:
-            _ = await state.data.pins.pin(kind, id)
-        case .playlist:
-            let playlist = await library.playlists().first { $0.name.caseInsensitiveCompare(id) == .orderedSame || $0.id == id }
-            guard let playlist else { return }
-            _ = await state.data.pins.pin(.playlist, playlist.id)
-        }
-    }
+    /// A playlist made by this restore may not be written yet, so it is pinned by its id alone.
+    func pin(_ kind: PinKind, id: String) async { _ = await state.data.pins.pin(kind, id) }
 
     func restoreSortOrders(_ orders: [String: String]) async { state.restoreOrders(orders) }
-
-    /// Each song's lyrics timing is put back by the lyrics, not the library.
-    func setLyricsOffset(_ trackId: String, ms: Int64) async {}
 }

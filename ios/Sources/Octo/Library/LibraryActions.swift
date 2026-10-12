@@ -20,6 +20,8 @@ final class LibraryActions {
     }
 
     var shareItem: ShareItem?
+    /// The link being made, while one is.
+    private(set) var makingLink: MakingLink?
     /// A playlist to write as an M3U file, by the phone's file picker.
     var export: PlaylistExport?
     /// Songs being looked for at a better copy, by server id.
@@ -166,7 +168,7 @@ final class LibraryActions {
 
     /// Plays the song then up to 50 songs like it, in place of the queue.
     func startRadio(_ song: Song) async {
-        await player.startRadio(from: song)
+        if !(await player.startRadio(from: song)) { router.show("No similar songs found") }
     }
 
     /// Plays `seed`, then songs like the seeds, in place of the queue. Nothing found says so.
@@ -416,18 +418,24 @@ final class LibraryActions {
     // MARK: Links
 
     /// Makes a shared link and opens the phone's share sheet with it. Answers the words of a
-    /// failure, or nil once the sheet is on its way.
+    /// failure, or nil once the sheet is on its way. Only one link is made at a time: asking
+    /// while one is being made does nothing.
     func share(_ target: ShareTarget, title: String, expiry: ShareExpiry) async -> String? {
+        guard makingLink == nil else { return nil }
+        makingLink = MakingLink(target: target, expiry: expiry)
+        defer { makingLink = nil }
         let controls = data.controls
+        guard session.inUse != nil else { return userMessage(OctoError.server(code: 0, message: noServerSignedIn)) }
         let id: String? = switch target {
         case .song(let trackId): await controls.shareableSongId(trackId)
         case .album(let albumId): await controls.shareableAlbumId(albumId)
         }
         guard let id else { return "This server has no copy of it to share." }
         do {
-            guard let link = try await controls.createShare([id], description: title, expiry: expiry),
-                  !link.url.trimmingCharacters(in: .whitespaces).isEmpty
-            else { return "The server made the link but did not say where it is." }
+            let link = try await controls.createShare([id], description: title, expiry: expiry)
+            guard !link.url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return "The server made the link but did not say where it is."
+            }
             shareItem = ShareItem(items: [link.url], subject: title)
             return nil
         } catch {
@@ -569,6 +577,12 @@ final class LibraryActions {
 enum ShareTarget: Hashable {
     case song(String)
     case album(String)
+}
+
+/// A link being made: what to, and how long it is to last.
+struct MakingLink: Equatable {
+    let target: ShareTarget
+    let expiry: ShareExpiry
 }
 
 /// The song an info sheet is about.

@@ -70,7 +70,7 @@ private struct SoundPageContent: View {
                 }
             }
         }
-        .background(OctoColor.background)
+        .background { PageBackdrop(page: .sound, route: nil) }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.plainText, .text]) { result in
             if case .success(let url) = result { model.importCorrection(url) }
         }

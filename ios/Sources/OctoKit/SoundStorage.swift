@@ -85,11 +85,11 @@ public enum SoundBackupWords {
         if let profiles {
             let outputs = profiles.keys.filter { $0 != AudioOutput.shared }.count
             if perOutput && outputs > 0 {
-                lines.append(outputs == 1 ? "1 output with its own sound" : "\(outputs) outputs with their own sound")
+                lines.append(SettingsSummaries.count(outputs, one: "output with its own sound", many: "outputs with their own sound"))
             }
         }
         if !presets.isEmpty {
-            lines.append(presets.count == 1 ? "1 equalizer preset" : "\(presets.count) equalizer presets")
+            lines.append(SettingsSummaries.count(presets.count, one: "equalizer preset", many: "equalizer presets"))
         }
         return lines
     }

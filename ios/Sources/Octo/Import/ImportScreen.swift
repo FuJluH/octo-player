@@ -27,7 +27,7 @@ struct ImportScreen: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .barClearance()
-        .background(OctoColor.background)
+        .background { PageBackdrop(page: .importList, route: nil) }
         .onAppear {
             router.importInFront = true
             let model = model ?? makeModel()

@@ -46,9 +46,10 @@ final class LocalFile: ByteSource, @unchecked Sendable {
 
 /// A song read from the server by parts: what is asked for downloads into a file of its own on
 /// the phone, from the place a read needs onwards, so the player can jump about and a part read
-/// once is not fetched again. Each request is signed as it goes out (`sign`), so no address is
-/// kept. A failed request is tried again after 0, 1 and 2 seconds; a refusal to load at all (no
-/// connection, no server) fails at once.
+/// once is not fetched again. What the songs kept on the phone already hold of it is read from
+/// there, and the server is asked only for the parts missing. Each request is signed as it goes
+/// out (`sign`), so no address is kept. A failed request is tried again after 0, 1 and 2
+/// seconds; a refusal to load at all (no connection, no server) fails at once.
 final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked Sendable {
     private let sign: @Sendable () throws -> URLRequest
     /// The name the song is saved under among the songs kept on the phone, when it is kept.
@@ -70,6 +71,12 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
     private var errorsInARow = 0
     /// Whether the server sends a part of the song when asked, once an answer showed it.
     private var sendsParts: Bool?
+    /// The parts of the song the songs kept on the phone held as it opened. Once one cannot be
+    /// read, none are used again.
+    private var saved = ByteRanges()
+    /// The last byte the request downloading now asks for, when it stops before the next saved
+    /// part; nil for the rest of the song.
+    private var taskEnd: Int64?
 
     private let file: URL
     private let handle: FileHandle
@@ -85,8 +92,12 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
 
     /// How far ahead of the download a read may land before a new request starts there.
     private static let jumpAhead: Int64 = 512 * 1024
+    /// How much of a saved part is taken from the saved songs at a time, at least.
+    private static let savedStep: Int64 = 1024 * 1024
 
-    init(savedKey: String? = nil, online: @escaping @Sendable () -> Bool = { true },
+    /// `readsSaved` false leaves the saved parts unread, as when the saved copy could not be
+    /// played; what comes from the server is still saved over it.
+    init(savedKey: String? = nil, readsSaved: Bool = true, online: @escaping @Sendable () -> Bool = { true },
          sign: @escaping @Sendable () throws -> URLRequest) throws {
         self.sign = sign
         self.savedKey = savedKey
@@ -98,6 +109,11 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
         guard let handle = try? FileHandle(forUpdating: file) else { throw PlayError(.ioUnspecified, detail: "no room for the song") }
         self.handle = handle
         super.init()
+        if readsSaved, let savedKey, let found = (try? blocking({ await StreamCache.shared.savedParts(savedKey) })) ?? nil {
+            saved = found.ranges
+            total = found.length
+            type = found.mimeType
+        }
     }
 
     deinit {
@@ -125,7 +141,7 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
             if let total { return total }
             if cancelled { throw PlayError(.ioUnspecified, detail: "stopped") }
             if let failure { throw failure }
-            if task == nil { try start(from: 0) }
+            if task == nil { try start(from: saved.contiguous(from: 0)) }
             condition.wait(until: Date().addingTimeInterval(0.5))
         }
     }
@@ -140,6 +156,7 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
             if held.covers(offset..<end) {
                 return readHeld(offset, Int(end - offset), buffer)
             }
+            if takeSaved(from: offset, to: end) { continue }
             if let failure { throw failure }
             if sendsParts == false {
                 // A server that only sends the whole song: a look at its last bytes (for a tag)
@@ -152,8 +169,11 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
                 }
                 if task == nil { try start(from: 0) }
             } else {
-                let reaching = task != nil && offset >= taskStart && offset <= writeAt + Self.jumpAhead
-                if !reaching { try start(from: offset) }
+                // The first byte this read still needs.
+                let gap = offset + held.contiguous(from: offset)
+                let withinAsk = taskEnd.map { gap <= $0 } ?? true
+                let reaching = task != nil && gap >= taskStart && gap <= writeAt + Self.jumpAhead && withinAsk
+                if !reaching { try start(from: gap) }
             }
             condition.wait(until: Date().addingTimeInterval(0.5))
         }
@@ -201,6 +221,33 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
 
     // MARK: Inside, with the condition held
 
+    /// Copies what the saved songs hold at the first byte `offset` still needs into this song's
+    /// own file: up to `end`, and at least `savedStep` when the saved part goes on that far.
+    /// False when they hold nothing there. A saved part that cannot be read is passed over for
+    /// the server's, and no saved part is used again.
+    private func takeSaved(from offset: Int64, to end: Int64) -> Bool {
+        guard let savedKey, !saved.ranges.isEmpty else { return false }
+        let gap = offset + held.contiguous(from: offset)
+        let run = saved.contiguous(from: gap)
+        guard gap < end, run > 0 else { return false }
+        let length = min(run, max(end - gap, Self.savedStep))
+        guard let data = (try? blocking({ await StreamCache.shared.read(savedKey, offset: gap, length: Int(length)) })) ?? nil,
+              !data.isEmpty
+        else {
+            saved = ByteRanges()
+            return false
+        }
+        do {
+            try handle.seek(toOffset: UInt64(gap))
+            try handle.write(contentsOf: data)
+        } catch {
+            saved = ByteRanges()
+            return false
+        }
+        held.insert(gap..<(gap + Int64(data.count)))
+        return true
+    }
+
     private func readHeld(_ offset: Int64, _ count: Int, _ buffer: UnsafeMutableRawPointer) -> Int {
         do {
             try handle.seek(toOffset: UInt64(offset))
@@ -223,11 +270,14 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
             condition.broadcast()
             throw error
         }
-        request.setValue("bytes=\(offset)-", forHTTPHeaderField: "Range")
+        // Only up to the next saved part, which is read from the phone.
+        let end = streamCacheGapEnd(saved, from: offset)
+        request.setValue("bytes=\(offset)-\(end.map(String.init) ?? "")", forHTTPHeaderField: "Range")
         request.timeoutInterval = 30
         let next = session.dataTask(with: request)
         task = next
         taskStart = offset
+        taskEnd = end
         writeAt = offset
         next.resume()
     }
@@ -272,6 +322,7 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
             sendsParts = false
             writeAt = 0
             taskStart = 0
+            taskEnd = nil
             if total == nil, http.expectedContentLength > 0 { total = http.expectedContentLength }
         }
         errorsInARow = 0
@@ -306,11 +357,19 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
         condition.broadcast()
     }
 
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest) async -> URLRequest? {
+        ServerTrust.shared.redirected(request, first: task.originalRequest)
+    }
+
     func urlSession(_ session: URLSession, task finished: URLSessionTask, didCompleteWithError error: Error?) {
+        ServerTrust.shared.noteEnd(of: finished.originalRequest, error)
         condition.lock()
         defer { condition.unlock() }
         guard finished === task else { return }
         task = nil
+        let askedEnd = taskEnd
+        taskEnd = nil
         if let error {
             let urlError = error as? URLError
             if urlError?.code == .cancelled { return }
@@ -329,6 +388,8 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
                 let code: PlayErrorCode = urlError?.code == .timedOut ? .networkConnectionTimeout : .networkConnectionFailed
                 failure = PlayError(code, detail: urlError.map { "\($0.code.rawValue)" } ?? "network")
             }
+        } else if let askedEnd, writeAt > askedEnd {
+            // The part asked for came whole; the saved part after it is read from the phone.
         } else if total == nil || writeAt < (total ?? 0) {
             // The answer ended: what came is all there is (a stream made on the way can be
             // shorter than it said it would be).

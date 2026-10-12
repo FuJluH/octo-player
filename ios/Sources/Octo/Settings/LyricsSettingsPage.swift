@@ -12,7 +12,8 @@ struct LyricsSettingsPage: View {
     var body: some View {
         let look = settings.lyricsLook
         let name = sound.output
-        let timing = settings.outputTiming(name.key)
+        // Read under the output's key, or a key it had before.
+        let timing = outputTimingIn(settings.outputTimings, name)
         SettingsPageFrame(title: SettingsPage.lyrics.title, highlight: highlight) {
             SettingsGroup {
                 ToggleRow(SettingsIndex.lyricsOnline, isOn: settings.player.lyricsOnline,
@@ -35,10 +36,10 @@ struct LyricsSettingsPage: View {
                 InfoRow(SettingsIndex.lyricsOutputTiming, title: name.label, value: LyricsOutputTiming.signed(timing.ms),
                         helper: LyricsOutputTiming.about(name.key, automatic: timing.automatic))
                 TimingButtons(ms: timing.ms, canReset: !timing.automatic) { steps in
-                    settings.stepOutputTiming(name.key, steps: steps)
+                    LyricsOutput.step(steps)
                     lyrics.moveOutput(steps: steps)
                 } reset: {
-                    settings.resetOutputTiming(name.key)
+                    LyricsOutput.reset()
                     lyrics.resetOutput()
                 }
                 .padding(.top, 12)

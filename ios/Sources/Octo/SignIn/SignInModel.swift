@@ -57,12 +57,21 @@ final class SignInModel {
     var apiKey = ""
     var legacy = false
     var useApiKey = false
+    /// Whether the server takes API keys: nil until known, which is before signing in, when a
+    /// key may still be tried.
     var takesApiKeys: Bool?
     var homeAddress = ""
     var headers: [Header] = []
+    /// A certificate chosen on this form, checked but not in use until the server is saved.
     var certificate: (name: String, data: Data, password: String)?
+    /// The kept server has a certificate the keychain can still read.
     var hadCertificate = false
     var removesCertificate = false
+    /// The saved certificate's file name.
+    private(set) var savedCertificateName: String?
+    /// The kept server says it has a certificate, but the keychain no longer holds it (a phone
+    /// restored from a backup); saving clears that.
+    private var staleCertificate = false
     var advancedOpen = false
 
     var busy = false
@@ -107,9 +116,12 @@ final class SignInModel {
         useApiKey = server.mode == .apiKey
         homeAddress = server.homeAddress.map(ServerAddress.shown) ?? ""
         headers = savedHeaderNames.map { Header(name: $0, value: "", saved: true) }
-        hadCertificate = server.hasClientCertificate
+        let certificateKept = server.hasClientCertificate && CertificateCheck.isSaved(forServer: server.id)
+        hadCertificate = certificateKept
+        staleCertificate = server.hasClientCertificate && !certificateKept
+        savedCertificateName = certificateKept ? server.clientCertificateName : nil
         advancedOpen = server.mode != .token || server.homeAddress != nil || !headers.isEmpty || hadCertificate
-        takesApiKeys = server.extensions.contains { $0.hasPrefix("apiKeyAuthentication") } ? true : nil
+        takesApiKeys = server.takesApiKeys
         if case .again(_, let note) = form { error = note }
     }
 
@@ -146,7 +158,7 @@ final class SignInModel {
         switch form {
         case .add: return "Keep another server here and switch to it in one tap."
         case .edit: return "Octo signs in with the new details before it saves them."
-        case .again(let server, _): return server.account
+        case .again(let server, _): return accountLine(username: server.username, address: ServerAddress.written(server.address))
         case .signIn, .editConnection, .join:
             if invite != nil { return "Sign up for your family's server" }
             if handOver != nil { return "Signing in with your other device's login" }
@@ -168,9 +180,28 @@ final class SignInModel {
     var url: URL? { ServerAddress.url(scheme, rest) }
 
     var ready: Bool {
-        guard url != nil, !busy else { return false }
-        if useApiKey { return !apiKey.isEmpty || (editing && saved?.mode == .apiKey) }
-        return !username.trimmingCharacters(in: .whitespaces).isEmpty && (!password.isEmpty || editing)
+        guard !busy else { return false }
+        return signInReady(hasAddress: url != nil, mode: mode, username: username, password: password, apiKey: apiKey,
+                           editing: editing, savedMode: saved?.mode)
+    }
+
+    /// The way of signing in the form is set to.
+    private var mode: AuthMode { useApiKey ? .apiKey : (legacy ? .legacyPassword : .token) }
+
+    /// Where the page sits, for the glow behind it.
+    var ambientPage: AmbientPage {
+        switch form {
+        case .signIn, .join: .signIn
+        case .editConnection: .editConnection
+        case .add, .edit, .again: .serverForm
+        }
+    }
+
+    /// The client certificate's name to show, or nil for none.
+    var certificateShown: String? {
+        if let certificate { return certificate.name }
+        guard hadCertificate, !removesCertificate else { return nil }
+        return savedCertificateName ?? "Saved certificate"
     }
 
     /// A scheme typed or pasted moves into the button; until one is picked the scheme follows
@@ -198,6 +229,7 @@ final class SignInModel {
     func toggleScheme() {
         scheme = scheme == .https ? .http : .https
         schemePicked = true
+        error = nil
     }
 
     /// How safe the connection is, for the line under the card.
@@ -230,18 +262,16 @@ final class SignInModel {
 
     /// The home address field, read: nil when blank, or the error words when unreadable.
     private func readHome() -> Result<URL?, SignInFailure> {
-        if homeAddress.trimmingCharacters(in: .whitespaces).isEmpty { return .success(nil) }
-        guard let parsed = ServerAddress.parse(homeAddress) else { return .failure(.words(SignInWords.badHomeAddress)) }
-        return .success(parsed == url ? nil : parsed)
+        switch ServerAddress.home(homeAddress, main: url) {
+        case .none: .success(nil)
+        case .address(let home): .success(home)
+        case .unreadable: .failure(.words(SignInWords.badHomeAddress))
+        }
     }
 
-    /// The header rows that count, or nil when one is not valid.
-    private func headerRows() -> [Header]? {
-        let rows = headers.filter { !($0.name.isEmpty && $0.value.isEmpty && !$0.saved) }
-        let valid = rows.allSatisfy {
-            HeaderRules.isValidName($0.name) && ($0.saved || HeaderRules.isValidValue($0.value)) && ($0.saved || !$0.value.isEmpty)
-        }
-        return valid ? rows : nil
+    /// The header rows that count, trimmed, or nil when one is not valid.
+    private func headerRows() -> [HeaderRules.Row]? {
+        HeaderRules.rows(headers.map { HeaderRules.Row(name: $0.name, value: $0.value, saved: $0.saved) })
     }
 
     func submit(_ session: Session, sync: ServerSync? = nil) async {
@@ -258,7 +288,7 @@ final class SignInModel {
             error = SignInWords.badHeaders
             return
         }
-        let mode: AuthMode = useApiKey ? .apiKey : (legacy ? .legacyPassword : .token)
+        let mode = self.mode
         let typedLabel = label.trimmingCharacters(in: .whitespaces)
         // Only the server list's Add and Edit name the server; the rest keep the saved name.
         let name: String? = showsName ? typedLabel : nil
@@ -272,11 +302,12 @@ final class SignInModel {
             address: url, homeAddress: home,
             label: name,
             username: username.trimmingCharacters(in: .whitespaces),
-            secret: useApiKey ? apiKey : password,
+            secret: useApiKey ? apiKey.trimmingCharacters(in: .whitespacesAndNewlines) : password,
             mode: mode,
             headers: rows.map { ($0.name, $0.saved && $0.value.isEmpty ? nil : $0.value) },
             certificate: certificate.map { ($0.data, $0.password) },
-            removesCertificate: removesCertificate)
+            removesCertificate: removesCertificate || (staleCertificate && certificate == nil),
+            certificateName: certificate?.name)
         let purpose: Session.Purpose = switch form {
         case .signIn, .again, .join: .signIn
         case .add: .add
@@ -322,11 +353,12 @@ final class SignInModel {
     }
 
     /// An edit that only gave the server another name: nothing to check with the server.
-    private func onlyRenamed(_ server: StoredServer, url: URL, home: URL?, mode: AuthMode, rows: [Header]) -> Bool {
+    private func onlyRenamed(_ server: StoredServer, url: URL, home: URL?, mode: AuthMode, rows: [HeaderRules.Row]) -> Bool {
         let sameHeaders = rows.allSatisfy { $0.saved && $0.value.isEmpty } && rows.map(\.name) == savedHeaderNames
         return url == server.address && home == server.homeAddress
             && username.trimmingCharacters(in: .whitespaces) == server.username && mode == server.mode
-            && password.isEmpty && apiKey.isEmpty && sameHeaders && certificate == nil && !removesCertificate
+            && password.isEmpty && apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && sameHeaders && certificate == nil && !removesCertificate
     }
 
     func trust(_ session: Session, sync: ServerSync? = nil) async {
@@ -437,7 +469,7 @@ final class SignInModel {
         let fields = Session.Form(
             address: url, homeAddress: home, label: nil, username: account.username, secret: account.password, mode: .token,
             headers: rows.map { ($0.name, $0.saved && $0.value.isEmpty ? nil : $0.value) },
-            certificate: certificate.map { ($0.data, $0.password) }, removesCertificate: false)
+            certificate: certificate.map { ($0.data, $0.password) }, removesCertificate: false, certificateName: certificate?.name)
         let previous = session.inUse != nil ? session.active : nil
         do {
             _ = try await session.keepServer(fields, for: .signIn)
@@ -488,15 +520,14 @@ final class SignInModel {
                 error = SignInWords.badAddress
                 return
             }
-            let home = signIn.home.flatMap { $0.isEmpty ? nil : $0 }
-            var homeURL: URL?
-            if let home {
-                guard let parsed = ServerAddress.parse(home) else {
-                    handOverStep = nil
-                    error = SignInWords.badHomeAddress
-                    return
-                }
-                homeURL = parsed == address ? nil : parsed
+            let homeURL: URL?
+            switch ServerAddress.home(signIn.home ?? "", main: address) {
+            case .none: homeURL = nil
+            case .address(let home): homeURL = home
+            case .unreadable:
+                handOverStep = nil
+                error = SignInWords.badHomeAddress
+                return
             }
             let mode: AuthMode = switch signIn.mode {
             case "LegacyPassword": .legacyPassword

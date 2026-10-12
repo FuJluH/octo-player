@@ -236,6 +236,9 @@ struct ArtistListRow: View {
 struct PlaylistListRow: View {
     let playlist: Playlist
     var onServer = true
+    /// The library's own record of the list, when there is one: its picture then follows the
+    /// playlist covers setting.
+    var summary: PlaylistSummary?
     var opened: () -> Void = {}
     @Environment(Router.self) private var router
 
@@ -246,7 +249,11 @@ struct PlaylistListRow: View {
             router.go(.playlist(playlist))
         } label: {
             HStack(spacing: 12) {
-                Cover(id: playlist.coverArt ?? playlist.id, size: 56, radius: OctoRadius.artS)
+                if let summary {
+                    PlaylistCover(playlist: summary, size: 56, radius: OctoRadius.artS)
+                } else {
+                    Cover(id: playlist.coverArt ?? playlist.id, size: 56, radius: OctoRadius.artS)
+                }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(playlist.name).font(.octoBodySmall).foregroundStyle(.white).lineLimit(1)
                     HStack(spacing: 4) {

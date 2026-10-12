@@ -30,31 +30,16 @@ final class SettingsFeeds {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("media", isDirectory: true)
     }
 
-    /// Measures the cache again, off the main thread.
+    /// Measures the cache again: the bytes of the songs saved in it, off the main thread.
     func measureCache() async {
-        cacheUsed = await Task.detached { Self.folderSize(Self.cacheFolder) }.value
+        let used = await StreamCache.shared.usedBytes()
+        if cacheUsed != used { cacheUsed = used }
     }
 
     /// Removes every saved song at once, then measures again.
     func clearCache() async {
-        await Task.detached {
-            let folder = Self.cacheFolder
-            for item in (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? [] {
-                try? FileManager.default.removeItem(at: item)
-            }
-        }.value
+        await StreamCache.shared.clear()
         await measureCache()
-    }
-
-    nonisolated private static func folderSize(_ folder: URL) -> Int64 {
-        let keys: [URLResourceKey] = [.totalFileAllocatedSizeKey, .fileSizeKey, .isRegularFileKey]
-        guard let walk = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: keys) else { return 0 }
-        var total: Int64 = 0
-        for case let file as URL in walk {
-            guard let values = try? file.resourceValues(forKeys: Set(keys)), values.isRegularFile == true else { continue }
-            total += Int64(values.totalFileAllocatedSize ?? values.fileSize ?? 0)
-        }
-        return total
     }
 }
 

@@ -298,8 +298,16 @@ public enum BackupFile {
                 .object([("enabled", .bool($0.enabled)), ("sendPlays", .string($0.sendPlays.storedName)), ("nowPlaying", .bool($0.nowPlaying))])
             }),
         ]
-        top.append(("sortOrders", .object(backup.sortOrders.sorted { $0.key < $1.key }.map { ($0.key, .string($0.value)) })))
+        top.append(("sortOrders", sortOrdersJSON(backup.sortOrders)))
         return OrderedJSON.fields(top).pretty()
+    }
+
+    /// Each list's order in the order the lists come in, any list this app does not have last.
+    static func sortOrdersJSON(_ orders: [String: String]) -> OrderedJSON {
+        let lists = SortList.allCases.map(\.key)
+        func place(_ key: String) -> Int { lists.firstIndex(of: key) ?? lists.count }
+        let ordered = orders.sorted { a, b in place(a.key) != place(b.key) ? place(a.key) < place(b.key) : a.key < b.key }
+        return .object(ordered.map { ($0.key, .string($0.value)) })
     }
 
     static func playerJSON(_ p: PlayerPrefs) -> OrderedJSON {
@@ -385,33 +393,50 @@ public enum BackupFile {
 
     // MARK: Reading
 
+    /// Reads a file's bytes as UTF-8, bytes that are not UTF-8 read as U+FFFD.
     public static func decode(_ data: Data) -> BackupRead {
-        guard var text = String(data: data, encoding: .utf8) else { return .notABackup }
-        if text.hasPrefix("\u{FEFF}") { text.removeFirst() }
-        return decode(text)
+        decode(String(decoding: data, as: UTF8.self))
     }
 
+    /// Reads a backup the way the other Octo apps do: a file that is not JSON, not an object, or
+    /// has a field of the wrong kind anywhere is not a backup; a null or a choice this app does
+    /// not know takes the default; fields this app does not know are passed over.
     public static func decode(_ text: String) -> BackupRead {
         let clean = text.hasPrefix("\u{FEFF}") ? String(text.dropFirst()) : text
-        guard let object = try? JSONSerialization.jsonObject(with: Data(clean.utf8)) as? [String: Any] else { return .notABackup }
-        let kind = object["kind"] as? String ?? backupKind
-        if object["kind"] != nil, object["kind"] as? String == nil { return .notABackup }
-        if kind != backupKind { return .notABackup }
-        let version = (object["version"] as? NSNumber)?.intValue ?? backupVersion
+        guard let parsed = try? OrderedJSON.parse(clean), case .object = parsed,
+              case .object(let fields)? = try? BackupShape.backup.normalized(parsed)
+        else { return .notABackup }
+        let read = Fields(fields)
+        if (read["kind"]?.text ?? backupKind) != backupKind { return .notABackup }
+        let version = read["version"]?.whole.map { Int($0) } ?? backupVersion
         if version > backupVersion { return .tooNew }
-        return .read(backup(from: object, version: version))
+        return .read(backup(from: read, version: version))
     }
 
-    static func backup(from o: [String: Any], version: Int) -> Backup {
+    /// An object's fields by key, once each.
+    struct Fields {
+        private let values: [String: OrderedJSON]
+
+        init(_ pairs: [(String, OrderedJSON)]) { values = Dictionary(pairs, uniquingKeysWith: { _, last in last }) }
+
+        subscript(_ key: String) -> OrderedJSON? { values[key] }
+    }
+
+    static func backup(from o: Fields, version: Int) -> Backup {
         var b = Backup()
         b.version = version
-        b.createdAt = (o["createdAt"] as? NSNumber)?.int64Value ?? 0
+        b.createdAt = o["createdAt"]?.whole ?? 0
         b.player = part(o["player"], PlayerPrefs.self)
         b.streaming = part(o["streaming"], StreamPrefs.self)
-        if let sound = o["sound"] as? [String: Any] { b.sound = soundBackup(sound) }
-        b.presets = (o["presets"] as? [[String: Any]] ?? []).compactMap { item in
-            guard let name = item["name"] as? String else { return nil }
-            return PresetBackup(name, (item["gains"] as? [NSNumber] ?? []).map(\.doubleValue))
+        if case .object(let sound)? = o["sound"] { b.sound = soundBackup(Fields(sound)) }
+        if case .array(let presets)? = o["presets"] {
+            b.presets = presets.compactMap { item -> PresetBackup? in
+                guard case .object(let pairs) = item else { return nil }
+                let fields = Fields(pairs)
+                guard let name = fields["name"]?.text else { return nil }
+                guard case .array(let gains)? = fields["gains"] else { return PresetBackup(name, []) }
+                return PresetBackup(name, gains.compactMap(\.decimal))
+            }
         }
         b.library = part(o["library"], LibraryBackup.self)
         b.server = part(o["server"], ServerBackup.self)
@@ -424,23 +449,31 @@ public enum BackupFile {
         b.lyrics = part(o["lyrics"], LyricsBackup.self)
         b.offline = part(o["offline"], OfflinePrefs.self)
         b.listenBrainz = part(o["listenBrainz"], ListenBrainzBackup.self)
-        b.sortOrders = o["sortOrders"] as? [String: String] ?? [:]
+        if case .object(let orders)? = o["sortOrders"] {
+            for (list, order) in orders { if let order = order.text { b.sortOrders[list] = order } }
+        }
         return b
     }
 
-    private static func part<T: Decodable>(_ value: Any?, _ type: T.Type) -> T? {
-        guard let value, !(value is NSNull), JSONSerialization.isValidJSONObject(value),
-              let data = try? JSONSerialization.data(withJSONObject: value)
-        else { return nil }
-        return try? JSONDecoder().decode(T.self, from: data)
+    /// One part of a checked backup, read by its own decoder. Null is no part.
+    private static func part<T: Decodable>(_ value: OrderedJSON?, _ type: T.Type) -> T? {
+        guard let value else { return nil }
+        if case .null = value { return nil }
+        let decoder = JSONDecoder()
+        decoder.userInfo[unknownChoicesTakeDefaults] = true
+        return try? decoder.decode(T.self, from: Data(value.pretty().utf8))
     }
 
-    static func soundBackup(_ o: [String: Any]) -> SoundBackup {
+    static func soundBackup(_ o: Fields) -> SoundBackup {
         var profiles: [String: SoundSettings] = [:]
-        for (key, value) in o["profiles"] as? [String: Any] ?? [:] {
-            if let settings = part(value, SoundSettings.self) { profiles[key] = settings }
+        if case .object(let saved)? = o["profiles"] {
+            for (key, value) in saved {
+                if let settings = part(value, SoundSettings.self) { profiles[key] = settings }
+            }
         }
-        return SoundBackup(perOutput: o["perOutput"] as? Bool ?? false, profiles: profiles)
+        var perOutput = false
+        if case .bool(let on)? = o["perOutput"] { perOutput = on }
+        return SoundBackup(perOutput: perOutput, profiles: profiles)
     }
 
     /// A server address with nothing but where it is: no user name or password written into it,
@@ -704,7 +737,7 @@ public enum BackupPlanner {
 
     /// How much of a backup this library has, a line each, like "Playlists: 331 of 340 songs found".
     public static func describe(_ plan: RestorePlan) -> [String] {
-        let g = SettingsSummaries.grouped
+        let g: (Int) -> String = { SettingsSummaries.grouped($0) }
         var lines: [String] = []
         if !plan.playlists.isEmpty {
             lines.append("Playlists: \(g(plan.playlistSongs)) of \(plural(plan.playlistSongsTotal, "song", "songs")) found")

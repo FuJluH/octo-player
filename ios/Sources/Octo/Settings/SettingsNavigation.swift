@@ -165,7 +165,7 @@ extension View {
         }
         .navigationDestination(for: SettingsSideRoute.self) { route in
             switch route {
-            case .downloads: DownloadsPage().detailPage()
+            case .downloads: DownloadsPage().background { PageBackdrop(page: .downloads, route: nil) }.detailPage()
             }
         }
         .accountRoutes()

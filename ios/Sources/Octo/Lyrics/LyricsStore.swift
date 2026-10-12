@@ -161,7 +161,7 @@ final class LyricsStore {
 
     /// While lyrics show on screen, the songs either side of this one have theirs looked up once
     /// the song has settled, so skipping shows them at once. A skip before then starts the wait
-    /// again.
+    /// again. Radio stations have no lyrics and are skipped.
     private func followNeighbors() {
         neighbors?.cancel()
         guard open, watchers > 0, let id = songId, let player else { return }
@@ -171,7 +171,7 @@ final class LyricsStore {
             var around: [Song] = []
             if player.queue.indices.contains(player.index + 1) { around.append(player.queue[player.index + 1]) }
             if player.index > 0, player.queue.indices.contains(player.index - 1) { around.append(player.queue[player.index - 1]) }
-            for song in around where song.id != id {
+            for song in around where song.id != id && !isRadio(song.id) {
                 guard !Task.isCancelled else { return }
                 let facts = LyricsSong(song.id, song.title, song.byline, "", song.duration * 1000)
                 _ = try? await self.answerFor(facts, resumed: false)

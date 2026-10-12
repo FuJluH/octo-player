@@ -25,14 +25,20 @@ struct LiveMarkTile: View {
     }
 }
 
-/// A picture made of the first covers of the songs a list holds, or the live mark tile when none.
+/// A list's picture: its designed cover when playlist covers are designed, else the first covers
+/// of the songs it holds, or the live mark tile when none.
 private struct LiveListCover: View {
+    let id: String
+    let name: String
     let songs: [LibraryTrack]
     let size: CGFloat
 
     var body: some View {
-        let covers = Array(uniqueCovers.prefix(4))
-        if covers.isEmpty {
+        let artworks = Array(uniqueArtworks.prefix(4))
+        let covers = artworks.compactMap { coverId(of: $0) }
+        if AppSettings.shared.playlistCovers == .designed {
+            DesignedCover(id: id, name: name, covers: artworks, size: size, radius: 10, line: liveListCoverLine)
+        } else if covers.isEmpty {
             LiveMarkTile(size: size, radius: 10)
         } else if covers.count < 4 {
             Cover(id: covers[0], size: size, radius: 10)
@@ -46,12 +52,12 @@ private struct LiveListCover: View {
         }
     }
 
-    /// One cover per album, in the songs' order.
-    private var uniqueCovers: [String] {
+    /// One cover per album, in the songs' order, as the songs keep them.
+    private var uniqueArtworks: [String] {
         var seen = Set<String>()
         return songs.compactMap { track in
-            guard seen.insert(track.albumId).inserted else { return nil }
-            return coverId(of: track.artwork)
+            guard seen.insert(track.albumId).inserted, let artwork = track.artwork, coverId(of: artwork) != nil else { return nil }
+            return artwork
         }
     }
 }
@@ -79,7 +85,7 @@ struct LiveListView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if let list {
                     VStack(spacing: 0) {
-                        LiveListCover(songs: songs, size: 240)
+                        LiveListCover(id: list.id, name: list.name, songs: songs, size: 240)
                             .shadow(color: .black.opacity(0.4), radius: 16, y: 8)
                         Text(list.name)
                             .font(.octoTitle)

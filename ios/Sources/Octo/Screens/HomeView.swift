@@ -130,7 +130,7 @@ struct HomeView: View {
                     case .playlist(let summary):
                         if let playlist = summary.asPlaylist(discovery.sourceId) {
                             PinnedCard(title: summary.name, subtitle: "Playlist", route: .playlist(playlist)) {
-                                Cover(id: coverId(of: summary.covers.first) ?? playlist.id, size: 150)
+                                PlaylistCover(playlist: summary, size: 150)
                             }
                             .contextMenu { CollectionMenuItems(subject: .playlist(summary)) }
                         }

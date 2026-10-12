@@ -9,7 +9,8 @@ public func storeKey(_ store: String, _ name: String, account: String? = nil) ->
 /// The two choices about keeping things on the server, each under one key in the app's own
 /// defaults: syncing the play queue (on until turned off) and making new playlists on the
 /// server too (off until turned on). PlaylistSync owns the playlist choice and the Server page
-/// the queue one; backups read and restore both here.
+/// writes the queue one, which the queue sync follows as it changes; backups read and restore
+/// both here.
 public struct ServerSyncChoices: @unchecked Sendable {
     public static let playlistsStore = "playlist_sync"
     public static let playlistsName = "new_on_server"

@@ -39,7 +39,7 @@ struct FamilyScreen: View {
             .padding(.top, detailTopGap)
         }
         .barClearance()
-        .background(OctoColor.background)
+        .background { PageBackdrop(page: .family, route: nil) }
         .onAppear { model.watch() }
         .onDisappear { model.stop() }
         .opensWhenAsked("reset_password") { resetting = model.info?.manager?.members.first }

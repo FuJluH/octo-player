@@ -28,7 +28,14 @@ final class LiveListStore {
         return liveListAccountKey(username: client.credentials.username, address: client.baseURL.absoluteString)
     }
 
-    private func key(_ account: String) -> String { "live_lists.lists:\(account)" }
+    private func key(_ account: String) -> String { Self.listsKey(account) }
+
+    private static func listsKey(_ account: String) -> String { "live_lists.lists:\(account)" }
+
+    /// Forgets the live lists of a server taken off the list.
+    static func forget(_ account: String) {
+        UserDefaults.standard.removeObject(forKey: listsKey(account))
+    }
 
     /// Another account in use shows its own lists.
     func accountChanged() {

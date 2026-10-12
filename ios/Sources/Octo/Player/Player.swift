@@ -250,29 +250,35 @@ final class Player {
         play(songs)
     }
 
-    /// Radio from a song: it plays at once and Octo's mix of songs like it follows.
-    func startRadio(from song: Song) async {
-        radioSeed = song
+    /// Radio from a song: it plays at once and Octo's mix of songs like it follows, in place of
+    /// the queue, named "{title} radio". Answers false when nothing like it was found; the queue
+    /// is then left as it was.
+    @discardableResult
+    func startRadio(from song: Song) async -> Bool {
         guard let data else {
-            guard let client = session.client else { return }
+            guard let client = session.client else { return false }
+            radioSeed = song
             play([song], radio: song)
             if let more = try? await client.radio(from: song.id, count: radioLength) {
                 append(more.filter { $0.id != song.id })
             }
-            return
+            return true
         }
         var seed = await data.library.songs(ids: [song.id]).first
         if seed == nil { seed = await data.discovery.resolveFromServer([song]).first }
         guard let seed else {
+            radioSeed = song
             play([song], radio: song)
-            return
+            return true
         }
-        let ids = await LibraryRadio(data: data).songsLike([seed], count: radioLength, exclude: [seed.id])
-        let found = await playable.items(ids: [seed.id] + ids, source: .played(nil))
+        let ids = await LibraryRadio(data: data).songsLike([seed], count: radioLength, exclude: [seed.id], before: [seed.id])
+        guard !ids.isEmpty else { return false }
+        let found = await playable.items(ids: [seed.id] + ids, source: .played("\(seed.title) radio"))
         let items = found.compactMap { $0 }
-        guard !items.isEmpty else { return }
+        guard !items.isEmpty else { return false }
         radioSeed = song
         load(items, startIndex: 0, shuffled: false)
+        return true
     }
 
     func toggle() {
@@ -701,21 +707,23 @@ final class Player {
     private func recordPlay(_ trackId: String, startedAt: Int, heardMs: Int, durationMs: Int) {
         guard countsAsPlay(playedMs: heardMs, durationMs: durationMs), !isRadio(trackId) else { return }
         let item = engine.queue.items.first { $0.trackId == trackId }
-        if isOpenedFile(trackId) {
-            if let item {
-                ListenBrainzSync.shared.played(playedSong(item, reachesServer: false),
-                                               startedAt: Date(timeIntervalSince1970: Double(startedAt) / 1000))
-            }
+        if let file = openedFileOf(trackId) {
+            // An opened file is told by its own tags; one without a title or artist is not sent.
+            let length = Int64(lengths.lengthMs(trackId, listedMs: item?.durationMs ?? durationMs))
+            ListenBrainzSync.shared.played(PlayedSong(file.title, file.artist, "", durationMs: length, trackNumber: nil, reachesServer: false),
+                                           startedAt: Date(timeIntervalSince1970: Double(startedAt) / 1000))
             return
         }
         let server = session.inUse
         Task {
             if let data, await inCatalog(trackId) {
                 data.plays.record(trackId, startedAt: Int64(startedAt), playedMs: Int64(heardMs), durationMs: Int64(durationMs))
-            } else if let item, let serverId = parseStreamUri(item.uri)?.serverId, let server {
-                let started = Date(timeIntervalSince1970: Double(startedAt) / 1000)
-                try? await server.client.scrobble(serverId, submission: true, at: started)
-                ListenBrainzSync.shared.played(playedSong(item, reachesServer: true), startedAt: started)
+            } else if let item, let stream = parseStreamUri(item.uri), let server, stream.sourceId == nil || stream.sourceId == server.sourceId {
+                // A server song outside the library waits in the server's queue of plays, so a
+                // failed send is tried again.
+                data?.listening.played(serverId: stream.serverId, startedAt: Int64(startedAt))
+                ListenBrainzSync.shared.played(playedSong(item, reachesServer: true),
+                                               startedAt: Date(timeIntervalSince1970: Double(startedAt) / 1000))
             }
         }
     }

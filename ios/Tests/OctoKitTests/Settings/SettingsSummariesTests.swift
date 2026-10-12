@@ -116,6 +116,8 @@ import Testing
         #expect(SettingsSummaries.grouped(999) == "999")
         #expect(SettingsSummaries.grouped(1_234) == "1,234")
         #expect(SettingsSummaries.grouped(1_234_567) == "1,234,567")
+        #expect(SettingsSummaries.grouped(1_234_567, locale: Locale(identifier: "de_DE")) == "1.234.567")
+        #expect(SettingsSummaries.grouped(-1_234, locale: Locale(identifier: "en_US")) == "-1,234")
         #expect(SettingsSummaries.count(0, one: "song", many: "songs") == "0 songs")
     }
 

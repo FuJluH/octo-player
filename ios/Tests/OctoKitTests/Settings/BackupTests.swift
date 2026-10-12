@@ -314,6 +314,106 @@ import Testing
         #expect(back.replayGain == .album)
     }
 
+    @Test func emptyListsAndMapsAreWrittenOnOneLine() {
+        let text = BackupFile.encode(Backup())
+        #expect(text.contains("\"presets\": []"))
+        #expect(text.contains("\"likes\": []"))
+        #expect(text.contains("\"sortOrders\": {}"))
+        #expect(!text.contains("[\n"))
+        #expect(OrderedJSON.object([("a", .array([])), ("b", .object([]))]).pretty() == "{\n    \"a\": [],\n    \"b\": {}\n}")
+    }
+
+    @Test func sortOrdersAreWrittenInTheListsOrder() {
+        var backup = Backup()
+        backup.sortOrders = ["favourites": "Name:asc", "albums": "Year:asc", "songs": "Title:desc", "liked": "DateLiked:desc"]
+        let text = BackupFile.encode(backup)
+        let places = ["\"songs\"", "\"liked\"", "\"albums\"", "\"favourites\""].map { text.range(of: $0)?.lowerBound }
+        #expect(places.allSatisfy { $0 != nil })
+        #expect(zip(places, places.dropFirst()).allSatisfy { a, b in a! < b! })
+    }
+
+    @Test func aFieldOfTheWrongKindRefusesTheWholeFile() {
+        for text in [
+            #"{"kind": "octo-settings", "likes": "x"}"#,
+            #"{"kind": "octo-settings", "player": 5}"#,
+            #"{"kind": "octo-settings", "player": {"crossfade": "yes"}}"#,
+            #"{"kind": "octo-settings", "player": {"crossfadeSeconds": 4.5}}"#,
+            #"{"kind": "octo-settings", "player": {"crossfadeSeconds": 3000000000}}"#,
+            #"{"kind": "octo-settings", "streaming": {"wifi": 320}}"#,
+            #"{"kind": "octo-settings", "likes": [{"title": 5}]}"#,
+            #"{"kind": "octo-settings", "likes": [null]}"#,
+            #"{"kind": "octo-settings", "ratings": [{"song": {}}]}"#,
+            #"{"kind": "octo-settings", "playlists": [{"songs": []}]}"#,
+            #"{"kind": "octo-settings", "pins": [{"kind": "album", "item": null}]}"#,
+            #"{"kind": "octo-settings", "sortOrders": {"songs": 1}}"#,
+            #"{"kind": "octo-settings", "sound": {"profiles": {"all": {"filters": [{"gainDb": 3}]}}}}"#,
+            #"{"kind": "octo-settings", "lyrics": {"outputOffsets": {"speaker": "soon"}}}"#,
+            #"{"kind": 5}"#,
+            #"{"version": "one"}"#,
+        ] {
+            #expect(BackupFile.decode(text) == .notABackup, "\(text) was read")
+        }
+    }
+
+    @Test func aNullTakesTheFieldsDefault() {
+        guard case .read(let backup) = BackupFile.decode(
+            #"{"kind": null, "version": null, "likes": null, "player": {"crossfade": null, "speed": null}, "lyrics": {"look": null, "offsets": null}}"#)
+        else { Issue.record("not read"); return }
+        #expect(backup.likes.isEmpty)
+        #expect(backup.player == PlayerPrefs())
+        #expect(backup.lyrics == LyricsBackup())
+        guard case .read(let handMade) = BackupFile.decode(#"{"sound": {"profiles": {"all": {"preset": null}}}}"#)
+        else { Issue.record("not read"); return }
+        #expect(handMade.sound?.profiles["all"]?.preset == nil)
+    }
+
+    @Test func numbersWrittenInQuotesStillRead() {
+        guard case .read(let backup) = BackupFile.decode(#"{"player": {"crossfadeSeconds": "4", "speed": "1.25"}}"#)
+        else { Issue.record("not read"); return }
+        #expect(backup.player?.crossfadeSeconds == 4)
+        #expect(backup.player?.speed == 1.25)
+        #expect(BackupFile.decode(#"{"kind": "octo-settings", "version": "2"}"#) == .tooNew)
+    }
+
+    @Test func aFieldWrittenTwiceKeepsItsLastValue() {
+        guard case .read(let backup) = BackupFile.decode(#"{"player": {"crossfade": true, "crossfade": false}}"#)
+        else { Issue.record("not read"); return }
+        #expect(backup.player?.crossfade == false)
+    }
+
+    @Test func unknownSoundAndLookChoicesFallBackToTheirDefaults() {
+        let text = #"""
+            {"sound": {"perOutput": true, "profiles": {"all": {"eqEnabled": true, "mode": "Wavy", "replayGain": "Loud",
+              "filters": [{"type": "Notch", "frequency": 100, "gainDb": 2}]}}},
+             "lyrics": {"look": {"style": "Bouncy", "glow": 150}}}
+            """#
+        guard case .read(let backup) = BackupFile.decode(text), let sound = backup.sound?.profiles["all"]
+        else { Issue.record("not read"); return }
+        #expect(sound.eqEnabled)
+        #expect(sound.mode == .graphic)
+        #expect(sound.replayGain == .off)
+        #expect(sound.filters.first?.type == .peak)
+        #expect(sound.filters.first?.gainDb == 2)
+        #expect(backup.lyrics?.look?.style == .flowing)
+        #expect(backup.lyrics?.look?.glow == 150)
+    }
+
+    @Test func bytesThatAreNotUTF8StillRead() {
+        let bytes: [UInt8] = [0xEF, 0xBB, 0xBF] + Array(#"{"kind": "octo-settings", "playlists": [{"name": "Caf"#.utf8) + [0xE9]
+            + Array(#""}]}"#.utf8)
+        guard case .read(let backup) = BackupFile.decode(Data(bytes)) else { Issue.record("not read"); return }
+        #expect(backup.playlists.map(\.name) == ["Caf\u{FFFD}"])
+    }
+
+    @Test func onlyStrictJSONReads() {
+        for text in [#"{"kind": "octo-settings",}"#, #"{"kind": "octo-settings"} x"#, "{// note\n}", #"{'kind': 'octo-settings'}"#, ""] {
+            #expect(BackupFile.decode(text) == .notABackup, "\(text) was read")
+        }
+        guard case .read(let backup) = BackupFile.decode(#"{"playlists": [{"name": "Café 🎵 \"live\"\n"}]}"#)
+        else { Issue.record("not read"); return }
+        #expect(backup.playlists.map(\.name) == ["Caf\u{E9} \u{1F3B5} \"live\"\n"])
+    }
+
     @Test func theSuggestedNameCarriesTheDate() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "UTC")!

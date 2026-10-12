@@ -30,7 +30,8 @@ public struct EqFilter: Codable, Sendable, Equatable, Identifiable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        type = try c.decodeIfPresent(FilterType.self, forKey: .type) ?? .peak
+        // In a backup, a shape this app does not know reads as a peak.
+        type = try c.choice(FilterType.self, forKey: .type, decoder) ?? .peak
         frequency = try c.decode(Double.self, forKey: .frequency)
         gainDb = try c.decode(Double.self, forKey: .gainDb)
         q = try c.decodeIfPresent(Double.self, forKey: .q) ?? graphicQ
@@ -48,6 +49,21 @@ public struct EqFilter: Codable, Sendable, Equatable, Identifiable {
 
     public static func == (a: EqFilter, b: EqFilter) -> Bool {
         a.type == b.type && a.frequency == b.frequency && a.gainDb == b.gainDb && a.q == b.q && a.enabled == b.enabled
+    }
+}
+
+/// Set in a decoder's user info, a stored choice this app does not know reads as missing, so it
+/// takes its default, as a backup reads them. Without it such a choice fails to read.
+public let unknownChoicesTakeDefaults = CodingUserInfoKey(rawValue: "octo.unknownChoicesTakeDefaults")!
+
+extension KeyedDecodingContainer {
+    /// A stored choice by its name.
+    func choice<T: Decodable & RawRepresentable>(_ type: T.Type, forKey key: Key, _ decoder: Decoder) throws -> T?
+        where T.RawValue == String {
+        if decoder.userInfo[unknownChoicesTakeDefaults] as? Bool == true {
+            return try decodeIfPresent(String.self, forKey: key).flatMap(T.init(rawValue:))
+        }
+        return try decodeIfPresent(T.self, forKey: key)
     }
 }
 
@@ -121,14 +137,15 @@ public struct SoundSettings: Codable, Sendable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = SoundSettings()
         eqEnabled = try c.decodeIfPresent(Bool.self, forKey: .eqEnabled) ?? d.eqEnabled
-        mode = try c.decodeIfPresent(EqMode.self, forKey: .mode) ?? d.mode
+        // In a backup, a mode or loudness choice this app does not know takes its default.
+        mode = try c.choice(EqMode.self, forKey: .mode, decoder) ?? d.mode
         graphicGains = try c.decodeIfPresent([Double].self, forKey: .graphicGains) ?? d.graphicGains
         filters = try c.decodeIfPresent([EqFilter].self, forKey: .filters) ?? d.filters
         preset = c.contains(.preset) ? try c.decodeIfPresent(String.self, forKey: .preset) : d.preset
         preampDb = try c.decodeIfPresent(Double.self, forKey: .preampDb) ?? d.preampDb
         autoPreamp = try c.decodeIfPresent(Bool.self, forKey: .autoPreamp) ?? d.autoPreamp
         correction = try c.decodeIfPresent(HeadphoneCorrection.self, forKey: .correction)
-        replayGain = try c.decodeIfPresent(ReplayGainMode.self, forKey: .replayGain) ?? d.replayGain
+        replayGain = try c.choice(ReplayGainMode.self, forKey: .replayGain, decoder) ?? d.replayGain
         replayGainPreampDb = try c.decodeIfPresent(Double.self, forKey: .replayGainPreampDb) ?? d.replayGainPreampDb
         replayGainFallbackDb = try c.decodeIfPresent(Double.self, forKey: .replayGainFallbackDb) ?? d.replayGainFallbackDb
         preventClipping = try c.decodeIfPresent(Bool.self, forKey: .preventClipping) ?? d.preventClipping

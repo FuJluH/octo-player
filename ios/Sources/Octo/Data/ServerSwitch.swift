@@ -31,8 +31,9 @@ protocol SwitchPlayer: AnyObject {
 enum SwitchOutcome {
     /// In use now; `notice` says so, and plainly when music was stopped.
     case done(notice: String?)
-    /// Its password is not kept here, or the server no longer takes it.
-    case needsPassword(serverId: String, note: String)
+    /// Its password is not kept here, or the server no longer takes it; the note says why, when
+    /// there is something to say, and the form opens without one otherwise.
+    case needsPassword(serverId: String, note: String?)
     case failed(String)
 }
 
@@ -73,6 +74,9 @@ final class ServerSwitch {
         self.playlists = playlists
         before = session.inUse?.account ?? phoneLibrary
         session.leaving = { [weak self] from, to in await self?.leave(from, to) }
+        // Recent playlists and live lists are kept by the server's id.
+        onForget("recent_playlists") { account in LibraryState.forgetRecent(account) }
+        onForget("live_lists") { account in LiveListStore.forget(account) }
         watch = Watch({ [weak session] in session?.inUse?.account ?? phoneLibrary }) { [weak self] now in
             guard let self else { return }
             let from = self.before

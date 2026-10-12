@@ -17,6 +17,9 @@ struct ServerPage: View {
     @State private var navigator = SettingsNavigator.shared
     @State private var folders: [ServerMusicFolder]?
     @State private var folderProblem: String?
+    /// The server whose sharing this page has asked about.
+    @State private var sharingProbedFor: String?
+    @State private var readingFolders = false
     @State private var look: (answerMs: Int64?, scan: ServerScanStatus?)?
     @State private var listening: [ServerNowPlaying] = []
     @Environment(\.dataServices) private var data
@@ -56,14 +59,21 @@ struct ServerPage: View {
         .sheet(isPresented: $changingPassword) {
             ChangePasswordForm { changingPassword = false }.fittedSheet()
         }
-        .task(id: session.client == nil ? nil : session.activeId) { await lookAgain() }
-        .task(id: session.client == nil ? nil : session.activeId) { await readFolders() }
+        .task(id: session.client == nil ? nil : session.generation) { await lookAgain() }
+        .task(id: session.client == nil ? nil : session.generation) { await readFolders(quietly: true) }
         .task(id: session.client == nil ? nil : session.activeId) { await watchListening() }
-        .task(id: session.activeId) { _ = try? await controls.shares() }
+        .task(id: session.activeId) {
+            // Sharing is asked about once for each server the page shows.
+            guard sharingProbedFor != session.activeId else { return }
+            sharingProbedFor = session.activeId
+            _ = try? await controls.shares()
+        }
         .onChange(of: session.activeId) {
             folderProblem = nil
             folders = nil
         }
+        // A restored backup may have changed the queue choice since the page was last open.
+        .onAppear { queueSync = ServerSyncChoices().syncQueue }
         .onChange(of: navigator.popup, initial: true) { _, popup in openAsked(popup) }
     }
 
@@ -76,7 +86,10 @@ struct ServerPage: View {
                 InfoRow(SettingsIndex.serverConnection, value: place == .home ? "Connected at home" : "Connected away")
             }
             InfoRow(SettingsIndex.serverUser, value: server.username.isEmpty ? "API key" : server.username)
-            FolderRow(value: session.folder(for: server.id)?.name ?? "All", question: folderQuestion(server))
+            FolderRow(value: session.folder(for: server.id)?.name ?? "All", question: folders.map { folderQuestion(server, $0) },
+                      busy: readingFolders) {
+                Task { await readFolders(quietly: false) }
+            }
             if let folderProblem { NoteRow(folderProblem, color: OctoColor.error) }
             ActionRow(SettingsIndex.editConnection) { router.signIn = .editConnection(server) }
             if server.mode != .apiKey {
@@ -93,21 +106,26 @@ struct ServerPage: View {
         }
     }
 
-    /// Reads the server's folders for the menu as the page opens; when that fails a note says so
-    /// and the menu offers All alone.
-    private func readFolders() async {
+    /// Reads the server's folders for the menu: as the page opens, quietly, and again on a tap
+    /// while they could not be read. A tap that cannot read them shows a note under the row and
+    /// opens nothing.
+    private func readFolders(quietly: Bool) async {
         guard let client = session.client else { return }
+        readingFolders = true
+        defer { readingFolders = false }
         do {
-            folders = try await client.serverMusicFolders()
+            let read = try await client.serverMusicFolders()
+            guard session.client != nil else { return }
+            folders = read
             folderProblem = nil
-        } catch is CancellationError {
         } catch {
-            folderProblem = "Couldn't read the server's music folders."
+            if isCancellation(error) { return }
+            folders = nil
+            if !quietly { folderProblem = "Couldn't read the server's music folders." }
         }
     }
 
-    private func folderQuestion(_ server: StoredServer) -> SettingsQuestion {
-        let listed = folders ?? []
+    private func folderQuestion(_ server: StoredServer, _ listed: [ServerMusicFolder]) -> SettingsQuestion {
         let chosen = session.folder(for: server.id)
         let picked = listed.firstIndex { $0.id == chosen?.id }.map { $0 + 1 } ?? 0
         let answers = [SettingsAnswer("All", "Every folder on the server")] + listed.map { SettingsAnswer($0.name) }
@@ -212,24 +230,48 @@ struct ServerPage: View {
 }
 
 /// The Music folder row: its title, the folder in use at the end, and the small mark of a
-/// choice. The folders open as a system menu beside it.
+/// choice. Once the server's folders are read they open as a system menu beside it; until then
+/// a tap reads them.
 private struct FolderRow: View {
     let value: String
-    let question: SettingsQuestion
+    /// The choices, nil while the folders have not been read.
+    let question: SettingsQuestion?
+    let busy: Bool
+    let read: () -> Void
 
     var body: some View {
-        Menu {
-            QuestionMenuItems(question: question)
-        } label: {
-            RowFrame(entry: SettingsIndex.serverMusicFolder) {
-                Text(SettingsIndex.serverMusicFolder.title).font(.octoBody).foregroundStyle(OctoColor.textPrimary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Text(value)
-                    .font(.octoBodySmall)
-                    .foregroundStyle(OctoColor.textSecondary)
-                    .multilineTextAlignment(.trailing)
-                    .lineLimit(2)
-                    .layoutPriority(-1)
+        Group {
+            if let question {
+                Menu {
+                    QuestionMenuItems(question: question)
+                } label: {
+                    label
+                }
+                .menuStyle(.button)
+                .menuOrder(.fixed)
+            } else {
+                Button(action: read) { label }
+                    .disabled(busy)
+            }
+        }
+        .buttonStyle(SettingsRowPress())
+        .accessibilityLabel(SettingsIndex.serverMusicFolder.title)
+        .accessibilityValue(value)
+    }
+
+    private var label: some View {
+        RowFrame(entry: SettingsIndex.serverMusicFolder) {
+            Text(SettingsIndex.serverMusicFolder.title).font(.octoBody).foregroundStyle(OctoColor.textPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(value)
+                .font(.octoBodySmall)
+                .foregroundStyle(OctoColor.textSecondary)
+                .multilineTextAlignment(.trailing)
+                .lineLimit(2)
+                .layoutPriority(-1)
+            if busy {
+                ProgressView().controlSize(.mini).tint(OctoColor.textSecondary).frame(width: 18, height: 18)
+            } else {
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 13, weight: .semibold))
                     .frame(width: 18, height: 18)
@@ -237,10 +279,5 @@ private struct FolderRow: View {
                     .accessibilityHidden(true)
             }
         }
-        .menuStyle(.button)
-        .buttonStyle(SettingsRowPress())
-        .menuOrder(.fixed)
-        .accessibilityLabel(SettingsIndex.serverMusicFolder.title)
-        .accessibilityValue(value)
     }
 }

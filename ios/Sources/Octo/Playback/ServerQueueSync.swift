@@ -55,7 +55,12 @@ final class ServerQueueSync {
     init(session: Session, data: DataServices?) {
         self.session = session
         self.data = data
-        enabled = (UserDefaults(suiteName: "server_queue") ?? .standard).object(forKey: "sync_on") as? Bool ?? true
+        enabled = ServerSyncChoices().syncQueue
+        // The choice lives in the app's defaults, where the Server page and a restored backup
+        // both write it; whichever changes it, this follows at once.
+        _ = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.followChoice() }
+        }
     }
 
     #if DEBUG
@@ -66,10 +71,20 @@ final class ServerQueueSync {
     #endif
 
     func setEnabled(_ on: Bool) {
+        ServerSyncChoices().setSyncQueue(on)
+        followChoice()
+    }
+
+    /// Takes up the stored choice when it changed. Turned off, a save waiting to go is dropped
+    /// and so is an offer; while off nothing is saved and no offer is looked for. Turned on, the
+    /// next change saves again.
+    private func followChoice() {
+        let on = ServerSyncChoices().syncQueue
+        guard on != enabled else { return }
         enabled = on
-        store.set(on, forKey: "sync_on")
         if !on {
             pending?.cancel()
+            pending = nil
             offer = nil
         }
     }

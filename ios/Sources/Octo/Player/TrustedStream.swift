@@ -84,7 +84,13 @@ final class TrustedStream: NSObject, AVAssetResourceLoaderDelegate, URLSessionDa
         requests[dataTask.taskIdentifier]?.dataRequest?.respond(with: data)
     }
 
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest) async -> URLRequest? {
+        ServerTrust.shared.redirected(request, first: task.originalRequest)
+    }
+
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        ServerTrust.shared.noteEnd(of: task.originalRequest, error)
         guard let request = requests.removeValue(forKey: task.taskIdentifier) else { return }
         if let error, (error as? URLError)?.code != .cancelled {
             request.finishLoading(with: error)

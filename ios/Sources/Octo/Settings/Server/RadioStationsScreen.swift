@@ -7,8 +7,9 @@ struct RadioStationsScreen: View {
     @Environment(ServerControls.self) private var controls
     @Environment(Session.self) private var session
     @Environment(Player.self) private var player
+    @Environment(Discovery.self) private var discovery
     @State private var stations: LoadState<[ServerStationDetails]> = .loading
-    @State private var draft: StationDraft?
+    @State private var form: StationFormRequest?
     @State private var saving = false
     @State private var problem: String?
     @State private var starting: String?
@@ -20,7 +21,7 @@ struct RadioStationsScreen: View {
                 if controls.isAdmin {
                     GlazeButton("Add station", size: .medium) {
                         problem = nil
-                        draft = StationDraft()
+                        form = StationFormRequest(StationDraft())
                     }
                     .padding(.leading, 20)
                     .padding(.bottom, 8)
@@ -43,22 +44,19 @@ struct RadioStationsScreen: View {
                     ForEach(list) { station in row(station, readOnly: !controls.canEdit(stationId: station.id, coverArt: station.coverArt), admin: controls.isAdmin) }
                 }
             }
-            .padding(.top, detailTopGap)
+            .padding(.top, 8 + detailTopGap)
         }
         .barClearance()
-        .background(OctoColor.background)
+        .background { PageBackdrop(page: .radioStations, route: nil) }
         .task { await reload() }
         .opensWhenAsked("add_station") {
             guard controls.isAdmin else { return }
             problem = nil
-            draft = StationDraft()
+            form = StationFormRequest(StationDraft())
         }
-        .sheet(isPresented: Binding(get: { draft != nil }, set: { if !$0, !saving { draft = nil } })) {
-            if let draft {
-                StationForm(draft: draft, saving: saving, problem: problem, save: save, delete: delete)
-                    .fittedSheet()
-                    .interactiveDismissDisabled(saving)
-            }
+        .sheet(item: Binding(get: { form }, set: { if $0 != nil || !saving { form = $0 } })) { request in
+            StationForm(draft: request.draft, saving: saving, problem: problem, save: save, delete: delete)
+                .interactiveDismissDisabled(saving)
         }
     }
 
@@ -84,7 +82,7 @@ struct RadioStationsScreen: View {
             if admin && !readOnly {
                 Button {
                     problem = nil
-                    draft = StationDraft(station.id, station.name, station.streamUrl, station.homePageUrl ?? "")
+                    form = StationFormRequest(StationDraft(station.id, station.name, station.streamUrl, station.homePageUrl ?? ""))
                 } label: {
                     Image(systemName: "pencil")
                         .font(.system(size: 17))
@@ -126,14 +124,20 @@ struct RadioStationsScreen: View {
         Task {
             defer { starting = nil }
             do {
-                let songs = try await session.client?.playlist(station.id).entry ?? []
+                let songs = try await discovery.stationSongs(station.id)
                 if !songs.isEmpty {
                     player.play(songs, from: 0)
                 } else if !stream.isEmpty, let song = radioSong(radioId(streamUrl: station.streamUrl, name: station.name)) {
                     player.play([song], from: 0)
                 }
             } catch {
-                if case .notFound = SubsonicError(error) { await reload() }
+                if isCancellation(error) { return }
+                if case .notFound = SubsonicError(error) {
+                    // Made anew on the server since the list was read: read it again.
+                    await reload()
+                } else {
+                    playbackLog.warning("station failed to start: \(String(describing: type(of: error)), privacy: .public)")
+                }
             }
         }
     }
@@ -164,7 +168,7 @@ struct RadioStationsScreen: View {
             do {
                 try await call(controls)
                 saving = false
-                draft = nil
+                form = nil
                 await reload()
             } catch {
                 saving = false
@@ -178,8 +182,18 @@ struct RadioStationsScreen: View {
     }
 }
 
+/// The station form opened once: a station to change, or a new one. Each opening is its own, so
+/// the form starts afresh, and keeps its words while it slides away.
+private struct StationFormRequest: Identifiable {
+    let id = UUID()
+    let draft: StationDraft
+
+    init(_ draft: StationDraft) { self.draft = draft }
+}
+
 /// The station form: a name, its stream and an optional home page; Save, and for a station
-/// already there, Delete after asking.
+/// already there, Delete after asking. It scrolls when it is taller than the sheet allows. Next
+/// on the keyboard moves from the name to the stream to the home page.
 private struct StationForm: View {
     @State var draft: StationDraft
     let saving: Bool
@@ -187,6 +201,10 @@ private struct StationForm: View {
     let save: (StationDraft) -> Void
     let delete: (StationDraft) -> Void
     @State private var confirming = false
+    @State private var height: CGFloat?
+    @FocusState private var nameFocused: Bool
+    @FocusState private var streamFocused: Bool
+    @FocusState private var homePageFocused: Bool
 
     init(draft: StationDraft, saving: Bool, problem: String?, save: @escaping (StationDraft) -> Void, delete: @escaping (StationDraft) -> Void) {
         _draft = State(initialValue: draft)
@@ -197,15 +215,25 @@ private struct StationForm: View {
     }
 
     var body: some View {
+        ScrollView {
+            content
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .presentationDetents(height.map { [.height($0)] } ?? [.medium])
+        .presentationDragIndicator(.visible)
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(draft.id == nil ? "Add station" : "Edit station").font(.octoBody).foregroundStyle(OctoColor.textPrimary)
-            GlassInput("Name", text: $draft.name, submitLabel: .next)
+            GlassInput("Name", text: $draft.name, submitLabel: .next, focus: $nameFocused, onSubmit: { streamFocused = true })
                 .textInputAutocapitalization(.words)
-            GlassInput("Stream address", text: $draft.stream, submitLabel: .next)
+            GlassInput("Stream address", text: $draft.stream, submitLabel: .next, focus: $streamFocused, onSubmit: { homePageFocused = true })
                 .keyboardType(.URL)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-            GlassInput("Home page (optional)", text: $draft.homePage)
+            GlassInput("Home page (optional)", text: $draft.homePage, focus: $homePageFocused, onSubmit: { homePageFocused = false })
                 .keyboardType(.URL)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
@@ -224,5 +252,6 @@ private struct StationForm: View {
         .padding(.horizontal, 20)
         .padding(.top, 18)
         .padding(.bottom, 20)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

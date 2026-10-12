@@ -114,4 +114,9 @@ private let longDashes: [Character] = ["\u{2014}", "\u{2013}"]
         #expect(settingsNormalized("  Wi-Fi   Ön! 2 ") == "wifi on 2")
         #expect(settingsNormalized("What's  new") == "whats new")
     }
+
+    @Test func theServerPagesRowsAreFound() {
+        #expect(titles("password").contains("Change password"))
+        #expect(searchSettings("version").contains(SettingsIndex.serverKind))
+    }
 }

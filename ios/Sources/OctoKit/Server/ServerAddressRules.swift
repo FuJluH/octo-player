@@ -46,6 +46,15 @@ extension ServerAddress {
         return parts.url.map(lowercasingHost)
     }
 
+    /// Where a request goes: scheme, host and port, the port written even when it is the
+    /// scheme's own. Two addresses with the same origin reach the same server. Nil for an
+    /// address with no scheme or host.
+    public static func origin(_ url: URL) -> String? {
+        guard let scheme = url.scheme?.lowercased(), let host = url.host?.lowercased(), !host.isEmpty else { return nil }
+        let port = url.port ?? (scheme == "https" ? 443 : scheme == "http" ? 80 : -1)
+        return "\(scheme)://\(host):\(port)"
+    }
+
     static func lowercasingHost(_ url: URL) -> URL {
         guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false), let host = parts.host,
               host != host.lowercased()

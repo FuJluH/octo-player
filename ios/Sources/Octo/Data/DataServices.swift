@@ -33,6 +33,8 @@ final class DataServices {
     var streamCache: StreamCache { .shared }
     private var watches: [AnyObject] = []
     private var links: SettingsLinks?
+    /// The last cache size change, so the next one waits for it and the sizes apply in order.
+    private var resize: Task<Void, Never>?
 
     /// `announce` shows a line: the words, and whether it marks something done.
     init(session: Session, announce: @escaping @MainActor (String, Bool) -> Void) {
@@ -53,8 +55,13 @@ final class DataServices {
         device = DeviceLibrary(library: library)
         offline = OfflineDownloads(session: session, library: library, connectivity: connectivity, sync: serverSync) { words in announce(words, false) }
         marks = OfflineMarkings(downloads: offline, connectivity: connectivity)
-        prefetcher = Prefetcher(connectivity: connectivity)
-        prefetcher.headers = { [weak session] in session?.client?.headers ?? [:] }
+        prefetcher = Prefetcher(session: session, connectivity: connectivity)
+        // A family account whose plan has offline copies off gets no new downloads from that
+        // server. Without a family, or when the plan cannot be read, downloads go.
+        offline.offlineCopiesAllowed = { [weak session] in
+            guard let session, session.family, let family = SystemEntries.shared?.family else { return true }
+            return OctoKit.offlineCopiesAllowed(await family.model.plan())
+        }
         controls = ServerControls(session: session, library: library, sync: serverSync)
         refresh = LibraryRefresh(device: device, sync: serverSync, downloads: downloads, session: session)
         serverSwitch = ServerSwitch(session: session, library: library, sync: serverSync, listening: listening,
@@ -72,10 +79,21 @@ final class DataServices {
         serverSync.start()
         offline.start()
         let settings = AppSettings.shared
-        Task { await StreamCache.shared.setSize(settings.offline.cacheSize) }
-        watches.append(Watch({ settings.offline.cacheSize }) { size in
-            Task { await StreamCache.shared.setSize(size) }
+        // Each new size is measured again once the cache has taken it, so what was let go shows.
+        resize = Task { await Self.applySize(to: settings.offline.cacheSize, after: nil) }
+        watches.append(Watch({ settings.offline.cacheSize }) { [weak self] size in
+            guard let self else { return }
+            let before = resize
+            resize = Task { await Self.applySize(to: size, after: before) }
         })
+        // Fetching ahead follows the player, which hands itself to the server switch as it is made.
+        if let player = serverSwitch.player as? Player { prefetcher.follow(player) }
+    }
+
+    private static func applySize(to size: CacheSize, after before: Task<Void, Never>?) async {
+        await before?.value
+        await StreamCache.shared.setSize(size)
+        await SettingsFeeds.shared.measureCache()
     }
 }
 

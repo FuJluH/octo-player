@@ -20,12 +20,14 @@ public enum SettingsSummaries {
         n == 1 ? "1 \(one)" : "\(grouped(n)) \(many)"
     }
 
-    /// A number with its thousands grouped, as the other apps print "%,d".
-    public static func grouped(_ n: Int) -> String {
-        let digits = String(abs(n))
+    /// A number with its thousands grouped by the phone's own separator: "2,357", or "2.357" on a
+    /// German phone.
+    public static func grouped(_ n: Int, locale: Locale = .current) -> String {
+        let separator = locale.groupingSeparator ?? ","
+        let digits = String(n.magnitude)
         var out = ""
         for (i, ch) in digits.enumerated() {
-            if i > 0, (digits.count - i) % 3 == 0 { out.append(",") }
+            if i > 0, (digits.count - i) % 3 == 0 { out += separator }
             out.append(ch)
         }
         return (n < 0 ? "-" : "") + out

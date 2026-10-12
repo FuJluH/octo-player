@@ -20,7 +20,7 @@ struct OctoAdminScreen: View {
         }
         .refreshable { await model?.refresh() }
         .barClearance()
-        .background(OctoColor.background)
+        .background { PageBackdrop(page: .octoAdmin, route: nil) }
         .onAppear {
             guard model == nil else { return }
             let made = OctoAdminModel(admin: OctoAdminPages.shared, signIn: { [session] in OctoAdminPages.signIn(session) })

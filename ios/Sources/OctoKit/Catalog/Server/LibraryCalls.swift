@@ -40,9 +40,10 @@ extension SubsonicClient {
         return body.value?.song ?? []
     }
 
-    /// The params with the chosen music folder, when there is one.
+    /// The params with the music folder asked for, else the one the client is limited to, when
+    /// there is one.
     func inFolder(_ params: [(String, String)], _ folder: String?) -> [(String, String)] {
-        guard let folder else { return params }
+        guard let folder = folder ?? musicFolderId else { return params }
         return params + [("musicFolderId", folder)]
     }
 

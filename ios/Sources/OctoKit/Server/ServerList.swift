@@ -116,7 +116,8 @@ public func scanWords(_ status: ServerScanStatus?, nowMs: Int64, zone: TimeZone 
     if status.scanning {
         return status.count > 0 ? "Reading its folders now, \(SettingsSummaries.grouped(Int(status.count))) files so far." : "Reading its folders now."
     }
-    guard let last = epochMs(status.lastScan) else { return nil }
+    // Only an instant or a time with its offset can be read; a time with no zone cannot.
+    guard let last = serverTime(status.lastScan).map(Int64.init) else { return nil }
     return "Last read its folders \(agoWords(thenMs: last, nowMs: nowMs, zone: zone))."
 }
 

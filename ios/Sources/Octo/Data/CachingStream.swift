@@ -131,7 +131,13 @@ final class CachingStream: NSObject, AVAssetResourceLoaderDelegate, URLSessionDa
         Task { await cache.write(key, offset: offset, data: data) }
     }
 
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest) async -> URLRequest? {
+        ServerTrust.shared.redirected(request, first: task.originalRequest)
+    }
+
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        ServerTrust.shared.noteEnd(of: task.originalRequest, error)
         guard let waiting = requests.removeValue(forKey: task.taskIdentifier) else { return }
         if let error, (error as? URLError)?.code != .cancelled {
             waiting.request.finishLoading(with: error)

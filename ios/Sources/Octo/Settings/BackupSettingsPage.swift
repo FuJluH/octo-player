@@ -11,6 +11,9 @@ struct BackupSettingsPage: View {
     @State private var model = BackupModel.shared
     @State private var saving: BackupDocument?
     @State private var opening = false
+    /// Whether this visit of the page has begun, so coming back from another tab or a picker
+    /// keeps where it is up to.
+    @State private var visiting = false
 
     var body: some View {
         SettingsPageFrame(title: SettingsPage.backup.title, highlight: highlight) {
@@ -46,11 +49,17 @@ struct BackupSettingsPage: View {
         .fileImporter(isPresented: $opening, allowedContentTypes: [.json, .plainText, .data]) { result in
             if case .success(let url) = result { Task { await model.open(url) } }
         }
+        .onAppear {
+            guard !visiting else { return }
+            visiting = true
+            model.visitStarted()
+        }
     }
 }
 
-/// Where saving or restoring a backup is up to. It lives as long as the app, so leaving the page
-/// and coming back finds it as it was.
+/// Where saving or restoring a backup is up to. Each visit of the page starts with nothing to
+/// report; a save or restore still going when the page was left carries on and shows on the
+/// next visit.
 @MainActor
 @Observable
 final class BackupModel {
@@ -95,6 +104,11 @@ final class BackupModel {
     }
 
     func saved(_ ok: Bool) { state = .saved(ok) }
+
+    /// A fresh visit of the page: no note and no backup waiting, unless something is working.
+    func visitStarted() {
+        if !working { state = .idle }
+    }
 
     func open(_ url: URL) async {
         state = .working

@@ -56,8 +56,10 @@ struct JewelSlider: View {
                     .onEnded { drag in
                         let f = Double(min(max((drag.location.x - radius) / max(width - 2 * radius, 1), 0), 1))
                         onSeek(f)
+                        // The fill settles on the saved value, which moves in steps.
                         shown = f
                         dragging = nil
+                        withAnimation(.linear(duration: 0.08)) { shown = fraction }
                     }
             )
             .animation(.easeOut(duration: 0.15), value: dragging == nil)

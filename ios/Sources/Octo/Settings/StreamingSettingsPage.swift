@@ -30,10 +30,8 @@ struct StreamingSettingsPage: View {
                           question: SettingsQuestion(
                               SettingsIndex.cacheSize.title, CacheSize.allCases, current: kept.cacheSize,
                               answer: { SettingsAnswer($0.label, $0 == .off ? "Songs stream every time, and nothing is fetched ahead" : nil) },
-                              pick: { size in
-                                  settings.setCacheSize(size)
-                                  Task { size == .off ? await feeds.clearCache() : await feeds.measureCache() }
-                              }))
+                              // The cache takes the new size, then measures itself again.
+                              pick: settings.setCacheSize))
                 if kept.cacheSize != .off {
                     ChoiceRow(SettingsIndex.fetchWifi, value: SettingsWords.ahead(kept.prefetchWifi),
                               question: aheadQuestion(SettingsIndex.fetchWifi.title, kept.prefetchWifi, settings.setPrefetchWifi))

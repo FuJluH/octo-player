@@ -271,7 +271,7 @@ struct SearchView: View {
     private func playlistRows(_ found: LibraryResults) -> some View {
         ForEach(found.playlists) { summary in
             if let playlist = summary.asPlaylist(discovery.sourceId) {
-                PlaylistListRow(playlist: playlist, onServer: summary.onServer) { model.keepSearch() }
+                PlaylistListRow(playlist: playlist, onServer: summary.onServer, summary: summary) { model.keepSearch() }
             }
         }
     }

@@ -8,7 +8,7 @@ import OctoKit
 @MainActor
 @Observable
 final class ServerControls {
-    /// Whether the user is an admin, asked once per server in use; false while asking or on failure.
+    /// Whether the user is an admin, asked on each sign-in; false while asking or on failure.
     private(set) var isAdmin = false
     private(set) var scan: ServerScanState = .idle
     /// Whether the server in use shares links, until it refuses.
@@ -17,21 +17,38 @@ final class ServerControls {
     @ObservationIgnored private let session: Session
     @ObservationIgnored private let library: Library
     @ObservationIgnored private let sync: ServerSync
-    @ObservationIgnored private var notSharing = Set<String>()
+    private var notSharing = Set<String>()
     /// Stations each kept server refused to change, by its id and theirs.
     @ObservationIgnored private var readOnly: [String: Set<String>] = [:]
     @ObservationIgnored private var scanning: Task<Void, Never>?
-    @ObservationIgnored private var watch: Watch<String?>?
+    @ObservationIgnored private var watch: Watch<SignedInUser?>?
+    /// Each library song's server id for sharing, once looked up; dropped when the server or the
+    /// library changes.
+    @ObservationIgnored private var shareLookups: [String: ShareLookup] = [:]
+    /// Goes up whenever the looked-up ids are dropped, so the menus that read them ask again.
+    private var shareLookupEpoch = 0
+    @ObservationIgnored private var copiesWatch: Watch<Int>?
+
+    /// Who is signed in where: another kept server, or another user on the same one, is a new
+    /// sign-in.
+    struct SignedInUser: Equatable {
+        let account: String
+        let username: String
+    }
 
     init(session: Session, library: Library, sync: ServerSync) {
         self.session = session
         self.library = library
         self.sync = sync
-        watch = Watch({ [weak session] in session?.inUse?.account }) { [weak self] _ in self?.serverChanged() }
+        watch = Watch({ [weak session] in session?.inUse.map { SignedInUser(account: $0.account, username: $0.username) } }) { [weak self] _ in
+            self?.serverChanged()
+        }
+        copiesWatch = Watch({ [weak library] in library?.stamp(.library, .sources) ?? 0 }) { [weak self] _ in self?.dropShareLookups() }
         serverChanged()
     }
 
     private func serverChanged() {
+        dropShareLookups()
         isAdmin = false
         scanning?.cancel()
         scanning = nil
@@ -40,7 +57,7 @@ final class ServerControls {
         Task {
             let name = server.username
             guard !name.isEmpty, let user = try? await server.client.user(name) else { return }
-            if session.inUse?.account == server.account { isAdmin = user.adminRole }
+            if let now = session.inUse, now.account == server.account, now.username == name { isAdmin = user.adminRole }
         }
     }
 
@@ -74,6 +91,34 @@ final class ServerControls {
 
     // MARK: Sharing
 
+    /// The server's id for a library song, for sharing, as far as it is known now: nil until it
+    /// has been looked up, and when the song has no copy on the server in use. Asking starts the
+    /// look-up; the answer reaches whoever asked through observation.
+    func knownShareableSongId(_ trackId: String) -> String? {
+        _ = shareLookupEpoch
+        let lookup: ShareLookup
+        if let known = shareLookups[trackId] {
+            lookup = known
+        } else {
+            lookup = ShareLookup()
+            shareLookups[trackId] = lookup
+            let epoch = shareLookupEpoch
+            Task { [weak self] in
+                guard let self else { return }
+                let id = await self.shareableSongId(trackId)
+                guard self.shareLookupEpoch == epoch else { return }
+                lookup.answer = .some(id)
+            }
+        }
+        return lookup.answer ?? nil
+    }
+
+    private func dropShareLookups() {
+        guard !shareLookups.isEmpty else { return }
+        shareLookups = [:]
+        shareLookupEpoch += 1
+    }
+
     /// The server's id for a library song, for sharing: the lowest among its copies there.
     func shareableSongId(_ trackId: String) async -> String? {
         guard let server = session.inUse else { return nil }
@@ -95,17 +140,19 @@ final class ServerControls {
         return try await guarded(server) { try await server.client.serverShares() }
     }
 
-    /// Makes a link to songs or an album that lasts as chosen.
-    func createShare(_ ids: [String], description: String? = nil, expiry: ShareExpiry) async throws -> ServerShare? {
-        guard let server = session.inUse else { return nil }
+    /// Makes a link to songs or an album that lasts as chosen. With no server signed in it fails
+    /// as a server refusal would.
+    func createShare(_ ids: [String], description: String? = nil, expiry: ShareExpiry) async throws -> ServerShare {
+        guard let server = session.inUse else { throw OctoError.server(code: 0, message: noServerSignedIn) }
         return try await guarded(server) {
             try await server.client.serverCreateShare(ids, description: description, expiresAtMs: shareExpiresAt(expiry, now: epochNowMs()))
         }
     }
 
+    /// Deletes a link. A refusal here never marks the server as not sharing.
     func deleteShare(_ id: String) async throws {
         guard let server = session.inUse else { return }
-        try await guarded(server) { try await server.client.serverDeleteShare(id) }
+        try await server.client.serverDeleteShare(id)
     }
 
     private func guarded<T>(_ server: ServerInUse, _ call: () async throws -> T) async throws -> T {
@@ -167,4 +214,15 @@ final class ServerControls {
             throw error
         }
     }
+}
+
+/// What sharing says when no server is signed in.
+let noServerSignedIn = "No server signed in"
+
+/// One song's server id for sharing: nil while it is looked up, then the answer, which is
+/// itself nil when the server in use has no copy.
+@MainActor
+@Observable
+final class ShareLookup {
+    var answer: String?? = nil
 }

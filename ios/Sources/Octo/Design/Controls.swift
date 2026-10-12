@@ -195,12 +195,15 @@ struct GlassInput<Leading: View, Trailing: View>: View {
     @ViewBuilder var trailing: Trailing
     /// Takes the focus, and so opens the keyboard, as it appears.
     var focusOnAppear = false
+    /// The focus of a form that moves from field to field; without one the field keeps its own.
+    var focus: FocusState<Bool>.Binding? = nil
     @FocusState private var focused: Bool
     @Environment(\.motionScale) private var motion
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
-        let depth: Double = focused ? 1 : 0
+        let isFocused = focus?.wrappedValue ?? focused
+        let depth: Double = isFocused ? 1 : 0
         HStack(spacing: 8) {
             leading
             ZStack(alignment: .leading) {
@@ -219,7 +222,7 @@ struct GlassInput<Leading: View, Trailing: View>: View {
                 .font(.octoBody)
                 .foregroundStyle(.white)
                 .tint(OctoColor.accent)
-                .focused($focused)
+                .focused(focus ?? $focused)
                 .submitLabel(submitLabel)
                 .onSubmit(onSubmit)
                 .textFieldStyle(.plain)
@@ -247,18 +250,22 @@ struct GlassInput<Leading: View, Trailing: View>: View {
             shape.inset(by: -0.75).stroke(OctoColor.accent.opacity(0.60), lineWidth: 1.5).opacity(depth)
                 .allowsHitTesting(false)
         }
-        .animation(.octoTween(OctoDuration.card, OctoEasing.overshoot, scale: motion), value: focused)
+        .animation(.octoTween(OctoDuration.card, OctoEasing.overshoot, scale: motion), value: isFocused)
         .contentShape(shape)
-        .onTapGesture { focused = true }
-        .onAppear { if focusOnAppear { focused = true } }
+        .onTapGesture { takeFocus() }
+        .onAppear { if focusOnAppear { takeFocus() } }
+    }
+
+    private func takeFocus() {
+        if let focus { focus.wrappedValue = true } else { focused = true }
     }
 }
 
 extension GlassInput where Leading == EmptyView, Trailing == EmptyView {
     init(_ placeholder: String, text: Binding<String>, secure: Bool = false, submitLabel: SubmitLabel = .done,
-         onSubmit: @escaping () -> Void = {}) {
+         focus: FocusState<Bool>.Binding? = nil, onSubmit: @escaping () -> Void = {}) {
         self.init(placeholder: placeholder, text: text, secure: secure, submitLabel: submitLabel, onSubmit: onSubmit,
-                  leading: { EmptyView() }, trailing: { EmptyView() })
+                  leading: { EmptyView() }, trailing: { EmptyView() }, focus: focus)
     }
 }
 

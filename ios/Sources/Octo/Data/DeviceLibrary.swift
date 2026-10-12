@@ -63,7 +63,11 @@ final class DeviceLibrary {
                                                             queue: .main) { [weak self] _ in
             Task { @MainActor in self?.returned() }
         }
-        Task { await rescan() }
+        Task {
+            // The count the library keeps shows at once; the scan brings it up to date.
+            if let kept = try? await library.store.trackCount(sourceId: deviceSource) { songCount = kept }
+            await rescan()
+        }
     }
 
     @ObservationIgnored private var foreground: NSObjectProtocol?

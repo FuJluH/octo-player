@@ -77,14 +77,16 @@ struct ServersSection: View {
                     .disabled(serverSwitch.switching != nil)
             }
             Menu {
-                Button("Edit") { router.signIn = .edit(server) }
-                if inUse && server.mode != .apiKey { Button("Change password", action: changePassword) }
-                if server.signedOut {
-                    Button("Sign in") { router.signIn = .again(server) }
-                } else {
-                    Button("Sign out") { signOut(server, inUse: inUse) }
+                Section(server.name) {
+                    Button("Edit") { router.signIn = .edit(server) }
+                    if inUse && server.mode != .apiKey { Button("Change password", action: changePassword) }
+                    if server.signedOut {
+                        Button("Sign in") { router.signIn = .again(server) }
+                    } else {
+                        Button("Sign out") { signOut(server, inUse: inUse) }
+                    }
+                    Button("Remove", role: .destructive) { removing = server }
                 }
-                Button("Remove", role: .destructive) { removing = server }
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 16, weight: .semibold))

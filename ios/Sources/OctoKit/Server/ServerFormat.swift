@@ -35,7 +35,14 @@ public func shareDetails(_ share: ServerShare, nowMs: Int64) -> String {
     case 1: "1 visit"
     default: "\(SettingsSummaries.grouped(Int(share.visitCount))) visits"
     }
-    return [songs, expiryLabel(expiresAtMs: epochMs(share.expires), nowMs: nowMs), visits].compactMap { $0 }.joined(separator: " • ")
+    return [songs, expiryLabel(expiresAtMs: shareExpiresAtMs(share), nowMs: nowMs), visits].compactMap { $0 }.joined(separator: " • ")
+}
+
+/// When a link stops working, in milliseconds since 1970: its expiry read as an instant or a
+/// date and time with an offset. A time with no zone, or anything else, is nil, so the link
+/// reads as never expiring.
+public func shareExpiresAtMs(_ share: ServerShare) -> Int64? {
+    serverTime(share.expires).map(Int64.init)
 }
 
 /// When a link stops working, in words.

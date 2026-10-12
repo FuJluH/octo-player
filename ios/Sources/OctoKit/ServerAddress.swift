@@ -1,7 +1,7 @@
 import Foundation
 
-/// Turns whatever someone typed into a server's base address, the way the other Octo apps do
-/// (`subsonic/.../ServerUrl.kt`, `ServerScheme.kt`): "192.168.50.21:5274",
+/// Turns whatever someone typed into a server's base address, the way the other Octo apps do:
+/// "192.168.50.21:5274",
 /// "https://music.example.com/" and ".../rest" all work. With no scheme typed, plain http on
 /// the home network, where servers seldom have a certificate, and https anywhere else.
 public enum ServerAddress {
@@ -76,6 +76,24 @@ public enum ServerAddress {
         let text = rest.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !text.contains("://") else { return nil }
         return normalize(scheme.prefix + text)
+    }
+
+    /// What the home network address field holds.
+    public enum HomeReading: Equatable, Sendable {
+        /// Blank, or the main address again: no home address.
+        case none
+        case address(URL)
+        /// Text that is not an address.
+        case unreadable
+    }
+
+    /// The home network address as typed. A missing scheme is read as http, since the home
+    /// network is where servers seldom have a certificate.
+    public static func home(_ typed: String, main: URL?) -> HomeReading {
+        if typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .none }
+        guard let home = normalized(typed) else { return .unreadable }
+        if let main, home == normalized(main.absoluteString) { return .none }
+        return .address(home)
     }
 
     /// An address as people read it: no slash at the end.

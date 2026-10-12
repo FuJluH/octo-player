@@ -166,7 +166,7 @@ private struct IndexesBody: Decodable {
 extension SubsonicClient {
     /// The server's folders from the top: its music folders' indexes, then loose songs.
     public func folderTop() async throws -> ServerFolderListing {
-        let body: IndexesBody = try await get("getIndexes", key: "indexes")
+        let body: IndexesBody = try await get("getIndexes", inFolder([], nil), key: "indexes")
         return ServerFolderListing(folders: body.folders, songs: body.songs)
     }
 

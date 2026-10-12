@@ -80,6 +80,42 @@ actor StreamCache {
         return Set(streamCacheFullySavedKeys(enabled: enabled, lengths: lengths, spans: spans()).map(savedSongOf))
     }
 
+    /// What is saved of a song, as it opens to stream: the parts held, its whole length and type.
+    /// Nil while songs are not kept or nothing of it is saved.
+    struct SavedParts: Sendable {
+        var ranges: ByteRanges
+        var length: Int64?
+        var mimeType: String?
+    }
+
+    func savedParts(_ key: String) -> SavedParts? {
+        guard enabled else { return nil }
+        dropIfGone(key)
+        guard let entry = entries[key], !entry.pieces.isEmpty else { return nil }
+        var ranges = ByteRanges()
+        for piece in entry.pieces where piece.count == 2 { ranges.insert(piece[0]..<(piece[0] + piece[1])) }
+        return SavedParts(ranges: ranges, length: entry.contentLength, mimeType: entry.mimeType)
+    }
+
+    /// How much the saved songs take: their saved pieces, not the list of them.
+    func usedBytes() -> Int64 {
+        for key in Array(entries.keys) { dropIfGone(key) }
+        return streamCacheUsedBytes(spans())
+    }
+
+    /// Lets every saved song go at once.
+    func clear() {
+        for key in entries.keys { try? FileManager.default.removeItem(at: file(key)) }
+        entries = [:]
+        dirty = true
+        save()
+        // Anything else left in the folder, such as a file whose song was already forgotten.
+        for item in (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        where item != indexFile {
+            try? FileManager.default.removeItem(at: item)
+        }
+    }
+
     /// What is known of a saved song: its whole length and type.
     func info(_ key: String) -> (length: Int64?, mimeType: String?)? {
         dropIfGone(key)

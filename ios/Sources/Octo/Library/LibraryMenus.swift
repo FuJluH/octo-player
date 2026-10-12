@@ -120,7 +120,7 @@ struct SongMenuItems<Extras: View>: View {
         return songActions(
             find: track.isFound,
             radio: true,
-            share: state.canShare && track.serverSongId != nil,
+            share: state.canShare && state.data.controls.knownShareableSongId(track.id) != nil,
             offline: !track.isFound && (!track.onPhone || kept != nil),
             place: place,
             phone: track.onPhone,
@@ -279,20 +279,36 @@ struct AddToPlaylistMenu: View {
 }
 
 /// How long a shared link lasts, under the note that anyone with it can listen. Picking one
-/// makes the link, then hands it to the phone's share sheet.
+/// makes the link, then hands it to the phone's share sheet. From an album page it is headed
+/// with what it shares. While a link is being made every choice is off, and the one being made
+/// says so.
 struct ShareLinkItems: View {
     let target: ShareTarget
     let title: String
     @Environment(LibraryActions.self) private var actions
 
     var body: some View {
-        Text("Anyone with the link can listen.")
+        if case .album = target {
+            Section("Share \"\(title)\"") { note }
+        } else {
+            note
+        }
         Section("Link expires") {
             ForEach(ShareExpiry.allCases, id: \.self) { expiry in
-                Button(expiry.label) { actions.makeLink(target, title: title, expiry: expiry) }
+                let making = actions.makingLink
+                Button { actions.makeLink(target, title: title, expiry: expiry) } label: {
+                    if making == MakingLink(target: target, expiry: expiry) {
+                        Label(expiry.label, systemImage: "hourglass")
+                    } else {
+                        Text(expiry.label)
+                    }
+                }
+                .disabled(making != nil)
             }
         }
     }
+
+    private var note: some View { Text("Anyone with the link can listen.") }
 }
 
 // MARK: Collection menus

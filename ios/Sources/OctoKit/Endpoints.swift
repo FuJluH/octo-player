@@ -52,7 +52,8 @@ extension SubsonicClient {
 
     public func albumList(_ type: AlbumListType, size: Int = 30, offset: Int = 0) async throws -> [Album] {
         let list: AlbumListBody = try await get(
-            "getAlbumList2", [("type", type.rawValue), ("size", "\(size)"), ("offset", "\(offset)")], key: "albumList2")
+            "getAlbumList2", inFolder([("type", type.rawValue), ("size", "\(size)"), ("offset", "\(offset)")], nil),
+            key: "albumList2")
         return list.album
     }
 
@@ -61,7 +62,7 @@ extension SubsonicClient {
     }
 
     public func artists() async throws -> [Artist] {
-        let body: ArtistsBody = try await get("getArtists", key: "artists")
+        let body: ArtistsBody = try await get("getArtists", inFolder([], nil), key: "artists")
         return body.index.flatMap(\.artist)
     }
 
@@ -84,9 +85,9 @@ extension SubsonicClient {
     }
 
     public func search(_ query: String, artists: Int = 10, albums: Int = 20, songs: Int = 40) async throws -> SearchResult {
-        try await get("search3", [
+        try await get("search3", inFolder([
             ("query", query), ("artistCount", "\(artists)"), ("albumCount", "\(albums)"), ("songCount", "\(songs)"),
-        ], key: "searchResult3")
+        ], nil), key: "searchResult3")
     }
 
     public func starred() async throws -> SearchResult {

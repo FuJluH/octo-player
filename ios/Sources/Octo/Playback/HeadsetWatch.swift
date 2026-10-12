@@ -30,8 +30,15 @@ final class HeadsetWatch {
         defer { known = Set(now.map(\.uid)) }
         switch reason {
         case .oldDeviceUnavailable:
-            // Headphones pulled out: stop rather than play out loud.
             let wasPlaying = player.engine.playWhenReady
+            if let speaker = before.first(where: { $0.portType == .airPlay }) {
+                // An AirPlay speaker or TV went away: the music carries on here only when it was
+                // playing and "Keep playing on the phone when casting ends" is on.
+                if !(wasPlaying && AppSettings.shared.player.castKeepPlaying) { player.pause() }
+                SystemEntries.shared?.router.show("Lost the connection to \(speaker.portName)")
+                return
+            }
+            // Headphones pulled out: stop rather than play out loud.
             player.pause()
             if wasPlaying { lostOutputAt = epochMs() }
         case .newDeviceAvailable:
@@ -62,6 +69,7 @@ final class HeadsetWatch {
             let engine = self.player.engine
             if shouldResumeOnConnect(kind, prefs: resume, playing: engine.playWhenReady, hasQueue: !engine.queue.isEmpty,
                                      lostOutputAt: self.lostOutputAt, now: self.epochMs()) {
+                playbackLog.info("headphones: \(kind == .bluetooth ? "bluetooth" : "wired", privacy: .public) connected, playing again")
                 self.player.resume()
             }
         }

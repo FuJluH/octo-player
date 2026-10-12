@@ -107,9 +107,13 @@ public final class SubsonicClient: Sendable {
     public let session: URLSession
     /// How long a call may take, when shorter than each call's own limit.
     let timeout: TimeInterval?
+    /// The music folder the library is limited to, nil for all of them. Every album list,
+    /// artist list, folder index and search carries it.
+    public let musicFolderId: String?
 
     public init(baseURL: URL, credentials: Credentials, device: DeviceIdentity, appVersion: String,
-                customHeaders: [String: String] = [:], session: URLSession = .shared, timeout: TimeInterval? = nil) {
+                customHeaders: [String: String] = [:], session: URLSession = .shared, timeout: TimeInterval? = nil,
+                musicFolderId: String? = nil) {
         self.baseURL = baseURL
         self.credentials = credentials
         self.device = device
@@ -117,6 +121,7 @@ public final class SubsonicClient: Sendable {
         self.customHeaders = customHeaders
         self.session = session
         self.timeout = timeout
+        self.musicFolderId = musicFolderId
     }
 
     public var userAgent: String { "Octo/\(appVersion) (iOS)" }
@@ -124,13 +129,19 @@ public final class SubsonicClient: Sendable {
     /// The same server with other credentials.
     public func with(_ credentials: Credentials) -> SubsonicClient {
         SubsonicClient(baseURL: baseURL, credentials: credentials, device: device, appVersion: appVersion,
-                       customHeaders: customHeaders, session: session, timeout: timeout)
+                       customHeaders: customHeaders, session: session, timeout: timeout, musicFolderId: musicFolderId)
     }
 
     /// The same server reached at another address, like its home network address.
     public func at(_ address: URL) -> SubsonicClient {
         SubsonicClient(baseURL: address, credentials: credentials, device: device, appVersion: appVersion,
-                       customHeaders: customHeaders, session: session, timeout: timeout)
+                       customHeaders: customHeaders, session: session, timeout: timeout, musicFolderId: musicFolderId)
+    }
+
+    /// The same server with its library limited to one music folder, nil for all of them.
+    public func limited(to folderId: String?) -> SubsonicClient {
+        SubsonicClient(baseURL: baseURL, credentials: credentials, device: device, appVersion: appVersion,
+                       customHeaders: customHeaders, session: session, timeout: timeout, musicFolderId: folderId)
     }
 
     /// A signed address for an endpoint. Every call gets a fresh salt, so never use one as a

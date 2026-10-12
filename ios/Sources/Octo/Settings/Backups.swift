@@ -9,19 +9,22 @@ protocol BackupLibrary: AnyObject {
     func tracks() async -> [BackupTrack]
     func albums() async -> [NamedItem]
     func artists() async -> [NamedItem]
-    /// Every playlist here, phone and server, by name.
-    func playlistNames() async -> [String]
-    /// Playlists that exist only on the phone, oldest first.
+    /// Every playlist on the phone, whichever server it is kept with, the one changed last first.
+    func playlistRows() async -> [PlaylistRow]
+    /// Playlists that exist only on the phone, oldest first, each song in play order.
     func phonePlaylists() async -> [PlaylistBackup]
+    /// Every like, oldest first, songs the library no longer has included.
     func likes() async -> [SongKey]
+    /// Every rating made on the phone, oldest first, songs the library no longer has included.
     func ratings() async -> [RatedSong]
+    /// Every favorite album, oldest first; one the library no longer has keeps only its key.
     func favoriteAlbums() async -> [HeldKey]
     func favoriteArtists() async -> [HeldKey]
+    /// Every pin in row order. A playlist pin is named by the playlist's name alone.
     func pins() async -> [PinBackup]
     func sortOrders() async -> [String: String]
+    /// Each library song's own lyrics timing.
     func lyricsOffsets() async -> [LyricsOffsetBackup]
-    /// Each playlist kept downloaded, by id, and every playlist's name by id.
-    func playlistNamesById() async -> [String: String]
 
     func makePlaylist(_ name: String, trackIds: [String]) async -> String?
     func isLiked(_ trackId: String) async -> Bool
@@ -31,9 +34,9 @@ protocol BackupLibrary: AnyObject {
     func favoriteArtistIds() async -> Set<String>
     func favorite(album id: String) async
     func favorite(artist id: String) async
+    /// Pins by id: an album, an artist, or a playlist, which need not be in the library yet.
     func pin(_ kind: PinKind, id: String) async
     func restoreSortOrders(_ orders: [String: String]) async
-    func setLyricsOffset(_ trackId: String, ms: Int64) async
 }
 
 /// Saves the app's settings, playlists, likes, ratings, favorites and pins to a file the
@@ -71,7 +74,7 @@ final class Backups {
         if let active = session.active, session.client != nil {
             b.server = ServerBackup(address: BackupFile.plainAddress(active.address.absoluteString), username: active.username)
         }
-        let names = await library?.playlistNamesById() ?? [:]
+        let names = Dictionary((await library?.playlistRows() ?? []).map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
         if let library {
             b.playlists = await library.phonePlaylists()
             b.likes = await library.likes()
@@ -119,8 +122,14 @@ final class Backups {
     /// What restoring would do with the library as it is now.
     func plan(_ backup: Backup) async -> RestorePlan {
         guard let library else { return BackupPlanner.plan(backup, library: [], existingPlaylists: []) }
-        return BackupPlanner.plan(backup, library: await library.tracks(), existingPlaylists: await library.playlistNames(),
-                                  albums: await library.albums(), artists: await library.artists())
+        let tracks = await library.tracks()
+        let playlists = await library.playlistRows().map(\.name)
+        let albums = await library.albums()
+        let artists = await library.artists()
+        // Matching runs over the whole library, so it runs away from the main thread.
+        return await Task.detached(priority: .userInitiated) {
+            BackupPlanner.plan(backup, library: tracks, existingPlaylists: playlists, albums: albums, artists: artists)
+        }.value
     }
 
     /// Puts a backup's settings back, and makes its playlists, likes and ratings as planned.
@@ -149,10 +158,11 @@ final class Backups {
             }
             for (output, ms) in lyrics.outputOffsets { settings.setOutputTiming(output, Int(ms)) }
         }
-        for (id, ms) in plan.lyricsOffsets { await library?.setLyricsOffset(id, ms: min(max(ms, -10_000), 10_000)) }
+        // Held to the song limit, and dropped at 0, as when set by hand.
+        for (id, ms) in plan.lyricsOffsets { LyricsSongTiming.shared.set(id, Int(ms)) }
         // Playlists by name, with the ones made here, so pins and kept playlists can find them.
         var playlistIds: [String: String] = [:]
-        for (id, name) in await library?.playlistNamesById() ?? [:] { playlistIds[name.trimmingCharacters(in: .whitespaces).lowercased()] = id }
+        for row in await library?.playlistRows() ?? [] { playlistIds[row.name.trimmingCharacters(in: .whitespaces).lowercased()] = row.id }
         for playlist in plan.playlists where !playlist.trackIds.isEmpty || playlist.total == 0 {
             if let id = await library?.makePlaylist(playlist.name, trackIds: playlist.trackIds) {
                 playlistIds[playlist.name.trimmingCharacters(in: .whitespaces).lowercased()] = id

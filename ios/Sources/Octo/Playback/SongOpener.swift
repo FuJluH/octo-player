@@ -49,16 +49,17 @@ struct StreamContext: Sendable {
     }
 
     /// The server in use as a request goes out: the address in use now (the home one while at
-    /// home). As the app starts, the saved sign-in gets up to 3 s to come back.
+    /// home), or nil at once when none is signed in.
     private func serverNow() -> (client: SubsonicClient, sourceId: String)? {
         guard let session else { return client.map { ($0, sourceId ?? "") } }
-        let deadline = Date().addingTimeInterval(3)
-        while true {
-            let found = try? blocking { await MainActor.run { session.inUse.map { Unchecked(($0.client, $0.sourceId)) } } }
-            if let found = found ?? nil { return found.value }
-            if Date() >= deadline { return nil }
-            Thread.sleep(forTimeInterval: 0.1)
+        let found: Unchecked<(SubsonicClient, String)>?
+        if Thread.isMainThread {
+            found = MainActor.assumeIsolated { session.inUse.map { Unchecked(($0.client, $0.sourceId)) } }
+        } else {
+            found = (try? blocking { await MainActor.run { session.inUse.map { Unchecked(($0.client, $0.sourceId)) } } }) ?? nil
         }
+        guard let found else { return nil }
+        return found.value
     }
 
     /// Whether a song is another kept server's than the one in use: its id would be some other
@@ -120,13 +121,19 @@ enum SongOpener {
             if let ref = parseStreamUri(uri) {
                 guard OnlineWatch.shared.online || context.keeping else { throw PlayError(.ioUnspecified, detail: "No connection") }
                 let pinned = context.pinned(ref)
+                // A saved copy that cannot be read is passed over for the server's.
+                var savedUnreadable = false
                 if let key = context.savedKey(pinned),
-                   let saved = try? blocking({ await StreamCache.shared.savedFile(key) }),
-                   let file = try? LocalFile(url: saved.url, contentType: saved.mimeType) {
-                    token.adopt(file)
-                    return OpenedSong(decoder: try SongDecoder(source: file, mimeType: saved.mimeType ?? mime, outputRate: outputRate), bytes: file)
+                   let saved = try? blocking({ await StreamCache.shared.savedFile(key) }) {
+                    if let file = try? LocalFile(url: saved.url, contentType: saved.mimeType),
+                       let decoder = try? SongDecoder(source: file, mimeType: saved.mimeType ?? mime, outputRate: outputRate) {
+                        token.adopt(file)
+                        return OpenedSong(decoder: decoder, bytes: file)
+                    }
+                    savedUnreadable = true
                 }
-                let remote = try RemoteFile(savedKey: context.savedKey(pinned), online: { OnlineWatch.shared.online }) {
+                let remote = try RemoteFile(savedKey: context.savedKey(pinned), readsSaved: !savedUnreadable,
+                                            online: { OnlineWatch.shared.online }) {
                     try context.sign(pinned)
                 }
                 token.adopt(remote)

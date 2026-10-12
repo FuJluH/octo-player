@@ -60,7 +60,14 @@ final class LibraryState {
         recentPlaylists = UserDefaults.standard.stringArray(forKey: recentKey) ?? []
     }
 
-    private var recentKey: String { "playlists.recent.\(session.activeId ?? "phone")" }
+    private var recentKey: String { Self.recentPlaylistsKey(session.activeId ?? "phone") }
+
+    private static func recentPlaylistsKey(_ account: String) -> String { "playlists.recent.\(account)" }
+
+    /// Forgets the playlists added to lately on a server taken off the list.
+    static func forgetRecent(_ account: String) {
+        UserDefaults.standard.removeObject(forKey: recentPlaylistsKey(account))
+    }
 
     /// Whether the server in use can make shared links.
     var canShare: Bool { data.controls.sharing }

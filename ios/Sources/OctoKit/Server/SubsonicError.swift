@@ -95,10 +95,10 @@ public enum SubsonicError: Error, Equatable, Sendable, LocalizedError {
     }
 
     /// A failure to reach the address at all, as opposed to a cancelled call or a server that
-    /// answered badly: refused, no route, unknown host, or a timeout.
+    /// answered badly: refused or no route, unknown host, or a timeout. Having no network at all,
+    /// or losing it partway, is not one.
     public static func isConnectionError(_ error: URLError) -> Bool {
-        [.cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .timedOut, .notConnectedToInternet,
-         .networkConnectionLost].contains(error.code)
+        [.cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .timedOut].contains(error.code)
     }
 }
 

@@ -1,4 +1,5 @@
 import Foundation
+import MediaPlayer
 import OctoKit
 
 /// Turns songs into songs the player can play. Each library song plays from one of its copies,
@@ -64,8 +65,10 @@ struct PlayableItems {
         let reachable = copies.contains(where: \.isServerCopy) && online && context.client != nil
         let prefs = AppSettings.shared
         let streamInstead = prefs.offline.streamOnWifi && online && !OnlineWatch.shared.onMobileData
+        // Phone copies that could be swapped for a stream are checked, only while the server can
+        // be reached, in case one is gone.
         let chosen = chooseCopy(copies, download: downloadCopy, streamInstead: streamInstead, prefs.stream.copies,
-                                serverReachable: reachable, phoneFileMissing: { copy in Self.fileMissing(copy.uri) })
+                                serverReachable: reachable, phoneFileMissing: { copy in reachable && Self.fileMissing(copy.uri) })
         var uri = track.uri ?? ""
         var mime = track.mimeType
         let fileMime = chosen?.mimeType ?? track.mimeType
@@ -124,11 +127,21 @@ struct PlayableItems {
                  albumPeak: copy.albumPeak.map(Double.init))
     }
 
-    /// Whether a phone file has gone. Songs of the media library are taken to be there.
+    /// Whether a phone copy has gone: a file no longer there, or a song of the phone's music
+    /// library it no longer holds on the phone. Without access to the phone's music, every song of
+    /// it counts as gone.
     private static func fileMissing(_ uri: String?) -> Bool {
         guard let uri, let url = URL(string: uri) else { return true }
-        guard url.isFileURL else { return false }
-        return !FileManager.default.fileExists(atPath: url.path)
+        if url.isFileURL { return !FileManager.default.fileExists(atPath: url.path) }
+        guard url.scheme?.lowercased() == "ipod-library" else { return false }
+        guard MPMediaLibrary.authorizationStatus() == .authorized else { return true }
+        guard let id = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "id" })?.value,
+              let persistent = UInt64(id)
+        else { return true }
+        let query = MPMediaQuery.songs()
+        query.addFilterPredicate(MPMediaPropertyPredicate(value: NSNumber(value: persistent), forProperty: MPMediaItemPropertyPersistentID))
+        guard let item = query.items?.first else { return true }
+        return item.assetURL == nil
     }
 
     /// A library song as the screens show it.

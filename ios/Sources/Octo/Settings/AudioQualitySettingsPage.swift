@@ -47,14 +47,25 @@ final class AccountQualityModel {
         }
         let account = session.activeId
         if !force, readFor == account, quality != nil { return }
-        guard let read = try? await client.accountQuality() else { return }
-        quality = read
-        let devices = (try? await client.qualityDevices()) ?? []
-        if let me = devices.first(where: \.current) {
-            follows = me.quality
-            deviceId = me.id
+        if readFor != account {
+            // Another account: nothing of the last one's stays, so until this one is read the
+            // page shows only this app's quality and streams ask for the file as it is.
+            quality = nil
+            follows = nil
+            deviceId = nil
+            readFor = account
+            AppSettings.shared.applyQuality()
         }
-        readFor = account
+        guard let read = try? await client.accountQuality(), session.activeId == account else { return }
+        quality = read
+        let devices = try? await client.qualityDevices()
+        guard session.activeId == account else { return }
+        if let devices {
+            // A list without this phone in it leaves its mode unknown.
+            let me = devices.first(where: \.current)
+            follows = me?.quality
+            deviceId = me?.id
+        }
         AppSettings.shared.applyQuality()
     }
 

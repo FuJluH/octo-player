@@ -11,6 +11,9 @@ struct ChangePasswordForm: View {
     @State private var draft = PasswordDraft()
     @State private var busy = false
     @State private var problem: String?
+    @FocusState private var onCurrent: Bool
+    @FocusState private var onNew: Bool
+    @FocusState private var onAgain: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -35,10 +38,25 @@ struct ChangePasswordForm: View {
         .padding(.bottom, 20)
     }
 
+    /// Next moves on to the following field; Done on the last one changes the password.
     private func field(_ placeholder: String, text: Binding<String>, at index: Int) -> some View {
         GlassInput(placeholder, text: Binding(get: { text.wrappedValue }, set: { text.wrappedValue = $0; problem = nil }), secure: true,
-                   submitLabel: index == 2 ? .done : .next) { if index == 2 { change() } }
-            .textContentType(index == 0 ? .password : .newPassword)
+                   submitLabel: index == 2 ? .done : .next, focus: focus(at: index)) {
+            switch index {
+            case 0: onNew = true
+            case 1: onAgain = true
+            default: change()
+            }
+        }
+        .textContentType(index == 0 ? .password : .newPassword)
+    }
+
+    private func focus(at index: Int) -> FocusState<Bool>.Binding {
+        switch index {
+        case 0: $onCurrent
+        case 1: $onNew
+        default: $onAgain
+        }
     }
 
     private func change() {

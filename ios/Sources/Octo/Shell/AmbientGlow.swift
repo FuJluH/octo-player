@@ -187,7 +187,7 @@ struct AmbientBackdrop: View {
         let strength = source == .none || colors == nil ? 0 : ambientAlpha(prefs.strength)
         AmbientField(paint: AmbientPaint(colors: colors ?? .quiet, strength: strength), shown: awake)
             .animation(.octoTween(fixed: AmbientTiming.crossMs), value: AmbientPaint(colors: colors ?? .quiet, strength: strength))
-            .onChange(of: found) { _, new in if let new { held = new } }
+            .onChange(of: found, initial: true) { _, new in if let new { held = new } }
             .allowsHitTesting(false)
             .accessibilityHidden(true)
     }
@@ -294,11 +294,15 @@ struct AmbientPreview: View {
     @Environment(Player.self) private var player
 
     var body: some View {
-        let colors = store.colors(for: player.current?.coverArt) ?? .quiet
+        // With no artwork the quiet colors show; artwork whose colors are still being read
+        // shows the plain strip until they are.
+        let cover = player.current?.coverArt
+        let colors: ArtworkColors? = cover == nil ? .quiet : store.colors(for: cover)
+        let paint = AmbientPaint(colors: colors ?? .quiet, strength: colors == nil ? 0 : ambientAlpha(strength))
         ZStack(alignment: .leading) {
             OctoColor.background
-            MeshImage(colors: AmbientPaint(colors: colors, strength: 1).colors, time: 0)
-                .opacity(ambientAlpha(strength))
+            AmbientPreviewField(paint: paint)
+                .animation(.octoTween(fixed: AmbientTiming.crossMs), value: paint)
             VStack(alignment: .leading, spacing: 0) {
                 Text(player.current?.title ?? "Nothing playing")
                     .font(.octoBodySmall).foregroundStyle(.white).lineLimit(1)
@@ -309,6 +313,31 @@ struct AmbientPreview: View {
         }
         .frame(height: 72)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+/// The preview's glow: the pages' field held still, easing to a new strength or song as they
+/// do, faded toward the bottom the same way.
+private struct AmbientPreviewField: View, Animatable {
+    var paint: AmbientPaint
+
+    nonisolated var animatableData: AmbientPaint {
+        get { paint }
+        set { paint = newValue }
+    }
+
+    var body: some View {
+        if paint.strength > AmbientTiming.threshold {
+            MeshImage(colors: paint.colors, time: 0)
+                .opacity(paint.strength)
+                .overlay {
+                    LinearGradient(stops: [.init(color: .clear, location: 0.35),
+                                           .init(color: OctoColor.background.opacity(0.4), location: 1)],
+                                   startPoint: .top, endPoint: .bottom)
+                }
+        } else {
+            Color.clear
+        }
     }
 }
 
