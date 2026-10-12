@@ -23,6 +23,10 @@ final class Session {
     var isOcto: Bool { profile?.isOcto ?? active?.isOcto ?? false }
     var serverName: String { active?.name ?? "" }
 
+    /// Runs before the server in use changes to another (its id) or none, while the old one is
+    /// still the one in use: what plays stops and counts for it, and its queue is put away.
+    @ObservationIgnored var leaving: (@MainActor (_ from: StoredServer, _ to: String?) async -> Void)?
+
     @ObservationIgnored private let trust = ServerTrust.shared
     @ObservationIgnored private let network = NWPathMonitor()
     @ObservationIgnored private var onLocalNetwork = false
@@ -145,6 +149,7 @@ final class Session {
             save()
             return "Saved \(server.name)."
         default:
+            if let previous, previous.id != id, !previous.signedOut, self.client != nil { await leaving?(previous, id) }
             activeId = id
             save()
             self.client = client
@@ -174,6 +179,7 @@ final class Session {
         } catch {
             throw SignInFailure.words("Couldn't switch to \(server.name). \(SignInWords.describe(error))")
         }
+        if let previous = active, previous.id != id, !previous.signedOut, self.client != nil { await leaving?(previous, id) }
         activeId = id
         self.client = client
         atHome = false
