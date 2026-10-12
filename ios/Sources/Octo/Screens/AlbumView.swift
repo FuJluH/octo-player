@@ -153,9 +153,9 @@ struct AlbumView: View {
             }
             .padding(.top, 14)
             PlayShuffle(enabled: !listed.isEmpty) {
-                actions.play(listed)
+                actions.play(listed, name: shown?.title)
             } shuffle: {
-                actions.play(listed, shuffled: true)
+                actions.play(listed, shuffled: true, name: shown?.title)
             }
             .padding(.top, 10)
             quietActions(album)
@@ -267,7 +267,7 @@ struct AlbumView: View {
                 let track = list[position]
                 TrackRow(track: track, lead: .number(track.trackNo), subtitle: track.artist == album.artist ? "" : track.artist,
                          context: SongMenuContext(albumId: album.id), ownership: mixed, highlighted: track.id == highlight) {
-                    actions.play(list, from: position)
+                    actions.play(list, from: position, name: shown?.title)
                 }
             }
         }
@@ -417,7 +417,7 @@ struct ArtistView: View {
             }
             .padding(.top, 8)
             if !songs.isEmpty {
-                PlayShuffle { actions.play(songs) } shuffle: { actions.play(songs, shuffled: true) }
+                PlayShuffle { actions.play(songs, name: artist?.name ?? name) } shuffle: { actions.play(songs, shuffled: true, name: artist?.name ?? name) }
                     .padding(.top, 4)
             }
         }
@@ -436,7 +436,7 @@ struct ArtistView: View {
             }
         }
         ForEach(Array(songs.prefix(allSongs ? songs.count : 10).enumerated()), id: \.element.id) { position, track in
-            TrackRow(track: track, subtitle: track.album) { actions.play(songs, from: position) }
+            TrackRow(track: track, subtitle: track.album) { actions.play(songs, from: position, name: artist?.name ?? name) }
         }
     }
 
@@ -447,7 +447,7 @@ struct ArtistView: View {
             TrackRow(track: track,
                      subtitle: rowAlbum(title: track.title, album: track.album, find: track.isFound),
                      context: SongMenuContext(artistId: artist?.id), offersAdd: offersAdd, addSpace: offersAdd) {
-                actions.play(top, from: position)
+                actions.play(top, from: position, name: artist?.name ?? name)
             }
         }
     }
@@ -770,7 +770,7 @@ struct PlaylistPage: View {
             }
             .padding(.top, 14)
             if !rows.isEmpty {
-                PlayShuffle { actions.play(tracks) } shuffle: { actions.play(tracks, shuffled: true) }
+                PlayShuffle { actions.play(tracks, name: playlist.name) } shuffle: { actions.play(tracks, shuffled: true, name: playlist.name) }
                     .padding(.top, 10)
             }
         }
@@ -790,7 +790,7 @@ struct PlaylistPage: View {
                 actions.remove([row.itemId], from: playlist)
             }
         ) {
-            actions.play(rows.map(\.track), from: position)
+            actions.play(rows.map(\.track), from: position, name: playlist.name)
         }
     }
 

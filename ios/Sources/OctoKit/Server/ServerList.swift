@@ -143,6 +143,23 @@ public func agoWords(thenMs: Int64, nowMs: Int64, zone: TimeZone = .current) -> 
     return "on " + formatter.string(from: then)
 }
 
+/// The kept servers in one shape, with the one in use. `legacy` is the one server an older
+/// version of an app keeps, and it has the last word, since that version writes only it: a store
+/// from before the list becomes a list of one, a server an older version signed in to since is
+/// added (or brought up to date) and made the one in use, and one it signed out of leaves none in
+/// use. `id` gives a server's id, `same` tells whether two are the same account, and `adopt`
+/// makes the legacy server into the kept one, with the id and name of the one it matched, if any.
+public func settleServers<T>(_ listed: [T], legacy: T?, id: (T) -> String, same: (T, T) -> Bool,
+                             adopt: (_ legacy: T, _ match: T?) -> T) -> (list: [T], inUse: T?) {
+    var seen = Set<String>()
+    let list = listed.filter { seen.insert(id($0)).inserted }
+    guard let legacy else { return (list, nil) }
+    let match = list.first { id($0) == id(legacy) || same($0, legacy) }
+    let kept = adopt(legacy, match)
+    guard let match else { return (list + [kept], kept) }
+    return (list.map { id($0) == id(match) ? kept : $0 }, kept)
+}
+
 /// Home only when a home address is set, the device is on a local network (Wi-Fi or a cable),
 /// and the home address answered just now.
 public func choosePlace(hasHome: Bool, onLocalNetwork: Bool, homeAnswered: Bool) -> ServerPlace {

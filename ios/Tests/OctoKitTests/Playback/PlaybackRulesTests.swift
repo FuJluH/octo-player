@@ -176,6 +176,13 @@ import Testing
         #expect(sleepFade(-5) == 0)
     }
 
+    @Test func fadeIsFullUntilTheLastThirtySecondsThenFallsToSilence() {
+        #expect(sleepFade(60_000) == 1)
+        #expect(sleepFade(30_000) == 1)
+        #expect(abs(sleepFade(15_000) - 0.25) < 0.0001)
+        #expect(sleepFade(0) == 0)
+    }
+
     @Test func ticksLandOnWholeSecondsThenTenTimesASecond() {
         #expect(untilNextSleepTick(60_000) == 1_000)
         #expect(untilNextSleepTick(59_500) == 500)

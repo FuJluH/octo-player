@@ -513,7 +513,7 @@ final class Player {
     @discardableResult
     func removeEntry(_ key: String) -> QueueUndo? {
         var undo: QueueUndo?
-        engine.edit { undo = $0.removeEntry(key) }
+        engine.edit { undo = $0.removeEntry(key); return undo?.ended ?? false }
         return undo
     }
 
@@ -521,14 +521,14 @@ final class Player {
     @discardableResult
     func clearUpcoming() -> QueueUndo? {
         var undo: QueueUndo?
-        engine.edit { undo = $0.clearAllButCurrent() }
+        engine.edit { undo = $0.clearAllButCurrent(); return undo?.ended ?? false }
         return undo
     }
 
     @discardableResult
     func removePlayed() -> QueueUndo? {
         var undo: QueueUndo?
-        engine.edit { undo = $0.removePlayed() }
+        engine.edit { undo = $0.removePlayed(); return undo?.ended ?? false }
         return undo
     }
 
@@ -536,20 +536,20 @@ final class Player {
     @discardableResult
     func removeSongs(_ trackIds: Set<String>) -> QueueUndo? {
         var undo: QueueUndo?
-        engine.edit { undo = $0.removeSongs(trackIds) }
+        engine.edit { undo = $0.removeSongs(trackIds); return undo?.ended ?? false }
         return undo
     }
 
     /// Moves a song already queued to play next.
     func playEntryNext(_ key: String) {
-        engine.edit { _ = $0.playEntryNext(key) }
+        engine.edit { _ = $0.playEntryNext(key); return false }
     }
 
     /// Puts an edit back; false when the queue changed some other way since.
     @discardableResult
     func undo(_ undo: QueueUndo) -> Bool {
         var done = false
-        engine.edit { done = $0.undo(undo) }
+        engine.edit { done = $0.undo(undo); return false }
         return done
     }
 

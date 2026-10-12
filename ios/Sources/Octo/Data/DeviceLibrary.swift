@@ -371,22 +371,27 @@ final class DeviceLibrary {
     // MARK: Phone files
 
     /// Deletes the phone files of these songs: files in Octo's own folder go; songs in the Music
-    /// app's library can only be removed in the Music app. Answers the words to show, if any.
-    func delete(_ trackIds: [String]) async -> String? {
+    /// app's library can only be removed in the Music app. Answers the words to show, if any, and
+    /// the songs whose every file went, which leave the queue.
+    func delete(_ trackIds: [String]) async -> (words: String?, deleted: [String]) {
         let copies = (try? await library.store.copies(of: trackIds)) ?? []
-        guard let plan = deletePlan(trackIds, phoneFiles(copies, ownFolder: Self.filesFolder.absoluteString)) else { return nil }
+        let files = phoneFiles(copies, ownFolder: Self.filesFolder.absoluteString)
+        guard let plan = deletePlan(trackIds, files) else { return (nil, []) }
         var kept = 0
-        for uri in plan.uris {
-            guard let url = URL(string: uri), url.isFileURL else {
+        var keptSongs = Set<String>()
+        for file in files where plan.uris.contains(file.uri) {
+            guard let url = URL(string: file.uri), url.isFileURL else {
                 kept += 1
+                keptSongs.insert(file.trackId)
                 continue
             }
             try? FileManager.default.removeItem(at: url)
         }
         await rescan()
-        if kept == 0 { return nil }
-        return kept == 1 ? "1 song is in the Music app's library. Remove it in the Music app."
-            : "\(kept) songs are in the Music app's library. Remove them in the Music app."
+        let deleted = plan.trackIds.filter { !keptSongs.contains($0) }
+        if kept == 0 { return (nil, deleted) }
+        return (kept == 1 ? "1 song is in the Music app's library. Remove it in the Music app."
+            : "\(kept) songs are in the Music app's library. Remove them in the Music app.", deleted)
     }
 
     /// Files to hand to the share sheet for these songs: Octo's own files as they are, and songs

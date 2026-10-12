@@ -208,12 +208,12 @@ struct SongsPage: View {
                         } else {
                             ListPlayLine(count: filters.any ? filteredCount(shown: list.count, all: sorted.items.count)
                                          : countText(list.count, "song", "songs")) {
-                                actions.play(list)
+                                actions.play(list, name: "Songs")
                             } shuffle: {
-                                actions.play(list, shuffled: true)
+                                actions.play(list, shuffled: true, name: "Songs")
                             }
                             LetterRuns(items: list, headings: shownHeadings, id: \.id) { position, track in
-                                TrackRow(track: track) { actions.play(list, from: position) }
+                                TrackRow(track: track) { actions.play(list, from: position, name: "Songs") }
                             }
                             Color.clear.frame(height: 140)
                         }
@@ -450,7 +450,7 @@ struct GenrePage: View {
                             .font(.octoCaption)
                             .foregroundStyle(OctoColor.textMuted)
                             .padding(.top, 14)
-                        PlayShuffle(enabled: !songs.isEmpty) { actions.play(songs) } shuffle: { actions.play(songs, shuffled: true) }
+                        PlayShuffle(enabled: !songs.isEmpty) { actions.play(songs, name: name) } shuffle: { actions.play(songs, shuffled: true, name: name) }
                             .padding(.top, 10)
                     }
                     .padding(.horizontal, 20)
@@ -459,7 +459,7 @@ struct GenrePage: View {
                     albumGrid
                     if !songs.isEmpty { SortBar(name: "Songs", list: .genreSongs).id("songs") }
                     ForEach(Array(songs.enumerated()), id: \.element.id) { position, track in
-                        TrackRow(track: track) { actions.play(songs, from: position) }
+                        TrackRow(track: track) { actions.play(songs, from: position, name: name) }
                     }
                     Color.clear.frame(height: 20)
             }
@@ -564,7 +564,7 @@ struct HistoryPage: View {
     private func playFrom(_ track: LibraryTrack, in all: [LibraryTrack]) {
         var seen = Set<String>()
         let once = all.filter { seen.insert($0.id).inserted }
-        actions.play(once, from: once.firstIndex { $0.id == track.id } ?? 0)
+        actions.play(once, from: once.firstIndex { $0.id == track.id } ?? 0, name: "History")
     }
 
     @ViewBuilder
@@ -601,7 +601,7 @@ struct HistoryPage: View {
                 ForEach(Array(most.enumerated()), id: \.offset) { position, played in
                     TrackRow(track: played.track,
                              subtitle: "\(played.track.artist) • \(played.plays == 1 ? "1 play" : "\(played.plays) plays")") {
-                        actions.play(tracks, from: position)
+                        actions.play(tracks, from: position, name: "History")
                     }
                 }
             }

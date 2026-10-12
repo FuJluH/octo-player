@@ -96,7 +96,7 @@ struct LiveListView: View {
                         }
                         .frame(minHeight: 44)
                         .padding(.top, 14)
-                        PlayButtons(songs: playable).padding(.top, 4)
+                        PlayButtons(songs: playable, listName: list.name).padding(.top, 4)
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, detailTopGap)
@@ -112,7 +112,7 @@ struct LiveListView: View {
                         Text(noMatchesNote).font(.octoBodySmall).foregroundStyle(OctoColor.textMuted).padding(20)
                     }
                     ForEach(Array(playable.enumerated()), id: \.element.id) { index, song in
-                        SongRow(song: song, list: playable, position: index)
+                        SongRow(song: song, list: playable, position: index, listName: list.name)
                     }
                 }
             }
@@ -274,7 +274,7 @@ struct LiveListEditView: View {
                         .padding(.horizontal, 20)
                         .padding(.vertical, 8)
                     ForEach(Array(playable.enumerated()), id: \.element.id) { index, song in
-                        SongRow(song: song, list: playable, position: index)
+                        SongRow(song: song, list: playable, position: index, listName: draft.savedName)
                     }
                 }
             }

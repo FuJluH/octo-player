@@ -204,6 +204,30 @@ struct SeededRandom: RandomNumberGenerator {
         #expect(q.trackIds == ["b", "c"])
         #expect(q.currentItem?.trackId == "c")
     }
+
+    @Test func deletingTheLastSongOnPlaysTheQueueOut() {
+        var q = queue(["a", "b", "c"], current: 2)
+        #expect(q.removeSongs(["c"])?.ended == true)
+        var middle = queue(["a", "b", "c"], current: 1)
+        #expect(middle.removeSongs(["b"])?.ended == false)
+        var other = queue(["a", "b", "c"], current: 2)
+        #expect(other.removeSongs(["a"])?.ended == false)
+    }
+
+    @Test func theOrderCarriesOverToTheOtherDeck() {
+        var q = queue(["a", "b", "c", "d", "e", "f"])
+        q.setPlayOrder([4, 0, 2, 5, 1, 3])
+        var copy = q
+        #expect(copy.order == [4, 0, 2, 5, 1, 3])
+        copy.add([item("g")], at: 6)
+        #expect(copy.order.last == 6)
+    }
+
+    @Test func clearingEmptiesTheOrder() {
+        var q = queue(["a", "b", "c"])
+        q.clear()
+        #expect(q.order.isEmpty)
+    }
 }
 
 @Suite struct StoresTest {

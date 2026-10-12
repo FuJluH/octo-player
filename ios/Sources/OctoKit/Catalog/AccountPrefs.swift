@@ -6,6 +6,13 @@ import Foundation
 /// The key a value of one account is kept under.
 public func accountKey(_ name: String, _ account: String) -> String { "\(name)@\(account)" }
 
+/// The id a kept server has for an account an older single-server store wrote as
+/// "user@address": the same key the server list gives it.
+public func accountOfServerKey(_ serverKey: String) -> String {
+    guard let at = serverKey.lastIndex(of: "@") else { return serverAccountKey(serverKey, serverKey) }
+    return serverAccountKey(String(serverKey[..<at]), String(serverKey[serverKey.index(after: at)...]))
+}
+
 /// The keys among `keys` that belong to `account`, to forget when it is removed.
 public func accountKeys(_ keys: some Sequence<String>, of account: String) -> [String] {
     keys.filter { $0.hasSuffix("@\(account)") }

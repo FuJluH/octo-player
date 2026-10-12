@@ -71,6 +71,10 @@ private final class FakeHost: AcquisitionHost, @unchecked Sendable {
     }
 
     func row(_ findId: String) -> FindSong { lock.withLock { _finds.first { $0.id == findId }! } }
+
+    func add(_ find: FindSong) { lock.withLock { _finds.append(find) } }
+
+    var finds: [FindSong] { lock.withLock { _finds } }
 }
 
 private func watchOf(_ host: FakeHost, _ clock: TestClock) -> ProgressWatch {
@@ -199,6 +203,40 @@ private struct Away: Error {}
         // Adopted before the full look, so the check shows at once.
         #expect(shown == [.done])
         #expect(phaseFor(host.row("a"), live: watch.live["a"], now: now0) == .done)
+    }
+
+    @Test func theSecondSongAddedPlaysItselfWhenTapped() async {
+        let uicideOnServer = "dAti9HX34pPuxG3bYPqDPJ", huntinOnServer = "cEi8RizCv3u1jOCzd6jCJL"
+        let uicideSong = "server:octo:\(uicideOnServer)", huntinSong = "server:octo:\(huntinOnServer)"
+        let uicide = find("uicide", "$UICIDE", artist: "$uicideboy$", requestedAt: now0)
+        let huntin = find("huntin", "Huntin' Wabbitz", artist: "J. Cole", requestedAt: now0 + 6 * 60_000)
+        let host = FakeHost(uicide)
+        host.library = [uicideOnServer: uicideSong, huntinOnServer: huntinSong]
+        let first = entry("uicide", "done", title: uicide.title, artist: uicide.artist, libraryId: uicideOnServer,
+                          startedAt: "2026-09-27T12:00:00Z")
+        host.answer = { _ in [first] }
+        let clock = TestClock()
+        let watch = watchOf(host, clock)
+        // "$UICIDE" is added and arrives.
+        #expect(await watch.run())
+        // Six minutes on, "Huntin' Wabbitz" is added and arrives; the server still lists the first.
+        clock.advance(6 * 60_000)
+        host.add(huntin)
+        let second = entry("huntin", "done", title: huntin.title, artist: huntin.artist, libraryId: huntinOnServer,
+                           startedAt: "2026-09-27T12:06:00Z")
+        host.answer = { _ in [first, second] }
+        #expect(await watch.run())
+        // Each find is linked to its own library song.
+        #expect(host.row("uicide").adoptedId == uicideSong)
+        #expect(host.row("huntin").adoptedId == huntinSong)
+        // Tapping the second plays the list from it, by the finds' ids.
+        let asked = ["uicide", "huntin"]
+        let library: Set<String> = [uicideSong, huntinSong]
+        let stored = Dictionary(host.finds.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let played = asked.map { id in stored[id].map { playsAs(findId: $0.id, adoptedId: $0.adoptedId, library: library) } }
+        #expect(played == [uicideSong, huntinSong])
+        let start = chosenStart(played, asked.firstIndex(of: "huntin")!)
+        #expect(played.compactMap { $0 }[start] == huntinSong)
     }
 
     @Test func aFinishedSongWithoutALibraryIdWaitsForTheSync() async {

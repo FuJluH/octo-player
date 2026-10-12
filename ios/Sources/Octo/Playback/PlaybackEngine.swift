@@ -400,15 +400,23 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
         changedUnder()
     }
 
-    /// Runs an edit of the queue that keeps the song on now.
-    func edit(_ change: (inout PlayQueue) -> Void) {
+    /// Runs an edit of the queue. `change` answers whether it took out the song on now with
+    /// nothing left to play after it: then the queue has played out.
+    func edit(_ change: (inout PlayQueue) -> Bool) {
         crossfader.interrupt()
         let before = queue.currentItem?.entryId
-        change(&queue)
+        let playedOut = change(&queue)
         if queue.isEmpty {
             stop()
         } else if queue.currentItem?.entryId != before {
-            loadCurrent(atMs: 0)
+            if playedOut {
+                ended = true
+                playWhenReady = false
+                deck.clear()
+                onPlayWhenReadyChange?(false, false)
+            } else {
+                loadCurrent(atMs: 0)
+            }
             onSongChange?(.playlistChanged)
         }
         changedUnder()

@@ -262,6 +262,22 @@ import Testing
         #expect(streamQualityFor(appPicks: false, onMobile: true, prefs: prefs) == .original)
     }
 
+    @Test func aPhoneLeftToTheAppUsesItsOwnSettings() {
+        let picks = AccountQualityWords.appPicksQuality(familyOn: true, follows: .app)
+        #expect(streamQualityFor(appPicks: picks, onMobile: false, prefs: prefs) == .mp3(kbps: 320))
+        #expect(streamQualityFor(appPicks: picks, onMobile: true, prefs: prefs) == .mp3(kbps: 128))
+    }
+
+    @Test func theAppPicksQualityOnlyWithoutAFamilyOrWhenLeftToIt() {
+        #expect(AccountQualityWords.appPicksQuality(familyOn: false, follows: nil))
+        #expect(AccountQualityWords.appPicksQuality(familyOn: false, follows: .account))
+        #expect(AccountQualityWords.appPicksQuality(familyOn: true, follows: .app))
+        #expect(!AccountQualityWords.appPicksQuality(familyOn: true, follows: .account))
+        #expect(!AccountQualityWords.appPicksQuality(familyOn: true, follows: nil))
+        // Following the account, the phone asks for the file as it is.
+        #expect(streamQualityFor(appPicks: false, onMobile: true, prefs: StreamPrefs(wifi: .mp3(kbps: 96), mobile: .mp3(kbps: 96))) == .original)
+    }
+
     @Test func originalIsTheDefaultOnWifiAndMobileData() {
         let prefs = StreamPrefs()
         #expect(prefs.wifi == .original)

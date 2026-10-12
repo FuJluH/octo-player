@@ -324,11 +324,14 @@ public struct QueueUndo: Sendable, Equatable {
     public let items: [QueueItem]
     public let order: [Int]
     public let kept: [String]
+    /// The edit took out the song on now and left nothing to play after it.
+    public let ended: Bool
 
-    public init(items: [QueueItem], order: [Int], kept: [String]) {
+    public init(items: [QueueItem], order: [Int], kept: [String], ended: Bool = false) {
         self.items = items
         self.order = order
         self.kept = kept
+        self.ended = ended
     }
 }
 
@@ -341,8 +344,8 @@ extension PlayQueue {
         guard !positions.isEmpty else { return nil }
         let before = items
         let order = self.order
-        removeRuns(removalRuns(positions))
-        return QueueUndo(items: before, order: order, kept: entryKeys)
+        let result = removeRuns(removalRuns(positions))
+        return QueueUndo(items: before, order: order, kept: entryKeys, ended: result.currentRemoved && result.ended)
     }
 
     /// Takes one song out by its key. Answers the undo, or nil when the song is no longer there.

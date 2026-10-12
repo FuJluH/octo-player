@@ -142,9 +142,9 @@ final class LibraryActions {
 
     /// Plays library songs from one of them, by their library ids, so the player takes each one's
     /// best copy.
-    func play(_ tracks: [LibraryTrack], from start: Int = 0, shuffled: Bool = false) {
+    func play(_ tracks: [LibraryTrack], from start: Int = 0, shuffled: Bool = false, name: String? = nil) {
         guard !tracks.isEmpty else { return }
-        player.play(ids: tracks.map(\.id), from: start, shuffled: shuffled)
+        player.play(ids: tracks.map(\.id), from: start, name: name, shuffled: shuffled)
     }
 
     func playNext(_ tracks: [LibraryTrack]) {
@@ -468,7 +468,10 @@ final class LibraryActions {
                             confirm: "Delete") { [weak self] in
             guard let self else { return }
             Task {
-                if let words = await self.data.device.delete(songs.map(\.id)) { self.router.show(words) }
+                let done = await self.data.device.delete(songs.map(\.id))
+                // Songs whose files went leave the queue; when the one playing goes, the next plays.
+                if !done.deleted.isEmpty { self.player.removeSongs(Set(done.deleted)) }
+                if let words = done.words { self.router.show(words) }
             }
         }
     }

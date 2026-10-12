@@ -417,15 +417,15 @@ struct FavoritesView: View {
                 MutedNote("No liked songs yet. Tap the heart in the player to add the song that is playing, or long press any song and choose Add to Liked songs.")
             } else {
                 ListPlayLine(count: countText(songs.count, "song", "songs")) {
-                    actions.play(songs)
+                    actions.play(songs, name: "Favorites")
                 } shuffle: {
-                    actions.play(songs, shuffled: true)
+                    actions.play(songs, shuffled: true, name: "Favorites")
                 }
                 .padding(.bottom, 6)
                 Color.clear.frame(height: 0).id("liked-top")
                 ForEach(Array(songs.enumerated()), id: \.element.id) { position, track in
                     TrackRow(track: track, swipe: .remove { unlike(track) }) {
-                        actions.play(songs, from: position)
+                        actions.play(songs, from: position, name: "Favorites")
                     }
                 }
             }

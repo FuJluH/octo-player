@@ -55,6 +55,48 @@ import Testing
         #expect(ServerAddress.normalized("HTTPS://WWW.Example.com/a?b=1#c").map(ServerAddress.shown) == "https://www.example.com/a")
         #expect(ServerAddress.normalized("://") == nil)
     }
+
+    private struct Kept: Equatable {
+        var id: String
+        var username: String
+        var address: String
+        var label = ""
+        var signedOut = false
+    }
+
+    private func settle(_ listed: [Kept], _ legacy: Kept?) -> (list: [Kept], inUse: Kept?) {
+        settleServers(listed, legacy: legacy, id: \.id, same: { a, b in a.username == b.username && a.address == b.address }) { old, match in
+            guard let match else { return old }
+            var kept = old
+            kept.id = match.id
+            kept.label = old.label.isEmpty ? match.label : old.label
+            kept.signedOut = false
+            return kept
+        }
+    }
+
+    @Test func theOneServerOfAnOlderAppBecomesAListOfOneInUse() {
+        let legacy = Kept(id: "k", username: "winters", address: "https://music.test/")
+        let (list, inUse) = settle([], legacy)
+        #expect(list == [legacy])
+        #expect(inUse == legacy)
+    }
+
+    @Test func theListStandsAloneWhenNoServerIsInUse() {
+        let home = Kept(id: "h", username: "winters", address: "https://home.test/")
+        let (list, inUse) = settle([home, home], nil)
+        #expect(list == [home])
+        #expect(inUse == nil)
+    }
+
+    @Test func theServerInUseIsBroughtUpToDateInItsPlace() {
+        let home = Kept(id: "h", username: "winters", address: "https://home.test/", label: "Home", signedOut: true)
+        let work = Kept(id: "w", username: "brandon", address: "https://work.test/")
+        let (list, inUse) = settle([home, work], Kept(id: "other", username: "winters", address: "https://home.test/"))
+        #expect(list.map(\.id) == ["h", "w"])
+        #expect(inUse?.label == "Home")
+        #expect(inUse?.signedOut == false)
+    }
 }
 
 /// The words about a server both apps show.
