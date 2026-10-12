@@ -34,7 +34,6 @@ struct SettingsView: View {
         .scrollIndicators(.hidden)
         .scrollDismissesKeyboard(.immediately)
         .barClearance()
-        .background(OctoColor.background)
         .settingsRoutes()
         .navigationDestination(item: $driven) { SettingsDestination(route: $0) }
         .task {

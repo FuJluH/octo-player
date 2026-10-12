@@ -121,7 +121,7 @@ struct SettingsPageFrame<Content: View>: View {
             }
             .scrollIndicators(.hidden)
             .barClearance()
-            .background(OctoColor.background)
+            .background { PageBackdrop(page: .settingsPage, route: nil) }
             .environment(\.settingsHighlight, SettingsHighlight(
                 id: shown ? nil : highlight,
                 onShown: { shown = true },
