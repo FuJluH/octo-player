@@ -21,6 +21,7 @@ final class LyricsStore {
     private(set) var choicesVersion = 0
 
     @ObservationIgnored private let session: Session
+    @ObservationIgnored private let library: Library?
     @ObservationIgnored private weak var player: Player?
     @ObservationIgnored let choices = LyricsChoices(DefaultsValues(suite: "lyrics_choices"))
     @ObservationIgnored private let answers: LyricsAnswers
@@ -31,8 +32,12 @@ final class LyricsStore {
     @ObservationIgnored private var feed: LyricsFeed?
     @ObservationIgnored private var songId: String?
     @ObservationIgnored private var watchers = 0
+    /// Something has shown the lyrics within the last few seconds.
+    @ObservationIgnored private var watched = false
     @ObservationIgnored private var leaving: Task<Void, Never>?
     @ObservationIgnored private var neighbors: Task<Void, Never>?
+    /// The song whose neighbors are being looked up, while lyrics are open and watched.
+    @ObservationIgnored private var neighborsOf: String?
 
     /// How long the lyrics view may be gone before it counts as off screen, so turning the
     /// phone does not count as leaving.
@@ -44,10 +49,28 @@ final class LyricsStore {
     /// How long to wait for the saved sign-in to come back as the app starts.
     static let sessionWait: Duration = .seconds(3)
 
-    init(session: Session) {
+    init(session: Session, library: Library? = nil, player: Player? = nil) {
         self.session = session
+        self.library = library
         let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("lyrics")
         answers = LyricsAnswers(LyricsCache(folder))
+        if let player {
+            attach(player)
+            followSong()
+        }
+    }
+
+    /// Follows the song playing all the time, the player open or not.
+    private func followSong() {
+        withObservationTracking {
+            _ = player?.current?.id
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.songChanged(self.player?.current?.id)
+                self.followSong()
+            }
+        }
     }
 
     /// Whether the online library may be asked, as the app's settings say.
@@ -67,13 +90,6 @@ final class LyricsStore {
             if AppSettings.shared.lyricsLook.style != style { AppSettings.shared.setLyricsStyle(style) }
         }
     }
-
-    /// The output's timing moved in the settings, which keep it; the lyrics read it from there on
-    /// their next frame, so there is nothing more to do here.
-    func moveOutput(steps: Int) {}
-
-    /// The output went back to its automatic timing in the settings, which keep it.
-    func resetOutput() {}
 
     // MARK: Following the song
 
@@ -119,6 +135,7 @@ final class LyricsStore {
         watchers += 1
         leaving?.cancel()
         leaving = nil
+        watched = true
         feed?.setWatched(true)
         followNeighbors()
     }
@@ -131,8 +148,9 @@ final class LyricsStore {
         leaving = Task { [weak self] in
             try? await Task.sleep(for: Self.leaveAfter)
             guard !Task.isCancelled, let self, self.watchers == 0 else { return }
+            self.watched = false
             self.feed?.setWatched(false)
-            self.neighbors?.cancel()
+            self.followNeighbors()
         }
     }
 
@@ -159,21 +177,24 @@ final class LyricsStore {
         refollow()
     }
 
-    /// While lyrics show on screen, the songs either side of this one have theirs looked up once
-    /// the song has settled, so skipping shows them at once. A skip before then starts the wait
-    /// again.
+    /// While lyrics show on screen, the songs either side of this one in play order (the next to
+    /// play and the last played) have theirs looked up once the song has settled, so skipping
+    /// shows them at once. A skip before then starts the wait again; radio stations are left
+    /// out, and a neighbor's failed lookup saves nothing.
     private func followNeighbors() {
+        let key = open && watched ? songId : nil
+        guard key != neighborsOf else { return }
+        neighborsOf = key
         neighbors?.cancel()
-        guard open, watchers > 0, let id = songId, let player else { return }
+        guard let id = key, let player else { return }
         neighbors = Task { [weak self] in
             try? await Task.sleep(for: Self.prefetchSettle)
             guard !Task.isCancelled, let self else { return }
-            var around: [Song] = []
-            if player.queue.indices.contains(player.index + 1) { around.append(player.queue[player.index + 1]) }
-            if player.index > 0, player.queue.indices.contains(player.index - 1) { around.append(player.queue[player.index - 1]) }
-            for song in around where song.id != id {
+            let slots = [player.upNextSlots.dropFirst().first, player.playedSlots.last].compactMap { $0 }
+            let around = slots.compactMap { player.items.indices.contains($0.index) ? player.items[$0.index] : nil }
+            for item in around where !isRadio(item.trackId) && item.trackId != id {
                 guard !Task.isCancelled else { return }
-                let facts = LyricsSong(song.id, song.title, song.byline, "", song.duration * 1000)
+                let facts = LyricsSong(item.trackId, item.title, item.artist, "", item.durationMs)
                 _ = try? await self.answerFor(facts, resumed: false)
             }
         }
@@ -204,8 +225,8 @@ final class LyricsStore {
     }
 
     private func search(_ song: LyricsSong, pick: LyricsPick?, picked: String?, onlineAllowed: Bool) async throws -> LyricsSearch {
-        let facts = described(song)
-        let phone = phoneFile(song.id)
+        let facts = await described(song)
+        let phone = await phoneFile(song.id)
         if let pick {
             if let found = try? await fetchPick(pick, facts, phone, onlineAllowed: onlineAllowed), !found.isEmpty {
                 return LyricsSearch(found, complete: true, askedOnline: true, pick: picked)
@@ -214,7 +235,6 @@ final class LyricsStore {
         }
         let serverDecides = await serverKeepsChoices(for: song.id)
         let online = OnlineLyrics(userAgent: session.client?.userAgent)
-        let length = lengthOf(facts)
         let server: @Sendable () async throws -> Lyrics? = { [weak self] in try await self?.fromServer(facts, forLookup: true) }
         var songFile: (@Sendable () async throws -> Lyrics?)?
         var lyricsFile: (@Sendable () async throws -> Lyrics?)?
@@ -224,7 +244,12 @@ final class LyricsStore {
         }
         var fromOnline: (@Sendable () async throws -> Lyrics?)?
         if onlineAllowed && !facts.title.isBlank && !facts.artist.isBlank {
-            fromOnline = { try await online.find(facts.title, artist: facts.artist, album: facts.album, durationMs: length) }
+            // The length is read when the online library is asked, after the server, by when the
+            // song playing has usually opened.
+            fromOnline = { [weak self] in
+                let length = await self?.lengthOf(facts) ?? facts.durationMs
+                return try await online.find(facts.title, artist: facts.artist, album: facts.album, durationMs: length)
+            }
         }
         let steps = lyricsSteps(server: server, serverDecides: serverDecides, songFile: songFile, lyricsFile: lyricsFile,
                                 online: fromOnline)
@@ -265,9 +290,9 @@ final class LyricsStore {
     /// "none". This phone then follows the server and the song's lyrics are fetched again at
     /// once. Throws when the server cannot take it.
     func chooseOnServer(_ songId: String, _ choice: String, showAgain: Bool = false) async throws {
-        guard let client = session.client else { throw URLError(.notConnectedToInternet) }
+        guard let client = session.client, let server = await serverSong(songId) else { throw LyricsStoreError.notOnServer }
         try await sendServerChoice(songId, choice, choices, send: { [weak self] wanted in
-            let now = try await client.setLyricsChoice(songId, candidate: wanted)
+            let now = try await client.setLyricsChoice(server.id, candidate: wanted)
             self?.notePin(songId, now)
         }, forget: { [answers] in answers.forget(songId) }, showAgain: showAgain)
         refresh(songId)
@@ -289,7 +314,7 @@ final class LyricsStore {
     }
 
     private func onServerIfKept(_ songId: String, _ choice: String, showAgain: Bool = false) async -> Bool {
-        guard session.client != nil, await serverKeepsChoices(for: songId) else { return false }
+        guard await serverKeepsChoices(for: songId) else { return false }
         do {
             try await chooseOnServer(songId, choice, showAgain: showAgain)
             return true
@@ -308,21 +333,22 @@ final class LyricsStore {
     /// the answer and left out.
     func candidatesFor(_ song: LyricsSong) async -> CandidateSearch {
         let onlineAllowed = online
-        let facts = described(song)
-        let phone = phoneFile(song.id)
-        if session.client != nil, await serverKeepsChoices(for: song.id),
-           let found = await serverCandidatesFor(song.id, facts, phone, onlineAllowed: onlineAllowed) {
+        let facts = await described(song)
+        let phone = await phoneFile(song.id)
+        if let server = await serverSong(song.id), await keepsChoicesNow(),
+           let found = await serverCandidatesFor(song.id, server.id, facts, phone, onlineAllowed: onlineAllowed) {
             return found
         }
         return await localCandidatesFor(facts, phone, onlineAllowed: onlineAllowed)
     }
 
-    private func serverCandidatesFor(_ songId: String, _ facts: LyricsSong, _ phone: URL?, onlineAllowed: Bool) async -> CandidateSearch? {
+    private func serverCandidatesFor(_ songId: String, _ serverId: String, _ facts: LyricsSong, _ phone: URL?,
+                                     onlineAllowed: Bool) async -> CandidateSearch? {
         guard let client = session.client else { return nil }
         var missed = Set<LyricsSource>()
         var listed: LyricsCandidates?
         do {
-            listed = try await client.lyricsCandidates(songId)
+            listed = try await client.lyricsCandidates(serverId)
         } catch is URLError {
             missed.insert(.server)
         } catch OctoError.server {
@@ -409,9 +435,9 @@ final class LyricsStore {
     /// What the server's sources find for words the listener typed, for a song whose tags are
     /// wrong: "artist - title", or a title.
     func searchOnServer(_ songId: String, _ query: String) async throws -> [LyricsCandidate] {
-        guard let client = session.client else { throw URLError(.notConnectedToInternet) }
+        guard let client = session.client, let server = await serverSong(songId) else { throw LyricsStoreError.notOnServer }
         let (title, artist) = splitLyricsSearch(query)
-        let found = try await client.lyricsCandidates(songId, title: title, artist: artist)
+        let found = try await client.lyricsCandidates(server.id, title: title, artist: artist)
         return found.candidate.filter { !$0.id.isBlank }.map { $0.asCandidate() }
     }
 
@@ -421,16 +447,16 @@ final class LyricsStore {
     /// id (version 2 adds word timings); an older one by artist and title. Lyrics from a copy the
     /// server has pinned say which.
     private func fromServer(_ song: LyricsSong, forLookup: Bool = false) async throws -> Lyrics? {
-        guard let client = session.client else { return nil }
-        let extensions = try await serverExtensions(forLookup: forLookup)
+        guard let client = try await signedIn(forLookup: forLookup), let server = await serverSong(song.id) else { return nil }
         var found: Lyrics?
         do {
-            switch serverLyricsCall(extensions) {
+            switch serverLyricsCall(session.extensions) {
             case .byName:
-                found = try await client.lyrics(artist: song.artist, title: song.title).flatMap { parseLyricsText($0, source: .server) }
+                found = try await client.lyrics(artist: server.copy?.artist ?? song.artist, title: server.copy?.title ?? song.title)
+                    .flatMap { parseLyricsText($0, source: .server) }
             case let call:
-                let all = try await client.lyricsBySongId(song.id, enhanced: call == .withWords)
-                found = serverLyrics(all, language: Locale.current.language.languageCode?.identifier)
+                let all = try await client.lyricsBySongId(server.id, enhanced: call == .withWords)
+                found = serverLyrics(all, language: Self.phoneLanguage)
             }
         } catch OctoError.notFound {
             found = nil
@@ -439,27 +465,57 @@ final class LyricsStore {
         return found
     }
 
-    /// The server's extensions, waiting a moment for the saved sign-in to come back as the app
+    /// The phone's own language, whatever languages the app itself is written in.
+    private static var phoneLanguage: String? {
+        Locale.preferredLanguages.first.flatMap { Locale.Language(identifier: $0).languageCode?.identifier }
+    }
+
+    /// The server in use once the saved sign-in is back, waiting a moment for it as the app
     /// starts. For a lookup, a sign-in still not back is an error, not "not on the server".
-    private func serverExtensions(forLookup: Bool) async throws -> [String] {
-        if let profile = session.profile { return profile.extensions }
+    private func signedIn(forLookup: Bool) async throws -> SubsonicClient? {
+        if let client = session.client { return client }
+        guard session.activeId != nil else { return nil }
         let deadline = ContinuousClock.now + Self.sessionWait
-        while session.profile == nil, ContinuousClock.now < deadline {
+        while session.client == nil, ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(100))
         }
-        if let profile = session.profile { return profile.extensions }
+        if let client = session.client { return client }
         if forLookup { throw URLError(.notConnectedToInternet) }
-        return []
+        return nil
+    }
+
+    /// The song on the server in use: its id there, and the library's copy of it when there is
+    /// one. A song found online is the server's own find; a library song is on the server when
+    /// the library holds a copy from it; a server song the library does not hold streams by its
+    /// own id. Nil when the song is not on the server.
+    private func serverSong(_ songId: String) async -> (id: String, copy: SourceTrack?)? {
+        guard session.client != nil else { return nil }
+        if isFind(songId) { return (String(songId.dropFirst(findPrefix.count)), nil) }
+        let inUse = library?.serverInUse ?? session.inUse?.sourceId
+        if let library, let inUse, let copy = await library.copies(songId).first(where: { $0.sourceId == inUse }) {
+            return (copy.nativeId, copy)
+        }
+        if let item = player?.items.first(where: { $0.trackId == songId }), let ref = parseStreamUri(item.uri),
+           ref.sourceId == nil || ref.sourceId == inUse {
+            return (ref.serverId, nil)
+        }
+        return nil
+    }
+
+    /// Whether the song is on a server that keeps lyrics choices for every app.
+    private func serverKeepsChoices(for songId: String) async -> Bool {
+        guard await serverSong(songId) != nil else { return false }
+        return await keepsChoicesNow()
     }
 
     /// Whether the server keeps lyrics choices for every app: from what it listed at sign-in, or
     /// by asking, since it may have been updated since. A "no" learned from the server itself
-    /// stands over what it listed, for a while.
-    private func serverKeepsChoices(for songId: String) async -> Bool {
+    /// stands over what it listed, for a while; no answer at all is taken as no and not kept.
+    private func keepsChoicesNow() async -> Bool {
         guard let client = session.client, let server = session.activeId else { return false }
         if let known = keepsChoices[server], Date().timeIntervalSince(known.at) < Self.recheckChoices { return known.yes }
-        if offersLyricsChoices(session.profile?.extensions ?? []) { return true }
-        guard let yes = await client.supportsIfKnown(OCTO_LYRICS) else { return false }
+        if offersLyricsChoices(session.extensions) { return true }
+        guard let yes = await client.supportsIfKnown(OCTO_LYRICS, version: 1) else { return false }
         noteKeepsChoices(yes)
         return yes
     }
@@ -474,8 +530,13 @@ final class LyricsStore {
         if choice == LYRICS_AUTO || choice == LYRICS_NONE { serverPicks[songId] = nil } else { serverPicks[songId] = choice }
     }
 
-    /// The song's file on this phone, when it has one.
-    private func phoneFile(_ songId: String) -> URL? { nil }
+    /// The song's file on this phone, when it has one: its first copy on the phone with an
+    /// address (a Music app song, or a file brought in from Files). A song found online has none.
+    private func phoneFile(_ songId: String) async -> URL? {
+        guard !isFind(songId), let library else { return nil }
+        let copy = await library.copies(songId).first { $0.sourceId == deviceSource && !($0.uri ?? "").isEmpty }
+        return copy?.uri.flatMap(URL.init(string:))
+    }
 
     /// Lyrics in the song file's own tags.
     private nonisolated static func fromSongFile(_ file: URL) async throws -> Lyrics? {
@@ -497,34 +558,49 @@ final class LyricsStore {
         return songFileLyrics(tags).flatMap { parseLyricsText($0, source: .songFile) }
     }
 
-    /// Lyrics in a .lrc file beside the song.
+    /// Lyrics in a .lrc file beside the song. A Music app song has no folder, so only a file has
+    /// one beside it.
     private nonisolated static func fromLyricsFile(_ file: URL) -> Lyrics? {
-        lyricsFileBeside(file).flatMap { parseLyricsText($0, source: .lyricsFile) }
+        guard file.isFileURL else { return nil }
+        return lyricsFileBeside(file).flatMap { parseLyricsText($0, source: .lyricsFile) }
     }
 
-    /// The song's facts, from the song playing when it is this one.
-    private func described(_ song: LyricsSong) -> LyricsSong {
-        guard let known = player?.current, known.id == song.id else { return song }
+    /// The library's own facts for the song where it has them, since what the player shows can
+    /// be shortened; a blank fact, or no length, is taken from what was given.
+    private func described(_ song: LyricsSong) async -> LyricsSong {
+        guard let library else { return song }
+        var known: LyricsSong?
+        if isFind(song.id) {
+            if let find = await library.finds([song.id]).first {
+                known = LyricsSong(song.id, find.title, find.artist, find.album, Int(find.durationMs))
+            }
+        } else if let track = await library.track(song.id) {
+            known = LyricsSong(song.id, track.title, track.artist, track.album, Int(track.durationMs))
+        }
+        guard let known else { return song }
         return LyricsSong(
             song.id,
-            song.title.isBlank ? known.title : song.title,
-            song.artist.isBlank ? known.byline : song.artist,
-            song.album.isBlank ? (known.album ?? "") : song.album,
-            song.durationMs > 0 ? song.durationMs : known.duration * 1000
+            known.title.isBlank ? song.title : known.title,
+            known.artist.isBlank ? song.artist : known.artist,
+            known.album.isBlank ? song.album : known.album,
+            known.durationMs > 0 ? known.durationMs : song.durationMs
         )
     }
 
     /// The length the online library matches a song by: its real one once playing it found the
     /// listing wrong.
     private func lengthOf(_ song: LyricsSong) -> Int {
-        if let player, player.current?.id == song.id, player.duration > 1, player.duration < 86_400 {
-            let measured = Int((player.duration * 1000).rounded())
-            if song.durationMs <= 0 || abs(measured - song.durationMs) > 1000 { return measured }
-        }
-        return song.durationMs
+        player?.lengths.lengthMs(song.id, listedMs: song.durationMs) ?? song.durationMs
     }
 
     private static var nowMs: Int { Int(Date().timeIntervalSince1970 * 1000) }
+}
+
+/// What the lyrics store says when the song is not on the server in use.
+enum LyricsStoreError: LocalizedError {
+    case notOnServer
+
+    var errorDescription: String? { "The song is not on the server" }
 }
 
 extension String {
@@ -548,7 +624,8 @@ final class NetworkWatch: @unchecked Sendable {
 
     init() {
         monitor.pathUpdateHandler = { [weak self] path in
-            let name = path.status == .satisfied ? path.availableInterfaces.map(\.name).joined(separator: ",") : nil
+            // The network in use: the preferred interface, the first of those available.
+            let name = path.status == .satisfied ? path.availableInterfaces.first?.name : nil
             self?.changed(name)
         }
         monitor.start(queue: DispatchQueue(label: "app.winters.octo.lyrics.network"))

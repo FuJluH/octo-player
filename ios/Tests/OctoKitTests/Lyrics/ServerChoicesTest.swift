@@ -281,6 +281,24 @@ final class LyricsAsked: @unchecked Sendable {
         answers.map { source, answer in LyricsStep(source) { asked.add(source); return try answer() } }
     }
 
+    @Test func aSourceCutOffByItsOwnTimeLimitMakesTheSearchIncomplete() async throws {
+        let slow = LyricsStep(.online) {
+            // Its own time limit ends the wait inside it; the search around it carries on.
+            let wait = Task<Lyrics?, Error> {
+                try await Task.sleep(for: .seconds(60))
+                return nil
+            }
+            Task {
+                try? await Task.sleep(for: .milliseconds(20))
+                wait.cancel()
+            }
+            return try await wait.value
+        }
+        let search = try await searchInOrder(steps([(.server, { nil }), (.songFile, { nil })], LyricsAsked()) + [slow])
+        #expect(search.lyrics == nil)
+        #expect(!search.complete)
+    }
+
     @Test func theServerWinsWhenItHasSyncedLyrics() async throws {
         let asked = LyricsAsked()
         let server = synced(.server), file = synced(.songFile), online = synced(.online)

@@ -58,7 +58,7 @@ struct OctoApp: App {
         _libraryActions = State(initialValue: LibraryActions(
             state: LibraryState(data: data, session: session), player: player, router: router, session: session,
             selection: selectionActions, selectionBar: selectionBar))
-        _lyrics = State(initialValue: LyricsStore(session: session))
+        _lyrics = State(initialValue: LyricsStore(session: session, library: data.library, player: player))
         _artworkColors = State(initialValue: ArtworkColorStore(session: session))
         data.start()
         let accounts = Accounts(session: session, router: router)
