@@ -34,6 +34,8 @@ struct StreamContext: Sendable {
     let quality: StreamQuality
     /// Songs played are kept on the phone as they stream.
     let keeping: Bool
+    /// The sign-in, asked again as each request goes out.
+    let session: Session?
 
     @MainActor
     static func now(_ session: Session) -> StreamContext {
@@ -42,7 +44,21 @@ struct StreamContext: Sendable {
             client: inUse?.client, sourceId: inUse?.sourceId,
             keptSources: Set(session.servers.map(\.sourceId)),
             quality: AppSettings.shared.qualityInUse,
-            keeping: AppSettings.shared.offline.cacheSize != .off)
+            keeping: AppSettings.shared.offline.cacheSize != .off,
+            session: session)
+    }
+
+    /// The server in use as a request goes out: the address in use now (the home one while at
+    /// home). As the app starts, the saved sign-in gets up to 3 s to come back.
+    private func serverNow() -> (client: SubsonicClient, sourceId: String)? {
+        guard let session else { return client.map { ($0, sourceId ?? "") } }
+        let deadline = Date().addingTimeInterval(3)
+        while true {
+            let found = try? blocking { await MainActor.run { session.inUse.map { Unchecked(($0.client, $0.sourceId)) } } }
+            if let found = found ?? nil { return found.value }
+            if Date() >= deadline { return nil }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
     }
 
     /// Whether a song is another kept server's than the one in use: its id would be some other
@@ -76,8 +92,10 @@ struct StreamContext: Sendable {
     /// server, an unreadable address, or another server's song.
     func sign(_ ref: StreamRef) throws -> URLRequest {
         guard OnlineWatch.shared.online else { throw PlayError(.ioUnspecified, detail: "No connection") }
-        guard let client else { throw PlayError(.ioUnspecified, detail: "No server signed in") }
-        if fromAnotherServer(ref) { throw PlayError(.ioUnspecified, detail: "Another server's song") }
+        guard let (client, inUse) = serverNow() else { throw PlayError(.ioUnspecified, detail: "No server signed in") }
+        if let source = ref.sourceId, source != inUse, keptSources.contains(source) {
+            throw PlayError(.ioUnspecified, detail: "Another server's song")
+        }
         var request = URLRequest(url: client.streamURL(serverId: ref.serverId, request: ref.request(quality)))
         for (name, value) in client.headers { request.setValue(value, forHTTPHeaderField: name) }
         return request
