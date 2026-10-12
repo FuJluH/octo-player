@@ -18,6 +18,10 @@ final class LibraryState {
     private(set) var playlists: [PlaylistSummary] = []
     /// Every rated library song's rating, by id.
     private(set) var rated: [String: Int] = [:]
+    /// Library songs in the family member's own library on the server in use, and whether that
+    /// server marks any.
+    private(set) var personalIds: Set<String> = []
+    private(set) var marksPersonal = false
 
     @ObservationIgnored let data: DataServices
     @ObservationIgnored let session: Session
@@ -92,7 +96,8 @@ final class LibraryState {
         for (list, order) in restorableOrders(saved) { setOrder(list, order) }
     }
 
-    /// Reads again what the menus need at once: the playlists and the ratings.
+    /// Reads again what the menus need at once: the playlists, the ratings and the member's own
+    /// songs.
     func refreshCaches() async {
         playlists = await library.playlists()
         let ratedRows = (try? await library.store.tracks(sql: "SELECT t.*, NULL AS heading FROM track t WHERE t.rating > 0")) ?? []
@@ -101,6 +106,13 @@ final class LibraryState {
         for rating in (try? await library.store.ratings()) ?? [] { byId[rating.trackId] = rating.rating }
         rated = byId
         ratings = ratings.filter { byId[$0.key] != $0.value }
+        if let server = library.serverInUse {
+            personalIds = (try? await library.store.personalTrackIds(server)) ?? []
+            marksPersonal = (try? await library.store.marksPersonal(server)) ?? false
+        } else {
+            personalIds = []
+            marksPersonal = false
+        }
     }
 
     /// A library song as a plain server song shows it, before the library is asked: enough for

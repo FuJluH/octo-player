@@ -39,24 +39,23 @@ struct AlbumView: View {
     private var finds: [LibraryTrack] { (whole ?? []).filter(\.isFound) }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                if let shown {
-                    header(shown)
-                    about
-                    songs(shown)
-                    if !more.isEmpty {
-                        Shelf(title: "More by \(shown.artist)") {
-                            ForEach(more) { other in AlbumCard(album: other.asAlbum, library: other) }
-                        }
-                        .padding(.top, 16)
+        LibraryList {
+            if let shown {
+                header(shown)
+                about
+                songs(shown)
+                if !more.isEmpty {
+                    Shelf(title: "More by \(shown.artist)") {
+                        ForEach(more) { other in AlbumCard(album: other.asAlbum, library: other) }
                     }
-                } else if let online {
-                    OnlineAlbum(album: online)
+                    .padding(.top, 16)
                 }
+            } else if let online {
+                OnlineAlbum(album: online)
             }
         }
         .barClearance()
+        .inlineTitle(shown?.title ?? online?.name ?? album.name)
         .pageArtwork(.album(album), shown.flatMap { coverId(of: $0.artwork) } ?? album.coverArt)
         .backStopsPicking()
         .selectableSongs(state.pickables(listed))
@@ -140,7 +139,8 @@ struct AlbumView: View {
                 .font(.octoTitle)
                 .multilineTextAlignment(.center)
                 .padding(.top, 20)
-            NavigationLink(value: Route.artist(id: album.artistId, name: album.artist)) {
+                .bigTitle()
+            Button { router.go(.artist(id: album.artistId, name: album.artist)) } label: {
                 Text(album.artist).font(.octoBody).foregroundStyle(OctoColor.accent)
             }
             .buttonStyle(.plain)
@@ -233,7 +233,7 @@ struct AlbumView: View {
         if genre != nil || average != nil {
             HStack(spacing: 16) {
                 if let genre {
-                    NavigationLink(value: Route.library(.genre(genre))) {
+                    Button { router.go(.library(.genre(genre))) } label: {
                         Text(genre).font(.octoCaption).foregroundStyle(OctoColor.accent).padding(.vertical, 6).padding(.horizontal, 4)
                     }
                     .buttonStyle(.plain)
@@ -299,7 +299,7 @@ private struct OnlineAlbum: View {
         VStack(spacing: 0) {
             BadgedCover(id: album.coverArt, size: 240, radius: 10, external: album.isExternal)
                 .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
-            Text(album.name).font(.octoTitle).multilineTextAlignment(.center).padding(.top, 20)
+            Text(album.name).font(.octoTitle).multilineTextAlignment(.center).padding(.top, 20).bigTitle()
             Text(album.byline).font(.octoBody).foregroundStyle(OctoColor.textSecondary).padding(.top, 4)
             PlayButtons(songs: album.song).padding(.top, 14)
         }
@@ -342,20 +342,19 @@ struct ArtistView: View {
     var body: some View {
         let order = state.order(.artistAlbums)
         ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    header
-                    if !songs.isEmpty { songsSection }
-                    if !top.isEmpty { topSection }
-                    shelves.id("albums")
-                    if let biography { aboutSection(biography) }
-                    if !similar.isEmpty { similarSection }
-                }
-                .padding(.bottom, 20)
+            LibraryList {
+                header
+                if !songs.isEmpty { songsSection }
+                if !top.isEmpty { topSection }
+                shelves
+                if let biography { aboutSection(biography) }
+                if !similar.isEmpty { similarSection }
+                Color.clear.frame(height: 20)
             }
             .onChange(of: order) { _, _ in proxy.scrollTo("albums", anchor: .top) }
         }
         .barClearance()
+        .inlineTitle(artist?.name ?? name)
         .pageArtwork(.artist(id: id, name: name), artist.flatMap { coverId(of: $0.artwork) })
         .backStopsPicking()
         .selectableSongs(state.pickables(songs))
@@ -399,7 +398,7 @@ struct ArtistView: View {
     private var header: some View {
         VStack(spacing: 0) {
             ArtCover(artwork: artist?.artwork, size: 160, radius: 80)
-            Text(artist?.name ?? name).font(.octoTitle).multilineTextAlignment(.center).padding(.top, 16)
+            Text(artist?.name ?? name).font(.octoTitle).multilineTextAlignment(.center).padding(.top, 16).bigTitle()
             if let artist {
                 Text("\(albumsCount(artist.albumCount)) • \(songsCount(artist.songCount))")
                     .font(.octoCaption)
@@ -432,29 +431,27 @@ struct ArtistView: View {
         .padding(.bottom, 8)
     }
 
+    @ViewBuilder
     private var songsSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                SectionTitle("Songs")
-                if songs.count > 10 {
-                    QuietButton(allSongs ? "Show fewer" : "See all") { allSongs.toggle() }.padding(.trailing, 10)
-                }
+        HStack {
+            SectionTitle("Songs")
+            if songs.count > 10 {
+                QuietButton(allSongs ? "Show fewer" : "See all") { allSongs.toggle() }.padding(.trailing, 10)
             }
-            ForEach(Array(songs.prefix(allSongs ? songs.count : 10).enumerated()), id: \.element.id) { position, track in
-                TrackRow(track: track, subtitle: track.album) { actions.play(songs, from: position) }
-            }
+        }
+        ForEach(Array(songs.prefix(allSongs ? songs.count : 10).enumerated()), id: \.element.id) { position, track in
+            TrackRow(track: track, subtitle: track.album) { actions.play(songs, from: position) }
         }
     }
 
+    @ViewBuilder
     private var topSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SectionTitle("Top songs")
-            ForEach(Array(top.enumerated()), id: \.element.id) { position, track in
-                TrackRow(track: track,
-                         subtitle: rowAlbum(title: track.title, album: track.album, find: track.isFound),
-                         context: SongMenuContext(artistId: artist?.id), offersAdd: offersAdd, addSpace: offersAdd) {
-                    actions.play(top, from: position)
-                }
+        SectionTitle("Top songs")
+        ForEach(Array(top.enumerated()), id: \.element.id) { position, track in
+            TrackRow(track: track,
+                     subtitle: rowAlbum(title: track.title, album: track.album, find: track.isFound),
+                     context: SongMenuContext(artistId: artist?.id), offersAdd: offersAdd, addSpace: offersAdd) {
+                actions.play(top, from: position)
             }
         }
     }
@@ -465,7 +462,7 @@ struct ArtistView: View {
         let titled = groups.count > 1 || !songs.isEmpty || !top.isEmpty
         ForEach(Array(groups.enumerated()), id: \.offset) { index, shelf in
             if index == 0, albums.count > 1 {
-                SortBar(name: titled ? shelf.group.title : nil, list: .artistAlbums).padding(.top, 8)
+                SortBar(name: titled ? shelf.group.title : nil, list: .artistAlbums).padding(.top, 8).id("albums")
             } else if titled {
                 SectionTitle(shelf.group.title).padding(.top, 8)
             }
@@ -541,6 +538,7 @@ struct PlaylistsView: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     TitleWithButtons(title: "Playlists") { if playlists != nil { SortButton(list: .playlists) } }
                         .padding(.top, detailTopGap)
+                        .bigTitle()
                     Button { actions.askNewPlaylist(.tracks([])) } label: {
                         PlaylistLine(name: "New playlist") { LeadTile(icon: .addToLibrary) }
                     }
@@ -576,6 +574,7 @@ struct PlaylistsView: View {
                 if let first = sortPlaylists(playlists ?? [], order).first { proxy.scrollTo(first.id, anchor: .top) }
             }
         }
+        .inlineTitle("Playlists")
         .barClearance()
         .libraryRefreshable {}
         .task { sync.syncAgain() }
@@ -684,8 +683,9 @@ struct PlaylistView: View {
     }
 }
 
-/// A playlist's page: its cover and name, the play line with More, Play and Shuffle, then its
-/// songs, which can be dragged into another order, swiped away and picked.
+/// A playlist's page: its cover and name, the play line with Reorder, More, Play and Shuffle,
+/// then its songs, which can be swiped away, picked, and dragged into another order by their
+/// handles while reordering.
 struct PlaylistPage: View {
     let id: String
     @Environment(Library.self) private var library
@@ -696,37 +696,37 @@ struct PlaylistPage: View {
     @State private var rows: [PlaylistTrack] = []
     @State private var phoneOnly = 0
     @State private var read = false
-    @State private var dragging: Int64?
-    @State private var dragOffset: CGFloat = 0
-    @State private var rowHeight: CGFloat = 56
-    @State private var step = 0
+    @State private var editMode: EditMode = .inactive
+
+    private var reordering: Bool { editMode.isEditing }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                if let summary {
-                    header(summary)
-                    if summary.onServer, phoneOnly > 0 {
-                        Text(phoneOnlyNote(phoneOnly))
-                            .font(.octoBodySmall)
-                            .foregroundStyle(OctoColor.textMuted)
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: .infinity)
-                            .padding(.horizontal, 32)
-                            .padding(.vertical, 8)
-                    }
-                    if read, rows.isEmpty {
-                        MutedNote("This playlist is empty. Long press any song and choose Add to playlist.", vertical: 20)
-                    }
-                    ForEach(Array(rows.enumerated()), id: \.element.itemId) { position, row in
-                        playlistRow(position, row, summary)
-                    }
+        LibraryList {
+            if let summary {
+                header(summary)
+                if summary.onServer, phoneOnly > 0 {
+                    Text(phoneOnlyNote(phoneOnly))
+                        .font(.octoBodySmall)
+                        .foregroundStyle(OctoColor.textMuted)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 32)
+                        .padding(.vertical, 8)
                 }
+                if read, rows.isEmpty {
+                    MutedNote("This playlist is empty. Long press any song and choose Add to playlist.", vertical: 20)
+                }
+                ForEach(Array(rows.enumerated()), id: \.element.itemId) { position, row in
+                    playlistRow(position, row, summary)
+                }
+                .onMove(perform: reordering ? { from, to in move(from, to, summary) } : nil)
+                Color.clear.frame(height: 20)
             }
-            .padding(.bottom, 20)
         }
+        .environment(\.editMode, $editMode)
         .barClearance()
-        .sensoryFeedback(.selection, trigger: step)
+        .inlineTitle(summary?.name ?? "")
+        .backAction(reordering ? { editMode = .inactive } : nil)
         .backStopsPicking()
         .selectableSongs(state.pickables(rows)) { picked in
             guard let summary else { return }
@@ -756,13 +756,14 @@ struct PlaylistPage: View {
         VStack(spacing: 0) {
             PlaylistCover(playlist: playlist, size: 240, radius: 10)
                 .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
-            Text(playlist.name).font(.octoTitle).multilineTextAlignment(.center).padding(.top, 20)
+            Text(playlist.name).font(.octoTitle).multilineTextAlignment(.center).padding(.top, 20).bigTitle()
             HStack(spacing: 8) {
                 Text(rows.isEmpty ? "0 songs" : "\(songsCount(rows.count)) · \(asLength(length))")
                     .font(.octoCaption)
                     .foregroundStyle(OctoColor.textMuted)
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                if rows.count > 1 { ReorderButton(editMode: $editMode) }
                 Menu {
                     PlaylistOptionsItems(playlist: playlist, serverOnly: tracks.contains { !$0.onPhone && !$0.isFound }) { dismiss() }
                 } label: {
@@ -784,81 +785,44 @@ struct PlaylistPage: View {
     }
 
     private func playlistRow(_ position: Int, _ row: PlaylistTrack, _ playlist: PlaylistSummary) -> some View {
-        let lifted = dragging == row.itemId
-        return TrackRow(
+        TrackRow(
             track: row.track,
             context: SongMenuContext(playlistId: playlist.id, playlistItemId: row.itemId, selectKey: String(row.itemId)),
             selectKey: String(row.itemId),
-            swipe: dragging == nil ? .remove { actions.remove([row.itemId], from: playlist) } : .none,
-            trailing: AnyView(HiddenWhilePicking { handle(row, position, playlist) })
+            swipe: reordering ? .none : .remove {
+                rows.removeAll { $0.itemId == row.itemId }
+                actions.remove([row.itemId], from: playlist)
+            }
         ) {
             actions.play(rows.map(\.track), from: position)
         }
-        .background(lifted ? OctoColor.backgroundTertiary : .clear, in: RoundedRectangle(cornerRadius: OctoRadius.row))
-        .shadow(color: lifted ? .black.opacity(0.4) : .clear, radius: 6, y: 2)
-        .offset(y: offset(for: position, row))
-        .zIndex(lifted ? 1 : 0)
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { if position == 0 { rowHeight = $0 } }
     }
 
-    /// How far a row moves while another is dragged past it.
-    private func offset(for position: Int, _ row: PlaylistTrack) -> CGFloat {
-        guard let dragging, let from = rows.firstIndex(where: { $0.itemId == dragging }) else { return 0 }
-        if row.itemId == dragging { return dragOffset }
-        let to = target(from)
-        if from < to, position > from, position <= to { return -rowHeight }
-        if from > to, position >= to, position < from { return rowHeight }
-        return 0
-    }
-
-    private func target(_ from: Int) -> Int {
-        min(max(from + Int((dragOffset / max(rowHeight, 1)).rounded()), 0), rows.count - 1)
-    }
-
-    /// Two short lines that move the row when dragged.
-    private func handle(_ row: PlaylistTrack, _ position: Int, _ playlist: PlaylistSummary) -> some View {
-        VStack(spacing: 4) {
-            Capsule().frame(width: 18, height: 2)
-            Capsule().frame(width: 18, height: 2)
-        }
-        .foregroundStyle(OctoColor.textMuted)
-        .frame(width: 40, height: 40)
-        .contentShape(Rectangle())
-        .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .global)
-            .onChanged { value in
-                if dragging == nil { dragging = row.itemId }
-                let before = target(position)
-                dragOffset = value.translation.height
-                if target(position) != before { step += 1 }
-            }
-            .onEnded { _ in
-                let to = target(position)
-                let landing = rows[to].itemId
-                dragging = nil
-                dragOffset = 0
-                if to != position {
-                    var moved = rows
-                    let item = moved.remove(at: position)
-                    moved.insert(item, at: to)
-                    rows = moved
-                    actions.move(row.itemId, onto: landing, in: playlist)
-                }
-            })
-        .accessibilityLabel("Reorder")
-        .accessibilityAdjustableAction { direction in
-            let to = direction == .increment ? position + 1 : position - 1
-            guard rows.indices.contains(to) else { return }
-            actions.move(row.itemId, onto: rows[to].itemId, in: playlist)
-        }
+    /// Moves a row where it was dropped: into the place of the row that was there.
+    private func move(_ from: IndexSet, _ to: Int, _ playlist: PlaylistSummary) {
+        guard let start = from.first, rows.indices.contains(start) else { return }
+        let item = rows[start].itemId
+        var moved = rows
+        moved.move(fromOffsets: from, toOffset: to)
+        guard let landed = moved.firstIndex(where: { $0.itemId == item }), landed != start else { return }
+        let landing = rows[landed].itemId
+        rows = moved
+        actions.move(item, onto: landing, in: playlist)
     }
 }
 
-/// Hidden while the list is picking songs.
-private struct HiddenWhilePicking<Content: View>: View {
-    @ViewBuilder var content: Content
+/// Reorder, or Done while reordering, on a playlist page: the rows show their handles while
+/// reordering. Hidden while the list is picking songs.
+private struct ReorderButton: View {
+    @Binding var editMode: EditMode
     @Environment(\.songSelection) private var selection
 
     var body: some View {
-        if selection?.active != true { content }
+        let reordering = editMode.isEditing
+        if selection?.active != true {
+            QuietAction(icon: reordering ? .check : .sort, text: reordering ? "Done" : "Reorder", checked: reordering) {
+                withAnimation { editMode = reordering ? .inactive : .active }
+            }
+        }
     }
 }

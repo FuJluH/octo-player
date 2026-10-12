@@ -14,7 +14,7 @@ struct HealthPage: View {
         let offers = model.offers
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                ScreenTitle("Library health").padding(.top, detailTopGap)
+                ScreenTitle("Library health").padding(.top, detailTopGap).bigTitle()
                 if let health = model.health {
                     let report = health.report
                     HealthWords(report.overview, muted: true)
@@ -54,6 +54,7 @@ struct HealthPage: View {
             }
             .padding(.bottom, 140)
         }
+        .inlineTitle("Library health")
         .healthSheet(model)
         .onAppear { model.attach(actions) }
         .onDisappear { model.leave() }
@@ -76,7 +77,7 @@ struct HealthCheckPage: View {
         let files = actions.state.files
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                ScreenTitle(found?.title ?? "Library health").padding(.top, detailTopGap)
+                ScreenTitle(found?.title ?? "Library health").padding(.top, detailTopGap).bigTitle()
                 if let found {
                     if let health = model.health {
                         content(found, health)
@@ -89,6 +90,7 @@ struct HealthCheckPage: View {
             }
             .padding(.bottom, 140)
         }
+        .inlineTitle(found?.title ?? "Library health")
         .healthSheet(model)
         .onAppear { model.attach(actions) }
         .onDisappear { model.leave() }
@@ -208,7 +210,7 @@ struct RecentlyRemovedPage: View {
         let canRestore = files.actions?.canRestore == true
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                ScreenTitle(recentlyRemovedWords).padding(.top, detailTopGap)
+                ScreenTitle(recentlyRemovedWords).padding(.top, detailTopGap).bigTitle()
                 if let trash {
                     HealthWords(keepsFor(trash.keepDays), muted: true)
                     if trash.songs.isEmpty {
@@ -231,6 +233,7 @@ struct RecentlyRemovedPage: View {
             }
             .padding(.bottom, 140)
         }
+        .inlineTitle(recentlyRemovedWords)
         .task(id: files.serverChanges) {
             trash = nil
             problem = nil

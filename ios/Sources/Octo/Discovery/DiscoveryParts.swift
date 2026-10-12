@@ -205,9 +205,14 @@ struct ArtistListRow: View {
     let coverArt: String?
     let albumCount: Int
     var opened: () -> Void = {}
+    @Environment(Router.self) private var router
 
+    // A button that opens the page, so a list shows it as a plain row.
     var body: some View {
-        NavigationLink(value: Route.artist(id: id, name: name)) {
+        Button {
+            opened()
+            router.go(.artist(id: id, name: name))
+        } label: {
             HStack(spacing: 12) {
                 Cover(id: coverArt, size: 48, radius: 24)
                 VStack(alignment: .leading, spacing: 2) {
@@ -224,7 +229,6 @@ struct ArtistListRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(SqueezeStyle())
-        .simultaneousGesture(TapGesture().onEnded(opened))
     }
 }
 
@@ -233,9 +237,14 @@ struct PlaylistListRow: View {
     let playlist: Playlist
     var onServer = true
     var opened: () -> Void = {}
+    @Environment(Router.self) private var router
 
+    // A button that opens the page, so a list shows it as a plain row.
     var body: some View {
-        NavigationLink(value: Route.playlist(playlist)) {
+        Button {
+            opened()
+            router.go(.playlist(playlist))
+        } label: {
             HStack(spacing: 12) {
                 Cover(id: playlist.coverArt ?? playlist.id, size: 56, radius: OctoRadius.artS)
                 VStack(alignment: .leading, spacing: 2) {
@@ -260,7 +269,6 @@ struct PlaylistListRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(SqueezeStyle())
-        .simultaneousGesture(TapGesture().onEnded(opened))
     }
 }
 
