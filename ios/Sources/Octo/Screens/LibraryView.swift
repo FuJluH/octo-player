@@ -116,8 +116,9 @@ struct ListPlayLine<Extra: View>: View {
                 .foregroundStyle(OctoColor.textMuted)
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            extra
-            PlayPills(play: play, shuffle: shuffle)
+            // The buttons keep their words whole; the count gives way first.
+            extra.fixedSize()
+            PlayPills(play: play, shuffle: shuffle).fixedSize()
         }
         .padding(.leading, 20)
         .padding(.trailing, 13)
