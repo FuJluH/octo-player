@@ -10,36 +10,9 @@ struct AddToLibraryButton: View {
     let song: Song
     var size: CGFloat = 44
     var iconSize: CGFloat = 24
-    @Environment(Accounts.self) private var accounts
 
     var body: some View {
-        if accounts.family.outside.addLabel != nil {
-            SaveHeart(song: song, family: accounts.family, size: size, iconSize: iconSize)
-        } else {
-            AddButton(song: song, size: size, iconSize: iconSize)
-        }
-    }
-}
-
-/// The heart that saves a song found online for a family member whose songs are saved rather
-/// than added: white and glowing while saved, white at 60% otherwise.
-private struct SaveHeart: View {
-    let song: Song
-    let family: FamilyHub
-    let size: CGFloat
-    let iconSize: CGFloat
-
-    var body: some View {
-        let saved = family.isSaved(song.id)
-        Button { family.toggleSaved(song.id, title: song.title) } label: {
-            IconView(saved ? .liked : .like, size: iconSize, color: saved ? .white : .white.opacity(0.6))
-                .iconGlow(saved)
-                .frame(width: size, height: size)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(NoPress())
-        .accessibilityLabel(FamilyText.save)
-        .accessibilityValue(saved ? "Saved" : "Not saved")
+        AddButton(song: song, size: size, iconSize: iconSize)
     }
 }
 

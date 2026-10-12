@@ -139,6 +139,9 @@ private struct FlowingHost: View {
         }
         .onAppear { if model == nil { model = FlowingModel(LyricMapper.map(lyrics)) } }
         .onChange(of: lyrics) { _, new in model = FlowingModel(LyricMapper.map(new)) }
+        // A seek, a new song or the same one again, play or pause, or a new speed: the lyrics
+        // clock takes a fresh reading.
+        .onChange(of: player.timeEvents) { _, _ in model?.anchor() }
     }
 }
 
