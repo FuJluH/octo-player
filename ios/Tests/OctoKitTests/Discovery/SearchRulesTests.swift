@@ -273,7 +273,7 @@ private func artist(_ id: String, _ name: String) -> Artist {
     }
 }
 
-@Suite struct NotInLibraryTests {
+@Suite struct NotInLibraryRulesTests {
     private func song(_ id: String, external: Bool) -> Song { Song(id: id, title: id, isExternal: external) }
 
     @Test func onlyASongFoundOnlineAndNotYetInTheLibraryIsMarked() {

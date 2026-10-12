@@ -9,8 +9,7 @@ struct FindSwap<Content: View>: View {
     let offersAdd: Bool
     @ViewBuilder let content: (Song) -> Content
     @Environment(Downloads.self) private var downloads
-    @Environment(\.accessibilityReduceMotion) private var systemCalm
-    private var appCalm: Bool { AppSettings.shared.player.reduceMotion }
+    @Environment(\.octoReduceMotion) private var calm
     @State private var face: FindFace?
     @State private var sawFind = false
 
@@ -20,7 +19,7 @@ struct FindSwap<Content: View>: View {
         let next = nextFindFace(face, adopted: known, offersAdd: offersAdd)
         let library = next == .library ? libraryId.flatMap { downloads.librarySong($0) } : nil
         let shown = library ?? find
-        let fade = swapFadeMs(sawFind: sawFind || next == .find, calm: appCalm || systemCalm)
+        let fade = swapFadeMs(sawFind: sawFind || next == .find, calm: calm)
         ZStack {
             content(shown)
                 .id(shown.id)

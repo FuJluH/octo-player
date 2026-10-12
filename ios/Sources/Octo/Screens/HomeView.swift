@@ -150,12 +150,9 @@ struct HomeView: View {
                 .font(.octoCaption)
                 .foregroundStyle(OctoColor.textSecondary)
             HStack(spacing: 12) {
-                Button(model.access == .deniedForever ? accessButtonLabel(model.access) : "Allow") { model.requestAccess() }
-                    .buttonStyle(.glassProminent)
-                Button("Not now") { model.dismissAccess() }
-                    .buttonStyle(.glass)
+                AccentButton(model.access == .deniedForever ? accessButtonLabel(model.access) : "Allow") { model.requestAccess() }
+                GlazeButton("Not now") { model.dismissAccess() }
             }
-            .font(DiscoveryStyle.label)
             .padding(.top, 10)
         }
         .padding(20)
@@ -171,10 +168,9 @@ struct HomeView: View {
             Text("New in Octo").font(.octoCaption).foregroundStyle(OctoColor.textMuted)
             Text(WhatsNew.summary).font(.octoBody).foregroundStyle(.white).lineLimit(2)
             HStack(spacing: 12) {
-                Button("See what's new") { reading = true }.buttonStyle(.glass)
-                Button("Dismiss") { model.dismissWhatsNew() }.buttonStyle(.glass)
+                GlazeButton("See what's new") { reading = true }
+                GlazeButton("Dismiss") { model.dismissWhatsNew() }
             }
-            .font(DiscoveryStyle.label)
             .padding(.top, 12)
         }
         .padding(20)
@@ -197,10 +193,9 @@ struct HomeView: View {
                 .foregroundStyle(OctoColor.textMuted)
             if askAccess || signIn {
                 HStack(spacing: 12) {
-                    if askAccess { Button(accessButtonLabel(model.access)) { model.requestAccess() }.buttonStyle(.glass) }
-                    if signIn { Button("Sign in to a server") { router.signIn = .signIn }.buttonStyle(.glass) }
+                    if askAccess { GlazeButton(accessButtonLabel(model.access)) { model.requestAccess() } }
+                    if signIn { GlazeButton("Sign in to a server") { router.signIn = .signIn } }
                 }
-                .font(DiscoveryStyle.label)
                 .padding(.top, 12)
             }
         }

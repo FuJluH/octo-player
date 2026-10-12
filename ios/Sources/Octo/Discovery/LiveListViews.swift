@@ -67,9 +67,9 @@ struct LiveListView: View {
     @Environment(Router.self) private var router
     @Environment(Session.self) private var session
     @Environment(\.dismiss) private var dismiss
+    @Environment(Prompts.self) private var prompts
     @State private var renaming = false
     @State private var newName = ""
-    @State private var deleting = false
 
     var body: some View {
         let list = store.byId(id)
@@ -121,15 +121,11 @@ struct LiveListView: View {
         .task(id: library.stamp(.library, .likes, .plays)) { await liveLibrary.read() }
         // Leaves the page once the list is deleted.
         .onChange(of: list == nil) { _, gone in if gone { dismiss() } }
-        .alert("Rename live list", isPresented: $renaming) {
-            TextField("Live list name", text: $newName)
-            Button("Save") { store.rename(id, to: newName) }
-            Button("Cancel", role: .cancel) {}
-        }
-        .confirmationDialog("Delete \"\(list?.name ?? "")\"?", isPresented: $deleting, titleVisibility: .visible) {
-            Button("Delete", role: .destructive) { store.remove(id) }
-        } message: {
-            Text("The songs stay in your library.")
+        .glassPopup(isPresented: $renaming, title: "Rename live list") {
+            PopupNameForm(title: "Rename live list", placeholder: "Live list name", action: "Save", onDone: { name in
+                store.rename(id, to: name)
+                renaming = false
+            }, initial: newName)
         }
     }
 
@@ -148,7 +144,11 @@ struct LiveListView: View {
                 } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
                 Button { Task { await saveCopy(list, songs) } } label: { Label("Save a copy as a playlist", systemImage: "music.note.list") }
             }
-            Button(role: .destructive) { deleting = true } label: { Label("Delete", systemImage: "trash") }
+            Button(role: .destructive) {
+                prompts.confirm("Delete \"\(list.name)\"?", detail: "The songs stay in your library.", confirm: "Delete") {
+                    store.remove(list.id)
+                }
+            } label: { Label("Delete", systemImage: "trash") }
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 18, weight: .semibold))
@@ -190,17 +190,7 @@ struct LiveListEditView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draft: LiveListDraft?
     @State private var starters = false
-    @State private var asking: RuleAsk?
-    @State private var choosingRule = false
-    @State private var choosingOrder = false
-    @State private var choosingLimit = false
-
-    /// A page of rules to pick from.
-    struct RuleAsk: Identifiable {
-        let title: String
-        let rules: [(String, QueryRule)]
-        var id: String { title }
-    }
+    @Environment(Prompts.self) private var prompts
 
     var body: some View {
         let draft = self.draft ?? editorStart(id.flatMap { store.byId($0) }, start: start)
@@ -210,19 +200,20 @@ struct LiveListEditView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ScreenTitle(id == nil ? "New live list" : "Edit live list")
-                InputField(text: Binding(get: { draft.name }, set: { self.draft = LiveListDraft(name: $0, query: query) }),
-                           placeholder: liveListName(query))
+                GlassInput(liveListName(query), text: Binding(get: { draft.name }, set: { self.draft = LiveListDraft(name: $0, query: query) }))
+                    .padding(.horizontal, 20)
                 Text("Picks songs from your whole library that match these rules, and keeps up as songs are added, played and liked.")
                     .font(.octoCaption)
                     .foregroundStyle(OctoColor.textMuted)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 12)
-                InputField(text: Binding(get: { query.text }, set: { update(query.withText($0)) }), placeholder: "With these words")
-                FlowChips(spacing: 8) {
+                GlassInput("With these words", text: Binding(get: { query.text }, set: { update(query.withText($0)) }))
+                    .padding(.horizontal, 20)
+                FlowRow(spacing: 8) {
                     ForEach(Array(query.rules.enumerated()), id: \.offset) { _, rule in
                         OnOffChip(text: rule.label(), on: true) { update(query.without(rule)) }
                     }
-                    OnOffChip(text: query.rules.isEmpty ? "Add a rule" : "Add another rule", on: false) { choosingRule = true }
+                    OnOffChip(text: query.rules.isEmpty ? "Add a rule" : "Add another rule", on: false) { addRule() }
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
@@ -237,16 +228,15 @@ struct LiveListEditView: View {
                 }
                 HStack(spacing: 0) {
                     Text("Order").font(.octoCaption).foregroundStyle(OctoColor.textMuted)
-                    QuietAction(query.sort.flatMap(sortWords).map(capitalizedFirst) ?? "In library order") { choosingOrder = true }
+                    QuietButton(query.sort.flatMap(sortWords).map(capitalizedFirst) ?? "In library order") { chooseOrder() }
                     Text("How many").font(.octoCaption).foregroundStyle(OctoColor.textMuted).padding(.leading, 12)
-                    QuietAction(limitWords(query.limit)) { choosingLimit = true }
+                    QuietButton(limitWords(query.limit)) { chooseLimit() }
                 }
                 .padding(.horizontal, 20)
                 HStack(spacing: 10) {
-                    Button(id == nil ? "Make live list" : "Save") { save(draft) }.buttonStyle(.glassProminent)
-                    Button("Cancel") { dismiss() }.buttonStyle(.glass)
+                    AccentButton(id == nil ? "Make live list" : "Save") { save(draft) }
+                    GlazeButton("Cancel") { dismiss() }
                 }
-                .font(DiscoveryStyle.label)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 16)
                 if starters {
@@ -289,22 +279,49 @@ struct LiveListEditView: View {
             if self.draft == nil { self.draft = editorStart(id.flatMap { store.byId($0) }, start: start) }
             starters = offersStarters(store.lists, id: id, start: start)
         }
-        .confirmationDialog("Add a rule", isPresented: $choosingRule, titleVisibility: .visible) {
-            ForEach(Array(liveListRuleMenu().enumerated()), id: \.offset) { _, entry in
-                Button(entry.0) { pick(entry.1) }
+    }
+
+    /// Asks which rule to add, a page at a time.
+    private func addRule() {
+        let menu = liveListRuleMenu()
+        prompts.choose("Add a rule", menu.map { Choice($0.0) }) { picked in
+            guard menu.indices.contains(picked) else { return }
+            pick(menu[picked].1)
+        }
+    }
+
+    /// The order, from the orders a live list can keep; picking the one in use turns it round.
+    private func chooseOrder() {
+        let sorts = liveListSorts
+        let now = currentQuery.sort?.order
+        prompts.choose("Order", sorts.map { Choice($0.label) }, selected: now.flatMap { sorts.firstIndex(of: $0) } ?? -1) { picked in
+            guard sorts.indices.contains(picked) else { return }
+            let by = sorts[picked]
+            if by == now, let sort = currentQuery.sort {
+                update(currentQuery.sorted(by: QuerySort(by, descending: !sort.descending)))
+            } else {
+                update(currentQuery.sorted(by: by))
             }
         }
-        .sheet(item: $asking) { ask in
-            RulePage(ask: ask, query: currentQuery) { rule in update(currentQuery.toggling(rule)) }
+    }
+
+    private func chooseLimit() {
+        let limits = liveListLimits
+        prompts.choose("How many songs", limits.map { Choice(limitWords($0)) }, selected: limits.firstIndex(of: currentQuery.limit) ?? -1) { picked in
+            guard limits.indices.contains(picked) else { return }
+            update(currentQuery.limited(to: limits[picked]))
         }
-        .confirmationDialog("Order", isPresented: $choosingOrder, titleVisibility: .visible) {
-            ForEach(liveListSorts, id: \.self) { sort in
-                Button(sort.label) { update(currentQuery.sorted(by: sort)) }
-            }
-        }
-        .confirmationDialog("How many songs", isPresented: $choosingLimit, titleVisibility: .visible) {
-            ForEach(Array(liveListLimits.enumerated()), id: \.offset) { _, limit in
-                Button(limitWords(limit)) { update(currentQuery.limited(to: limit)) }
+    }
+
+    /// One page of rules: the current pick is ticked; a pick adds or takes off the rule. It opens
+    /// once the page before has closed.
+    private func ask(_ title: String, _ rules: [(String, QueryRule)]) {
+        if rules.isEmpty { return }
+        Task {
+            try? await Task.sleep(for: .milliseconds(350))
+            prompts.choose(title, rules.map { Choice($0.0) }, selected: pickedIn(rules.map(\.1), query: currentQuery)) { picked in
+                guard rules.indices.contains(picked) else { return }
+                update(currentQuery.toggling(rules[picked].1))
             }
         }
     }
@@ -321,11 +338,11 @@ struct LiveListEditView: View {
         let tracks = liveLibrary.tracks
         let fields = liveLibrary.fields
         switch pick {
-        case .group(let group): asking = RuleAsk(title: group.title, rules: group.choices.map { ($0.words, $0.rule) })
-        case .rating: asking = RuleAsk(title: "Rating", rules: ratingRules)
-        case .genre: asking = RuleAsk(title: "Genre", rules: genresIn(tracks, fields: fields).map { ($0, FilterPresets.genre($0)) })
-        case .artist: asking = RuleAsk(title: "Artist", rules: artistsIn(tracks, fields: fields).map { ($0, FilterPresets.artist($0)) })
-        case .year: asking = RuleAsk(title: "Year", rules: decadesIn(tracks, fields: fields).reversed().map { ("The \($0)s", FilterPresets.decade($0)) })
+        case .group(let group): ask(group.title, group.choices.map { ($0.words, $0.rule) })
+        case .rating: ask("Rating", ratingRules)
+        case .genre: ask("Genre", genresIn(tracks, fields: fields).map { ($0, FilterPresets.genre($0)) })
+        case .artist: ask("Artist", artistsIn(tracks, fields: fields).map { ($0, FilterPresets.artist($0)) })
+        case .year: ask("Year", decadesIn(tracks, fields: fields).reversed().map { ("The \($0)s", FilterPresets.decade($0)) })
         case .rule(let rule): update(currentQuery.toggling(rule))
         }
     }
@@ -354,101 +371,4 @@ struct LiveListEditView: View {
     private func capitalizedFirst(_ text: String) -> String { text.prefix(1).uppercased() + text.dropFirst() }
 }
 
-/// One page of rules: the current pick is ticked; a tap adds or takes off the rule.
-private struct RulePage: View {
-    let ask: LiveListEditView.RuleAsk
-    let query: LibraryQuery
-    let toggle: (QueryRule) -> Void
-    @Environment(\.dismiss) private var dismiss
 
-    var body: some View {
-        let picked = pickedIn(ask.rules.map(\.1), query: query)
-        NavigationStack {
-            List {
-                ForEach(Array(ask.rules.enumerated()), id: \.offset) { index, entry in
-                    Button {
-                        toggle(entry.1)
-                        dismiss()
-                    } label: {
-                        HStack {
-                            Text(entry.0).foregroundStyle(.white)
-                            Spacer()
-                            if index == picked { Image(systemName: "checkmark").foregroundStyle(OctoColor.accent) }
-                        }
-                    }
-                }
-            }
-            .navigationTitle(ask.title)
-            .navigationBarTitleDisplayMode(.inline)
-        }
-        .presentationDetents([.medium, .large])
-    }
-}
-
-/// A text field sunk into the surface, the way Octo's inputs look.
-struct InputField: View {
-    @Binding var text: String
-    let placeholder: String
-    @FocusState private var focused: Bool
-
-    var body: some View {
-        ZStack(alignment: .leading) {
-            if text.isEmpty {
-                Text(placeholder).font(.octoBody).foregroundStyle(OctoColor.textMuted).lineLimit(1).accessibilityHidden(true)
-            }
-            TextField("", text: $text)
-                .font(.octoBody)
-                .foregroundStyle(.white)
-                .focused($focused)
-                .accessibilityLabel(placeholder)
-        }
-        .padding(.horizontal, 14)
-        .frame(height: 48)
-        .background(OctoColor.accent.opacity(focused ? 0.15 : 0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(OctoColor.accent.opacity(0.10), lineWidth: 1))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(OctoColor.accent.opacity(focused ? 0.6 : 0), lineWidth: 1.5))
-        .padding(.horizontal, 20)
-    }
-}
-
-/// Chips that wrap onto the next line.
-struct FlowChips: Layout {
-    var spacing: CGFloat = 8
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? .infinity
-        var x: CGFloat = 0
-        var y: CGFloat = 0
-        var line: CGFloat = 0
-        var widest: CGFloat = 0
-        for view in subviews {
-            let size = view.sizeThatFits(.unspecified)
-            if x > 0 && x + size.width > width {
-                y += line + spacing
-                x = 0
-                line = 0
-            }
-            x += size.width + spacing
-            line = max(line, size.height)
-            widest = max(widest, x - spacing)
-        }
-        return CGSize(width: proposal.width ?? widest, height: y + line)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var x = bounds.minX
-        var y = bounds.minY
-        var line: CGFloat = 0
-        for view in subviews {
-            let size = view.sizeThatFits(.unspecified)
-            if x > bounds.minX && x + size.width > bounds.maxX {
-                y += line + spacing
-                x = bounds.minX
-                line = 0
-            }
-            view.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
-            x += size.width + spacing
-            line = max(line, size.height)
-        }
-    }
-}

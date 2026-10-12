@@ -8,8 +8,7 @@ import SwiftUI
 struct DownloadsPill: View {
     @Environment(ServerDownloads.self) private var serverDownloads
     @Environment(Downloads.self) private var downloads
-    @Environment(\.accessibilityReduceMotion) private var systemCalm
-    private var appCalm: Bool { AppSettings.shared.player.reduceMotion }
+    @Environment(\.octoReduceMotion) private var calm
     /// Moves on when the oldest ask counted runs out, so the count is worked out again.
     @State private var tick = 0
 
@@ -19,7 +18,6 @@ struct DownloadsPill: View {
         let since = serverDownloads.watch.listedSince
         let now = msSince1970()
         let coming = pillCount(rows, downloads.asked, listedSince: since, now: now)
-        let calm = appCalm || systemCalm
         ZStack {
             if coming > 0 && serverDownloads.supported {
                 let lead = pillLead(rows)

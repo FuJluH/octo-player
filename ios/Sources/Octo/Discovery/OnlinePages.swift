@@ -2,76 +2,18 @@ import OctoKit
 import SwiftUI
 
 /// What to tell someone when a read from the server fails.
-func onlineFailureWords(_ error: Error) -> String {
-    switch error {
-    case let error as OctoError:
-        switch error {
-        case .notSubsonic: return "That address answered, but not like a music server. Check the port."
-        case .http(let status) where [502, 503, 504].contains(status):
-            return "The server isn't answering right now. It may be restarting, so try again in a moment."
-        case .http: return "That address answered, but not like a music server. Check the port."
-        case .wrongCredentials: return "Wrong username or password."
-        case .authUnsupported(let code, _):
-            return code == 41 ? "This account can't sign in with a token. Turn on Legacy sign-in under Advanced."
-                : "The server doesn't take this way of signing in."
-        case .notFound: return "That isn't on the server any more."
-        case .server(_, let message): return "The server said: \(message)"
-        }
-    case is URLError:
-        return "Couldn't reach the server. Check the address, and that you're on the right network."
-    default:
-        return "Something went wrong."
-    }
-}
+func onlineFailureWords(_ error: Error) -> String { userMessage(for: error) ?? "Something went wrong." }
 
-/// Where a read of a page from the server has got to.
-enum LoadState<T> {
-    case loading
-    case failed(String)
-    case ready(T)
-
-    var value: T? {
-        if case .ready(let value) = self { return value }
-        return nil
-    }
-}
-
-/// Runs a read from the server. Nothing back means no server is signed in.
+/// Runs a read from the server. Nothing back means no server is signed in; a read that was
+/// canceled gives nil, and the page keeps what it had.
 @MainActor
-func loadOnline<T>(_ read: () async throws -> T?) async -> LoadState<T> {
+func loadOnline<T>(_ read: () async throws -> T?) async -> LoadState<T>? {
     do {
         guard let value = try await read() else { return .failed("Sign in to your server to see this.") }
         return .ready(value)
     } catch {
-        return .failed(onlineFailureWords(error))
-    }
-}
-
-/// A page's loading spinner, or its failure with Try again, or the page.
-struct LoadStateContent<T, Content: View>: View {
-    let state: LoadState<T>
-    let retry: () -> Void
-    @ViewBuilder let content: (T) -> Content
-
-    var body: some View {
-        switch state {
-        case .loading:
-            AccentSpinner()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        case .failed(let message):
-            VStack(spacing: 16) {
-                Text(message)
-                    .font(.octoBodySmall)
-                    .foregroundStyle(OctoColor.textSecondary)
-                    .multilineTextAlignment(.center)
-                Button("Try again", action: retry)
-                    .buttonStyle(.glassProminent)
-            }
-            .padding(32)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        case .ready(let value):
-            content(value)
-        }
+        guard let words = userMessage(for: error) else { return nil }
+        return .failed(words)
     }
 }
 
@@ -91,7 +33,7 @@ struct OnlineAlbumView: View {
     @State private var highlight: String?
 
     var body: some View {
-        LoadStateContent(state: page, retry: { Task { await reload() } }) { found in
+        LoadStateView(state: page, retry: { Task { await reload() } }) { found in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     header(found)
@@ -106,6 +48,7 @@ struct OnlineAlbumView: View {
             }
             .barClearance()
         }
+        .pageArtwork(.onlineAlbum(id: id, name: name), page.value?.album.coverArt)
         .task { if page.value == nil { await reload() } }
         .task(id: page.value?.album.id) { await markHighlight() }
         .onChange(of: downloads.arrived) { _, _ in
@@ -213,13 +156,13 @@ struct OnlineAlbumView: View {
 
     private func reload() async {
         page = .loading
-        page = await loadOnline { try await discovery.album(id) }
+        if let state = await loadOnline({ try await discovery.album(id) }) { page = state }
     }
 
     /// Asks the server again, keeping the page as it is if it cannot answer.
     private func refresh() async {
         let fresh = await loadOnline { try await discovery.album(id) }
-        if case .ready = fresh { page = fresh }
+        if let fresh, case .ready = fresh { page = fresh }
     }
 
     /// The album's main song: the one first in the artist's top songs on the server.
@@ -241,7 +184,7 @@ struct OnlineArtistView: View {
     @State private var width: CGFloat = 390
 
     var body: some View {
-        LoadStateContent(state: page, retry: { Task { await reload() } }) { artist in
+        LoadStateView(state: page, retry: { Task { await reload() } }) { artist in
             let columns = max(1, Int((width - 40 + 14) / (150 + 14)))
             let cell = (width - 40 - 14 * CGFloat(columns - 1)) / CGFloat(columns)
             ScrollView {
@@ -271,6 +214,7 @@ struct OnlineArtistView: View {
             }
             .barClearance()
         }
+        .pageArtwork(.onlineArtist(id: id, name: name), page.value?.coverArt)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .task { if page.value == nil { await reload() } }
     }
@@ -284,7 +228,7 @@ struct OnlineArtistView: View {
 
     private func reload() async {
         page = .loading
-        page = await loadOnline { try await discovery.artist(id) }
+        if let state = await loadOnline({ try await discovery.artist(id) }) { page = state }
     }
 }
 
@@ -332,10 +276,7 @@ struct ChartsView: View {
                         if let caption = chartCaption(source: list.source, chart: list.chart, country: list.country) {
                             quiet(caption)
                         }
-                        Button { play(list, 0) } label: {
-                            Text("Play all").font(DiscoveryStyle.label)
-                        }
-                        .buttonStyle(.glass)
+                        GlazeButton("Play all", size: .small) { play(list, 0) }
                         .padding(.leading, 20)
                         .padding(.bottom, 8)
                         let all = list.songs.map(\.track)

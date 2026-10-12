@@ -41,15 +41,9 @@ struct ResumeCard: View {
                         Text(artist).font(.octoBodySmall).foregroundStyle(OctoColor.textSecondary).lineLimit(1)
                     }
                     HStack(spacing: 12) {
-                        Button {
-                            resume(shown)
-                        } label: {
-                            if loading { ProgressView().controlSize(.small) } else { Text("Resume") }
-                        }
-                        .buttonStyle(.glassProminent)
-                        Button("Not now") { source?.dismiss(shown) }.buttonStyle(.glass)
+                        AccentButton("Resume", loading: loading) { resume(shown) }
+                        GlazeButton("Not now") { source?.dismiss(shown) }
                     }
-                    .font(DiscoveryStyle.label)
                     .padding(.top, 12)
                 }
                 .padding(20)

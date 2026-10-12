@@ -12,31 +12,6 @@ enum DiscoveryStyle {
     static let red = Color(hex: 0xFF3B30)
 }
 
-/// A small text button for a lesser action beside a title, like "See all" or "Clear all": no
-/// border and no fill.
-struct QuietAction: View {
-    let text: String
-    let action: () -> Void
-
-    init(_ text: String, action: @escaping () -> Void) {
-        self.text = text
-        self.action = action
-    }
-
-    var body: some View {
-        Button(action: action) {
-            Text(text)
-                .font(DiscoveryStyle.label)
-                .foregroundStyle(OctoColor.textSecondary)
-                .lineLimit(1)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 /// A section's title with a quiet button at its end.
 struct TitleRow: View {
     let title: String
@@ -53,7 +28,7 @@ struct TitleRow: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 10)
                 .accessibilityAddTraits(.isHeader)
-            if let action { QuietAction(action, action: perform) }
+            if let action { QuietButton(action, action: perform) }
         }
         .padding(.trailing, 10)
         .padding(.top, top)
@@ -144,30 +119,6 @@ struct SideScroller<Content: View>: View {
     }
 }
 
-/// The mark on the artwork of something not in the library: a small glass disc with a black film
-/// and a thin plus, at the bottom right. Only a sign, not a button.
-struct OutsideMark: View {
-    let art: CGFloat
-    var round = false
-
-    var body: some View {
-        let size = notInLibraryMarkSize(Double(art))
-        let inset = notInLibraryMarkInset(Double(art), mark: size, round: round)
-        Circle()
-            .fill(.black.opacity(0.42))
-            .frame(width: size, height: size)
-            .overlay {
-                Image(systemName: "plus")
-                    .font(.system(size: size * 0.68 * 0.8, weight: .regular))
-                    .foregroundStyle(.white.opacity(0.9))
-            }
-            .glassEffect(.regular, in: .circle)
-            .padding(.trailing, inset)
-            .padding(.bottom, inset)
-            .accessibilityHidden(true)
-    }
-}
-
 /// A cover with the not-in-library mark when the thing is not in the library.
 struct OutsideCover: View {
     let id: String?
@@ -176,10 +127,7 @@ struct OutsideCover: View {
     var outside = false
 
     var body: some View {
-        Cover(id: id, size: size, radius: radius)
-            .overlay(alignment: .bottomTrailing) {
-                if outside { OutsideMark(art: size, round: radius >= size / 2) }
-            }
+        BadgedCover(id: id, size: size, radius: radius, external: outside)
             .accessibilityElement()
             .accessibilityLabel(artworkDescription(nil, outside: outside) ?? "")
             .accessibilityHidden(!outside)
@@ -316,15 +264,3 @@ struct PlaylistListRow: View {
     }
 }
 
-/// A spinner in the accent, while a page loads.
-struct AccentSpinner: View {
-    var size: CGFloat = 28
-
-    var body: some View {
-        ProgressView()
-            .progressViewStyle(.circular)
-            .tint(OctoColor.accent)
-            .controlSize(size >= 28 ? .large : .regular)
-            .frame(width: size, height: size)
-    }
-}

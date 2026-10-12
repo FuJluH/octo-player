@@ -9,6 +9,17 @@ public func isOutsideLibrary(_ song: Song?, adopted: Set<String>) -> Bool {
     return song.isExternal && !adopted.contains(song.id)
 }
 
+/// The same, from a song's id and whether the server marks it outside the library.
+public func isOutsideLibrary(songId: String?, isExternal: Bool, adopted: Set<String>) -> Bool {
+    guard let songId else { return false }
+    return isExternal && !adopted.contains(songId)
+}
+
+/// The finds whose download has arrived in the library.
+public func adoptedFinds(_ phases: [String: DownloadPhase]) -> Set<String> {
+    Set(phases.filter { $0.value == .done }.keys)
+}
+
 /// How a song row says a song is not in the library: the add button at its end, the small plus on
 /// its artwork, or nothing. A row says it once, so a row with the button has no mark.
 public enum AddSign: Sendable, Equatable { case button, mark, none }

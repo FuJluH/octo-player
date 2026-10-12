@@ -23,9 +23,7 @@ struct ServerDownloadsSheet: View {
         }
         .padding(.top, 20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
-        .sheet(isPresented: replaceAnywayShown) { ReplaceAnywaySheet() }
+        .glassSheet(isPresented: replaceAnywayShown, scrolls: false) { ReplaceAnywaySheet() }
     }
 
     /// The question before a copy that needs the person's word replaces the library's.
@@ -55,7 +53,7 @@ private struct DownloadListPage: View {
             }
             Spacer(minLength: 8)
             if rows.contains(where: \.finished) {
-                QuietAction("Clear finished") { model.clear() }
+                QuietButton("Clear finished") { model.clear() }
             }
         }
         .padding(.leading, 20)
@@ -188,10 +186,10 @@ private struct DownloadLogPage: View {
         let running = row?.finished == false
         SheetBar(back: "Back to \(serverDownloadsTitle)", onBack: model.showList) {
             if let row, let id = row.findId {
-                QuietAction(findSongsTitle) { model.find(id, title: row.title, from: key) }
+                QuietButton(findSongsTitle) { model.find(id, title: row.title, from: key) }
             }
             if let row, row.finished {
-                QuietAction("Clear") {
+                QuietButton("Clear") {
                     model.clear(row.key)
                     model.showList()
                 }
@@ -302,12 +300,11 @@ private struct LogHead: View {
 private struct StepsStrip: View {
     let row: DownloadRow
     let at: Int
-    @Environment(\.accessibilityReduceMotion) private var systemCalm
-    private var appCalm: Bool { AppSettings.shared.player.reduceMotion }
+    @Environment(\.octoReduceMotion) private var calm
 
     var body: some View {
         let failed = row.phase == .failed
-        let breathes = !row.finished && row.fraction == nil && !(appCalm || systemCalm)
+        let breathes = !row.finished && row.fraction == nil && !(calm)
         TimelineView(.animation(paused: !breathes)) { context in
             let t = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.8) / 0.9
             let pulse = breathes ? 0.45 + 0.55 * (t <= 1 ? t : 2 - t) : 1
@@ -438,7 +435,7 @@ private struct LogCopies: View {
                 CopyLine(copy: copy, compact: true)
             }
             if copies.count > logCopiesShown {
-                QuietAction(all ? "Show fewer" : "Show all \(copies.count)") { all.toggle() }
+                QuietButton(all ? "Show fewer" : "Show all \(copies.count)") { all.toggle() }
             }
         }
         .padding(.vertical, 2)
@@ -466,7 +463,7 @@ private struct FindSongsPage: View {
             if let from { model.showLog(from) } else { model.showList() }
         }) {
             if !searching {
-                QuietAction("Search again") {
+                QuietButton("Search again") {
                     asking = nil
                     model.searchAgain()
                 }
@@ -686,10 +683,9 @@ private struct ReplaceItCard: View {
             Text(replaceQuestion(copy)).font(.octoBodySmall).foregroundStyle(.white)
             Text(findReplaces(asksFirst: asksFirst)).font(.octoCaption).foregroundStyle(OctoColor.textMuted)
             HStack(spacing: 10) {
-                Button("Cancel", action: no).buttonStyle(.glass).controlSize(.small)
-                Button(action: yes) { Label("Replace it", systemImage: "waveform") }.buttonStyle(.glass).controlSize(.small)
+                GlazeButton("Cancel", size: .small, action: no)
+                GlazeButton("Replace it", icon: .lossless, size: .small, action: yes)
             }
-            .font(DiscoveryStyle.label)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -769,19 +765,13 @@ private struct ReplaceAnywaySheet: View {
                     .animation(.easeOut(duration: 0.2), value: atEnd)
                 }
                 HStack(spacing: 10) {
-                    Button { model.keepMine(asked) } label: { Text(keepMineText).frame(maxWidth: .infinity) }
-                        .buttonStyle(.glass)
-                    Button { model.replaceAnyway() } label: { Text(replaceAnywayText).frame(maxWidth: .infinity) }
-                        .buttonStyle(.glassProminent)
+                    GlazeButton(keepMineText, size: .medium, fillWidth: true) { model.keepMine(asked) }
+                    AccentButton(replaceAnywayText, size: .medium, fillWidth: true) { model.replaceAnyway() }
                 }
-                .controlSize(.large)
-                .font(DiscoveryStyle.label)
             }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 20)
-        .presentationDetents([.medium])
-        .presentationDragIndicator(.visible)
         .onChange(of: model.findWatch.question, initial: true) { _, question in
             if let question, question.kind == .confirm { shown = question }
         }
