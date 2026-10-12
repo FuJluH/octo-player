@@ -11,7 +11,7 @@ struct AddToLibraryButton: View {
     var iconSize: CGFloat = 24
     @Environment(Downloads.self) private var downloads
     @Environment(Router.self) private var router
-    @Environment(\.accessibilityReduceMotion) private var calm
+    @Environment(\.octoReduceMotion) private var calm
     @State private var release: (@Sendable () -> Void)?
 
     var body: some View {

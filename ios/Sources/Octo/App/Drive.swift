@@ -16,6 +16,7 @@ import SwiftUI
 /// - `found:TEXT` plays the songs not in the library that a search for TEXT finds
 /// - `search:TEXT` plays the library songs a search for TEXT finds
 /// - `pause`
+/// - discovery steps: see `DiscoveryDrive`
 /// - `toast:TEXT` a plain message; `undo:TEXT` a message with Undo; `done:TEXT` one with a check
 /// - `dialog` a question with Delete and Cancel; `choice` a choice list; `sheet` a glass sheet;
 ///   `menu` a glass menu with a second page; `menu:page` opens it on its second page
@@ -99,7 +100,12 @@ enum Drive {
                 let songs = found.song.filter { name == "found" ? $0.isExternal : !$0.isExternal }
                 if !songs.isEmpty { player.play(songs, from: 0) }
             default:
-                for handle in steps where await handle(name, value) { break }
+                var taken = false
+                for handle in steps where await handle(name, value) {
+                    taken = true
+                    break
+                }
+                if !taken { await DiscoveryDrive.step(name, value, session: session, router: router) }
             }
             try? await Task.sleep(for: .milliseconds(400))
         }
