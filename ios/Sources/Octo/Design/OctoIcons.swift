@@ -1,9 +1,9 @@
 import OctoKit
 import SwiftUI
 
-/// The app's icons, from Phosphor Icons (MIT): the Regular weight, and Fill for the transport
-/// and for things that are on (a liked song, a rating, the selected tab). The outlines live in
-/// `OctoIcon+Paths.swift`; draw them with `IconView` and tint in place.
+/// The app's icons, each one of Apple's SF Symbols: the outline for a plain action, the filled
+/// form for the transport and for things that are on (a liked song, a rating, the selected tab).
+/// Draw them with `IconView` and tint in place.
 enum OctoIcon: String, CaseIterable, Sendable {
     case previous, next, play, pause, shuffle, repeatAll, repeatOne, sleepTimer, queue, volumeDown, volumeUp
     case lossless, like, liked, more, playNext, addToQueue, addToPlaylist, rename, delete, album, artist
@@ -16,51 +16,114 @@ enum OctoIcon: String, CaseIterable, Sendable {
     case timer, listeners, layout, wifi, camera, qrCode, copy, link, audioQuality, visible, hidden
     case minimize, maximize, restore, system, keyboard, loudness, balance, crossfade
 
-    /// The outline in a unit square, read once.
-    var outline: Path { IconOutlines.shared.path(for: self) }
-}
-
-/// Every icon's outline, read from its path data the first time it is drawn.
-private final class IconOutlines: @unchecked Sendable {
-    static let shared = IconOutlines()
-    private var cache: [OctoIcon: Path] = [:]
-    private let lock = NSLock()
-
-    func path(for icon: OctoIcon) -> Path {
-        lock.lock()
-        defer { lock.unlock() }
-        if let hit = cache[icon] { return hit }
-        let made = Path(steps: PathData.steps(icon.pathData), scale: 1.0 / 256)
-        cache[icon] = made
-        return made
-    }
-}
-
-extension Path {
-    /// An outline from parsed path steps, scaled by `scale`.
-    init(steps: [PathStep], scale: CGFloat) {
-        self.init()
-        for step in steps {
-            switch step {
-            case .move(let x, let y): move(to: CGPoint(x: x * scale, y: y * scale))
-            case .line(let x, let y): addLine(to: CGPoint(x: x * scale, y: y * scale))
-            case .cubic(let x1, let y1, let x2, let y2, let x, let y):
-                addCurve(to: CGPoint(x: x * scale, y: y * scale),
-                         control1: CGPoint(x: x1 * scale, y: y1 * scale),
-                         control2: CGPoint(x: x2 * scale, y: y2 * scale))
-            case .close: closeSubpath()
-            }
+    /// The SF Symbol drawn for it.
+    var symbol: String {
+        switch self {
+        case .previous: "backward.fill"
+        case .next: "forward.fill"
+        case .play: "play.fill"
+        case .pause: "pause.fill"
+        case .shuffle: "shuffle"
+        case .repeatAll: "repeat"
+        case .repeatOne: "repeat.1"
+        case .sleepTimer: "moon.zzz"
+        case .queue: "list.bullet"
+        case .volumeDown: "speaker.fill"
+        case .volumeUp: "speaker.wave.3.fill"
+        case .lossless: "waveform"
+        case .like: "heart"
+        case .liked: "heart.fill"
+        case .more: "ellipsis"
+        case .playNext: "text.line.first.and.arrowtriangle.forward"
+        case .addToQueue: "text.line.last.and.arrowtriangle.forward"
+        case .addToPlaylist: "text.badge.plus"
+        case .rename: "pencil"
+        case .delete: "trash"
+        case .album: "square.stack"
+        case .artist: "music.microphone"
+        case .songs: "music.note"
+        case .genres: "guitars"
+        case .playlists: "music.note.list"
+        case .chevron: "chevron.right"
+        case .chevronBack, .back: "chevron.left"
+        case .collapse: "chevron.down"
+        case .cloud: "cloud"
+        case .check: "checkmark"
+        case .download: "arrow.down.circle"
+        case .downloading: "arrow.down.circle.dotted"
+        case .downloaded: "arrow.down.circle.fill"
+        case .addToLibrary: "plus"
+        case .notInLibrary: "plus"
+        case .radio: "dot.radiowaves.left.and.right"
+        case .share: "square.and.arrow.up"
+        case .sound: "slider.horizontal.3"
+        case .star: "star"
+        case .starFilled: "star.fill"
+        case .lyrics: "quote.bubble"
+        case .folder: "folder"
+        case .sort: "arrow.up.arrow.down"
+        case .filter: "line.3.horizontal.decrease"
+        case .ascending: "arrow.up"
+        case .descending: "arrow.down"
+        case .info: "info.circle"
+        case .select: "checkmark.circle"
+        case .close: "xmark"
+        case .history: "clock.arrow.circlepath"
+        case .pin: "pin"
+        case .pinned: "pin.fill"
+        case .removeFromPlaylist: "minus.circle"
+        case .shareFile: "square.and.arrow.up.on.square"
+        case .ringtone: "bell"
+        case .playback: "play.circle"
+        case .appearance: "paintpalette"
+        case .library: "square.stack"
+        case .scrobbling: "chart.bar"
+        case .backup: "arrow.clockwise.icloud"
+        case .search, .searchSelected: "magnifyingglass"
+        case .phone: "iphone"
+        case .home: "house"
+        case .homeSelected: "house.fill"
+        case .librarySelected: "square.stack.fill"
+        case .settings: "gearshape"
+        case .settingsSelected: "gearshape.fill"
+        case .cast, .castConnected: "airplay.audio"
+        case .tv: "tv"
+        case .speaker: "hifispeaker"
+        case .speakerGroup: "hifispeaker.2"
+        case .headphones: "headphones"
+        case .globe: "globe"
+        case .lock: "lock"
+        case .lockOpen: "lock.open"
+        case .key: "key"
+        case .sparkle: "sparkles"
+        case .sync: "arrow.triangle.2.circlepath"
+        case .storage: "internaldrive"
+        case .servers: "server.rack"
+        case .timer: "timer"
+        case .listeners: "person.2"
+        case .layout: "rectangle.3.group"
+        case .wifi: "wifi"
+        case .camera: "camera"
+        case .qrCode: "qrcode"
+        case .copy: "doc.on.doc"
+        case .link: "link"
+        case .audioQuality: "waveform"
+        case .visible: "eye"
+        case .hidden: "eye.slash"
+        case .minimize: "arrow.down.right.and.arrow.up.left"
+        case .maximize: "arrow.up.left.and.arrow.down.right"
+        case .restore: "arrow.uturn.backward"
+        case .system: "gearshape.2"
+        case .keyboard: "keyboard"
+        case .loudness: "speaker.wave.2"
+        case .balance: "dial.medium"
+        case .crossfade: "arrow.triangle.merge"
         }
     }
-}
 
-/// An icon as a shape that fills its frame.
-struct IconShape: Shape {
-    let icon: OctoIcon
-
-    func path(in rect: CGRect) -> Path {
-        icon.outline.applying(CGAffineTransform(translationX: rect.minX, y: rect.minY).scaledBy(x: rect.width, y: rect.height))
-    }
+    /// Whether the selected tab's or the on state's symbol is drawn bolder, as the system's
+    /// tab bars do for a symbol without a filled form.
+    var bold: Bool { self == .searchSelected }
 }
 
 /// An icon, `size` points square, in `color` (the foreground style by default).
@@ -76,37 +139,20 @@ struct IconView: View {
     }
 
     var body: some View {
-        Group {
-            if let color {
-                IconShape(icon: icon).fill(color)
-            } else {
-                IconShape(icon: icon).fill(.foreground)
-            }
-        }
-        .frame(width: size, height: size)
-        .accessibilityHidden(true)
+        Image(systemName: icon.symbol)
+            .font(.system(size: size * 0.8, weight: icon.bold ? .bold : .regular))
+            .foregroundStyle(color.map { AnyShapeStyle($0) } ?? AnyShapeStyle(.foreground))
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
     }
 }
 
-/// The pause sign: two rounded bars on Phosphor's 256 grid, drawn at 0.8 about the middle.
+/// The pause sign, `size` points square.
 struct PauseGlyph: View {
     var size: CGFloat = 22
     var color: Color = .white
 
     var body: some View {
-        Canvas { context, canvas in
-            let unit = canvas.width / 256
-            func bar(_ x: CGFloat) -> Path {
-                // 0.8 about the middle of the grid.
-                let scale: CGFloat = 0.8
-                let rect = CGRect(x: 128 + (x - 128) * scale, y: 128 + (32 - 128) * scale, width: 72 * scale, height: 192 * scale)
-                return Path(roundedRect: CGRect(x: rect.minX * unit, y: rect.minY * unit, width: rect.width * unit, height: rect.height * unit),
-                            cornerRadius: 16 * scale * unit)
-            }
-            context.fill(bar(40), with: .color(color))
-            context.fill(bar(144), with: .color(color))
-        }
-        .frame(width: size, height: size)
-        .accessibilityHidden(true)
+        IconView(.pause, size: size, color: color)
     }
 }
