@@ -4,11 +4,22 @@ import SwiftUI
 /// Where a heart would be for a song not in the library: a plus that asks the server to download
 /// the song into the library (the download arrow is kept for saving to the phone). A ring around
 /// the plus shows the song on its way and turns into a check once it is in the library. A failed
-/// one shows an alert: a tap tries again, a long press says why.
+/// one shows an alert: a tap tries again, a long press says why. A family member whose songs are
+/// saved rather than added gets a heart that saves the song instead.
 struct AddToLibraryButton: View {
     let song: Song
     var size: CGFloat = 44
     var iconSize: CGFloat = 24
+
+    var body: some View {
+        AddButton(song: song, size: size, iconSize: iconSize)
+    }
+}
+
+private struct AddButton: View {
+    let song: Song
+    let size: CGFloat
+    let iconSize: CGFloat
     @Environment(Downloads.self) private var downloads
     @Environment(Router.self) private var router
     @Environment(Accounts.self) private var accounts
@@ -44,7 +55,8 @@ struct AddToLibraryButton: View {
         let phase = downloads.phase(song.id)
         let onItsWay = phase.state == .requested
         let follows = onItsWay && downloads.keepsLog
-        let enabled = phase == .none || isFailed(phase) || follows
+        let failed = isFailed(phase)
+        let enabled = phase == .none || failed || follows
         Button {
             if follows {
                 router.showServerDownloads(songId: song.id)
@@ -70,14 +82,17 @@ struct AddToLibraryButton: View {
         .buttonStyle(NoPress())
         .disabled(!enabled)
         .id(song.id)
-        .simultaneousGesture(LongPressGesture().onEnded { _ in explain() })
+        // Only a failed one has a long press: it says why, in place of the tap.
+        .highPriorityGesture(LongPressGesture().onEnded { _ in explain() }, including: failed ? .all : .subviews)
         .accessibilityLabel("Add to your library")
         .accessibilityValue(phase.spoken)
-        .accessibilityAction(named: isFailed(phase) ? "Try again" : follows ? "Follow it" : "Add to your library") {
-            if follows { router.showServerDownloads(songId: song.id) } else if enabled { ask() }
-        }
         .accessibilityActions {
-            if isFailed(phase) { Button("Why") { explain() } }
+            if failed {
+                Button("Try again") { ask() }
+                Button("Why") { explain() }
+            } else if follows {
+                Button("Follow it") { router.showServerDownloads(songId: song.id) }
+            }
         }
         .onAppear { release = downloads.showing(song.id) }
         .onDisappear {

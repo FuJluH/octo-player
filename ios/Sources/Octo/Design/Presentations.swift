@@ -66,6 +66,7 @@ struct PopoverBack: View {
         .buttonStyle(.plain)
         .accessibilityLabel(title)
         .accessibilityHint("Back")
+        .accessibilityAddTraits(.isHeader)
     }
 }
 

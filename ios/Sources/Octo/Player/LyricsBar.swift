@@ -4,14 +4,19 @@ import SwiftUI
 /// While lyrics show, the controls fold into one glass bar: the song (a tap on it leaves the
 /// lyrics), previous, play and next, the lit lyrics switch and the lyrics menu, a system menu
 /// whose timing opens in a popover beside it, with the song's progress along the bottom edge.
-/// A sideways drag starting along that edge scrubs.
+/// A sideways drag starting along that edge scrubs; an upright one is the player's pull.
 struct LyricsBar: View {
     let ink: Color
     let close: () -> Void
     @Binding var timing: Bool
     let chooseOther: () -> Void
     @Environment(Player.self) private var player
+    @Environment(Downloads.self) private var downloads
+    @Environment(\.passedDrag) private var passedDrag
     @State private var scrub: Double?
+    /// The drag went up or down first: it is handed on to the player.
+    @State private var passing = false
+    @GestureState private var touching = false
     @State private var width: CGFloat = 0
 
     private static let height: CGFloat = 64
@@ -21,7 +26,8 @@ struct LyricsBar: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            BadgedCover(id: player.current?.coverArt, size: 40, radius: 10, external: player.current?.isExternal ?? false)
+            BadgedCover(id: player.current?.coverArt, size: 40, radius: 10,
+                        external: isOutsideLibrary(player.current, adopted: downloads.adopted))
             Button(action: close) {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(player.current?.title ?? "")
@@ -39,7 +45,8 @@ struct LyricsBar: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(NoPress())
-            .accessibilityLabel("Leave lyrics")
+            .accessibilityElement(children: .combine)
+            .accessibilityHint("Leave lyrics")
             control(.previous, 24, "Previous", player.previous)
             control(player.isPlaying ? .pause : .play, 28, player.isPlaying ? "Pause" : "Play", player.toggle)
             control(.next, 24, "Next", player.next)
@@ -73,6 +80,15 @@ struct LyricsBar: View {
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .floatingGlass(Capsule())
         .simultaneousGesture(scrubbing)
+        .onChange(of: touching) { _, now in
+            // A drag taken away by something else seeks nothing.
+            guard !now else { return }
+            scrub = nil
+            if passing {
+                passing = false
+                passedDrag?.cancelled()
+            }
+        }
     }
 
     private var progress: some View {
@@ -101,18 +117,34 @@ struct LyricsBar: View {
     }
 
     /// A sideways drag that starts in the bottom 22 points scrubs, once the song's length is known;
-    /// the song plays from there when the finger lifts.
+    /// the song plays from there when the finger lifts. A drag that goes up or down first is the
+    /// player's.
     private var scrubbing: some Gesture {
         DragGesture(minimumDistance: 8, coordinateSpace: .local)
+            .updating($touching) { _, state, _ in state = true }
             .onChanged { value in
+                if passing {
+                    passedDrag?.moved(value.translation)
+                    return
+                }
                 if scrub == nil {
-                    guard player.duration > 0, value.startLocation.y >= Self.height - Self.scrubZone,
-                          abs(value.translation.width) > abs(value.translation.height)
-                    else { return }
+                    let sideways = abs(value.translation.width) > abs(value.translation.height)
+                    guard sideways, player.duration > 0, value.startLocation.y >= Self.height - Self.scrubZone else {
+                        if !sideways {
+                            passing = true
+                            passedDrag?.moved(value.translation)
+                        }
+                        return
+                    }
                 }
                 scrub = fraction(value.location.x)
             }
             .onEnded { value in
+                if passing {
+                    passing = false
+                    passedDrag?.ended(value.translation, value.velocity)
+                    return
+                }
                 guard scrub != nil else { return }
                 let target = fraction(value.location.x)
                 scrub = nil

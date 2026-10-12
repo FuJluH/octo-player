@@ -381,7 +381,8 @@ final class WashView: UIView {
     private func dolly(_ now: CFTimeInterval) -> Float {
         if let closingAt {
             let t = min(max((now - closingAt) / 0.5, 0), 1)
-            let start = Float(min(max((closingAt - openedAt - 0.02) / 0.8, 0), 1))
+            let opened = min(max((closingAt - openedAt - 0.02) / 0.8, 0), 1)
+            let start = Float(Easing.cubicBezier(0.22, 1, 0.36, 1, opened))
             return start * Float(1 - Easing.cubicBezier(0.64, 0, 0.78, 0, t))
         }
         let t = min(max((now - openedAt - 0.02) / 0.8, 0), 1)

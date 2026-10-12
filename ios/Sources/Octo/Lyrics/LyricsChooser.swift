@@ -41,6 +41,8 @@ struct LyricsChooserContent: View {
         .scrollBounceBehavior(.basedOnSize)
         .scrollDismissesKeyboard(.interactively)
         .task(id: song.id) { look() }
+        // What was typed belongs to the song it was typed for.
+        .onChange(of: song.id) { _, _ in query = "" }
     }
 
     private var facts: LyricsSong { LyricsSong(song.id, song.title, song.byline, song.album ?? "", song.duration * 1000) }

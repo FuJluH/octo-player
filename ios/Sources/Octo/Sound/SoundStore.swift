@@ -120,7 +120,7 @@ final class SoundStore {
 
     private static func kind(of port: AVAudioSession.Port) -> OutputDevice.Kind {
         switch port {
-        case .bluetoothA2DP, .bluetoothLE: .bluetooth
+        case .bluetoothA2DP, .bluetoothLE, .bluetoothHFP: .bluetooth
         case .airPlay: .airPlay
         case .carAudio: .car
         case .usbAudio: .usb
