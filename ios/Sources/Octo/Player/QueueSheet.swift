@@ -41,6 +41,10 @@ struct QueueSheet: View {
     @State private var saving = false
     @State private var ticks = 0
     @State private var presses = 0
+    @State private var position = ScrollPosition(edge: .top)
+    @State private var scrollOffset: CGFloat = 0
+    @State private var maxOffset: CGFloat = 0
+    @State private var viewport: CGRect = .zero
 
     var body: some View {
         let entries = QueueEntry.of(player.queue).filter { !removed.contains($0.id) }
@@ -60,7 +64,7 @@ struct QueueSheet: View {
                     .foregroundStyle(OctoColor.textMuted)
                     .padding(.horizontal, 20)
                 tools(reader, now: now, hasPlayed: !played.isEmpty, hasOthers: entries.count > 1)
-                HuggingScroll {
+                QueueScroll(position: $position, onGeometry: scrolled) {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(played) { entry in
                             playedRow(entry)
@@ -89,8 +93,8 @@ struct QueueSheet: View {
                     }
                     .padding(.top, 4)
                     .padding(.bottom, 12)
-                    .coordinateSpace(name: "queue")
                 }
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { viewport = $0 }
             }
             .onAppear {
                 guard let now else { return }
@@ -98,6 +102,15 @@ struct QueueSheet: View {
             }
         }
         .sensoryFeedback(.selection, trigger: ticks)
+        .background {
+            // While a row is dragged near the list's top or bottom, the list keeps scrolling, finger
+            // moving or not.
+            if drag != nil {
+                TimelineView(.animation) { frame in
+                    Color.clear.onChange(of: frame.date) { last, now in edgeScroll(now.timeIntervalSince(last)) }
+                }
+            }
+        }
         .sensoryFeedback(.impact(weight: .medium), trigger: presses)
         .onChange(of: player.queue) { _, _ in removed = [] }
         .glassPopup(isPresented: $showsMenu, title: "Song in the queue") {
@@ -221,22 +234,18 @@ struct QueueSheet: View {
     /// Dragging starts from the handle at once. The other rows move aside as the dragged one
     /// passes them; the queue changes only on the drop.
     private func reorder(_ entry: QueueEntry, offset: Int, count: Int) -> some Gesture {
-        DragGesture(minimumDistance: 0, coordinateSpace: .named("queue"))
+        DragGesture(minimumDistance: 0, coordinateSpace: .global)
             .onChanged { value in
                 if drag == nil {
                     let upcoming = QueueEntry.of(player.queue).filter { $0.position > player.index }
                     let from = upcoming.firstIndex { $0.id == entry.id } ?? offset
-                    drag = QueueDrag(key: entry.id, from: from, target: from, lift: 0)
+                    drag = QueueDrag(key: entry.id, from: from, count: count, target: from, lift: 0, startOffset: scrollOffset,
+                                     fingerY: value.location.y, travel: 0)
                 }
                 guard var moving = drag else { return }
-                let steps = Int((value.translation.height / queueRowHeight).rounded())
-                let target = min(max(moving.from + steps, 0), count - 1)
-                if target != moving.target {
-                    ticks += 1
-                    withAnimation(.octoSpring(1, 400)) { moving.target = target }
-                }
-                moving.lift = value.translation.height - CGFloat(target - moving.from) * queueRowHeight
-                drag = moving
+                moving.fingerY = value.location.y
+                moving.travel = value.translation.height
+                place(moving)
             }
             .onEnded { _ in
                 guard let moving = drag else { return }
@@ -244,6 +253,58 @@ struct QueueSheet: View {
                 guard moving.target != moving.from else { return }
                 player.move(from: IndexSet(integer: moving.from), to: moving.target > moving.from ? moving.target + 1 : moving.target)
             }
+    }
+
+    /// Where the dragged row would land: the finger's travel plus how far the list has scrolled
+    /// under it, in whole rows. Each new place ticks, and the rows around it move aside.
+    private func place(_ given: QueueDrag) {
+        var moving = given
+        let travelled = moving.travel + (scrollOffset - moving.startOffset)
+        let target = min(max(moving.from + Int((travelled / queueRowHeight).rounded()), 0), max(moving.count - 1, 0))
+        moving.lift = travelled - CGFloat(target - moving.from) * queueRowHeight
+        if target != moving.target {
+            moving.target = target
+            ticks += 1
+            withAnimation(.octoSpring(1, 400)) { drag = moving }
+        } else {
+            drag = moving
+        }
+    }
+
+    /// The list's scroll, as it stands.
+    private func scrolled(_ geometry: ScrollGeometry) {
+        scrollOffset = geometry.contentOffset.y + geometry.contentInsets.top
+        maxOffset = max(0, geometry.contentSize.height + geometry.contentInsets.top + geometry.contentInsets.bottom
+                        - geometry.containerSize.height)
+    }
+
+    /// One frame of scrolling while the dragged row is within 48 points of the list's top or
+    /// bottom: up to five times half the list's height a second at the very edge, slowing to
+    /// nothing 48 points in.
+    private func edgeScroll(_ seconds: TimeInterval) {
+        guard let moving = drag, viewport.height > 0, seconds > 0, seconds < 0.25 else { return }
+        let fromTop = max(moving.fingerY - viewport.minY, 0)
+        let fromBottom = max(viewport.maxY - moving.fingerY, 0)
+        let speed: CGFloat
+        if fromTop < Self.edge {
+            speed = -edgeSpeed(fromTop)
+        } else if fromBottom < Self.edge {
+            speed = edgeSpeed(fromBottom)
+        } else {
+            return
+        }
+        let next = min(max(scrollOffset + speed * CGFloat(seconds), 0), maxOffset)
+        guard abs(next - scrollOffset) > 0.01 else { return }
+        scrollOffset = next
+        position.scrollTo(y: next)
+        place(moving)
+    }
+
+    private static let edge: CGFloat = 48
+
+    private func edgeSpeed(_ distance: CGFloat) -> CGFloat {
+        let share = 1 - min(max((distance + Self.edge) / (2 * Self.edge), 0), 1)
+        return share * 10 * viewport.height * 0.5
     }
 
     // MARK: Edits
@@ -314,13 +375,54 @@ struct QueueSheet: View {
     }
 }
 
-/// A row being dragged: which, from where, where it would land, and how far it sits from that
-/// place under the finger.
+/// A row being dragged: which, from where among how many, where it would land, how far it sits
+/// from that place under the finger, and the list's scroll and the finger when it started.
 private struct QueueDrag: Equatable {
     let key: String
     let from: Int
+    let count: Int
     var target: Int
     var lift: CGFloat
+    let startOffset: CGFloat
+    var fingerY: CGFloat
+    var travel: CGFloat
+}
+
+/// The queue's list: as tall as its rows, or less when there is less room, then it scrolls. Its
+/// scroll can be moved from code and is reported as it changes.
+private struct QueueScroll<Content: View>: View {
+    @Binding var position: ScrollPosition
+    let onGeometry: (ScrollGeometry) -> Void
+    @ViewBuilder var content: Content
+    @State private var height: CGFloat = 0
+
+    var body: some View {
+        RowsHeight(height: height) {
+            ScrollView(.vertical) {
+                content.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+            }
+            .scrollPosition($position)
+            .onScrollGeometryChange(for: ScrollGeometry.self, of: { $0 }) { _, geometry in onGeometry(geometry) }
+            .scrollBounceBehavior(.basedOnSize)
+            .scrollIndicators(.hidden)
+        }
+    }
+}
+
+/// Takes its rows' height, or less when less is offered.
+private struct RowsHeight: Layout {
+    let height: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? subviews.first?.sizeThatFits(.unspecified).width ?? 0
+        let ideal = subviews.first?.sizeThatFits(ProposedViewSize(width: width, height: nil)).height ?? 0
+        let natural = max(ideal, height)
+        return CGSize(width: width, height: min(natural, proposal.height ?? natural))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: bounds.height))
+    }
 }
 
 /// A song in the queue: its cover (marked when it is not in the library), title and artist, and
