@@ -371,6 +371,16 @@ final class ManualClock: PlaybackClock {
         #expect(headsetKind(portType: "Speaker") == nil)
         #expect(headsetKind(portType: "BluetoothHFP") == nil)
     }
+
+    @Test func theWayBackFollowsTheSettingOnlyWhenCastingEndsByItself() {
+        // Picking the phone carries on as things were.
+        #expect(playsOnReturn(wasPlaying: true, chosen: true, keepPlaying: false))
+        #expect(!playsOnReturn(wasPlaying: false, chosen: true, keepPlaying: true))
+        // The device went away: paused, unless the setting says carry on.
+        #expect(!playsOnReturn(wasPlaying: true, chosen: false, keepPlaying: false))
+        #expect(playsOnReturn(wasPlaying: true, chosen: false, keepPlaying: true))
+        #expect(!playsOnReturn(wasPlaying: false, chosen: false, keepPlaying: true))
+    }
 }
 
 @Suite struct AutoplayTest {

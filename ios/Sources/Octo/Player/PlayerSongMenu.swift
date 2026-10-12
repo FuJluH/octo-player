@@ -46,6 +46,7 @@ struct HiddenRoutePicker: UIViewRepresentable {
     func makeUIView(context: Context) -> AVRoutePickerView {
         let view = AVRoutePickerView()
         view.prioritizesVideoDevices = false
+        view.delegate = RouteChoice.shared
         view.alpha = 0.011
         view.isUserInteractionEnabled = false
         trigger.picker = view

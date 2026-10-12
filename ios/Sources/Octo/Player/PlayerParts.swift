@@ -37,6 +37,7 @@ struct RoutePicker: UIViewRepresentable {
         view.tintColor = tint
         view.activeTintColor = tint
         view.prioritizesVideoDevices = false
+        view.delegate = RouteChoice.shared
         return view
     }
 
