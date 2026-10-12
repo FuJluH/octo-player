@@ -98,6 +98,8 @@ private struct SelectableSongs: ViewModifier {
     func body(content: Content) -> some View {
         content
             .environment(\.songSelection, selection)
+            // Going back while picking ends the picking and stays on the page.
+            .backAction(selection.active ? { selection.clear() } : nil)
             .onAppear {
                 let made = target ?? SelectionTarget(selection: selection)
                 made.list = songs

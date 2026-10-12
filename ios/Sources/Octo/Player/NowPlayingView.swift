@@ -19,7 +19,7 @@ struct NowPlayingView: View {
     @Environment(\.octoReduceMotion) private var calm
     @Environment(\.scenePhase) private var scenePhase
     @State private var settings = AppSettings.shared
-    @State private var look = PlayerLook()
+    @State private var look = PlayerLook.shared
     @State private var facts = PlayerSongFacts()
     @State private var drive = PlayerDrive.shared
     @State private var flight = CoverFlight.shared
@@ -37,11 +37,19 @@ struct NowPlayingView: View {
     // The pull and the artwork's swipe.
     @State private var pull: CGFloat = 0
     @State private var axis: DragAxis = .undecided
+    /// The artwork has made its one decision for this drag and left it to the pull.
+    @State private var artDecided = false
+    /// Where the pull's slop is measured from: the touch, or the last point the finger went past
+    /// it upward.
+    @State private var slopOrigin: CGFloat = 0
+    @State private var lastDy: CGFloat = 0
     @State private var card: CGFloat = 0
-    @State private var cardStart: CGFloat = 0
+    /// Counts the artwork's settles, so a new swipe calls off one still under way.
+    @State private var settle = 0
     @State private var armed = false
     @State private var ticks = 0
     @State private var stage: CGRect = .zero
+    @State private var cardFrame: CGRect = .zero
     @GestureState private var dragging = false
 
     // What opens over the player.
@@ -57,6 +65,8 @@ struct NowPlayingView: View {
     private static let pullShare: CGFloat = 0.45
     private static let slop: CGFloat = 8
     private static let skipAt: CGFloat = 88
+    /// The line at the top, holding the album's name.
+    private static let topLineHeight: CGFloat = 40
 
     private var colors: PlayerColors { look.colors }
     private var ink: Color { colors.content }
@@ -88,6 +98,10 @@ struct NowPlayingView: View {
                     }
                     .foregroundStyle(ink)
                     .animation(.octoTween(fixed: 500), value: colors.dark)
+                    // An upright drag that starts on a line pulls the player down too.
+                    .environment(\.passedDrag, PassedDrag(moved: { dragMoved($0, cap: cap, onCard: false) },
+                                                          ended: { dragEnded($0, $1, cap: cap) },
+                                                          cancelled: dragTakenOver))
                 }
                 .frame(width: size.width, height: size.height)
                 .clipShape(RoundedRectangle(cornerRadius: travel > 0 ? 28 * min(pulled * 5, 1) : 0, style: .continuous))
@@ -101,14 +115,11 @@ struct NowPlayingView: View {
         .background(PlayerStatusBar(dark: colors.dark))
         .sensoryFeedback(.impact(flexibility: .rigid, intensity: 0.8), trigger: ticks)
         .onChange(of: dragging) { _, now in
-            // A drag taken over by something else ends as if it went nowhere.
-            guard !now, axis != .undecided else { return }
-            axis = .undecided
-            armed = false
-            withAnimation(.octoSpring(0.8, 400)) {
-                pull = 0
-                card = 0
+            guard !now, axis != .undecided else {
+                if !now { resetDrag() }
+                return
             }
+            dragTakenOver()
         }
         .onChange(of: lookAsk, initial: true) { _, ask in
             look.follow(coverId: ask.coverId, prefs: ask.prefs, live: ask.live, artwork: ask.artwork, client: session.client)
@@ -181,7 +192,7 @@ struct NowPlayingView: View {
         .overlay {
             if lyricsLayer {
                 LyricsPane(edgeBleed: 24, ink: ink)
-                    .padding(.top, insets.top + 56 + 8)
+                    .padding(.top, insets.top + Self.topLineHeight + 8)
                     .padding(.bottom, insets.bottom + 76 + 8)
                     .padding(.horizontal, 24)
                     .opacity(lyricsAlpha)
@@ -193,24 +204,30 @@ struct NowPlayingView: View {
         HStack(spacing: 32) {
             artStage(maxSide: 420, folds: false)
                 .padding(.vertical, 12)
-            VStack(spacing: 0) {
+            ZStack {
                 if lyrics.open {
-                    topLine
-                    LyricsPane(edgeBleed: 0, ink: ink)
-                        .padding(.vertical, 4)
-                    LyricsBar(ink: ink, close: toggleLyrics, timing: $showsTiming) { showsChooser = true }
-                        .padding(.horizontal, -12)
-                        .padding(.bottom, 8)
+                    VStack(spacing: 0) {
+                        topLine
+                        LyricsPane(edgeBleed: 0, ink: ink)
+                            .padding(.vertical, 4)
+                        LyricsBar(ink: ink, close: toggleLyrics, timing: $showsTiming) { showsChooser = true }
+                            .padding(.horizontal, -12)
+                            .padding(.bottom, 8)
+                    }
+                    .transition(swap)
                 } else {
-                    Spacer(minLength: 0)
-                    topLine
-                    controls(roomy: roomy)
-                        .offset(y: rise)
-                        .opacity(riseAlpha)
-                    Spacer(minLength: 0)
+                    VStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        topLine
+                        controls(roomy: roomy)
+                            .offset(y: rise)
+                            .opacity(riseAlpha)
+                        Spacer(minLength: 0)
+                    }
+                    .transition(swap)
                 }
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding(.horizontal, 24)
         .padding(.top, insets.top)
@@ -239,7 +256,7 @@ struct NowPlayingView: View {
                 .frame(width: 1, height: 1)
                 .accessibilityHidden(true)
         }
-        .frame(height: 40)
+        .frame(height: Self.topLineHeight)
     }
 
     @ViewBuilder
@@ -269,7 +286,10 @@ struct NowPlayingView: View {
             let folded = folds ? fold : 0
             let swiped = 1 - 0.5 * min(abs(card) / max(box.size.width / 2, 1), 1)
             Cover(id: player.current?.coverArt, size: side, radius: side * corner / 100, online: player.current?.isExternal ?? false)
-                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { flight.cardPlaced($0) }
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                    flight.cardPlaced(frame)
+                    cardFrame = frame
+                }
                 .elevation3()
                 .opacity(flight.hidesCard ? 0 : 1)
                 .scaleEffect(player.isPlaying ? 1 : 0.84)
@@ -404,7 +424,7 @@ struct NowPlayingView: View {
     }
 
     /// Closes the player: the background draws back and the cover rounds as it flies home. `then`
-    /// opens a page in its place, which closes the player on its way.
+    /// opens a page in its place as the player goes.
     private func close(then go: (() -> Void)? = nil) {
         guard !closing else { return }
         closing = true
@@ -412,11 +432,8 @@ struct NowPlayingView: View {
         withAnimation(PlayerDolly.close) { dolly = 0 }
         withAnimation(.octoSpring(1, 1500)) { corner = 50 }
         DispatchQueue.main.async {
-            if let go {
-                go()
-            } else {
-                withAnimation(.octoSpring(1, 400)) { dismiss() }
-            }
+            go?()
+            withAnimation(.octoSpring(1, 400)) { dismiss() }
         }
     }
 
@@ -459,44 +476,94 @@ struct NowPlayingView: View {
         DragGesture(minimumDistance: Self.slop, coordinateSpace: .global)
             .updating($dragging) { _, state, _ in state = true }
             .onChanged { value in
-                let dx = value.translation.width
-                let dy = value.translation.height
-                if axis == .undecided {
-                    if !folded, stage.contains(value.startLocation),
-                       dragAxis(dx, dy, slop: Self.slop) == .horizontal {
-                        axis = .horizontal
-                        cardStart = card
-                    } else if dy >= Self.slop {
-                        axis = .vertical
-                    }
-                }
-                switch axis {
-                case .vertical:
-                    pull = min(max(dy * 0.82, 0), cap)
+                dragMoved(value.translation, cap: cap, onCard: !folded && cardFrame.contains(value.startLocation))
+            }
+            .onEnded { value in dragEnded(value.translation, value.velocity, cap: cap) }
+    }
+
+    /// The finger moved `t` from where it went down. The artwork decides once, from the first
+    /// clear movement: sideways is its swipe, anything else is left for the pull. The pull starts
+    /// once the finger has gone the slop downward; going the slop upward first only moves the
+    /// point it is measured from. Then it follows the finger at 0.82, held between 0 and `cap`.
+    private func dragMoved(_ t: CGSize, cap: CGFloat, onCard: Bool) {
+        let dx = t.width
+        let dy = t.height
+        if axis == .undecided {
+            if onCard && !artDecided {
+                switch dragAxis(dx, dy, slop: Self.slop) {
                 case .horizontal:
-                    card = cardStart + dx * 0.55
-                    mark(abs(dx) >= Self.skipAt)
+                    axis = .horizontal
+                    // A new swipe takes over from one still settling.
+                    settle += 1
+                case .vertical:
+                    artDecided = true
                 case .undecided:
                     break
                 }
             }
-            .onEnded { value in
-                let taken = axis
-                axis = .undecided
-                switch taken {
-                case .vertical:
-                    let speed = value.velocity.height
-                    if speed > 1200 || (pull > cap / 2 && speed > -150) {
-                        close()
-                    } else {
-                        withAnimation(.octoSpring(0.8, 400)) { pull = 0 }
-                    }
-                case .horizontal:
-                    finishSwipe(value.translation.width, value.velocity.width)
-                case .undecided:
-                    break
+            if axis == .undecided {
+                let moved = dy - slopOrigin
+                if moved <= -Self.slop {
+                    slopOrigin = dy
+                } else if moved >= Self.slop {
+                    axis = .vertical
+                    pull = min(max((moved - Self.slop) * 0.82, 0), cap)
+                    lastDy = dy
+                    return
                 }
             }
+        }
+        switch axis {
+        case .vertical:
+            pull = min(max(pull + (dy - lastDy) * 0.82, 0), cap)
+            lastDy = dy
+        case .horizontal:
+            card = dx * 0.55
+            mark(abs(dx) >= Self.skipAt)
+        case .undecided:
+            break
+        }
+    }
+
+    /// The finger lifted: a flick down or a pull past half the way closes, unless it was moving
+    /// back up; a swipe of the artwork skips or springs back.
+    private func dragEnded(_ t: CGSize, _ velocity: CGSize, cap: CGFloat) {
+        let taken = axis
+        resetDrag()
+        switch taken {
+        case .vertical:
+            let speed = velocity.height
+            if speed > 1200 || (pull > cap / 2 && speed > -150) {
+                close()
+            } else {
+                withAnimation(.octoSpring(0.8, 400)) { pull = 0 }
+            }
+        case .horizontal:
+            finishSwipe(t.width, velocity.width)
+        case .undecided:
+            break
+        }
+    }
+
+    /// A drag taken over by something else ends as if it went nowhere.
+    private func dragTakenOver() {
+        let taken = axis
+        resetDrag()
+        switch taken {
+        case .vertical:
+            withAnimation(.octoSpring(0.8, 400)) { pull = 0 }
+        case .horizontal:
+            finishSwipe(0, 0)
+        case .undecided:
+            break
+        }
+    }
+
+    private func resetDrag() {
+        axis = .undecided
+        artDecided = false
+        slopOrigin = 0
+        lastDy = 0
     }
 
     /// One tick each time the finger passes the point where letting go skips.
@@ -506,10 +573,15 @@ struct NowPlayingView: View {
         if past { ticks += 1 }
     }
 
+    /// Settles a swipe of the artwork. A skip carries it on out the way it was going, changes the
+    /// song, and brings the new one in from 20% out on the other side; otherwise it springs back.
+    /// A new swipe calls off a settle still under way.
     private func finishSwipe(_ offset: CGFloat, _ velocity: CGFloat) {
         let result = swipeSkip(offset: Double(offset), velocity: Double(velocity), distance: Double(Self.skipAt), fling: 900)
         if result != .stay && !armed { ticks += 1 }
         armed = false
+        settle += 1
+        let token = settle
         let width = max(stage.width, 1)
         switch result {
         case .stay:
@@ -519,9 +591,15 @@ struct NowPlayingView: View {
             withAnimation(.octoTween(fixed: 120)) {
                 card = way * width / 2
             } completion: {
+                guard token == settle else { return }
                 if result == .next { player.next() } else { player.previous() }
-                card = -way * width * 0.2
-                withAnimation(.octoSpring(0.8, 300)) { card = 0 }
+                var still = Transaction()
+                still.disablesAnimations = true
+                withTransaction(still) { card = -way * width * 0.2 }
+                DispatchQueue.main.async {
+                    guard token == settle else { return }
+                    withAnimation(.octoSpring(0.8, 300)) { card = 0 }
+                }
             }
         }
     }
@@ -556,6 +634,12 @@ struct NowPlayingView: View {
 
     private func take(_ request: PlayerDrive.Request) {
         switch request.name {
+        case "close": close()
+        case "album":
+            // As the song menu's Go to album does: the page opens and the player closes around it.
+            if let song = player.current, let albumId = song.albumId, !albumId.isEmpty {
+                router.go(.album(Album(id: albumId, name: song.album ?? "", artist: song.artist ?? "", coverArt: song.coverArt)))
+            }
         case "queue": showsQueue = true
         case "sleep":
             if let minutes = Int(request.value) { player.startSleep(minutes: minutes) }

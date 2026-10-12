@@ -34,10 +34,9 @@ struct SharesScreen: View {
                     ForEach(list) { share in row(share, now: now) }
                 }
             }
-            .padding(.top, detailTopGap)
+            .padding(.top, 8 + detailTopGap)
         }
         .barClearance()
-        .background(OctoColor.background)
         .task { await load() }
         .opensWhenAsked("delete_link") { if case .ready(let list) = shares { deleting = list.first } }
     }

@@ -84,6 +84,8 @@ final class SystemActions: OctoIntentHandling {
     /// Carries on with the queue, or with none, shuffles everything, as the play button does.
     private func resumeOrShuffle() async -> String? {
         guard player.engine.queue.isEmpty else {
+            // A queue that played out starts the song it ended on again from its start.
+            if player.engine.state == .ended { player.engine.seek(to: player.engine.queue.current) }
             player.resume()
             return nil
         }
@@ -116,18 +118,29 @@ final class SystemActions: OctoIntentHandling {
         case .open:
             break
         case .player:
+            // Asked for with nothing loaded, the player opens as soon as a song loads.
             Task {
                 await restored()
-                if player.current != nil { router.drive = .openPlayer }
+                router.drive = .openPlayer
             }
         case .command(let command):
             Task {
-                if let words = await run(command) {
+                let words = await run(command)
+                // Resume with nothing to play plays nothing and says nothing.
+                if let words, !Self.resumes(command) {
                     router.show(words)
                 } else if case .quick = command {
                     router.drive = .openPlayer
                 }
             }
+        }
+    }
+
+    /// Whether a command is the play button's resume.
+    private static func resumes(_ command: WidgetCommand) -> Bool {
+        switch command {
+        case .play, .quick(.resume): true
+        default: false
         }
     }
 
@@ -149,7 +162,10 @@ final class SystemActions: OctoIntentHandling {
             }
         case .liked: words = await run(.quick(.liked))
         case .recentlyAdded: words = await run(.quick(.recentlyAdded))
-        case .resume: words = await run(.play)
+        case .resume:
+            // Resume always counts as started: the player opens, or opens once a song loads.
+            _ = await run(.play)
+            words = nil
         }
         if let words {
             router.show(words)

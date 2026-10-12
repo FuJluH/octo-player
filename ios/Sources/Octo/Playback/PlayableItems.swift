@@ -158,9 +158,7 @@ struct PlayableItems {
     }
 
     private func openedFileItem(_ id: String, source: QueueSource) -> QueueItem? {
-        // Only a file Octo can read plays; anything else is dropped quietly.
-        guard let file = openedFileOf(id), let url = URL(string: file.uri), url.isFileURL,
-              FileManager.default.isReadableFile(atPath: url.path) else { return nil }
+        guard let file = openedFileOf(id), let url = URL(string: file.uri), OpenedFileAccess.canRead(url) else { return nil }
         return QueueItem(trackId: id, uri: file.uri, title: file.shownTitle, artist: file.artist, source: source)
     }
 

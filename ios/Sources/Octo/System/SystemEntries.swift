@@ -84,31 +84,40 @@ final class SystemEntries {
     /// The list types Import takes from another app.
     private let importFileTypes: [UTType] = [.commaSeparatedText, .plainText, .json, .zip]
 
-    /// Plays a file opened from another app: its tags give its title and artist; one that cannot
-    /// be read says so.
+    /// Plays a file opened from another app: the library song it is, when it is one, else the
+    /// file itself, its tags giving its title and artist. One that cannot be read says so.
     func playOpened(_ url: URL) async {
-        guard FileManager.default.isReadableFile(atPath: url.path) else {
-            router.show("Octo cannot open that file")
+        OpenedFileAccess.keep(url)
+        let named = player.data?.device.named ?? [:]
+        let about = await Task.detached(priority: .userInitiated) { await OpenedFileAbout.read(url) }.value
+        if let trackId = await libraryTrack(url, about: about, named: named) {
+            player.play(ids: [trackId])
+            router.drive = .openPlayer
             return
         }
-        let asset = AVURLAsset(url: url)
-        var title: String?
-        var artist: String?
-        if let metadata = try? await asset.load(.commonMetadata) {
-            for item in metadata {
-                guard let key = item.commonKey, let value = try? await item.load(.stringValue) else { continue }
-                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                if key == .commonKeyTitle, !trimmed.isEmpty { title = trimmed }
-                if key == .commonKeyArtist, !trimmed.isEmpty { artist = trimmed }
-            }
-        }
-        let id = openedFileId(uri: url.absoluteString, title: title ?? titleFromName(url.lastPathComponent) ?? "", artist: artist ?? "")
-        guard let song = openedFileSong(id) else {
+        let readable = await Task.detached(priority: .userInitiated) { OpenedFileAccess.canRead(url) }.value
+        let id = openedFileId(uri: url.absoluteString, title: about.title ?? titleFromName(about.name) ?? "", artist: about.artist ?? "")
+        guard readable, let song = openedFileSong(id) else {
             router.show("Octo cannot open that file")
             return
         }
         player.play([song], from: 0)
         router.drive = .openPlayer
+    }
+
+    /// The library song an opened file is: a file in Octo's own folder by its place there, else
+    /// the phone song with the same file name and length (or size). Nil when it is neither.
+    private func libraryTrack(_ url: URL, about: OpenedFileAbout, named: [String: [NamedCandidate]]) async -> String? {
+        guard let store = player.data?.library.store else { return nil }
+        if let id = DeviceLibrary.ownFileId(url), let track = await Self.deviceTrack(id, store) { return track }
+        guard let name = about.name, let candidates = named[name],
+              let id = pickSameFile(candidates, durationMs: about.durationMs, sizeBytes: about.sizeBytes) else { return nil }
+        return await Self.deviceTrack(id, store)
+    }
+
+    /// The library song a phone song is part of, when the library holds it.
+    private static func deviceTrack(_ id: Int64, _ store: CatalogStore) async -> String? {
+        try? await store.libraryLinks(deviceSource, [String(id)]).first?.trackId
     }
 
     // MARK: Quick actions
@@ -166,6 +175,60 @@ enum LauncherShortcut: String, CaseIterable {
         case .recentlyAdded: "square.stack"
         case .resume: "play.fill"
         }
+    }
+}
+
+/// What an opened file says about itself: its name and size, and its title, artist and length
+/// from its tags. Anything that cannot be read is nil.
+struct OpenedFileAbout: Sendable {
+    var name: String?
+    var sizeBytes: Int64?
+    var title: String?
+    var artist: String?
+    var durationMs: Int64?
+
+    static func read(_ url: URL) async -> OpenedFileAbout {
+        var about = OpenedFileAbout()
+        if url.isFileURL {
+            let last = url.lastPathComponent
+            about.name = last.isEmpty || last == "/" ? nil : last
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+            about.sizeBytes = size > 0 ? Int64(size) : nil
+        }
+        let asset = AVURLAsset(url: url)
+        if let metadata = try? await asset.load(.commonMetadata) {
+            for item in metadata {
+                guard let key = item.commonKey, let value = try? await item.load(.stringValue) else { continue }
+                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                if key == .commonKeyTitle, !trimmed.isEmpty { about.title = trimmed }
+                if key == .commonKeyArtist, !trimmed.isEmpty { about.artist = trimmed }
+            }
+        }
+        if let time = try? await asset.load(.duration), time.seconds.isFinite, time.seconds > 0 {
+            about.durationMs = Int64((time.seconds * 1000).rounded())
+        }
+        return about
+    }
+}
+
+/// Reading files opened from another app.
+enum OpenedFileAccess {
+    /// The files whose access is held, each asked for once.
+    @MainActor private static var held: Set<URL> = []
+
+    /// Holds the right to read a file another app handed over in place, for as long as the app
+    /// runs. A copy handed over needs none.
+    @MainActor static func keep(_ url: URL) {
+        guard url.isFileURL, !held.contains(url), url.startAccessingSecurityScopedResource() else { return }
+        held.insert(url)
+    }
+
+    /// Whether the file can be read right now, found out by opening it. Only files on the phone
+    /// can.
+    nonisolated static func canRead(_ url: URL) -> Bool {
+        guard url.isFileURL, let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        try? handle.close()
+        return true
     }
 }
 

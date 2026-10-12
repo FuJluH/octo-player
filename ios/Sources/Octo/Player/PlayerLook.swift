@@ -108,6 +108,8 @@ final class WashArtwork {
     private var cache: [String: WashCover] = [:]
     private var order: [String] = []
     private var making: [String: Task<WashCover, Never>] = [:]
+    /// The cover being made: one at a time, so the next waits for it and may find it made.
+    private var last: Task<WashCover, Never>?
 
     /// The cover for a song's artwork with these adjustments. A song with no artwork gets a soft
     /// blend of its colors instead.
@@ -115,7 +117,9 @@ final class WashArtwork {
         let key = "\(coverId ?? "none:\(colors.mesh)")|\(tuning.contrast)|\(tuning.saturation)|\(tuning.brightnessCap)"
         if let known = cache[key] { return known }
         if let running = making[key] { return await running.value }
+        let before = last
         let task = Task<WashCover, Never> {
+            _ = await before?.value
             var source: CGImage?
             if let coverId { source = await Covers.shared.image(coverId, size: WashSize, client: client)?.cgImage }
             let mesh = colors.mesh
@@ -125,6 +129,7 @@ final class WashArtwork {
             }.value
         }
         making[key] = task
+        last = task
         let cover = await task.value
         making[key] = nil
         cache[key] = cover
@@ -146,7 +151,8 @@ final class WashArtwork {
         return pixels.map { capBrightness(applyColorMatrix($0, matrix), tuning.brightnessCap) }
     }
 
-    /// For music without artwork: its colors, blended corner to corner.
+    /// For music without artwork: its colors, blended corner to corner, then adjusted as a cover
+    /// would be.
     nonisolated static func blend(_ mesh: [UInt32], _ tuning: WashTuning) -> [UInt32] {
         let side = WashSize
         let colors = mesh.map { CGColor(srgbRed: CGFloat(($0 >> 16) & 0xFF) / 255, green: CGFloat(($0 >> 8) & 0xFF) / 255,
@@ -156,7 +162,9 @@ final class WashArtwork {
             // Drawn bottom-up, so top left to bottom right on the square as read.
             context.drawLinearGradient(gradient, start: CGPoint(x: 0, y: side), end: CGPoint(x: side, y: 0), options: [])
         }
-        return pixels ?? [UInt32](repeating: 0xFF00_0000, count: side * side)
+        guard let pixels else { return [UInt32](repeating: 0xFF00_0000, count: side * side) }
+        let matrix = washColorMatrix(tuning)
+        return pixels.map { capBrightness(applyColorMatrix($0, matrix), tuning.brightnessCap) }
     }
 
     /// Draws into a `side` square and reads its pixels back, top row first, as `0xFFRRGGBB`.
@@ -197,6 +205,9 @@ func drawnRange(_ mode: BackgroundMode, _ colors: PlayerColors, _ prefs: Backgro
 @MainActor
 @Observable
 final class PlayerLook {
+    /// One for the app's life, so a player opened again starts on the colors it closed with.
+    static let shared = PlayerLook()
+
     private(set) var colors = PlayerColors.quiet
     private(set) var cover: WashCover?
     @ObservationIgnored private var running: Task<Void, Never>?

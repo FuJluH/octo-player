@@ -1,5 +1,7 @@
 #if DEBUG
 import Foundation
+import os
+import QuartzCore
 import OctoKit
 import SwiftUI
 import UIKit
@@ -19,12 +21,16 @@ import UIKit
 ///   card opened on its speed page), `player:timing` (lyrics open, then the lyrics timing
 ///   popover), `player:chooser` (the Choose lyrics sheet), `player:look:flowing`,
 ///   `player:look:classic` (lyrics open in that style),
-///   `player:background:immersive|artwork|color|classic`. The song menu and the lyrics menu are
+///   `player:background:immersive|artwork|color|classic`, `player:album` (the song's album opened
+///   from inside the player, as the song menu does, so the player closes with its cover flying
+///   home). The song menu and the lyrics menu are
 ///   system menus, which only a finger opens.
 /// - `list:NAME` plays the server playlist with that name
 /// - `found:TEXT` plays the songs not in the library that a search for TEXT finds
 /// - `search:TEXT` plays the library songs a search for TEXT finds
 /// - `pause`
+/// - `covertime:N` times fetching N random albums' covers from the server, straight from it
+/// - `probe` logs the whole app's frame rate and late frames every two seconds
 /// - discovery steps: see `DiscoveryDrive`
 /// - `toast:TEXT` a plain message; `undo:TEXT` a message with Undo; `done:TEXT` one with a check
 /// - `dialog` the system question with Delete and Cancel; `sheet` a system sheet opened from
@@ -36,7 +42,8 @@ import UIKit
 /// - library steps (see `LibraryDrive`): `page:NAME`, `album:NAME`, `artist:NAME`, `playlist:NAME`,
 ///   `genre:NAME`, `menu:KIND` (song, album, artist, playlist; `menu:KIND=NAME`), `info:TITLE`,
 ///   `sort:LIST:OPTION:asc|desc`, `pick:COUNT` (picks songs on the open library page),
-///   `songs-search:TEXT`
+///   `songs-search:TEXT`, `songs-filter:CHIPS` (like `songs-filter:lossless,rating4`), and
+///   `menu:live` (a live list's options; `menu:live:rename`, `menu:live:delete`)
 /// - `sound`, `sound:graphic`, `sound:parametric`, `sound:preset:NAME`, `sound:editor`,
 ///   `sound:save`, `sound:own:NAME`, `sound:delete:NAME`, `sound:card:NAME`, `sound:eq:on|off`,
 ///   `sound:each:on|off`
@@ -69,6 +76,7 @@ enum Drive {
                 }
             case "close": router.drive = .closePlayer
             case "lyrics": router.drive = .lyrics
+            case "probe": HitchProbe.shared.start()
             case "pause": player.pause()
             case "toast": router.show(value.isEmpty ? "Added to the queue" : value)
             case "undo": router.undoable(value.isEmpty ? "Removed from the queue" : value) { router.done("Put back") }
@@ -183,4 +191,77 @@ private struct OctoSwitchRow: View {
         }
     }
 }
+
+/// Watches the whole app's frames while a debug build runs and logs, every two seconds, how
+/// many came and how many were late, for checking smoothness on a device.
+@MainActor
+final class HitchProbe: NSObject {
+    static let shared = HitchProbe()
+    private let log = Logger(subsystem: "app.winters.octo", category: "frames")
+    private var link: CADisplayLink?
+    private var last: CFTimeInterval?
+    private var since: CFTimeInterval = 0
+    private var count = 0
+    private var late = 0
+    private var worst: CFTimeInterval = 0
+
+    func start() {
+        guard link == nil else { return }
+        let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+
+    @objc private func tick(_ link: CADisplayLink) {
+        let now = link.timestamp
+        if let last {
+            let gap = now - last
+            worst = max(worst, gap)
+            if gap > (link.targetTimestamp - link.timestamp) * 1.8 + 0.004 { late += 1 }
+        } else {
+            since = now
+        }
+        last = now
+        count += 1
+        if now - since >= 2 {
+            log.notice("app frames \(Double(self.count) / (now - self.since), format: .fixed(precision: 1)) fps, late \(self.late), worst \(self.worst * 1000, format: .fixed(precision: 1)) ms")
+            since = now
+            count = 0
+            late = 0
+            worst = 0
+        }
+    }
+}
+/// Times how long the server takes to hand over album covers, for a debug build on a device.
+@MainActor
+enum CoverTiming {
+    static func run(session: Session, library: Library, count: Int) async {
+        let log = Logger(subsystem: "app.winters.octo", category: "covers")
+        guard let client = session.client else { return }
+        var asks: [(String, String)] = []
+        for album in await library.albums().shuffled().prefix(count) {
+            guard case .server(_, let coverId, _, _) = ArtworkRef.decode(album.artwork) else { continue }
+            asks.append((coverId, "album \(album.title)"))
+        }
+        for song in (try? await client.randomSongs(count: count)) ?? [] {
+            guard let coverId = song.coverArt else { continue }
+            asks.append((coverId, "song \(coverId) \(song.title)"))
+        }
+        for (coverId, name) in asks {
+            for size in [600, 128] {
+                var request = URLRequest(url: client.coverURL(coverId, size: size))
+                request.cachePolicy = .reloadIgnoringLocalCacheData
+                for (name, value) in client.headers { request.setValue(value, forHTTPHeaderField: name) }
+                let start = Date()
+                let answer = try? await client.session.data(for: request)
+                let ms = Int(Date().timeIntervalSince(start) * 1000)
+                let bytes = answer?.0.count ?? 0
+                let status = (answer?.1 as? HTTPURLResponse)?.statusCode ?? 0
+                log.notice("cover \(size) \(ms) ms \(bytes) bytes status \(status) \(name, privacy: .public)")
+            }
+        }
+    }
+}
+
 #endif

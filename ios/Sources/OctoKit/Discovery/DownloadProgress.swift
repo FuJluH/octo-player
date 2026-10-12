@@ -318,12 +318,14 @@ public final class ProgressWatch: @unchecked Sendable {
     }
 
     /// Asks the server until nothing is left waiting. Answers false at once when the server cannot
-    /// say how its downloads are going.
+    /// say how its downloads are going. A canceled run stops at its next turn, answering true, so
+    /// nothing takes over from it.
     public func run() async -> Bool {
         var arriving: Task<Void, Never>?
         var arrivingDone = true
         let doneFlag = Flag()
         while true {
+            if Task.isCancelled { return true }
             arrivingDone = arriving == nil || doneFlag.value
             switch await poll(canArrive: arrivingDone) {
             case .unsupported:
@@ -474,11 +476,20 @@ final class Wake: @unchecked Sendable {
         resume?.resume()
     }
 
+    /// Ends early when woken, or when the task waiting is canceled.
     func wait(ms: Int64) async {
         let mine: Int = lock.withLock {
             round += 1
             return round
         }
+        await withTaskCancellationHandler {
+            await sleepUnlessWoken(ms: ms, round: mine)
+        } onCancel: {
+            signal()
+        }
+    }
+
+    private func sleepUnlessWoken(ms: Int64, round mine: Int) async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             let now: Bool = lock.withLock {
                 if pending {

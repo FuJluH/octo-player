@@ -155,6 +155,16 @@ enum FamilyFixtures {
         #expect(server.requests[1].query["kind"] == "Upgrade")
     }
 
+    @Test func aFamilyPlaylistIsMade() async throws {
+        server.enqueue(#"{ "subsonic-response": { "status": "ok", "version": "1.16.1", "type": "octo", "openSubsonic": true, "playlist": { "id": "of_road", "name": "Road trip", "songCount": 0, "duration": 0, "owner": "alex", "public": true, "created": "2026-10-20T18:00:00Z", "changed": "2026-10-20T18:00:00Z" } } }"#)
+        let made = try await client.createFamilyPlaylist(name: " Road trip ", approveAdditions: true)
+        #expect(server.requests[0].path == "/rest/createFamilyPlaylist")
+        #expect(server.requests[0].query["name"] == "Road trip")
+        #expect(server.requests[0].query["approveAdditions"] == "true")
+        #expect(made.id == "of_road")
+        #expect(made.name == "Road trip")
+    }
+
     @Test func cancelAndDecideAnswerTheRequest() async throws {
         server.enqueue(FamilyFixtures.request("Cancelled"))
         #expect(try await client.cancelFamilyRequest("r_9xK2").state == .cancelled)

@@ -7,7 +7,9 @@ import SwiftUI
 /// admin pages for the downloads follower.
 @MainActor
 enum AccountHooks {
-    static func install(_ data: DataServices, session: Session) {
+    static func install(_ data: DataServices, session: Session, family: FamilyHub) {
+        // Offline copies follow the family plan; without a family they are always allowed.
+        data.offline.offlineCopiesAllowed = { [weak family] in offlineCopiesAllowed(await family?.model.plan()) }
         // A server taken off the list with "forget here" loses where its admin pages were, and
         // what its family notices already told.
         data.serverSwitch.onForget("octo_admin") { account in OctoAdminPages.shared.forget(server: account) }

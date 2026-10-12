@@ -25,33 +25,39 @@ struct LiveMarkTile: View {
     }
 }
 
-/// A picture made of the first covers of the songs a list holds, or the live mark tile when none.
-private struct LiveListCover: View {
+/// A live list's picture: the designed cover saying "Live list" when covers are designed, else
+/// one made of the first covers of the songs it holds, or the live mark tile when none.
+struct LiveListCover: View {
+    let id: String
+    let name: String
     let songs: [LibraryTrack]
     let size: CGFloat
+    var radius: CGFloat = 10
 
     var body: some View {
         let covers = Array(uniqueCovers.prefix(4))
-        if covers.isEmpty {
-            LiveMarkTile(size: size, radius: 10)
+        if AppSettings.shared.playlistCovers == .designed {
+            DesignedCover(id: id, name: name, covers: covers, size: size, radius: radius, line: liveListCoverLine)
+        } else if covers.isEmpty {
+            LiveMarkTile(size: size, radius: radius)
         } else if covers.count < 4 {
-            Cover(id: covers[0], size: size, radius: 10)
+            Cover(id: covers[0], size: size, radius: radius)
         } else {
             let half = size / 2
             VStack(spacing: 0) {
                 HStack(spacing: 0) { Cover(id: covers[0], size: half, radius: 0); Cover(id: covers[1], size: half, radius: 0) }
                 HStack(spacing: 0) { Cover(id: covers[2], size: half, radius: 0); Cover(id: covers[3], size: half, radius: 0) }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         }
     }
 
-    /// One cover per album, in the songs' order.
+    /// One cover per album, in the songs' order; songs without artwork are passed over.
     private var uniqueCovers: [String] {
         var seen = Set<String>()
         return songs.compactMap { track in
-            guard seen.insert(track.albumId).inserted else { return nil }
-            return coverId(of: track.artwork)
+            guard let cover = coverId(of: track.artwork), seen.insert(track.albumId).inserted else { return nil }
+            return cover
         }
     }
 }
@@ -65,21 +71,21 @@ struct LiveListView: View {
     @Environment(Library.self) private var library
     @Environment(Player.self) private var player
     @Environment(Router.self) private var router
-    @Environment(Session.self) private var session
+    @Environment(LibraryActions.self) private var actions
     @Environment(\.dismiss) private var dismiss
-    @State private var renaming = false
-    @State private var deleting = false
-    @State private var newName = ""
 
     var body: some View {
         let list = store.byId(id)
-        let songs = list.flatMap { liveLibrary.songs($0.query) } ?? []
+        // Nil until the songs are worked out, so nothing says "no songs" before then.
+        let picked = list.flatMap { liveLibrary.songs($0.query) }
+        let songs = picked ?? []
         let playable = songs.map(\.asSong)
+        let ids = songs.map(\.id)
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if let list {
                     VStack(spacing: 0) {
-                        LiveListCover(songs: songs, size: 240)
+                        LiveListCover(id: list.id, name: list.name, songs: songs, size: 240)
                             .shadow(color: .black.opacity(0.4), radius: 16, y: 8)
                         Text(list.name)
                             .font(.octoTitle)
@@ -87,16 +93,22 @@ struct LiveListView: View {
                             .multilineTextAlignment(.center)
                             .padding(.top, 20)
                         HStack {
-                            let total = songs.reduce(Int64(0)) { $0 + $1.durationMs } / 1_000
-                            Text([songCountLine(songs.count), songs.isEmpty ? nil : Int(total).spokenLength].compactMap { $0 }.joined(separator: " • "))
-                                .font(.octoCaption)
-                                .foregroundStyle(OctoColor.textMuted)
+                            if picked != nil {
+                                let total = songs.reduce(Int64(0)) { $0 + $1.durationMs } / 1_000
+                                Text([songCountLine(songs.count), songs.isEmpty ? nil : Int(total).spokenLength].compactMap { $0 }.joined(separator: " · "))
+                                    .font(.octoCaption)
+                                    .foregroundStyle(OctoColor.textMuted)
+                            }
                             Spacer()
-                            options(list, songs)
+                            options(list)
                         }
                         .frame(minHeight: 44)
                         .padding(.top, 14)
-                        PlayButtons(songs: playable, listName: list.name).padding(.top, 4)
+                        // Played under the list's name.
+                        PlayShuffle(enabled: !ids.isEmpty) { player.play(ids: ids, name: list.name) } shuffle: {
+                            player.play(ids: ids, name: list.name, shuffled: true)
+                        }
+                        .padding(.top, 4)
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, detailTopGap)
@@ -108,11 +120,11 @@ struct LiveListView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.horizontal, 32)
                         .padding(.bottom, 12)
-                    if songs.isEmpty {
+                    if picked?.isEmpty == true {
                         Text(noMatchesNote).font(.octoBodySmall).foregroundStyle(OctoColor.textMuted).padding(20)
                     }
                     ForEach(Array(playable.enumerated()), id: \.element.id) { index, song in
-                        SongRow(song: song, list: playable, position: index, listName: list.name)
+                        SongRow(song: song, list: playable, position: index, tap: { player.play(ids: ids, from: index, name: list.name) })
                     }
                 }
             }
@@ -123,30 +135,15 @@ struct LiveListView: View {
         .task(id: PickKey(version: liveLibrary.version, query: list?.query)) { if let list { await liveLibrary.pick(list.query) } }
         // Leaves the page once the list is deleted.
         .onChange(of: list == nil) { _, gone in if gone { dismiss() } }
-        .opensWhenAsked("rename_live_list") {
-            guard let list else { return }
-            newName = list.name
-            renaming = true
-        }
-        .opensWhenAsked("delete_live_list") { if list != nil { deleting = true } }
+        .opensWhenAsked("rename_live_list") { if let list { actions.askRename(list, in: store) } }
+        .opensWhenAsked("delete_live_list") { if let list { actions.askDelete(list, in: store) } }
     }
 
-    /// The live list's options, under its name.
-    private func options(_ list: LiveList, _ songs: [LibraryTrack]) -> some View {
+    /// The live list's options, under its name: the same system menu a long press on its line
+    /// among the playlists gives.
+    private func options(_ list: LiveList) -> some View {
         Menu {
-            Section(list.name) {
-                Button { router.go(.liveListEditor(id: list.id)) } label: { Label("Edit rules", systemImage: "line.3.horizontal.decrease") }
-                Button {
-                    newName = list.name
-                    renaming = true
-                } label: { Label("Rename", systemImage: "pencil") }
-                Button {
-                    let copy = store.duplicate(list)
-                    router.show("Made a copy: \(copy.name)", done: true)
-                } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
-                Button { Task { await saveCopy(list, songs) } } label: { Label("Save a copy as a playlist", systemImage: "music.note.list") }
-            }
-            Button(role: .destructive) { deleting = true } label: { Label("Delete", systemImage: "trash") }
+            LiveListOptionsItems(list: list)
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 18, weight: .semibold))
@@ -155,31 +152,6 @@ struct LiveListView: View {
                 .contentShape(Rectangle())
         }
         .accessibilityLabel("More")
-        .namePopover(isPresented: $renaming, title: "Rename live list", placeholder: "Live list name", action: "Save",
-                     initial: newName) { name in
-            store.rename(id, to: name)
-            renaming = false
-        }
-        .confirmationDialog("Delete \"\(list.name)\"?", isPresented: $deleting, titleVisibility: .visible) {
-            Button("Delete", role: .destructive) { store.remove(list.id) }
-        } message: {
-            Text("The songs stay in your library.")
-        }
-    }
-
-    /// A playlist named as the live list with the songs it holds now; it does not follow the rules.
-    private func saveCopy(_ list: LiveList, _ songs: [LibraryTrack]) async {
-        guard !songs.isEmpty else {
-            router.show(nothingToCopy(list.name))
-            return
-        }
-        guard let client = session.client else { return }
-        do {
-            try await client.createPlaylist(name: list.name, songIds: songs.map(\.asSong.id))
-            router.show(liveCopyMessage(list.name, count: songs.count), done: true)
-        } catch {
-            router.show(onlineFailureWords(error))
-        }
     }
 }
 
@@ -274,7 +246,9 @@ struct LiveListEditView: View {
                         .padding(.horizontal, 20)
                         .padding(.vertical, 8)
                     ForEach(Array(playable.enumerated()), id: \.element.id) { index, song in
-                        SongRow(song: song, list: playable, position: index, listName: draft.savedName)
+                        // Played under the name the list would be saved with.
+                        SongRow(song: song, list: playable, position: index,
+                                tap: { player.play(ids: preview.map(\.id), from: index, name: draft.savedName) })
                     }
                 }
             }
@@ -300,7 +274,9 @@ struct LiveListEditView: View {
                     let (words, pick) = item
                     if case .rule(let rule) = pick {
                         MenuPick(words, checked: query.rules.contains(rule)) { update(currentQuery.toggling(rule)) }
-                    } else {
+                    } else if !rules(for: pick).isEmpty {
+                        // A page with nothing to pick, such as genres in a library without any, is
+                        // not offered.
                         Menu(words) {
                             RulePageItems(title: words, rules: { rules(for: pick) }, query: query) { update(currentQuery.toggling($0)) }
                         }
@@ -321,22 +297,31 @@ struct LiveListEditView: View {
         .menuOrder(.fixed)
     }
 
-    /// The order, from the orders a live list can keep, as a system menu; picking the one in use
-    /// turns it round.
+    /// The order, as a system menu: the two directions of the order in use on top (newest first
+    /// while none is picked), then the orders a live list can keep. Another order comes in its own
+    /// starting direction; the one in use stays as it is.
     private func orderMenu(_ query: LibraryQuery) -> some View {
-        let now = query.sort?.order
+        let first = liveListSorts[0]
+        let now = query.sort ?? QuerySort(first, descending: first.startsDescending)
+        let by = now.order ?? first
+        let option = SongSort(rawValue: by.rawValue).map { SortOption.song($0) }
         return Menu {
-            Section("Order") {
-                ForEach(liveListSorts, id: \.self) { by in
-                    MenuPick(by.label, checked: by == now) {
-                        if by == now, let sort = currentQuery.sort {
-                            update(currentQuery.sorted(by: QuerySort(by, descending: !sort.descending)))
-                        } else {
-                            update(currentQuery.sorted(by: by))
-                        }
+            if let option {
+                Picker("Direction", selection: Binding(get: { now.descending },
+                                                       set: { update(currentQuery.sorted(by: QuerySort(by, descending: $0))) })) {
+                    ForEach(directionChoices(option), id: \.descending) { choice in
+                        Label(choice.label, systemImage: choice.descending ? "arrow.down" : "arrow.up").tag(choice.descending)
                     }
                 }
+                .pickerStyle(.palette)
             }
+            Picker("Order", selection: Binding(get: { by }, set: { picked in
+                guard picked != by else { return }
+                update(currentQuery.sorted(by: picked))
+            })) {
+                ForEach(liveListSorts, id: \.self) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.inline)
         } label: {
             quietLabel(query.sort.flatMap(sortWords).map(capitalizedFirst) ?? "In library order")
         }
@@ -390,7 +375,9 @@ struct LiveListEditView: View {
 
     /// Keeps the list, then opens it: a new one in place of the editor, an edited one goes back.
     private func save(_ draft: LiveListDraft) {
-        if let id, var old = store.byId(id) {
+        if let id {
+            // A list deleted while it was being edited is not made again.
+            guard var old = store.byId(id) else { return }
             old.name = draft.savedName
             old.query = draft.query
             store.save(old)

@@ -31,13 +31,14 @@ struct OnlineAlbumView: View {
     /// Set once the album is asked for here, cleared if the server says no.
     @State private var asked = false
     @State private var highlight: String?
+    @State private var arrivalWait: Task<Void, Never>?
 
     var body: some View {
         LoadStateView(state: page, retry: { Task { await reload() } }) { found in
             let songs = found.songs.map(\.asSong)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    header(found.album, songs)
+                    header(found.album, songs, lengthsMs: found.songs.map(\.durationMs))
                     let mixed = songs.contains(where: \.isExternal)
                     ForEach(Array(songs.enumerated()), id: \.element.id) { index, song in
                         // Only say who is singing when it is not the album's artist.
@@ -54,9 +55,11 @@ struct OnlineAlbumView: View {
         .task(id: page.value?.album.id) { await markHighlight() }
         .onChange(of: downloads.arrived) { _, _ in
             // A song from here that joins the library turns into a library song on the page,
-            // once its check has landed.
-            Task {
+            // once its check has landed. A later arrival starts the wait again.
+            arrivalWait?.cancel()
+            arrivalWait = Task {
                 try? await Task.sleep(for: .milliseconds(checkHoldMs + swapFadeDurationMs))
+                guard !Task.isCancelled else { return }
                 let songs = (page.value?.songs ?? []).map(\.asSong)
                 if songs.contains(where: { $0.isExternal && downloads.state($0.id) == .done }) { await refresh() }
             }
@@ -70,10 +73,9 @@ struct OnlineAlbumView: View {
         return asked || (!finds.isEmpty && finds.allSatisfy { downloads.state($0.id) != .none })
     }
 
-    private func header(_ album: OnlineAlbum, _ songs: [Song]) -> some View {
+    private func header(_ album: OnlineAlbum, _ songs: [Song], lengthsMs: [Int64]) -> some View {
         // The length only adds up when every song's length is known.
-        let lengths = songs.map { $0.isExternal ? Int(knownLengthMs($0) / 1_000) : $0.duration }
-        let length = !lengths.isEmpty && lengths.allSatisfy { $0 > 0 } ? lengths.reduce(0, +).spokenLength : nil
+        let length = !lengthsMs.isEmpty && lengthsMs.allSatisfy { $0 > 0 } ? Int(lengthsMs.reduce(0, +) / 1_000).spokenLength : nil
         let details = [album.year.map(String.init), album.songCount == 1 ? "1 song" : "\(album.songCount) songs", length]
             .compactMap { $0 }.joined(separator: " • ")
         let artistId = album.artistId.flatMap { $0.isEmpty ? nil : $0 }

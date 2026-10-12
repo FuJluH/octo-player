@@ -53,25 +53,28 @@ struct ButtonLabel: View {
 
 /// The filled button: a glass capsule in the accent's darker fill, white words. Large by
 /// default (50 tall, 40 dense). Disabled it shows at half strength and cannot be tapped; it
-/// cannot be tapped while loading either.
+/// cannot be tapped while loading either. `bright` fills it with the accent itself, dark words
+/// on it, for the one main button of a sheet.
 struct AccentButton: View {
     let text: String
     var icon: OctoIcon?
     var size: ButtonSize = .large
     var dense = false
     var tonal = false
+    var bright = false
     var enabled = true
     var loading = false
     var fillWidth = false
     let action: () -> Void
 
     init(_ text: String, icon: OctoIcon? = nil, size: ButtonSize = .large, dense: Bool = false, tonal: Bool = false,
-         enabled: Bool = true, loading: Bool = false, fillWidth: Bool = false, action: @escaping () -> Void) {
+         bright: Bool = false, enabled: Bool = true, loading: Bool = false, fillWidth: Bool = false, action: @escaping () -> Void) {
         self.text = text
         self.icon = icon
         self.size = size
         self.dense = dense
         self.tonal = tonal
+        self.bright = bright
         self.enabled = enabled
         self.loading = loading
         self.fillWidth = fillWidth
@@ -79,7 +82,7 @@ struct AccentButton: View {
     }
 
     var body: some View {
-        let fill = tonal ? OctoPalette.accentTonal : OctoPalette.accentFill
+        let fill = bright ? OctoPalette.accent : tonal ? OctoPalette.accentTonal : OctoPalette.accentFill
         Button(action: action) {
             ButtonLabel(text: text, icon: icon, size: size, loading: loading, color: Color(contentColorFor(fill)))
                 .frame(maxWidth: fillWidth ? .infinity : nil)

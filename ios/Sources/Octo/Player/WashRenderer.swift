@@ -343,8 +343,10 @@ final class WashView: UIView {
     private func wake() {
         guard foreground, link == nil, inputs != nil else { return }
         let link = CADisplayLink(target: WashTarget(self), selector: #selector(WashTarget.tick(_:)))
+        // The clock paces the wash itself; the range never caps the screen below what the rest
+        // of the app asks for (the system picks one rate that suits every link).
         let limit = Float(inputs?.fpsLimit ?? 60)
-        link.preferredFrameRateRange = CAFrameRateRange(minimum: 10, maximum: max(limit, 30), preferred: limit)
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 10, maximum: 120, preferred: limit)
         link.add(to: .main, forMode: .common)
         self.link = link
         clock?.start(Int(link.timestamp * 1e9))
@@ -379,7 +381,8 @@ final class WashView: UIView {
     private func dolly(_ now: CFTimeInterval) -> Float {
         if let closingAt {
             let t = min(max((now - closingAt) / 0.5, 0), 1)
-            let start = Float(min(max((closingAt - openedAt - 0.02) / 0.8, 0), 1))
+            let opened = min(max((closingAt - openedAt - 0.02) / 0.8, 0), 1)
+            let start = Float(Easing.cubicBezier(0.22, 1, 0.36, 1, opened))
             return start * Float(1 - Easing.cubicBezier(0.64, 0, 0.78, 0, t))
         }
         let t = min(max((now - openedAt - 0.02) / 0.8, 0), 1)

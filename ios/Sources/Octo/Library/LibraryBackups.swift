@@ -84,8 +84,14 @@ final class LibraryBackups: BackupLibrary {
 
     func sortOrders() async -> [String: String] { state.savedOrders() }
 
-    /// Each song's lyrics timing is kept by the lyrics, not the library.
-    func lyricsOffsets() async -> [LyricsOffsetBackup] { [] }
+    /// Each song's lyrics timing, by the song's key, for songs the library still has.
+    func lyricsOffsets() async -> [LyricsOffsetBackup] {
+        let offsets = LyricsSongTiming.shared.offsets
+        let tracks = Dictionary((await library.tracks(ids: Array(offsets.keys))).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        return offsets.sorted { $0.key < $1.key }.compactMap { id, ms in
+            tracks[id].map { LyricsOffsetBackup(key($0), Int64(ms)) }
+        }
+    }
 
     func playlistNamesById() async -> [String: String] {
         Dictionary((await library.playlists()).map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
@@ -126,6 +132,8 @@ final class LibraryBackups: BackupLibrary {
 
     func restoreSortOrders(_ orders: [String: String]) async { state.restoreOrders(orders) }
 
-    /// Each song's lyrics timing is put back by the lyrics, not the library.
-    func setLyricsOffset(_ trackId: String, ms: Int64) async {}
+    /// Puts one song's lyrics timing back: held to the song limit, and not kept at 0.
+    func setLyricsOffset(_ trackId: String, ms: Int64) async {
+        LyricsSongTiming.shared.set(trackId, Int(ms))
+    }
 }

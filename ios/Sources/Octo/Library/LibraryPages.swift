@@ -58,177 +58,87 @@ struct LibraryPageView: View {
 
 // MARK: Songs
 
-/// The quick filters on the Songs page, in their order.
-enum QuickFilter: CaseIterable, Hashable {
-    case favorites, week, month, year, neverPlayed, notLately, lossless
-
-    var label: String {
-        switch self {
-        case .favorites: "Favorites"
-        case .week: "Added in the last week"
-        case .month: "Added in the last month"
-        case .year: "Added in the last year"
-        case .neverPlayed: "Never played"
-        case .notLately: "Not played in the last 6 months"
-        case .lossless: "Lossless"
-        }
-    }
-
-    /// Filters on the same field replace each other.
-    var field: Int {
-        switch self {
-        case .favorites: 0
-        case .week, .month, .year: 1
-        case .neverPlayed, .notLately: 2
-        case .lossless: 3
-        }
-    }
-}
-
-/// What the Songs page is narrowed to: words, quick filters, a rating, a genre and a decade.
-struct SongFilters: Equatable {
-    var words = ""
-    var quick: [QuickFilter] = []
-    var rating: Int?
-    var genre: String?
-    var decade: Int?
-
-    var any: Bool {
-        !words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !quick.isEmpty || rating != nil || genre != nil || decade != nil
-    }
-
-    /// A quick filter on takes the place of any other on the same field; on again takes it off.
-    mutating func toggle(_ filter: QuickFilter) {
-        if quick.contains(filter) {
-            quick.removeAll { $0 == filter }
-        } else {
-            quick.removeAll { $0.field == filter.field }
-            quick.append(filter)
-        }
-    }
-
-    /// What a song needs to pass, worked out once for a whole list.
-    struct Facts {
-        var liked: Set<String>
-        var played: [String: Listening]
-        var ratings: (LibraryTrack) -> Int
-        var now: Int64
-    }
-
-    func matches(_ track: LibraryTrack, _ facts: Facts) -> Bool {
-        let words = foldedWords(self.words)
-        if !words.isEmpty {
-            let fields = [track.title, track.artist, track.album, track.genre].map(foldedText)
-            for word in words where !fields.contains(where: { $0.contains(word) }) { return false }
-        }
-        let day: Int64 = 86_400_000
-        let added = track.addedAt * 1_000
-        let heard = facts.played[track.id]
-        let lastPlayed = heard?.lastPlayedAt ?? 0
-        for filter in quick {
-            switch filter {
-            case .favorites: if !facts.liked.contains(track.id) { return false }
-            case .week: if added <= 0 || added < facts.now - 7 * day { return false }
-            case .month: if added <= 0 || added < facts.now - 30 * day { return false }
-            case .year: if added <= 0 || added < facts.now - 365 * day { return false }
-            case .neverPlayed: if lastPlayed > 0 || (heard?.plays ?? 0) > 0 { return false }
-            case .notLately: if lastPlayed > 0 && lastPlayed >= facts.now - 180 * day { return false }
-            case .lossless: if !losslessTrack(track) { return false }
-            }
-        }
-        if let rating, facts.ratings(track) < rating { return false }
-        if let genre, foldedText(track.genre) != foldedText(genre) { return false }
-        if let decade {
-            guard let year = track.year, year >= decade, year < decade + 10 else { return false }
-        }
-        return true
-    }
-
-    /// Lossless by the file's type or its format.
-    private func losslessTrack(_ track: LibraryTrack) -> Bool {
-        guard let mime = track.mimeType else { return false }
-        return isLosslessMime(mime) || isLosslessKind(formatOf(mime))
-    }
-}
-
-/// Lower case with accents gone.
-func foldedText(_ text: String) -> String {
-    text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).lowercased()
-}
-
-/// Typed words, split on spaces, tabs and new lines, each folded.
-func foldedWords(_ text: String) -> [String] {
-    text.split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "\n" }).map { foldedText(String($0)) }.filter { !$0.isEmpty }
-}
-
-/// Every song, in the chosen order, with a search and filter chips.
+/// Every song, in the chosen order, which the search above narrows: the words typed, and chips
+/// for the quick filters, a rating, a genre and a decade. A tap plays the list as shown from that
+/// song.
 struct SongsPage: View {
     @Environment(Library.self) private var library
     @Environment(LibraryState.self) private var state
     @Environment(LibraryActions.self) private var actions
+    @Environment(Router.self) private var router
+    @Environment(\.octoReduceMotion) private var calm
     @State private var sorted: Sorted<LibraryTrack>?
-    @State private var shown: [LibraryTrack]?
-    @State private var shownHeadings: [String]?
-    @State private var filters = SongFilters()
+    /// The songs as the filters leave them, in the chosen order; nil until first worked out.
+    @State private var shown: Sorted<LibraryTrack>?
+    /// The words typed and the chips on, for this visit only.
+    @State private var query = LibraryQuery()
     @State private var searchOpen = false
     @State private var genreChoices: [String] = []
     @State private var decadeChoices: [Int] = []
     @FocusState private var fieldFocused: Bool
 
-    private var searching: Bool { searchOpen || filters.any }
+    /// Searching while the panel is open or any filter is on, so a page coming back with filters
+    /// keeps its panel open.
+    private var searching: Bool { searchOpen || query.filters }
 
     var body: some View {
         let order = state.order(.songs)
-        let list = shown ?? []
+        let list = shown?.items ?? []
         ScrollViewReader { proxy in
             LibraryList {
-                    TitleWithButtons(title: "Songs") {
-                        if let sorted, !sorted.items.isEmpty {
-                            GlassIconButton(icon: searching ? .close : .search,
-                                            label: searching ? "Close the search" : "Search these songs", lit: searching) {
-                                if searching { closeSearch() } else { openSearch() }
-                            }
+                TitleWithButtons(title: "Songs") {
+                    if let sorted, !sorted.items.isEmpty {
+                        GlassIconButton(icon: searching ? .close : .search,
+                                        label: searching ? "Close the search" : "Search these songs", lit: searching) {
+                            if searching { closeSearch() } else { openSearch() }
                         }
-                        SortButton(list: .songs)
                     }
-                    .padding(.top, detailTopGap)
-                    .bigTitle()
-                    if searching { searchPanel.transition(.opacity.combined(with: .move(edge: .top))) }
-                    if let sorted {
-                        if sorted.items.isEmpty {
-                            EmptyLibraryNote()
-                        } else if shown == nil {
-                            LibrarySpinner()
-                        } else if list.isEmpty {
+                    SortButton(list: .songs)
+                }
+                .padding(.top, detailTopGap)
+                .bigTitle()
+                if sorted != nil, searching {
+                    searchPanel.transition(calm ? .opacity : .opacity.combined(with: .move(edge: .top)))
+                }
+                if let sorted {
+                    if sorted.items.isEmpty {
+                        EmptyLibraryNote()
+                    } else if let shown {
+                        if shown.items.isEmpty {
                             VStack(alignment: .leading, spacing: 12) {
                                 Text("No songs match these filters").font(.octoBodySmall).foregroundStyle(OctoColor.textMuted)
-                                QuietButton("Clear filters") { filters = SongFilters() }.padding(.leading, -10)
+                                QuietButton("Clear filters") { query = query.cleared() }.padding(.leading, -10)
                             }
                             .padding(20)
                         } else {
-                            ListPlayLine(count: filters.any ? filteredCount(shown: list.count, all: sorted.items.count)
+                            ListPlayLine(count: query.filters ? filteredCount(shown: list.count, all: sorted.items.count)
                                          : countText(list.count, "song", "songs")) {
-                                actions.play(list, name: "Songs")
+                                actions.play(list, source: "Songs")
                             } shuffle: {
-                                actions.play(list, shuffled: true, name: "Songs")
+                                actions.play(list, shuffled: true, source: "Songs")
                             }
-                            LetterRuns(items: list, headings: shownHeadings, id: \.id) { position, track in
-                                TrackRow(track: track) { actions.play(list, from: position, name: "Songs") }
+                            FirstRowMark().id("first")
+                            LetterRuns(items: list, headings: shown.headings, id: \.id) { position, track in
+                                TrackRow(track: track) { actions.play(list, from: position, source: "Songs") }
                             }
                             Color.clear.frame(height: 140)
                         }
                     } else {
                         LibrarySpinner()
                     }
+                } else {
+                    LibrarySpinner()
+                }
             }
-            .animation(.spring(response: 0.35, dampingFraction: 0.9), value: searching)
-            .letterRail(shownHeadings, count: list.count, byName: order.by.byName) { index in
-                let runs = letterRuns(shownHeadings ?? [])
+            .animation(calm ? .easeOut(duration: 0.12) : .spring(response: 0.35, dampingFraction: 0.9), value: searching)
+            .animation(.easeOut(duration: 0.25), value: shown?.order)
+            .letterRail(shown?.headings, count: list.count, byName: order.by.byName) { index in
+                let runs = letterRuns(shown?.headings ?? [])
                 if runs.indices.contains(index), list.indices.contains(runs[index].start) {
                     proxy.scrollTo(list[runs[index].start].id, anchor: .top)
                 }
             }
-            .onChange(of: order) { _, _ in if let first = list.first { proxy.scrollTo(first.id, anchor: .top) } }
+            .topOnNewOrder(shown?.order) { proxy.scrollTo("first", anchor: .top) }
         }
         .barClearance()
         .inlineTitle("Songs")
@@ -241,77 +151,81 @@ struct SongsPage: View {
             if let words = LibraryDrive.pendingSearch {
                 LibraryDrive.pendingSearch = nil
                 searchOpen = true
-                filters.words = words
+                query = query.withText(words)
+            }
+            if let rules = LibraryDrive.pendingFilters {
+                LibraryDrive.pendingFilters = nil
+                searchOpen = true
+                for rule in rules { query = query.setting(rule) }
             }
             #endif
         }
         .task(id: "\(library.stamp(.library, .likes, .ratings, .plays))|\(order.by.id)|\(order.descending)") {
             let read = await library.sortedSongs(order)
             sorted = read
-            genreChoices = genresOf(read.items)
-            decadeChoices = Array(Set(read.items.compactMap { $0.year.map { $0 / 10 * 10 } })).sorted(by: >)
+            // The chips offer what the whole list has, not only what the filters leave.
+            genreChoices = genresIn(read.items, fields: LibraryTrackFields())
+            decadeChoices = decadesIn(read.items, fields: LibraryTrackFields())
             await applyFilters()
         }
-        .task(id: filters) { await applyFilters() }
+        .task(id: query) { await applyFilters() }
     }
 
-    /// Works the shown list out again from the whole list and the filters.
+    /// Works the shown list out again from the whole list and the filters, away from the main
+    /// thread. With no filters it is the whole list.
     private func applyFilters() async {
         guard let sorted else { return }
-        guard filters.any else {
-            shown = sorted.items
-            shownHeadings = sorted.headings
+        guard query.filters else {
+            shown = sorted
             return
         }
-        let facts = SongFilters.Facts(liked: state.likedIds, played: songListening(await library.playedTracks()),
-                                      ratings: { state.rating(of: $0) }, now: Int64(Date().timeIntervalSince1970 * 1_000))
-        var items: [LibraryTrack] = []
-        var headings: [String] = []
-        for (index, track) in sorted.items.enumerated() where filters.matches(track, facts) {
-            items.append(track)
-            if let all = sorted.headings { headings.append(all[index]) }
-        }
-        shown = items
-        shownHeadings = sorted.headings == nil ? nil : headings
-    }
-
-    /// Each genre once, case and accents folded, the first spelling kept, sorted A to Z.
-    private func genresOf(_ tracks: [LibraryTrack]) -> [String] {
-        var seen: [String: String] = [:]
-        for track in tracks where !track.genre.trimmingCharacters(in: .whitespaces).isEmpty {
-            let key = foldedText(track.genre)
-            if seen[key] == nil { seen[key] = track.genre }
-        }
-        return seen.values.sorted { naturalSortKey($0) < naturalSortKey($1) }
+        let asked = query
+        let fields = LibraryTrackFields(liked: state.likedIds, listening: libraryListening(await library.playedTracks()))
+        let now = Int64(Date().timeIntervalSince1970 * 1_000)
+        let result = await Task.detached(priority: .userInitiated) { filteredSongs(sorted, asked, fields: fields, now: now) }.value
+        if asked == query { shown = result }
     }
 
     private func openSearch() {
         searchOpen = true
         Task {
+            // One frame, so the field is laid out before it is asked.
             try? await Task.sleep(for: .milliseconds(16))
             fieldFocused = true
         }
     }
 
-    /// Closing the search clears the words and every filter; the order stays.
+    /// Closing the search clears the words and every chip; the order stays.
     private func closeSearch() {
         fieldFocused = false
         searchOpen = false
-        filters = SongFilters()
+        query = query.cleared()
+    }
+
+    /// A chip on comes off; another takes the place of any filter on its field.
+    private func toggle(_ rule: QueryRule) {
+        query = query.rules.contains(rule) ? query.without(rule) : query.setting(rule)
+    }
+
+    /// Opens a new live list's editor started from these filters, in this list's order.
+    private func saveAsLiveList() {
+        let order = sorted?.order ?? state.order(.songs)
+        let sort = order.by.song.flatMap { QuerySort.By(rawValue: $0.rawValue) }.map { QuerySort($0, descending: order.descending) }
+        router.go(.liveListFrom(query: liveListQueryFrom([], filters: query, order: sort).toJSON()))
     }
 
     private var searchPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 4) {
                 IconView(.search, size: 20, color: OctoColor.textMuted)
-                TextField("Search songs", text: $filters.words)
+                TextField("Search songs", text: Binding(get: { query.text }, set: { query = query.withText($0) }))
                     .focused($fieldFocused)
                     .submitLabel(.search)
                     .onSubmit { fieldFocused = false }
                     .autocorrectionDisabled()
-                if !filters.words.isEmpty {
-                    Button { filters.words = "" } label: {
-                        IconView(.close, size: 18, color: OctoColor.textMuted).frame(width: 40, height: 40)
+                if !query.text.isEmpty {
+                    Button { query = query.withText("") } label: {
+                        IconView(.close, size: 20, color: OctoColor.textMuted).frame(width: 40, height: 40)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Clear the words")
@@ -323,29 +237,21 @@ struct SongsPage: View {
             .padding(.horizontal, 20)
             ScrollView(.horizontal) {
                 HStack(spacing: 8) {
-                    if filters.any {
-                        FilterChip(text: "Clear all", on: false) { filters = SongFilters() }
-                        if let open = LiveListHook.newLiveList {
-                            FilterChip(text: "Save as live list", on: false) {
-                                open(LiveListSeed(words: filters.words.trimmingCharacters(in: .whitespacesAndNewlines),
-                                                  rules: chipWords, order: state.order(.songs)))
-                            }
-                        }
+                    if query.filters {
+                        QuietButton("Clear all") { query = query.cleared() }
+                        QuietButton("Save as live list") { saveAsLiveList() }
                     }
-                    ForEach(QuickFilter.allCases, id: \.self) { filter in
-                        FilterChip(text: filter.label, on: filters.quick.contains(filter)) { filters.toggle(filter) }
+                    ForEach(FilterPresets.simple, id: \.self) { rule in
+                        FilterChip(text: rule.label(), on: query.rules.contains(rule)) { toggle(rule) }
                     }
-                    askingChip(on: filters.rating.map { "Rating at least \($0)" }, off: "Rating", title: "Rating",
-                               answers: [(5, "5 stars"), (4, "4 stars or more"), (3, "3 stars or more"), (2, "2 stars or more"), (1, "1 star or more")]) {
-                        filters.rating = $0
-                    } clear: { filters.rating = nil }
-                    if !genreChoices.isEmpty || filters.genre != nil {
-                        askingChip(on: filters.genre.map { "Genre is \($0)" }, off: "Genre", title: "Genre",
-                                   answers: genreChoices.map { ($0, $0) }) { filters.genre = $0 } clear: { filters.genre = nil }
+                    askingChip(.rating, off: "Rating", title: "Rating",
+                               answers: (1...5).reversed().map { (FilterPresets.ratingWords($0), FilterPresets.ratingAtLeast($0)) })
+                    if !genreChoices.isEmpty || query.rules.contains(where: { $0.field == .genre }) {
+                        askingChip(.genre, off: "Genre", title: "Genre", answers: genreChoices.map { ($0, FilterPresets.genre($0)) })
                     }
-                    if !decadeChoices.isEmpty || filters.decade != nil {
-                        askingChip(on: filters.decade.map { "From the \($0)s" }, off: "Year", title: "Year",
-                                   answers: decadeChoices.map { ($0, "The \($0)s") }) { filters.decade = $0 } clear: { filters.decade = nil }
+                    if !decadeChoices.isEmpty || query.rules.contains(where: { $0.field == .year }) {
+                        askingChip(.year, off: "Year", title: "Year",
+                                   answers: decadeChoices.reversed().map { ("The \($0)s", FilterPresets.decade($0)) })
                     }
                 }
                 .padding(.horizontal, 20)
@@ -356,27 +262,17 @@ struct SongsPage: View {
         .padding(.bottom, 10)
     }
 
-    /// The words of every filter on, for a live list made from them.
-    private var chipWords: [String] {
-        var out = filters.quick.map(\.label)
-        if let rating = filters.rating { out.append("Rating at least \(rating)") }
-        if let genre = filters.genre { out.append("Genre is \(genre)") }
-        if let decade = filters.decade { out.append("From the \(decade)s") }
-        return out
-    }
-
-    /// A chip that asks a question when off and reads as its filter when on; a tap on it then
-    /// takes the filter off.
+    /// A chip that asks which first, from a menu that opens on it. On, it reads as its filter and
+    /// a tap takes the filter off without asking.
     @ViewBuilder
-    private func askingChip<T: Hashable>(on: String?, off: String, title: String, answers: [(T, String)],
-                                         pick: @escaping (T) -> Void, clear: @escaping () -> Void) -> some View {
-        if let on {
-            FilterChip(text: on, on: true, action: clear)
+    private func askingChip(_ field: QueryField, off: String, title: String, answers: [(String, QueryRule)]) -> some View {
+        if let on = query.rules.first(where: { $0.field == field }) {
+            FilterChip(text: on.label(), on: true) { query = query.without(on) }
         } else {
             Menu {
                 Section(title) {
                     ForEach(answers.indices, id: \.self) { index in
-                        Button(answers[index].1) { pick(answers[index].0) }
+                        Button(answers[index].0) { query = query.setting(answers[index].1) }
                     }
                 }
             } label: {
@@ -438,6 +334,8 @@ struct GenrePage: View {
     @Environment(LibraryActions.self) private var actions
     @State private var albums: [LibraryAlbum] = []
     @State private var songs: [LibraryTrack] = []
+    /// The order the songs shown are in.
+    @State private var songsOrder: ListOrder?
     @State private var gridWidth: CGFloat = 390
 
     var body: some View {
@@ -446,33 +344,38 @@ struct GenrePage: View {
             LibraryList {
                     VStack(spacing: 0) {
                         Text(name).font(.octoTitle).multilineTextAlignment(.center).frame(maxWidth: .infinity).bigTitle()
-                        Text("\(albumsCount(albums.count)) • \(songsCount(songs.count))")
-                            .font(.octoCaption)
-                            .foregroundStyle(OctoColor.textMuted)
-                            .padding(.top, 14)
-                        PlayShuffle(enabled: !songs.isEmpty) { actions.play(songs, name: name) } shuffle: { actions.play(songs, shuffled: true, name: name) }
-                            .padding(.top, 10)
+                        PlayRow(details: "\(albumsCount(albums.count)) • \(songsCount(songs.count))") {
+                            actions.play(songs, source: name)
+                        } shuffle: {
+                            actions.play(songs, shuffled: true, source: name)
+                        }
+                        .padding(.top, 14)
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, detailTopGap)
                     .padding(.bottom, 20)
                     albumGrid
-                    if !songs.isEmpty { SortBar(name: "Songs", list: .genreSongs).id("songs") }
+                    if !songs.isEmpty {
+                        FirstRowMark()
+                        SortBar(name: "Songs", list: .genreSongs).id("songs")
+                    }
                     ForEach(Array(songs.enumerated()), id: \.element.id) { position, track in
-                        TrackRow(track: track) { actions.play(songs, from: position, name: name) }
+                        TrackRow(track: track) { actions.play(songs, from: position, source: name) }
                     }
                     Color.clear.frame(height: 20)
             }
-            .onChange(of: order) { _, _ in proxy.scrollTo("songs", anchor: .top) }
+            .animation(.easeOut(duration: 0.25), value: songsOrder)
+            .topOnNewOrder(songsOrder) { proxy.scrollTo("songs", anchor: .top) }
         }
         .barClearance()
         .inlineTitle(name)
         .backStopsPicking()
         .selectableSongs(state.pickables(songs))
-        .libraryRefreshable {}
         .task(id: "\(name)|\(library.stamp(.library, .likes, .ratings, .plays))|\(order.by.id)|\(order.descending)") {
             albums = await library.genreAlbums(name).sorted { $0.sortKey < $1.sortKey }
-            songs = await library.sortedSongs(order, scope: .genre(name)).items
+            let sorted = await library.sortedSongs(order, scope: .genre(name))
+            songs = sorted.items
+            songsOrder = sorted.order
         }
     }
 
@@ -564,7 +467,7 @@ struct HistoryPage: View {
     private func playFrom(_ track: LibraryTrack, in all: [LibraryTrack]) {
         var seen = Set<String>()
         let once = all.filter { seen.insert($0.id).inserted }
-        actions.play(once, from: once.firstIndex { $0.id == track.id } ?? 0, name: "History")
+        actions.play(once, from: once.firstIndex { $0.id == track.id } ?? 0, source: "History")
     }
 
     @ViewBuilder
@@ -598,10 +501,10 @@ struct HistoryPage: View {
                           : range == .fourWeeks ? "Nothing played in the last 4 weeks" : "Nothing played in the last 6 months", vertical: 24)
             } else {
                 let tracks = most.map(\.track)
-                ForEach(Array(most.enumerated()), id: \.offset) { position, played in
+                ForEach(Array(most.enumerated()), id: \.offset) { _, played in
                     TrackRow(track: played.track,
                              subtitle: "\(played.track.artist) • \(played.plays == 1 ? "1 play" : "\(played.plays) plays")") {
-                        actions.play(tracks, from: position, name: "History")
+                        playFrom(played.track, in: tracks)
                     }
                 }
             }
