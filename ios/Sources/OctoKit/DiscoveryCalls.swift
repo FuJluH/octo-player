@@ -67,30 +67,6 @@ extension TopSong {
 }
 
 extension SubsonicClient {
-    /// The OpenSubsonic extensions the server lists, as "name:version" strings.
-    public func openSubsonicExtensions() async throws -> [String] {
-        let extensions: [Extension] = try await get("getOpenSubsonicExtensions", key: "openSubsonicExtensions")
-        return extensions.flatMap { e in e.versions.isEmpty ? ["\(e.name):1"] : e.versions.map { "\(e.name):\($0)" } }
-    }
-
-    /// Whether the server lists an extension at this version, or nil when it could not be asked:
-    /// out of reach, a proxy answering while it restarts, or the sign-in refused. Only a yes or no
-    /// is the server's own answer, worth keeping; a nil is worth asking again. A server that
-    /// answers the call with an error has no extensions to list, which is a no.
-    public func supportsIfKnown(_ name: String, version: Int = 1) async -> Bool? {
-        do {
-            return try await openSubsonicExtensions().contains("\(name):\(version)")
-        } catch let error as OctoError {
-            switch error {
-            case .wrongCredentials: return nil
-            case .http(let status): return [502, 503, 504].contains(status) ? nil : false
-            default: return false
-            }
-        } catch {
-            return nil
-        }
-    }
-
     /// The charts the server's country has. Only for servers that list octoTopSongs version 2.
     public func charts() async throws -> ChartChoices {
         try await get("getCharts", key: "charts")

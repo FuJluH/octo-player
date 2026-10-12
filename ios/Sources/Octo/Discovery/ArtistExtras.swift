@@ -106,7 +106,7 @@ final class ArtistExtrasSource {
 
     private func extensionsOf(_ server: String, _ client: SubsonicClient) async -> Set<String> {
         if let known = extensions[server] { return known }
-        let names = Set(((try? await client.openSubsonicExtensions()) ?? []).map { String($0.split(separator: ":").first ?? "") })
+        let names = Set(((try? await client.extensionList()) ?? []).map { String($0.split(separator: ":").first ?? "") })
         extensions[server] = names
         return names
     }
