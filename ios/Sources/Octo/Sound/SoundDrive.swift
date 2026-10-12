@@ -10,7 +10,8 @@ import OctoKit
 /// - `sound:preset:NAME` opens it with that preset (built-in or own) applied
 /// - `sound:editor` opens the parametric filter editor, with a filter in it
 /// - `sound:save` opens the "Save as preset" card
-/// - `sound:own:NAME` saves the curve as an own preset, then asks to delete it
+/// - `sound:own:NAME` saves the ten bands as an own preset and marks the curve as it
+/// - `sound:delete:NAME` asks to delete that own preset
 /// - `sound:card:loudness`, `sound:card:balance`, `sound:card:correction` scroll to that card
 /// - `sound:eq:on`, `sound:eq:off`, `sound:each:on`, `sound:each:off` set those switches
 @MainActor
@@ -44,7 +45,13 @@ enum SoundDrive {
         case "own":
             let name = rest.isEmpty ? "Mine" : rest
             store.savePreset(name, gains: store.current.graphicGains)
-            store.pageRequest = .deletePreset(name)
+            store.update { settings in
+                var s = SoundEdits.withMode(settings, .graphic)
+                s.preset = name
+                return s
+            }
+        case "delete":
+            store.pageRequest = .deletePreset(rest.isEmpty ? "Mine" : rest)
         case "card":
             store.pageRequest = .card(rest)
         case "eq":

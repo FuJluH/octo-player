@@ -187,6 +187,9 @@ final class SoundStream: @unchecked Sendable {
         step.endOfStream(into: output)
     }
 
+    /// Whether this stream is shaped, as decided by the last `configure`.
+    var isActive: Bool { step.isActive }
+
     /// How many frames late the shaped sound comes out.
     var latency: Int { step.latency }
 

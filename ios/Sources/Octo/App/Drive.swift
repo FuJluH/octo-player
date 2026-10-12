@@ -13,7 +13,8 @@ import OctoKit
 /// - `search:TEXT` plays the library songs a search for TEXT finds
 /// - `pause`
 /// - `sound`, `sound:graphic`, `sound:parametric`, `sound:preset:NAME`, `sound:editor`,
-///   `sound:save`, `sound:own:NAME`, `sound:card:NAME`, `sound:eq:on|off`, `sound:each:on|off`
+///   `sound:save`, `sound:own:NAME`, `sound:delete:NAME`, `sound:card:NAME`, `sound:eq:on|off`,
+///   `sound:each:on|off`
 ///   open the Sound page in that state (see `SoundDrive`)
 @MainActor
 enum Drive {
