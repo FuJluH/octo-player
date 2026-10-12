@@ -19,6 +19,8 @@ final class SoundStore {
     private(set) var presets: [EqPreset]
     /// A state of the Sound page asked for from outside it.
     var pageRequest: SoundPageRequest?
+    /// How many Sound pages are on screen.
+    @ObservationIgnored var pagesShown = 0
 
     @ObservationIgnored let processor = SoundProcessor()
     @ObservationIgnored private let soundData: UserDefaults
