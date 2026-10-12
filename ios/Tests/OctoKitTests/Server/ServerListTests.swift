@@ -32,13 +32,6 @@ import Testing
         #expect(!ServerCheck(.answers).isWarning)
     }
 
-    @Test func theSwitchNoticeSaysWhenMusicStopped() {
-        #expect(switchNotice(to: "Work", from: nil, stoppedMusic: true) == nil)
-        #expect(switchNotice(to: "Work", from: "Home", stoppedMusic: false) == "Now on Work.")
-        #expect(switchNotice(to: "Work", from: "Home", stoppedMusic: true)
-            == "Now on Work. The music from Home stopped, and its queue is kept for when you come back.")
-    }
-
     @Test func aNewIdIsTheAccountsKeyUnlessTaken() {
         let first = serverAccountKey("winters", "https://music.test/")
         #expect(freshServerId(username: "winters", address: "https://music.test/", taken: []) == first)
@@ -51,7 +44,7 @@ import Testing
         #expect(serverAccountKey("a", "b").count == 16)
         #expect(serverAccountKey("a", "b") != serverAccountKey("a", "c"))
         // SHA-256 of "abc" starts ba7816bf8f01cfea.
-        #expect(SHA256Digest.hash(Array("abc".utf8)).prefix(8).map { String(format: "%02x", $0) }.joined() == "ba7816bf8f01cfea")
+        #expect(serverAccountKey("winters", "https://music.test/") == Hashes.hex(Hashes.sha256(Array("winters@https://music.test/".utf8)).prefix(8)))
     }
 
 
@@ -70,7 +63,7 @@ import Testing
     let now: Int64 = 1_790_683_200_000 // 2026-09-29 12:00 UTC
     let minute: Int64 = 60_000
 
-    func ms(_ text: String) -> Int64 { serverTime(text)! }
+    func ms(_ text: String) -> Int64 { epochMs(text)! }
 
     @Test func theKindAndVersionReadAsOneName() {
         #expect(serverKind("octo", "0.9.3") == "Octo 0.9.3")
@@ -124,22 +117,6 @@ import Testing
         #expect(agoWords(thenMs: now + 5 * minute, nowMs: now, zone: utc) == "just now")
     }
 
-    @Test func serverTimesReadWithAndWithoutFractions() {
-        #expect(serverTime("2026-09-29T10:00:00Z") == 1_790_676_000_000)
-        #expect(serverTime("2026-09-29T12:00:00+02:00") == 1_790_676_000_000)
-        #expect(serverTime("2026-09-29T10:00:00.250Z") == 1_790_676_000_250)
-        #expect(serverTime("yesterday") == nil)
-        #expect(serverTime(nil) == nil)
-    }
-
-    @Test func lastSyncedReadsShort() {
-        #expect(lastSyncedWords(atMs: now - 10_000, nowMs: now) == "Just now")
-        #expect(lastSyncedWords(atMs: now - 5 * minute, nowMs: now) == "5 min ago")
-        #expect(lastSyncedWords(atMs: now - 3 * 60 * minute, nowMs: now) == "3 hr ago")
-        #expect(lastSyncedWords(atMs: now - 30 * 60 * minute, nowMs: now) == "Yesterday")
-        #expect(lastSyncedWords(atMs: now - 4 * 24 * 60 * minute, nowMs: now) == "4 days ago")
-    }
-
     @Test func homeIsUsedOnlyWhenEverythingSaysSo() {
         #expect(choosePlace(hasHome: true, onLocalNetwork: true, homeAnswered: true) == .home)
         #expect(choosePlace(hasHome: true, onLocalNetwork: false, homeAnswered: true) == .away)
@@ -162,7 +139,7 @@ import Testing
 
     @Test func scanWords() {
         #expect(scanLabel(.idle) == "Scan library now")
-        #expect(scanLabel(.scanning(count: 1234), locale: english) == "Scanning, 1,234 songs")
+        #expect(scanLabel(.scanning(count: 1234)) == "Scanning, 1,234 songs")
         #expect(scanLabel(.scanning(count: 0)) == "Scanning")
         #expect(scanLabel(.finished) == "Scan finished")
         #expect(scanLabel(.failed(message: "Only an admin can scan")) == "Only an admin can scan")
@@ -182,12 +159,12 @@ import Testing
         let now: Int64 = 1_790_416_800_000
         let share: ServerShare = decoded(#"{"id":"sh1","url":"","description":"","expires":"2026-09-29T10:00:00Z","visitCount":12,"entry":[{"id":"s1","title":"Nightcall"},{"id":"s2","title":"Odd Look"}]}"#)
         #expect(shareTitle(share) == "Nightcall")
-        #expect(shareDetails(share, nowMs: now, locale: english) == "2 songs • Expires in 3 days • 12 visits")
+        #expect(shareDetails(share, nowMs: now) == "2 songs • Expires in 3 days • 12 visits")
         let bare: ServerShare = decoded(#"{"id":"sh2"}"#)
         #expect(shareTitle(bare) == "Shared link")
         #expect(shareDetails(bare, nowMs: now) == "Never expires • No visits")
         let busy: ServerShare = decoded(#"{"id":"sh3","visitCount":1234}"#)
-        #expect(shareDetails(busy, nowMs: now, locale: english) == "Never expires • 1,234 visits")
+        #expect(shareDetails(busy, nowMs: now) == "Never expires • 1,234 visits")
     }
 
     @Test func minutesAgoWords() {

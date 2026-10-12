@@ -102,7 +102,7 @@ struct RadioStationsScreen: View {
             stations = .ready(try await controls.stations())
         } catch is CancellationError {
         } catch {
-            stations = .failed(failureWords(error))
+            stations = .failed(userMessage(plainError(error)))
         }
     }
 
@@ -163,7 +163,7 @@ struct RadioStationsScreen: View {
                 if let id = next.id, stationChangeRefused(error) || !controls.canEdit(stationId: id, coverArt: nil) {
                     problem = "The server keeps this station as it is."
                 } else {
-                    problem = failureWords(error)
+                    problem = userMessage(plainError(error))
                 }
             }
         }

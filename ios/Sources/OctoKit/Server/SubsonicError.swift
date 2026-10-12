@@ -102,26 +102,17 @@ public enum SubsonicError: Error, Equatable, Sendable, LocalizedError {
     }
 }
 
-/// What to tell someone when a request fails, whichever kind of error it ended with.
-public func failureWords(_ error: Error) -> String {
-    guard error is SubsonicError || error is OctoError || error is URLError else { return "Something went wrong." }
-    switch SubsonicError(error) {
-    case .unreachable:
-        return "Couldn't reach the server. Check the address, and that you're on the right network."
-    case .notSubsonic(_, let status):
-        if let status, SubsonicError.busyStatuses.contains(status) {
-            return "The server isn't answering right now. It may be restarting, so try again in a moment."
-        }
-        return "That address answered, but not like a music server. Check the port."
-    case .wrongCredentials:
-        return "Wrong username or password."
-    case .authNotSupported(let code, _):
-        return code == 41
-            ? "This account can't sign in with a token. Turn on Legacy sign-in under Advanced."
-            : "The server doesn't take this way of signing in."
-    case .notFound:
-        return "That isn't on the server any more."
-    case .server(_, let message):
-        return "The server said: \(message)"
+/// An error as the app's plain kinds read it, for the words people see (`userMessage`): these
+/// kinds as the matching `OctoError`, a failure to reach the server as a connection error, and
+/// anything else as it is.
+public func plainError(_ error: Error) -> Error {
+    guard let known = error as? SubsonicError else { return error }
+    switch known {
+    case .wrongCredentials(let message): return OctoError.wrongCredentials(message)
+    case .authNotSupported(let code, let message): return OctoError.authUnsupported(code: code, message: message)
+    case .notFound(let message): return OctoError.notFound(message)
+    case .server(let code, let message): return OctoError.server(code: code, message: message)
+    case .notSubsonic(_, let status): return status.map(OctoError.http) ?? OctoError.notSubsonic
+    case .unreachable: return URLError(.cannotConnectToHost)
     }
 }

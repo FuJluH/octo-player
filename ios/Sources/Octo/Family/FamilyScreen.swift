@@ -290,8 +290,8 @@ struct FamilyItemLine<Actions: View>: View {
 
     private func stateColor(_ state: FamilyRequestState) -> Color {
         switch state {
-        case .done: AccountColor.signalGreen
-        case .declined, .failed: AccountColor.signalOrange
+        case .done: OctoColor.signalGreen
+        case .declined, .failed: OctoColor.signalOrange
         default: OctoColor.textSecondary
         }
     }
@@ -460,7 +460,7 @@ private struct RequestSheetBody: View {
                     .accessibilityAddTraits(chosen == choice.quality ? .isSelected : [])
                 }
                 VStack(alignment: .leading, spacing: 4) {
-                    if let line = sheet.storageLine { Text(line).font(.octoCaption).foregroundStyle(AccountColor.signalOrange) }
+                    if let line = sheet.storageLine { Text(line).font(.octoCaption).foregroundStyle(OctoColor.signalOrange) }
                     if let line = sheet.quotaLine { Text(line).font(.octoCaption).foregroundStyle(OctoColor.textSecondary) }
                     Text(sheet.approvalLine).font(.octoCaption).foregroundStyle(OctoColor.textMuted)
                 }

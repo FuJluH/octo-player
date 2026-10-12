@@ -126,13 +126,6 @@ import Testing
         #expect(abilityLines(home).first { $0.text.hasPrefix("Listening away") } == AbilityLine("Listening away from home is off", on: false))
     }
 
-    @Test func aStreamAsksForWhatTheAppPicks() {
-        func text(_ params: [(String, String)]) -> [String] { params.map { "\($0.0)=\($0.1)" } }
-        #expect(text(streamParams(appPicks: false, quality: .dataSaver)) == ["format=raw"])
-        #expect(text(streamParams(appPicks: true, quality: .original)) == ["format=raw"])
-        #expect(text(streamParams(appPicks: true, quality: .standard)) == ["format=opus", "maxBitRate=160"])
-    }
-
     @Test func aRoleFromANewerServerShowsItsOwnName() {
         #expect(roleLabel(name: "Listener") == "Listener")
         #expect(roleLabel(name: "CoAdmin") == "Co-admin")
@@ -340,8 +333,8 @@ import Testing
 
     @Test func theCountdownRunsToTheEnd() {
         let expires = "2026-10-20T18:02:00Z"
-        #expect(secondsLeft(expires, nowMs: serverTime(expires)! - 102_000) == 102)
-        #expect(secondsLeft(expires, nowMs: serverTime(expires)! + 5_000) == 0)
+        #expect(secondsLeft(expires, nowMs: epochMs(expires)! - 102_000) == 102)
+        #expect(secondsLeft(expires, nowMs: epochMs(expires)! + 5_000) == 0)
         #expect(secondsLeft(nil, nowMs: 0) == nil)
         #expect(countdownLine(102) == "Works once · expires in 1:42")
         #expect(countdownLine(nil) == "Works once")

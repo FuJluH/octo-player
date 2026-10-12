@@ -340,12 +340,3 @@ public func requestAnswerLine(_ request: FamilyRequest) -> String {
     default: requestStateLine(request)
     }
 }
-
-// MARK: Audio quality
-
-/// What a stream asks the server for: the file as it is, unless this app picks the quality and
-/// wants less, then Opus at that bitrate.
-public func streamParams(appPicks: Bool, quality: AccountStreamQuality) -> [(String, String)] {
-    if !appPicks || quality == .original { return [("format", "raw")] }
-    return [("format", "opus"), ("maxBitRate", "\(quality.kbps)")]
-}

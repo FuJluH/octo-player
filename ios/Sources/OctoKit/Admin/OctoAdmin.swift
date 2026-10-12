@@ -603,32 +603,6 @@ public func serviceName(_ key: String) -> String {
     }
 }
 
-/// A time from Octo, in milliseconds since 1970. One written without a zone is taken as UTC.
-public func adminTime(_ text: String?) -> Int64? {
-    guard let text, !text.trimmingCharacters(in: .whitespaces).isEmpty,
-          let pattern = try? NSRegularExpression(pattern: #"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(Z|[+-]\d{2}:\d{2})?$"#),
-          let match = pattern.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) else { return nil }
-    func group(_ index: Int) -> String? {
-        Range(match.range(at: index), in: text).map { String(text[$0]) }
-    }
-    guard let year = group(1).flatMap(Int.init), let month = group(2).flatMap(Int.init), let day = group(3).flatMap(Int.init),
-          let hour = group(4).flatMap(Int.init), let minute = group(5).flatMap(Int.init) else { return nil }
-    let second = group(6).flatMap(Int.init) ?? 0
-    let fraction = group(7).flatMap { Double("0." + $0) } ?? 0
-    var offset = 0
-    if let zone = group(8), zone != "Z" {
-        let parts = zone.dropFirst().split(separator: ":").compactMap { Int($0) }
-        guard parts.count == 2, parts[0] <= 18, parts[1] < 60 else { return nil }
-        offset = (parts[0] * 3_600 + parts[1] * 60) * (zone.hasPrefix("-") ? -1 : 1)
-    }
-    guard (1...12).contains(month), hour < 24, minute < 60, second < 60 else { return nil }
-    var calendar = Calendar(identifier: .gregorian)
-    calendar.timeZone = TimeZone(identifier: "UTC") ?? .current
-    let parts = DateComponents(year: year, month: month, day: day, hour: hour, minute: minute, second: second)
-    guard parts.isValidDate(in: calendar), let date = calendar.date(from: parts) else { return nil }
-    return Int64(((date.timeIntervalSince1970 - Double(offset) + fraction) * 1_000).rounded(.down))
-}
-
 /// How long ago, the way a person says it: "Just now", "5 min ago", "Yesterday", then the date.
 public func adminAgo(thenMs: Int64, nowMs: Int64, zone: TimeZone = .current, locale: Locale = .current) -> String {
     let minutes = (nowMs - thenMs) / 60_000
@@ -649,20 +623,21 @@ public func adminAgo(thenMs: Int64, nowMs: Int64, zone: TimeZone = .current, loc
     return formatter.string(from: then)
 }
 
+/// How long ago a time from Octo was (one written without a zone is UTC), or nil when it cannot be read.
 public func adminAgo(_ text: String?, nowMs: Int64, zone: TimeZone = .current, locale: Locale = .current) -> String? {
-    adminTime(text).map { adminAgo(thenMs: $0, nowMs: nowMs, zone: zone, locale: locale) }
+    epochMs(text).map { adminAgo(thenMs: $0, nowMs: nowMs, zone: zone, locale: locale) }
 }
 
 /// How far the stations have learned the listener's taste.
-public func learningLine(_ learning: RadioLearning, locale: Locale = .current) -> String {
+public func learningLine(_ learning: RadioLearning) -> String {
     if learning.needed <= 0 || learning.plays >= learning.needed {
-        return "Learned from \(plays(learning.plays, locale))"
+        return "Learned from \(plays(learning.plays))"
     }
-    return "Learning your taste: \(groupedCount(learning.plays, locale: locale)) of \(plays(learning.needed, locale))"
+    return "Learning your taste: \(SettingsSummaries.grouped(Int(learning.plays))) of \(plays(learning.needed))"
 }
 
-private func plays(_ count: Int, _ locale: Locale) -> String {
-    count == 1 ? "1 play" : "\(groupedCount(count, locale: locale)) plays"
+private func plays(_ count: Int) -> String {
+    count == 1 ? "1 play" : "\(SettingsSummaries.grouped(Int(count))) plays"
 }
 
 /// The last refresh's error in words fit for the screen. Anything that reads like a program's

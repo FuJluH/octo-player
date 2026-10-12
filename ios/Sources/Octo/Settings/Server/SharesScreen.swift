@@ -80,7 +80,7 @@ struct SharesScreen: View {
             shares = .ready(try await controls.shares())
         } catch is CancellationError {
         } catch {
-            shares = .failed(sharingUnavailable(error) ? "Sharing is switched off on this server." : failureWords(error))
+            shares = .failed(sharingUnavailable(error) ? "Sharing is switched off on this server." : userMessage(plainError(error)))
         }
     }
 
@@ -91,7 +91,7 @@ struct SharesScreen: View {
                 try await controls.deleteShare(share.id)
                 if case .ready(let list) = shares { shares = .ready(list.filter { $0.id != share.id }) }
             } catch {
-                deleteProblem = "Couldn't delete that link. \(failureWords(error))"
+                deleteProblem = "Couldn't delete that link. \(userMessage(plainError(error)))"
             }
         }
     }
@@ -216,7 +216,7 @@ struct ShareCard: View {
                     problem = "The server made no share"
                 }
             } catch {
-                problem = sharingUnavailable(error) ? "Sharing is switched off on this server." : failureWords(error)
+                problem = sharingUnavailable(error) ? "Sharing is switched off on this server." : userMessage(plainError(error))
             }
             making = nil
         }

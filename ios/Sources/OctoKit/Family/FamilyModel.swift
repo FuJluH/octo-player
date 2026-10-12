@@ -154,25 +154,6 @@ public final class FamilyModel {
         return read.me
     }
 
-    /// The account's own quality at home or away, kept on the server for every app it uses.
-    public func setQuality(home: AccountStreamQuality? = nil, away: AccountStreamQuality? = nil) {
-        act { client in
-            let now = try await client.setAccountQuality(home: home, away: away)
-            self.info?.me.quality = now
-            return nil
-        }
-    }
-
-    /// Whether this device follows the account's choice or its own app's.
-    public func setDeviceMode(_ mode: QualityFollows) {
-        guard let device = thisDevice else { return }
-        devices = devices.map { var copy = $0; if copy.id == device.id { copy.quality = mode }; return copy }
-        act { client in
-            try await client.setQualityFollows(deviceId: device.id, mode)
-            return nil
-        }
-    }
-
     public func refresh() async {
         guard let client = client() else { return }
         guard supported() else {

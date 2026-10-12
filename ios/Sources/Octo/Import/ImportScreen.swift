@@ -64,7 +64,7 @@ struct ImportScreen: View {
     @ViewBuilder
     private func content(_ model: ImportModel) -> some View {
         if let overview = model.overview {
-            if let problem = overview.libraryProblem { line(problem, color: AccountColor.signalOrange) }
+            if let problem = overview.libraryProblem { line(problem, color: OctoColor.signalOrange) }
             if let services = model.services {
                 GetMyMusicView(model: model, services: services, pick: { picking = true }, paste: { pasting = true })
                 if let said = model.said { line(said, color: OctoColor.textSecondary) }
@@ -333,8 +333,8 @@ private struct TrackLine<Actions: View>: View {
 
     private var stateColor: Color {
         switch track.stage {
-        case .have, .done: AccountColor.signalGreen
-        case .notFound, .skipped: AccountColor.signalOrange
+        case .have, .done: OctoColor.signalGreen
+        case .notFound, .skipped: OctoColor.signalOrange
         default: OctoColor.textSecondary
         }
     }
@@ -445,7 +445,7 @@ private struct GetMyMusicView: View {
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
                 .minimumScaleFactor(10.0 / 15.0)
-                .foregroundStyle(picked ? AccountColor.onAccent : OctoColor.textPrimary)
+                .foregroundStyle(picked ? OctoColor.background : OctoColor.textPrimary)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 8)
                 .frame(maxWidth: .infinity, minHeight: 56)
@@ -456,7 +456,7 @@ private struct GetMyMusicView: View {
                         Image(systemName: "checkmark")
                             .font(.system(size: 11, weight: .bold))
                             .frame(width: 14, height: 14)
-                            .foregroundStyle(AccountColor.onAccent)
+                            .foregroundStyle(OctoColor.background)
                             .padding(6)
                     }
                 }

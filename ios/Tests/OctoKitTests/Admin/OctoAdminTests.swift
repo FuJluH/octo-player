@@ -26,20 +26,20 @@ import Testing
 @Suite struct AdminFormatTests {
     let utc = TimeZone(identifier: "UTC")!
     let english = Locale(identifier: "en")
-    let now = adminTime("2026-09-26T15:00:00Z")!
+    let now = epochMs("2026-09-26T15:00:00Z")!
 
     func ago(_ text: String) -> String? { adminAgo(text, nowMs: now, zone: utc, locale: english) }
 
     @Test func readsTimesWithAndWithoutAZone() {
-        let two = adminTime("2026-09-26T14:00:00Z")
+        let two = epochMs("2026-09-26T14:00:00Z")
         #expect(two == 1_790_431_200_000)
-        #expect(adminTime("2026-09-26T16:00:00+02:00") == two)
-        #expect(adminTime("2026-09-26T14:00:00.1234567Z") == two.map { $0 + 123 })
-        #expect(adminTime("2026-09-26T14:00:00") == two)
-        #expect(adminTime(nil) == nil)
-        #expect(adminTime("") == nil)
-        #expect(adminTime("yesterday") == nil)
-        #expect(adminTime("2026-02-30T14:00:00Z") == nil)
+        #expect(epochMs("2026-09-26T16:00:00+02:00") == two)
+        #expect(epochMs("2026-09-26T14:00:00.1234567Z") == two.map { $0 + 123 })
+        #expect(epochMs("2026-09-26T14:00:00") == two)
+        #expect(epochMs(nil) == nil)
+        #expect(epochMs("") == nil)
+        #expect(epochMs("yesterday") == nil)
+        #expect(epochMs("2026-02-30T14:00:00Z") == nil)
     }
 
     @Test func saysRecentTimesInMinutes() {
@@ -56,8 +56,8 @@ import Testing
     }
 
     @Test func lateLastNightIsHoursAgo() {
-        let morning = adminTime("2026-09-26T02:00:00Z")!
-        #expect(adminAgo(thenMs: adminTime("2026-09-25T23:00:00Z")!, nowMs: morning, zone: utc, locale: english) == "3 hr ago")
+        let morning = epochMs("2026-09-26T02:00:00Z")!
+        #expect(adminAgo(thenMs: epochMs("2026-09-25T23:00:00Z")!, nowMs: morning, zone: utc, locale: english) == "3 hr ago")
     }
 
     @Test func thenYesterdayDaysAndDates() {
@@ -73,15 +73,15 @@ import Testing
     }
 
     @Test func learningCountsUpToWhatItNeeds() {
-        #expect(learningLine(RadioLearning(plays: 40, needed: 50), locale: english) == "Learning your taste: 40 of 50 plays")
-        #expect(learningLine(RadioLearning(plays: 0, needed: 1), locale: english) == "Learning your taste: 0 of 1 play")
-        #expect(learningLine(RadioLearning(plays: 1_234, needed: 5_000), locale: Locale(identifier: "en_US")) == "Learning your taste: 1,234 of 5,000 plays")
+        #expect(learningLine(RadioLearning(plays: 40, needed: 50)) == "Learning your taste: 40 of 50 plays")
+        #expect(learningLine(RadioLearning(plays: 0, needed: 1)) == "Learning your taste: 0 of 1 play")
+        #expect(learningLine(RadioLearning(plays: 1_234, needed: 5_000)) == "Learning your taste: 1,234 of 5,000 plays")
     }
 
     @Test func learnedOnceItHasEnough() {
-        #expect(learningLine(RadioLearning(plays: 212, needed: 50), locale: english) == "Learned from 212 plays")
-        #expect(learningLine(RadioLearning(plays: 50, needed: 50), locale: english) == "Learned from 50 plays")
-        #expect(learningLine(RadioLearning(plays: 1, needed: 0), locale: english) == "Learned from 1 play")
+        #expect(learningLine(RadioLearning(plays: 212, needed: 50)) == "Learned from 212 plays")
+        #expect(learningLine(RadioLearning(plays: 50, needed: 50)) == "Learned from 50 plays")
+        #expect(learningLine(RadioLearning(plays: 1, needed: 0)) == "Learned from 1 play")
     }
 
     @Test func healthPicksItsDot() {

@@ -42,16 +42,7 @@ struct PanelLine: View {
     }
 }
 
-/// The few colors the account pages use beyond the shared palette.
+/// The faint fill the account cards use beyond the shared palette.
 enum AccountColor {
-    static let signalOrange = Color(hex: 0xFF9500)
-    static let signalGreen = Color(hex: 0x28CD41)
-    /// Black with 40% of the accent: a chosen pill.
-    static let accentSelected = Color.black.mix(with: OctoColor.accent, by: 0.4)
-    /// A dark grey with 10% of the accent: a soft badge.
-    static let accentTonal = Color(hex: 0x1E1E1E).mix(with: OctoColor.accent, by: 0.1)
-    /// Words on the accent fill.
-    static let onAccent = Color(hex: 0x0C0C0D)
     static let fill = Color.white.opacity(0.04)
-    static let edge = Color.white.opacity(0.08)
 }

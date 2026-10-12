@@ -260,9 +260,9 @@ final class Session {
         } catch {
             restoreSecurity()
             if case .wrongCredentials = SubsonicError(error) {
-                return .needsPassword(server, passwordRefusedWords(name: server.name))
+                return .needsPassword(server, serverSwitchPasswordRefusedWords(server.name))
             }
-            return .failed(switchFailedWords(name: server.name, why: failureWords(error)))
+            return .failed(serverSwitchFailedWords(server.name, why: userMessage(plainError(error))))
         }
         var fresh = server
         fresh.serverType = reached.1.info.type ?? server.serverType
@@ -280,7 +280,7 @@ final class Session {
     func switchTo(_ id: String) async throws {
         switch await switchServer(id) {
         case .done: return
-        case .needsPassword(let server, let note): throw SignInFailure.needsPassword(server.id, note ?? passwordRefusedWords(name: server.name))
+        case .needsPassword(let server, let note): throw SignInFailure.needsPassword(server.id, note ?? serverSwitchPasswordRefusedWords(server.name))
         case .failed(let words): throw SignInFailure.words(words)
         }
     }

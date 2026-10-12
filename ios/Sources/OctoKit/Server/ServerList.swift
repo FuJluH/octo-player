@@ -57,18 +57,6 @@ public func statusLine(serverType: String?, serverVersion: String?, signedOut: B
     }
 }
 
-/// The notice once another server is in use, and plainly when music was stopped for it. Nil
-/// when nothing was in use before.
-public func switchNotice(to: String, from: String?, stoppedMusic: Bool) -> String? {
-    guard let from else { return nil }
-    if stoppedMusic { return "Now on \(to). The music from \(from) stopped, and its queue is kept for when you come back." }
-    return "Now on \(to)."
-}
-
-public func switchFailedWords(name: String, why: String) -> String { "Couldn't switch to \(name). \(why)" }
-
-public func passwordRefusedWords(name: String) -> String { "\(name) didn't take the saved password. It may have been changed." }
-
 /// An id for a newly kept server: the account's key, unless another kept server has it already.
 public func freshServerId(username: String, address: String, taken: Set<String>) -> String {
     let first = serverAccountKey(username, address)
@@ -105,7 +93,7 @@ public func offersOf(_ extensions: [String]) -> String? {
 /// How much it holds: "1,204 songs, 96 albums, 41 artists and 12 playlists". A count not known
 /// yet is left out.
 public func libraryCounts(songs: Int?, albums: Int?, artists: Int?, playlists: Int?) -> String? {
-    func counted(_ n: Int, _ one: String) -> String { "\(groupedCount(n, locale: serverWordsLocale)) \(n == 1 ? one : one + "s")" }
+    func counted(_ n: Int, _ one: String) -> String { "\(SettingsSummaries.grouped(Int(n))) \(n == 1 ? one : one + "s")" }
     let parts = [songs.map { counted($0, "song") }, albums.map { counted($0, "album") },
                  artists.map { counted($0, "artist") }, playlists.map { counted($0, "playlist") }].compactMap { $0 }
     switch parts.count {
@@ -126,9 +114,9 @@ public func answerWords(_ ms: Int64) -> String {
 public func scanWords(_ status: ServerScanStatus?, nowMs: Int64, zone: TimeZone = .current) -> String? {
     guard let status else { return nil }
     if status.scanning {
-        return status.count > 0 ? "Reading its folders now, \(groupedCount(status.count, locale: serverWordsLocale)) files so far." : "Reading its folders now."
+        return status.count > 0 ? "Reading its folders now, \(SettingsSummaries.grouped(Int(status.count))) files so far." : "Reading its folders now."
     }
-    guard let last = serverTime(status.lastScan) else { return nil }
+    guard let last = epochMs(status.lastScan) else { return nil }
     return "Last read its folders \(agoWords(thenMs: last, nowMs: nowMs, zone: zone))."
 }
 
@@ -155,50 +143,11 @@ public func agoWords(thenMs: Int64, nowMs: Int64, zone: TimeZone = .current) -> 
     return "on " + formatter.string(from: then)
 }
 
-/// A server's time as milliseconds since 1970, or nil when it cannot be read: an ISO instant,
-/// or an ISO date and time with an offset.
-public func serverTime(_ text: String?) -> Int64? {
-    guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-    for options in [ISO8601DateFormatter.Options.withInternetDateTime, [.withInternetDateTime, .withFractionalSeconds]] {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = options
-        if let date = formatter.date(from: text) { return Int64((date.timeIntervalSince1970 * 1_000).rounded()) }
-    }
-    return nil
-}
-
-/// How long ago the library was last copied, in words: "Just now", "5 min ago".
-public func lastSyncedWords(atMs: Int64, nowMs: Int64) -> String {
-    let gone = max(0, nowMs - atMs)
-    let minute: Int64 = 60_000
-    let hour = 60 * minute
-    let day = 24 * hour
-    if gone < minute { return "Just now" }
-    if gone < hour { return "\(gone / minute) min ago" }
-    if gone < day { return "\(gone / hour) hr ago" }
-    if gone < 2 * day { return "Yesterday" }
-    return "\(gone / day) days ago"
-}
-
 /// Home only when a home address is set, the device is on a local network (Wi-Fi or a cable),
 /// and the home address answered just now.
 public func choosePlace(hasHome: Bool, onLocalNetwork: Bool, homeAnswered: Bool) -> ServerPlace {
     hasHome && onLocalNetwork && homeAnswered ? .home : .away
 }
 
-/// Whether the server is Octo: its status page answered at sign-in, it calls itself Octo, or it
-/// lists an Octo extension.
-public func isOctoServer(probed: Bool, serverType: String?, extensions: [String]) -> Bool {
-    probed || serverType?.caseInsensitiveCompare("octo") == .orderedSame || extensions.contains { $0.hasPrefix("octo") }
-}
-
 let serverWordsLocale = Locale(identifier: "en_US")
 
-/// A count with thousands separators: "1,204".
-public func groupedCount<T: BinaryInteger>(_ n: T, locale: Locale = .current) -> String {
-    let formatter = NumberFormatter()
-    formatter.numberStyle = .decimal
-    formatter.usesGroupingSeparator = true
-    formatter.locale = locale
-    return formatter.string(from: NSNumber(value: Int64(n))) ?? "\(n)"
-}

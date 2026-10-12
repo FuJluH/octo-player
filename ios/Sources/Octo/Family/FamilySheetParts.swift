@@ -95,7 +95,7 @@ struct QrWell<Overlay: View>: View {
         }
         .frame(width: side + 16, height: side + 16)
         .background(AccountColor.fill, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(AccountColor.edge))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(OctoColor.hairline))
         .animation(.easeInOut(duration: 0.3), value: link)
     }
 }
@@ -141,7 +141,7 @@ struct SheetHeader: View {
                     .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(OctoColor.textPrimary)
                     .frame(width: 40, height: 40)
-                    .background(AccountColor.accentSelected, in: Circle())
+                    .background(OctoColor.accentSelected, in: Circle())
                     .overlay(Circle().strokeBorder(Color.white.opacity(0.1)))
                     .accessibilityHidden(true)
             }
@@ -209,8 +209,8 @@ struct SheetScrollArea<Content: View>: View {
                             .foregroundStyle(OctoColor.textPrimary)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 6)
-                            .background(AccountColor.accentSelected, in: Capsule())
-                            .overlay(Capsule().strokeBorder(AccountColor.edge))
+                            .background(OctoColor.accentSelected, in: Capsule())
+                            .overlay(Capsule().strokeBorder(OctoColor.hairline))
                         }
                         .buttonStyle(.plain)
                         .padding(.bottom, 6)
@@ -230,7 +230,7 @@ struct SheetFooter<Start: View>: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Rectangle().fill(AccountColor.edge).frame(height: 1)
+            Rectangle().fill(OctoColor.hairline).frame(height: 1)
             HStack(spacing: 10) {
                 start.frame(maxWidth: .infinity, alignment: .leading)
                 AccentButton("Done", action: done)
@@ -268,7 +268,7 @@ struct NumberedSteps: View {
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(OctoColor.textPrimary)
                         .frame(width: 20, height: 20)
-                        .background(AccountColor.accentTonal, in: Circle())
+                        .background(OctoColor.accentTonal, in: Circle())
                     Text(step).font(.octoCaption).foregroundStyle(OctoColor.textPrimary).fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -285,7 +285,7 @@ struct CopyButton: View {
     var body: some View {
         HStack(spacing: 2) {
             if copied {
-                Text(FamilySheetText.copied).font(.system(size: 12, weight: .semibold)).foregroundStyle(AccountColor.signalGreen)
+                Text(FamilySheetText.copied).font(.system(size: 12, weight: .semibold)).foregroundStyle(OctoColor.signalGreen)
             }
             Button {
                 UIPasteboard.general.string = value
@@ -294,7 +294,7 @@ struct CopyButton: View {
             } label: {
                 Image(systemName: copied ? "checkmark" : "doc.on.doc")
                     .font(.system(size: 17))
-                    .foregroundStyle(copied ? AccountColor.signalGreen : OctoColor.textPrimary)
+                    .foregroundStyle(copied ? OctoColor.signalGreen : OctoColor.textPrimary)
                     .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
@@ -333,7 +333,7 @@ struct SheetLinkRow: View {
         .padding(.leading, 14)
         .padding(.trailing, 2)
         .background(AccountColor.fill, in: Capsule())
-        .overlay(Capsule().strokeBorder(AccountColor.edge))
+        .overlay(Capsule().strokeBorder(OctoColor.hairline))
     }
 }
 
@@ -383,14 +383,14 @@ struct ReachChooser: View {
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(AccountColor.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(AccountColor.edge))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(OctoColor.hairline))
             }
         }
     }
 
     private func option(_ choice: LinkReach, icon: String) -> some View {
         let chosen = reach == choice
-        let ink = chosen ? AccountColor.onAccent : OctoColor.textSecondary
+        let ink = chosen ? OctoColor.background : OctoColor.textSecondary
         return Button { pick(choice) } label: {
             HStack(spacing: 6) {
                 Image(systemName: icon).font(.system(size: 16, weight: .medium))
@@ -402,7 +402,7 @@ struct ReachChooser: View {
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, minHeight: 48)
             .background(chosen ? OctoColor.accent : .clear, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(chosen ? .clear : AccountColor.edge))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(chosen ? .clear : OctoColor.hairline))
             .overlay(alignment: .topTrailing) {
                 if chosen { Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)).foregroundStyle(ink).padding(5) }
             }
@@ -423,7 +423,7 @@ struct ProblemCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
-                Image(systemName: "info.circle").font(.system(size: 18)).foregroundStyle(AccountColor.signalOrange)
+                Image(systemName: "info.circle").font(.system(size: 18)).foregroundStyle(OctoColor.signalOrange)
                 Text(words).font(.octoBodySmall).foregroundStyle(OctoColor.textPrimary).fixedSize(horizontal: false, vertical: true)
             }
             GlazeButton(FamilySheetText.tryAgain, size: .small, action: retry)
@@ -431,7 +431,7 @@ struct ProblemCard: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(AccountColor.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(AccountColor.edge))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(OctoColor.hairline))
     }
 }
 
@@ -443,12 +443,12 @@ struct SoftCard<Content: View>: View {
         VStack(alignment: .leading, spacing: 0) { content }
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(AccountColor.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(AccountColor.edge))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(OctoColor.hairline))
     }
 }
 
 struct SoftHairline: View {
-    var body: some View { Rectangle().fill(AccountColor.edge).frame(height: 1) }
+    var body: some View { Rectangle().fill(OctoColor.hairline).frame(height: 1) }
 }
 
 /// A value in monospace that shrinks to fit rather than being cut.

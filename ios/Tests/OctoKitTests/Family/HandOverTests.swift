@@ -18,7 +18,7 @@ final class HandOverClock: @unchecked Sendable {
 /// leaves it).
 @MainActor
 @Suite struct HandOverTests {
-    let start = serverTime("2026-10-20T18:00:00Z")!
+    let start = epochMs("2026-10-20T18:00:00Z")!
     let signIn = HandOverSignIn(username: "alex", secret: "secret", mode: "Token", server: "https://music.example.com",
                                 home: "http://192.168.1.20:4533", displayName: "Alex")
 
@@ -431,33 +431,6 @@ actor StepLog {
         #expect(await until("invite") { model.invite != nil })
         model.sendNewLink()
         #expect(await until("failed") { model.invite?.error == "Couldn't make a new link. Try again." && model.invite?.loading == false })
-    }
-
-    @Test func theAccountsQualityAndThisDevicesModeAreSetOnTheServer() async {
-        let fake = FamilyFake()
-        final class Mode: @unchecked Sendable { var value = "Account" }
-        let mode = Mode()
-        fake.answer("getFamilyDevices") { _ in
-            #""familyDevices":{"device":[{"id":"d_1","name":"Pixel 9","current":true,"quality":"\#(mode.value)"},{"id":"d_2","name":"Other","current":false}]}"#
-        }
-        fake.answer("setFamilyQuality") { _ in #""quality":{"home":"Original","away":"DataSaver"}"# }
-        fake.answer("setFamilyDeviceQuality") { call in
-            mode.value = call.query["mode"] ?? "Account"
-            return #""device":{"id":"d_1","current":true,"quality":"\#(mode.value)"}"#
-        }
-        let model = model(fake)
-        _ = await model.plan()
-        #expect(model.deviceMode == .account)
-        model.setQuality(away: .dataSaver)
-        #expect(await until("quality sent") { !fake.called("setFamilyQuality").isEmpty })
-        #expect(fake.called("setFamilyQuality").first?.query["away"] == "DataSaver")
-        #expect(await until("read again") { !model.working })
-        model.setDeviceMode(.app)
-        #expect(model.deviceMode == .app)
-        #expect(await until("mode sent") { !fake.called("setFamilyDeviceQuality").isEmpty })
-        #expect(fake.called("setFamilyDeviceQuality").first?.query["id"] == "d_1")
-        #expect(fake.called("setFamilyDeviceQuality").first?.query["mode"] == "App")
-        #expect(await until("mode kept") { model.deviceMode == .app })
     }
 
     @Test func withoutTheExtensionNothingIsAsked() async {

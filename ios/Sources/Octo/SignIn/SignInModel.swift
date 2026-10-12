@@ -316,7 +316,7 @@ final class SignInModel {
             case .unsafe:
                 self.error = legacyUnsafeMessage
             case .none:
-                self.error = failureWords(error)
+                self.error = userMessage(plainError(error))
             }
         }
     }
@@ -452,7 +452,7 @@ final class SignInModel {
         } catch let failure as SignInFailure {
             error = failure.localizedDescription
         } catch {
-            self.error = failureWords(error)
+            self.error = userMessage(plainError(error))
         }
     }
 
@@ -519,7 +519,7 @@ final class SignInModel {
                 error = failure.localizedDescription
             } catch {
                 handOverStep = nil
-                self.error = failureWords(error)
+                self.error = userMessage(plainError(error))
             }
         }
     }

@@ -170,7 +170,7 @@ extension SpotifyStatus {
     }
 
     static func day(_ utc: String, _ zone: TimeZone) -> String {
-        guard let ms = serverTime(utc) else { return utc }
+        guard let ms = epochMs(utc) else { return utc }
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .none
@@ -210,7 +210,7 @@ extension TrickleStatus {
     }
 
     static func time(_ utc: String, _ zone: TimeZone) -> String {
-        guard let ms = serverTime(utc) else { return utc }
+        guard let ms = epochMs(utc) else { return utc }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "HH:mm"

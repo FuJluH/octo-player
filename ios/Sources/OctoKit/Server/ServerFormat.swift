@@ -7,10 +7,10 @@ private let hourMs: Int64 = 60 * 60 * 1_000
 private let dayMs: Int64 = 24 * hourMs
 
 /// The words for a library scan in the Server card.
-public func scanLabel(_ state: ServerScanState, locale: Locale = .current) -> String {
+public func scanLabel(_ state: ServerScanState) -> String {
     switch state {
     case .idle: "Scan library now"
-    case .scanning(let count): count > 0 ? "Scanning, \(groupedCount(count, locale: locale)) songs" : "Scanning"
+    case .scanning(let count): count > 0 ? "Scanning, \(SettingsSummaries.grouped(Int(count))) songs" : "Scanning"
     case .finished: "Scan finished"
     case .failed(let message): message
     }
@@ -24,7 +24,7 @@ public func shareTitle(_ share: ServerShare) -> String {
 }
 
 /// How much it holds, when it expires and how often it was opened, on one line.
-public func shareDetails(_ share: ServerShare, nowMs: Int64, locale: Locale = .current) -> String {
+public func shareDetails(_ share: ServerShare, nowMs: Int64) -> String {
     let songs: String? = switch share.entry.count {
     case 0: nil
     case 1: "1 song"
@@ -33,9 +33,9 @@ public func shareDetails(_ share: ServerShare, nowMs: Int64, locale: Locale = .c
     let visits = switch share.visitCount {
     case 0: "No visits"
     case 1: "1 visit"
-    default: "\(groupedCount(share.visitCount, locale: locale)) visits"
+    default: "\(SettingsSummaries.grouped(Int(share.visitCount))) visits"
     }
-    return [songs, expiryLabel(expiresAtMs: serverTime(share.expires), nowMs: nowMs), visits].compactMap { $0 }.joined(separator: " • ")
+    return [songs, expiryLabel(expiresAtMs: epochMs(share.expires), nowMs: nowMs), visits].compactMap { $0 }.joined(separator: " • ")
 }
 
 /// When a link stops working, in words.

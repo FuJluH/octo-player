@@ -14,8 +14,6 @@ enum FamilyFixtures {
     static func request(_ state: String, outcome: String? = nil, id: String = "r_9xK2", note: String = "") -> String {
         #"{ "subsonic-response": { "status": "ok", "version": "1.16.1", "familyRequest": { "id": "\#(id)", "username": "alex", "kind": "Song", "target": "ext-deezer-song-12345", "title": "Song", "artist": "Artist", "quality": "Flac", "state": "\#(state)", "note": "\#(note)", "outcome": \#(outcome.map { "\"\($0)\"" } ?? "null") } } }"#
     }
-    static let setQuality = #"{ "subsonic-response": { "status": "ok", "version": "1.16.1", "quality": { "home": "High", "away": "DataSaver", "familyLimitKbps": 0, "familyAwayLimitKbps": 0 } } }"#
-    static let setDeviceQuality = #"{ "subsonic-response": { "status": "ok", "version": "1.16.1", "device": { "id": "d_7Qm2abc", "username": "alex", "name": "Pixel 9", "kind": "OctoApp", "current": true, "quality": "App" } } }"#
     static let extensionsFamily = #"{ "subsonic-response": { "status": "ok", "version": "1.16.1", "type": "octo", "openSubsonic": true, "openSubsonicExtensions": [ { "name": "octoAcquisitions", "versions": [ 1, 2 ] }, { "name": "octoFamily", "versions": [ 1 ] } ] } }"#
     static let extensionsOcto = #"{"subsonic-response":{"status":"ok","version":"1.16.1","type":"octo","openSubsonic":true,"openSubsonicExtensions":[{"name":"songLyrics","versions":[1,2]},{"name":"octoAcquisitions","versions":[1]}]}}"#
     static let sharedSong = #"{ "subsonic-response": { "status": "failed", "version": "1.16.1", "error": { "code": 50, "message": "This song is in the shared library, so only the owner can remove it." } } }"#

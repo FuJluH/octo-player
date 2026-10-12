@@ -82,7 +82,7 @@ enum AccountDrive {
         case "signin": router.signIn = .signIn
         case "add": router.signIn = .add
         case "edit": if let server = session.active { router.signIn = .edit(server) }
-        case "again": if let server = session.active { router.signIn = .again(server, note: passwordRefusedWords(name: server.name)) }
+        case "again": if let server = session.active { router.signIn = .again(server, note: serverSwitchPasswordRefusedWords(server.name)) }
         case "connection": if let server = session.active { router.signIn = .editConnection(server) }
         case "join": router.signIn = .join(rest)
         case "scan":

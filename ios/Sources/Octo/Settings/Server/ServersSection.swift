@@ -63,7 +63,7 @@ struct ServersSection: View {
                 Text(statusLine(serverType: server.serverType, serverVersion: server.serverVersion, signedOut: server.signedOut,
                                 check: check, switching: switchingThis, inUse: inUse))
                     .font(.octoCaption)
-                    .foregroundStyle(!inUse && check?.isWarning == true ? AccountColor.signalOrange : OctoColor.textMuted)
+                    .foregroundStyle(!inUse && check?.isWarning == true ? OctoColor.signalOrange : OctoColor.textMuted)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             if switchingThis {

@@ -45,11 +45,11 @@ public struct InviteSheet: Sendable, Equatable, CustomStringConvertible {
 }
 
 /// When `expires` (an ISO time) falls, in milliseconds, or nil without one.
-public func expiresAtMs(_ expires: String?) -> Int64? { serverTime(expires) }
+public func expiresAtMs(_ expires: String?) -> Int64? { epochMs(expires) }
 
 /// Seconds left until `expires`, or nil when the server set no expiry.
 public func secondsLeft(_ expires: String?, nowMs: Int64) -> Int64? {
-    guard let at = serverTime(expires) else { return nil }
+    guard let at = epochMs(expires) else { return nil }
     return max(0, at / 1_000 - nowMs / 1_000)
 }
 

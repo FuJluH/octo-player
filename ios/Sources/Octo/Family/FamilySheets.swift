@@ -37,7 +37,7 @@ struct InviteSheetView: View {
                     if let url { SheetSection(label: "Open the link") { SheetLinkRow(url: url) } }
                     SheetSection(label: "Then") {
                         Text(inviteNext(invite.name)).font(.octoBodySmall).foregroundStyle(OctoColor.textPrimary).id("then")
-                        if let error = invite.error { Text(error).font(.octoCaption).foregroundStyle(AccountColor.signalOrange) }
+                        if let error = invite.error { Text(error).font(.octoCaption).foregroundStyle(OctoColor.signalOrange) }
                     }
                 }
             }
@@ -91,20 +91,20 @@ struct HandOverSheetView: View {
         let reach = picked ?? options?.defaultReach ?? .anywhere
         return VStack(spacing: 0) {
             SheetHeader(name: avatarName, title: HandOverText.title, subtitle: subtitle,
-                        subtitleColor: warn ? AccountColor.signalOrange : OctoColor.textMuted, clock: !ended, close: source.close)
+                        subtitleColor: warn ? OctoColor.signalOrange : OctoColor.textMuted, clock: !ended, close: source.close)
             GeometryReader { geometry in
                 SheetScrollArea(target: "what") {
                     let side = qrSide(geometry.size.width - 40)
                     if let done = sheet.done {
                         HStack(spacing: 12) {
-                            Image(systemName: "checkmark").font(.system(size: 16, weight: .semibold)).foregroundStyle(AccountColor.signalGreen)
-                                .frame(width: 32, height: 32).background(AccountColor.signalGreen.opacity(0.18), in: Circle())
+                            Image(systemName: "checkmark").font(.system(size: 16, weight: .semibold)).foregroundStyle(OctoColor.signalGreen)
+                                .frame(width: 32, height: 32).background(OctoColor.signalGreen.opacity(0.18), in: Circle())
                             Text(done).font(.octoBodySmall).foregroundStyle(OctoColor.textPrimary)
                         }
                         .padding(16)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(AccountColor.fill, in: RoundedRectangle(cornerRadius: 14))
-                        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(AccountColor.edge))
+                        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(OctoColor.hairline))
                     } else if let failed = sheet.failed {
                         ProblemCard(words: failed, retry: source.newCode)
                     } else if let error = sheet.error, start == nil {
@@ -164,7 +164,7 @@ struct HandOverSheetView: View {
                         .foregroundStyle(OctoColor.textPrimary)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 2)
-                        .background(AccountColor.accentSelected, in: Capsule())
+                        .background(OctoColor.accentSelected, in: Capsule())
                         .transition(.opacity)
                     } else {
                         Text(HandOverText.caption).font(.octoCaption).foregroundStyle(OctoColor.textMuted).multilineTextAlignment(.center).transition(.opacity)
@@ -184,7 +184,7 @@ struct HandOverSheetView: View {
         }
         .id("what")
         if sheet.refreshFailed {
-            Text(FamilySheetText.renewFailed).font(.octoCaption).foregroundStyle(AccountColor.signalOrange)
+            Text(FamilySheetText.renewFailed).font(.octoCaption).foregroundStyle(OctoColor.signalOrange)
         }
     }
 }
@@ -203,7 +203,7 @@ struct AskingView: View {
                     .font(.system(size: 26))
                     .foregroundStyle(OctoColor.textPrimary)
                     .frame(width: 64, height: 64)
-                    .background(AccountColor.accentSelected, in: Circle())
+                    .background(OctoColor.accentSelected, in: Circle())
                 Text("Sign in on").font(.octoCaption).foregroundStyle(OctoColor.textMuted)
                 Text(asking.deviceName.trimmingCharacters(in: .whitespaces).isEmpty ? "A new device" : asking.deviceName)
                     .font(.octoTitle)

@@ -117,18 +117,18 @@ import Testing
     }
 
     @Test func plainWordsForEveryFailure() {
-        #expect(failureWords(SubsonicError.unreachable("x", certificate: false))
+        #expect(userMessage(plainError(SubsonicError.unreachable("x", certificate: false)))
             == "Couldn't reach the server. Check the address, and that you're on the right network.")
-        #expect(failureWords(SubsonicError.notSubsonic("HTTP 502 from ping", status: 502))
+        #expect(userMessage(plainError(SubsonicError.notSubsonic("HTTP 502 from ping", status: 502)))
             == "The server isn't answering right now. It may be restarting, so try again in a moment.")
-        #expect(failureWords(SubsonicError.notSubsonic("HTTP 404 from ping", status: 404))
+        #expect(userMessage(plainError(SubsonicError.notSubsonic("HTTP 404 from ping", status: 404)))
             == "That address answered, but not like a music server. Check the port.")
-        #expect(failureWords(SubsonicError.wrongCredentials("x")) == "Wrong username or password.")
-        #expect(failureWords(SubsonicError.authNotSupported(code: 41, message: "x"))
+        #expect(userMessage(plainError(SubsonicError.wrongCredentials("x"))) == "Wrong username or password.")
+        #expect(userMessage(plainError(SubsonicError.authNotSupported(code: 41, message: "x")))
             == "This account can't sign in with a token. Turn on Legacy sign-in under Advanced.")
-        #expect(failureWords(SubsonicError.authNotSupported(code: 42, message: "x")) == "The server doesn't take this way of signing in.")
-        #expect(failureWords(SubsonicError.notFound("x")) == "That isn't on the server any more.")
-        #expect(failureWords(SubsonicError.server(code: 0, message: "No server signed in")) == "The server said: No server signed in")
-        #expect(failureWords(CocoaError(.fileNoSuchFile)) == "Something went wrong.")
+        #expect(userMessage(plainError(SubsonicError.authNotSupported(code: 42, message: "x"))) == "The server doesn't take this way of signing in.")
+        #expect(userMessage(plainError(SubsonicError.notFound("x"))) == "That isn't on the server any more.")
+        #expect(userMessage(plainError(SubsonicError.server(code: 0, message: "No server signed in"))) == "The server said: No server signed in")
+        #expect(userMessage(plainError(CocoaError(.fileNoSuchFile))) == "Something went wrong.")
     }
 }
