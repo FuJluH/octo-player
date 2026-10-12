@@ -15,8 +15,13 @@ func serverId(of catalogId: String, sourceId: String?) -> String? {
 
 /// The server cover a library picture names, or nil for a picture from the phone.
 func coverId(of artwork: String?) -> String? {
-    if case .server(_, let coverId, _, _) = ArtworkRef.decode(artwork) { return coverId }
-    return nil
+    switch ArtworkRef.decode(artwork) {
+    case .server(_, let coverId, _, _): return coverId
+    // A cover inside the phone's own music travels as its whole reference, which the cover views
+    // and the cover cache read from the phone.
+    case .device: return artwork
+    case nil: return nil
+    }
 }
 
 extension LibraryTrack {

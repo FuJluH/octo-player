@@ -17,7 +17,11 @@ actor Covers {
         memory.countLimit = 300
     }
 
-    func image(_ coverId: String, size: Int, client: SubsonicClient) async -> UIImage? {
+    func image(_ coverId: String, size: Int, client: SubsonicClient?) async -> UIImage? {
+        if isPhoneCover(coverId) {
+            return await ArtworkCache.shared.image(coverId, px: size, client: client, signedInSource: nil)
+        }
+        guard let client else { return nil }
         let key = "\(coverId)_\(size)"
         if let hit = memory.object(forKey: key as NSString) { return hit }
         if let running = loading[key] { return await running.value }
@@ -71,9 +75,13 @@ struct Cover: View {
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         .task(id: id) {
-            guard let id, let client = session.client else { image = nil; return }
+            guard let id, session.client != nil || isPhoneCover(id) else { image = nil; return }
+            let client = session.client
             let loaded = await Covers.shared.image(id, size: Int(size * scale), client: client)
             withAnimation(.easeOut(duration: 0.2)) { image = loaded }
         }
     }
 }
+
+/// Whether a cover id is a cover inside the phone's own music rather than one on the server.
+func isPhoneCover(_ id: String) -> Bool { id.hasPrefix("device:") }
