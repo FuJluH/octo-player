@@ -71,10 +71,8 @@ struct LiveListView: View {
     @Environment(Library.self) private var library
     @Environment(Player.self) private var player
     @Environment(Router.self) private var router
+    @Environment(LibraryActions.self) private var actions
     @Environment(\.dismiss) private var dismiss
-    @State private var renaming = false
-    @State private var deleting = false
-    @State private var newName = ""
 
     var body: some View {
         let list = store.byId(id)
@@ -137,23 +135,15 @@ struct LiveListView: View {
         .task(id: PickKey(version: liveLibrary.version, query: list?.query)) { if let list { await liveLibrary.pick(list.query) } }
         // Leaves the page once the list is deleted.
         .onChange(of: list == nil) { _, gone in if gone { dismiss() } }
-        .opensWhenAsked("rename_live_list") {
-            guard let list else { return }
-            newName = list.name
-            renaming = true
-        }
-        .opensWhenAsked("delete_live_list") { if list != nil { deleting = true } }
+        .opensWhenAsked("rename_live_list") { if let list { actions.askRename(list, in: store) } }
+        .opensWhenAsked("delete_live_list") { if let list { actions.askDelete(list, in: store) } }
     }
 
-    /// The live list's options, under its name.
+    /// The live list's options, under its name: the same system menu a long press on its line
+    /// among the playlists gives.
     private func options(_ list: LiveList) -> some View {
         Menu {
-            LiveListMenuItems(list: list) {
-                newName = list.name
-                renaming = true
-            } delete: {
-                deleting = true
-            }
+            LiveListOptionsItems(list: list)
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 18, weight: .semibold))
@@ -162,104 +152,6 @@ struct LiveListView: View {
                 .contentShape(Rectangle())
         }
         .accessibilityLabel("More")
-        .liveListQuestions(list, renaming: $renaming, deleting: $deleting, name: newName)
-    }
-}
-
-/// A live list's options, as the items of a system menu titled with its name: Edit rules,
-/// Rename, Duplicate, Save a copy as a playlist, then Delete.
-struct LiveListMenuItems: View {
-    let list: LiveList
-    let rename: () -> Void
-    let delete: () -> Void
-    @Environment(LiveListStore.self) private var store
-    @Environment(LiveLibrary.self) private var liveLibrary
-    @Environment(LibraryActions.self) private var actions
-    @Environment(Router.self) private var router
-
-    var body: some View {
-        Section(list.name) {
-            Button { router.go(.liveListEditor(id: list.id)) } label: { Label("Edit rules", systemImage: "line.3.horizontal.decrease") }
-            Button(action: rename) { Label("Rename", systemImage: "pencil") }
-            Button {
-                let copy = store.duplicate(list)
-                router.show("Made a copy: \(copy.name)", done: true)
-            } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
-            Button { Task { await saveCopy() } } label: { Label("Save a copy as a playlist", systemImage: "music.note.list") }
-        }
-        Button(role: .destructive, action: delete) { Label("Delete", systemImage: "trash") }
-    }
-
-    /// A playlist on the phone named as the live list, with the songs it picks now; it does not
-    /// follow the rules. Kept with the server as any new playlist is.
-    private func saveCopy() async {
-        if liveLibrary.version == 0 { await liveLibrary.read() }
-        await liveLibrary.pick(list.query)
-        let songs = liveLibrary.songs(list.query) ?? []
-        guard !songs.isEmpty else {
-            router.show(nothingToCopy(list.name))
-            return
-        }
-        actions.state.data.playlists.create(list.name, trackIds: songs.map(\.id))
-        router.show(liveCopyMessage(list.name, count: songs.count), done: true)
-    }
-}
-
-extension View {
-    /// The questions a live list's options ask: its new name in a popover, and whether to delete
-    /// it.
-    func liveListQuestions(_ list: LiveList, renaming: Binding<Bool>, deleting: Binding<Bool>, name: String) -> some View {
-        modifier(LiveListQuestions(list: list, renaming: renaming, deleting: deleting, name: name))
-    }
-}
-
-private struct LiveListQuestions: ViewModifier {
-    let list: LiveList
-    @Binding var renaming: Bool
-    @Binding var deleting: Bool
-    let name: String
-    @Environment(LiveListStore.self) private var store
-
-    func body(content: Content) -> some View {
-        content
-            .namePopover(isPresented: $renaming, title: "Rename live list", placeholder: "Live list name", action: "Save",
-                         initial: name) { name in
-                store.rename(list.id, to: name)
-                renaming = false
-            }
-            .confirmationDialog("Delete \"\(list.name)\"?", isPresented: $deleting, titleVisibility: .visible) {
-                Button("Delete", role: .destructive) { store.remove(list.id) }
-            } message: {
-                Text("The songs stay in your library.")
-            }
-    }
-}
-
-/// A live list among the playlists: its picture (the designed cover saying "Live list", else the
-/// live mark), its name and "Live list". A tap opens it; a long press gives its options.
-struct LiveListRow: View {
-    let list: LiveList
-    @Environment(LiveLibrary.self) private var liveLibrary
-    @State private var renaming = false
-    @State private var deleting = false
-
-    var body: some View {
-        NavigationLink(value: Route.liveList(id: list.id)) {
-            PlaylistLine(name: list.name, subtitle: liveListCoverLine) {
-                if AppSettings.shared.playlistCovers == .designed {
-                    LiveListCover(id: list.id, name: list.name, songs: liveLibrary.songs(list.query) ?? [], size: 56, radius: OctoRadius.artS)
-                } else {
-                    LiveMarkTile(size: 56, radius: OctoRadius.artS)
-                }
-            }
-        }
-        .buttonStyle(SqueezeStyle())
-        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: OctoRadius.row))
-        .contextMenu {
-            LiveListMenuItems(list: list) { renaming = true } delete: { deleting = true }
-        }
-        .liveListQuestions(list, renaming: $renaming, deleting: $deleting, name: list.name)
-        .task(id: PickKey(version: liveLibrary.version, query: list.query)) { await liveLibrary.pick(list.query) }
     }
 }
 

@@ -16,7 +16,6 @@ struct AddToLibraryButton: View {
     @State private var release: (@Sendable () -> Void)?
 
     var body: some View {
-        // A family member whose songs are saved rather than added gets a heart instead.
         if accounts.family.outside.addLabel != nil {
             saveHeart
         } else {
@@ -24,21 +23,19 @@ struct AddToLibraryButton: View {
         }
     }
 
-    /// Saves the song for this family member, or takes it off Saved.
+    /// For a family member whose songs are saved rather than added: a heart that saves the song or
+    /// takes it off Saved.
     private var saveHeart: some View {
-        let family = accounts.family
-        let id = song.isExternal && !isFind(song.id) ? findId(song.id) : song.id
-        let saved = family.isSaved(id)
-        return Button { family.toggleSaved(id, title: song.title) } label: {
-            Image(systemName: saved ? "heart.fill" : "heart")
-                .font(.system(size: iconSize * 0.84))
-                .foregroundStyle(saved ? Color.white : Color.white.opacity(0.6))
+        let id = song.id.hasPrefix("find:") ? song.id : findId(song.id)
+        let saved = accounts.family.isSaved(id)
+        return Button { accounts.family.toggleSaved(id, title: song.title) } label: {
+            IconView(saved ? .liked : .like, size: iconSize, color: saved ? .white : .white.opacity(0.6))
                 .iconGlow(saved)
                 .frame(width: size, height: size)
                 .contentShape(Rectangle())
         }
         .buttonStyle(NoPress())
-        .accessibilityLabel(FamilyText.save)
+        .accessibilityLabel("Save")
         .accessibilityValue(saved ? "Saved" : "Not saved")
     }
 

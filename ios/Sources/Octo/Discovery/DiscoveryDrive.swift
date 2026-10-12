@@ -38,9 +38,8 @@ enum DiscoveryDrive {
             } else if value == "first" {
                 if let list = LiveListStore.current?.lists.first { router.go(.liveList(id: list.id)) }
             } else if value.hasPrefix("from:") {
-                let filters = SongFilters(words: String(value.dropFirst(5)))
-                let start = liveListQueryFrom([], filters: filters.query, order: defaultLiveListSort)
-                router.go(.liveListEditor(id: nil, start: start.toJSON()))
+                let start = liveListQueryFrom([], filters: LibraryQuery(text: String(value.dropFirst(5))), order: defaultLiveListSort)
+                router.go(.liveListFrom(query: start.toJSON()))
             } else {
                 router.go(.liveList(id: value))
             }

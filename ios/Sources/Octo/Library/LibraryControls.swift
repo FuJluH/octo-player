@@ -38,7 +38,7 @@ struct PlayShuffle: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 if spinner {
-                    Spinner(size: 20).frame(width: 22, height: 22)
+                    Spinner(size: 18).frame(width: 22, height: 22)
                 } else {
                     IconView(icon, size: 22)
                 }
@@ -52,6 +52,76 @@ struct PlayShuffle: View {
             .contentShape(Capsule())
         }
         .buttonStyle(PressScale(scale: 0.96))
+    }
+}
+
+/// A detail page's play line: what it holds on the left, up to two lines, and any quieter
+/// controls at the right, 8 apart; then Play and Shuffle across the full width 10 below, left out
+/// when there is nothing to play.
+struct PlayRow<Extras: View>: View {
+    let details: String
+    var playable = true
+    let play: () -> Void
+    let shuffle: () -> Void
+    @ViewBuilder var extras: Extras
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Text(details)
+                    .font(.octoCaption)
+                    .foregroundStyle(OctoColor.textMuted)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                extras
+            }
+            if playable {
+                PlayShuffle(play: play, shuffle: shuffle).padding(.top, 10)
+            }
+        }
+    }
+}
+
+extension PlayRow where Extras == EmptyView {
+    init(details: String, playable: Bool = true, play: @escaping () -> Void, shuffle: @escaping () -> Void) {
+        self.init(details: details, playable: playable, play: play, shuffle: shuffle) { EmptyView() }
+    }
+}
+
+/// "Keep downloaded" for a playlist, or for Liked songs when `playlistId` is nil: their songs
+/// only on a server download to the phone, and the downloads follow the list as songs come and
+/// go. Shown only when there is something to download or it is on. Liked songs' switch is the one
+/// the Streaming and offline settings have too.
+struct KeepDownloadedLine: View {
+    let tracks: [LibraryTrack]
+    var playlistId: String?
+    @Environment(OfflineDownloads.self) private var offline
+
+    var body: some View {
+        let prefs = offline.settings.offline
+        let checked = playlistId.map { prefs.keptPlaylists.contains($0) } ?? prefs.keepLiked
+        let serverOnly = tracks.filter { !$0.onPhone && !$0.isFound }
+        if !serverOnly.isEmpty || checked {
+            let done = serverOnly.filter { offline.byTrack[$0.id]?.state == .done }.count
+            HStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Keep downloaded").font(.octoBodySmall).foregroundStyle(.white)
+                    Text(checked ? keptSummary(serverOnly: serverOnly.count, done: done)
+                         : "Download the songs only on your server, and keep them in step")
+                        .font(.octoCaption)
+                        .foregroundStyle(OctoColor.textMuted)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.trailing, 12)
+                Toggle("Keep downloaded", isOn: Binding(get: { checked }, set: { on in
+                    if let playlistId { offline.setPlaylistKept(playlistId, on) } else { offline.setKeepLiked(on) }
+                }))
+                .labelsHidden()
+                .tint(OctoColor.accent)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 6)
+        }
     }
 }
 
@@ -90,7 +160,7 @@ struct GlassIconButton: View {
 
     var body: some View {
         Button(action: action) {
-            IconView(icon, size: 16, color: .white)
+            IconView(icon, size: 17, color: .white)
                 .frame(width: 34, height: 34)
                 .glassEffect(lit ? LibraryLook.lifted : LibraryLook.resting, in: .circle)
                 .frame(width: 48, height: 48)
@@ -192,8 +262,6 @@ struct MutedNote: View {
 /// "Nothing here yet" and the ways to get music in.
 struct EmptyLibraryNote: View {
     var text = "Nothing here yet"
-    @Environment(Session.self) private var session
-    @Environment(Router.self) private var router
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -205,8 +273,9 @@ struct EmptyLibraryNote: View {
     }
 }
 
-/// Ways to get music in: "Sign in to a server" while none is set up, and the phone's music
-/// once the phone's library can be asked for. Nothing when neither applies.
+/// Ways to get music in: "Allow access" while the phone's music is out of reach ("Open
+/// settings" once the system no longer asks), and "Sign in to a server" while none is in use.
+/// They wrap 12 apart; nothing shows when neither applies.
 struct LibrarySourceActions: View {
     @Environment(Session.self) private var session
     @Environment(Router.self) private var router
@@ -214,15 +283,17 @@ struct LibrarySourceActions: View {
 
     var body: some View {
         let askAccess = device.access != .granted
-        let signIn = session.servers.isEmpty || session.client == nil && session.active == nil
+        let signIn = session.client == nil
         if askAccess || signIn {
             FlowRow(spacing: 12) {
                 if askAccess {
-                    GlazeButton(accessButtonLabel(deniedForever: device.access == .deniedForever), size: .medium) {
+                    GlazeButton(accessButtonLabel(deniedForever: device.access == .deniedForever)) {
                         if device.access == .deniedForever { device.openSettings() } else { device.requestAccess() }
                     }
                 }
-                if signIn { GlazeButton("Sign in to a server", size: .medium) { router.signIn = .signIn } }
+                if signIn {
+                    GlazeButton("Sign in to a server") { router.signIn = .signIn }
+                }
             }
         }
     }

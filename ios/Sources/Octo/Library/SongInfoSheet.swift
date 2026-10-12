@@ -1,3 +1,5 @@
+import AVFoundation
+import CoreMedia
 import OctoKit
 import SwiftUI
 import UIKit
@@ -104,6 +106,14 @@ struct SongInfoSheet: View {
         facts.bitrate = described?.bitrate.map { $0 < 10_000 ? $0 * 1_000 : $0 } ?? facts.bitrate
         facts.sampleRate = described?.sampleRate ?? facts.sampleRate
         facts.bitDepth = described?.bitDepth ?? facts.bitDepth
+        // A phone file's missing sound details are read from the file itself.
+        if track.onPhone, facts.bitrate == nil || facts.sampleRate == nil || facts.bitDepth == nil,
+           let url = (phone?.uri).flatMap(URL.init(string:)) {
+            let read = await audioDetails(of: url)
+            facts.bitrate = facts.bitrate ?? read.bitrate
+            facts.sampleRate = facts.sampleRate ?? read.sampleRate
+            facts.bitDepth = facts.bitDepth ?? read.bitDepth
+        }
         if let gains = copies.first(where: { $0.trackGain != nil || $0.albumGain != nil }) {
             facts.trackGain = gains.trackGain.map(Double.init)
             facts.albumGain = gains.albumGain.map(Double.init)
@@ -130,6 +140,20 @@ struct SongInfoSheet: View {
         if let type = session.profile?.info.type, !type.isEmpty { return type.prefix(1).uppercased() + type.dropFirst() }
         return session.client?.baseURL.host
     }
+}
+
+/// A sound file's bit rate (bits per second), sample rate (Hz) and bit depth, as far as the file
+/// says; a compressed file has no bit depth.
+private func audioDetails(of url: URL) async -> (bitrate: Int?, sampleRate: Int?, bitDepth: Int?) {
+    let asset = AVURLAsset(url: url)
+    guard let track = try? await asset.loadTracks(withMediaType: .audio).first else { return (nil, nil, nil) }
+    let rate = try? await track.load(.estimatedDataRate)
+    let formats = (try? await track.load(.formatDescriptions)) ?? []
+    let basic = formats.first.flatMap { CMAudioFormatDescriptionGetStreamBasicDescription($0)?.pointee }
+    let bitrate = rate.flatMap { $0 > 0 ? Int($0.rounded()) : nil }
+    let sampleRate = basic.flatMap { $0.mSampleRate > 0 ? Int($0.mSampleRate.rounded()) : nil }
+    let bitDepth = basic.flatMap { $0.mBitsPerChannel > 0 ? Int($0.mBitsPerChannel) : nil }
+    return (bitrate, sampleRate, bitDepth)
 }
 
 /// One line of the info sheet: its label over its value, and a Copy button for copyable ones.

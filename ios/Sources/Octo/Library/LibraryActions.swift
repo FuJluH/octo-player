@@ -141,10 +141,10 @@ final class LibraryActions {
     // MARK: Playing
 
     /// Plays library songs from one of them, by their library ids, so the player takes each one's
-    /// best copy.
-    func play(_ tracks: [LibraryTrack], from start: Int = 0, shuffled: Bool = false) {
+    /// best copy. `source` names the list they play from, like an album's title.
+    func play(_ tracks: [LibraryTrack], from start: Int = 0, shuffled: Bool = false, source: String? = nil) {
         guard !tracks.isEmpty else { return }
-        player.play(ids: tracks.map(\.id), from: start, shuffled: shuffled)
+        player.play(ids: tracks.map(\.id), from: start, name: source, shuffled: shuffled)
     }
 
     func playNext(_ tracks: [LibraryTrack]) {
@@ -164,21 +164,33 @@ final class LibraryActions {
         }
     }
 
-    /// Plays the song then up to 50 songs like it, in place of the queue.
-    func startRadio(_ song: Song) async {
-        await player.startRadio(from: song)
+    /// Plays the song then up to 50 songs like it, in place of the queue. A song found online the
+    /// library has not met yet starts the player's own radio from it.
+    func startRadio(_ track: LibraryTrack, song: Song) async {
+        let known = await library.songs(ids: [track.id]).first
+        if known == nil, track.isFound {
+            await player.startRadio(from: song)
+            return
+        }
+        await radio([known ?? track], exclude: [])
     }
 
-    /// Plays `seed`, then songs like the seeds, in place of the queue. Nothing found says so.
+    /// The artist page's radio: their songs as the page lists them, the most played first, at most
+    /// 200 of them as seeds.
+    func startRadio(seeds: [LibraryTrack]) async {
+        await radio(Array(seeds.prefix(200)), exclude: [])
+    }
+
+    /// Plays `seed`, then songs like the seeds, in place of the queue, from "<title> radio".
+    /// Nothing found says so and plays nothing.
     private func radio(_ seeds: [LibraryTrack], exclude: Set<String>) async {
         guard let seed = seeds.first else { return }
-        let ids = await LibraryRadio(data: data).songsLike(seeds, count: 50, exclude: exclude)
+        let ids = await LibraryRadio(data: data).songsLike(seeds, count: 50, exclude: exclude, before: [seed.id])
         if ids.isEmpty {
             router.show("No similar songs found")
             return
         }
-        let first = seed.queueSong
-        player.play([first] + ids.map { Song(id: $0, title: "") }, from: 0, radio: first)
+        player.play(ids: [seed.id] + ids, name: "\(seed.title) radio")
     }
 
     /// A radio from an album: its most played song here, else its first, then the album's songs as
@@ -310,6 +322,22 @@ final class LibraryActions {
                             confirm: "Delete") { [weak self] in
             self?.delete(playlist)
             deleted?()
+        }
+    }
+
+    /// Asks a live list's new name.
+    func askRename(_ list: LiveList, in store: LiveListStore) {
+        let id = list.id
+        naming = NameRequest(title: "Rename live list", action: "Save", initial: list.name, placeholder: "Live list name") { name in
+            store.rename(id, to: name)
+        }
+    }
+
+    /// Asks before a live list goes; its songs stay in the library.
+    func askDelete(_ list: LiveList, in store: LiveListStore) {
+        let id = list.id
+        question = Question(title: "Delete \"\(list.name)\"?", detail: "The songs stay in your library.", confirm: "Delete") {
+            store.remove(id)
         }
     }
 
@@ -459,19 +487,30 @@ final class LibraryActions {
         }
     }
 
-    /// Deletes the songs' phone files, asking first.
+    /// Deletes the songs' phone files, asking first. On a yes the songs leave the queue, then
+    /// their files go; when none could go, the queue is put back as it was. One delete at a time:
+    /// another asked for while one runs is let go.
     func deleteFromPhone(_ tracks: [LibraryTrack]) {
         let songs = tracks.filter(\.onPhone)
-        guard !songs.isEmpty else { return }
+        guard !songs.isEmpty, !deletingFromPhone else { return }
         question = Question(title: songs.count == 1 ? "Delete this song from the phone?" : "Delete \(songs.count) songs from the phone?",
                             detail: songs.count == 1 ? "Its file is removed for good" : "Their files are removed for good",
                             confirm: "Delete") { [weak self] in
-            guard let self else { return }
+            guard let self, !self.deletingFromPhone else { return }
+            self.deletingFromPhone = true
+            let ids = songs.map(\.id)
+            let undo = self.player.removeSongs(Set(ids))
             Task {
-                if let words = await self.data.device.delete(songs.map(\.id)) { self.router.show(words) }
+                let outcome = await self.data.device.delete(ids)
+                if outcome.removed == 0, let undo { self.player.undo(undo) }
+                if let words = outcome.words { self.router.show(words) }
+                self.deletingFromPhone = false
             }
         }
     }
+
+    /// Whether a delete from the phone is under way.
+    @ObservationIgnored private var deletingFromPhone = false
 
     // MARK: Deleting from disk
 
@@ -492,7 +531,7 @@ final class LibraryActions {
         guard !songs.isEmpty else { return }
         let words = deleteFromDiskQuestion(songs)
         let asked = state.files.server()
-        question = Question(title: words.title, detail: words.body, confirm: "Delete") { [weak self] in
+        question = Question(title: words.title, detail: words.body, confirm: "Delete", server: asked) { [weak self] in
             self?.deleteFromDisk(songs, on: asked)
         }
     }
@@ -565,7 +604,7 @@ final class LibraryActions {
         Task {
             let asks = await library.albumTracks(albumId).filter(canUpgrade)
             if asks.isEmpty {
-                router.show("No song here can be looked for at a higher quality now")
+                router.show("Every song here is being looked for already")
                 return
             }
             question = Question(title: findHigherQualityAsk(asks.count, source: state.fileActions?.upgradeSource),
@@ -625,7 +664,11 @@ struct LibraryPresenter: ViewModifier {
                 actions.forgetAlbumFacts()
                 await actions.state.refreshCaches()
             }
-            .task(id: session.activeId) { await actions.state.serverChanged() }
+            .task(id: session.activeId) {
+                // A question about another server's files no longer has anywhere to go.
+                if let asked = actions.question?.server, asked != session.activeId { actions.question = nil }
+                await actions.state.serverChanged()
+            }
             .nameAlert($actions.naming)
             .addAskAlert($actions.addAsk) { ids, playlist in actions.addNow(ids, to: playlist) }
             .questionAlert($actions.question)

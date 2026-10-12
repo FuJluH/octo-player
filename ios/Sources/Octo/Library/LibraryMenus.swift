@@ -143,7 +143,7 @@ struct SongMenuItems<Extras: View>: View {
         case .addToQueue:
             item("Add to queue", .addToQueue) { player.append([queued]) }
         case .startRadio:
-            item("Start radio", .radio) { Task { await actions.startRadio(queued) } }
+            item("Start radio", .radio) { Task { await actions.startRadio(track, song: queued) } }
         case .download:
             if let save = family.outside.addLabel {
                 // A family member whose songs are saved rather than added.
@@ -237,15 +237,15 @@ extension SongMenuItems where Extras == EmptyView {
     init(subject: SongSubject) { self.init(subject: subject) { EmptyView() } }
 }
 
-/// The song's rating as a sub-menu: its stars ticked, picking another sets it, "No rating" takes
-/// it off.
+/// The song's rating as a sub-menu: its stars ticked, picking another sets it, picking the one it
+/// has (or "No rating") takes it off.
 struct RateMenu: View {
     let track: LibraryTrack
     @Environment(LibraryActions.self) private var actions
 
     var body: some View {
         let rating = actions.state.rating(of: track)
-        Picker(selection: Binding(get: { rating }, set: { actions.rate(track, $0) })) {
+        Picker(selection: Binding(get: { rating }, set: { actions.rate(track, nextRating(current: rating, tapped: $0)) })) {
             Text("No rating").tag(0)
             ForEach(1...5, id: \.self) { stars in
                 Text(starsLabel(stars) ?? "").tag(stars)
@@ -281,14 +281,20 @@ struct AddToPlaylistMenu: View {
 }
 
 /// How long a shared link lasts, under the note that anyone with it can listen. Picking one
-/// makes the link, then hands it to the phone's share sheet.
+/// makes the link, then hands it to the phone's share sheet. `heading` names what is shared when
+/// the menu opens from a page's Share button.
 struct ShareLinkItems: View {
     let target: ShareTarget
     let title: String
+    var heading: String?
     @Environment(LibraryActions.self) private var actions
 
     var body: some View {
-        Text("Anyone with the link can listen.")
+        if let heading {
+            Section(heading) { Text("Anyone with the link can listen.") }
+        } else {
+            Text("Anyone with the link can listen.")
+        }
         Section("Link expires") {
             ForEach(ShareExpiry.allCases, id: \.self) { expiry in
                 Button(expiry.label) { actions.makeLink(target, title: title, expiry: expiry) }
@@ -425,7 +431,7 @@ struct PlaylistOptionsItems: View {
     @Environment(LibraryActions.self) private var actions
 
     var body: some View {
-        Section {
+        Section(playlist.name) {
             item("Rename", .rename) { actions.askRename(playlist) }
             if actions.canSaveToServer(playlist) {
                 item("Save to server", .cloud) { actions.saveToServer(playlist) }
@@ -441,6 +447,41 @@ struct PlaylistOptionsItems: View {
     }
 }
 
+/// A live list's options, from a long press on its line: edit its rules, rename it, copy it, save
+/// the songs it holds now as a playlist, or delete it.
+struct LiveListOptionsItems: View {
+    let list: LiveList
+    @Environment(LibraryActions.self) private var actions
+    @Environment(LiveListStore.self) private var store
+    @Environment(LiveLibrary.self) private var liveLibrary
+    @Environment(Router.self) private var router
+
+    var body: some View {
+        Section(list.name) {
+            item("Edit rules", .filter) { router.go(.liveListEditor(id: list.id)) }
+            item("Rename", .rename) { actions.askRename(list, in: store) }
+            item("Duplicate", .copy) { router.show(copiedMessage(store.duplicate(list).name)) }
+            item("Save a copy as a playlist", .playlists) { Task { await saveCopy() } }
+        }
+        Section {
+            item("Delete", .delete, role: .destructive) { actions.askDelete(list, in: store) }
+        }
+    }
+
+    /// A playlist named as the live list with the songs it holds now; it does not follow the rules.
+    private func saveCopy() async {
+        if liveLibrary.version == 0 { await liveLibrary.read() }
+        await liveLibrary.pick(list.query)
+        let songs = liveLibrary.songs(list.query) ?? []
+        guard !songs.isEmpty else {
+            router.show(nothingToCopy(list.name))
+            return
+        }
+        actions.state.data.playlists.create(list.name, trackIds: songs.map(\.id))
+        router.show(liveCopyMessage(list.name, count: songs.count))
+    }
+}
+
 // MARK: Sheets and alerts
 
 /// A name asked for in an alert with its field: a new playlist's, or a new name for one.
@@ -449,6 +490,7 @@ struct NameRequest: Identifiable {
     let title: String
     let action: String
     var initial = ""
+    var placeholder = "Playlist name"
     let done: @MainActor (String) -> Void
 }
 
@@ -466,6 +508,8 @@ struct Question: Identifiable {
     var detail: String?
     let confirm: String
     var destructive = true
+    /// The server the question is about, when it goes to one: another coming into use cancels it.
+    var server: String?
     let run: @MainActor () -> Void
 }
 
@@ -507,7 +551,7 @@ private struct NameAlert: ViewModifier {
         content
             .alert(request?.title ?? "", isPresented: Binding(get: { request != nil }, set: { if !$0 { request = nil } }),
                    presenting: request) { asked in
-                TextField("Playlist name", text: $name)
+                TextField(asked.placeholder, text: $name)
                     .textInputAutocapitalization(.sentences)
                 Button(asked.action) { asked.done(name) }
                     .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -612,6 +656,7 @@ struct MenuPreview: Identifiable {
         case song(SongSubject)
         case collection(CollectionSubject)
         case playlistOptions(PlaylistSummary)
+        case liveListOptions(LiveList)
     }
 
     let id = UUID()
@@ -628,6 +673,7 @@ struct MenuPreviewSheet: View {
                 case .song(let subject): SongMenuItems(subject: subject)
                 case .collection(let subject): CollectionMenuItems(subject: subject)
                 case .playlistOptions(let playlist): PlaylistOptionsItems(playlist: playlist, serverOnly: true, deleted: {})
+                case .liveListOptions(let list): LiveListOptionsItems(list: list)
                 }
             }
             .navigationTitle("Menu")

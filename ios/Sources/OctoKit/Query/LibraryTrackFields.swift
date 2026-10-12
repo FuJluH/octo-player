@@ -82,6 +82,21 @@ public struct LibraryTrackFields: SongFields, Sendable {
     }
 }
 
+/// A sorted list of songs as `query` filters it, in the same order, its letter headings kept in
+/// step with the songs left. The query's own order and limit are not used: the list keeps the
+/// order the listener chose.
+public func filteredSongs<F: SongFields>(_ all: Sorted<F.Item>, _ query: LibraryQuery, fields: F, now: Int64) -> Sorted<F.Item>
+where F.Item: Sendable {
+    guard query.filters, let passes = query.matcher(now: now, fields: fields) else { return all }
+    var items: [F.Item] = []
+    var headings: [String]? = all.headings == nil ? nil : []
+    for (index, item) in all.items.enumerated() where passes(item) {
+        items.append(item)
+        if let named = all.headings, index < named.count { headings?.append(named[index]) }
+    }
+    return Sorted(items: items, order: all.order, headings: headings)
+}
+
 /// Each song's listening, by song id.
 public func libraryListening(_ played: [PlayedTrack]) -> [String: LibraryTrackFields.Listening] {
     Dictionary(played.map { ($0.track.id, LibraryTrackFields.Listening(plays: $0.plays, lastPlayedAt: $0.lastPlayedAt)) },
