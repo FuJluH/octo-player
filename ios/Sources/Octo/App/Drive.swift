@@ -12,6 +12,13 @@ import SwiftUI
 /// - `reselect` taps the tab in use again; `back` goes back once
 /// - `barplayer` grows the bar's small player; `showtabs` folds it back into the round button
 /// - `player` opens the full player, `close` closes it, `lyrics` opens its lyrics
+/// - `player:STATE` opens the full player in a state: `player:queue` (Up next), `player:sleep`
+///   (the time card), `player:sleep:MINUTES` (a countdown started, then the card), `player:speed`
+///   (the card on its speed page, from the speed mark), `player:speedpage` (the speed page opened
+///   from the timer), `player:more` (the song menu), `player:rate` (its Rate page),
+///   `player:lyricsmenu`, `player:timing` (the lyrics menu, on its timing page), `player:chooser`
+///   (Choose lyrics), `player:look:flowing`, `player:look:classic` (lyrics open in that style),
+///   `player:background:immersive|artwork|color|classic`
 /// - `list:NAME` plays the server playlist with that name
 /// - `found:TEXT` plays the songs not in the library that a search for TEXT finds
 /// - `search:TEXT` plays the library songs a search for TEXT finds
@@ -48,7 +55,12 @@ enum Drive {
             case "back": router.drive = .back
             case "barplayer": router.drive = .barPlayer
             case "showtabs": router.drive = .showTabs
-            case "player": router.drive = .openPlayer
+            case "player":
+                router.drive = .openPlayer
+                if !value.isEmpty {
+                    let (state, detail) = split(value)
+                    PlayerDrive.shared.ask(state, detail)
+                }
             case "close": router.drive = .closePlayer
             case "lyrics": router.drive = .lyrics
             case "pause": player.pause()

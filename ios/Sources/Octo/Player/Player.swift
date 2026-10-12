@@ -583,3 +583,17 @@ final class Player {
         }
     }
 }
+
+// MARK: Read by the full player
+
+extension Player {
+    /// The position as the audio engine has it at this moment, for views that move with the
+    /// song every frame (the lyrics, the progress line).
+    var livePosition: TimeInterval {
+        let seconds = engine.currentTime().seconds
+        return seconds.isFinite ? max(0, seconds) : elapsed
+    }
+
+    /// The song playing, as the audio engine opened it, for the quality badge.
+    var currentAsset: AVAsset? { engine.currentItem?.asset }
+}
