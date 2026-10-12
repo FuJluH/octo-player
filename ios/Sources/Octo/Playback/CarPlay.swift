@@ -22,6 +22,8 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             let library = CarLibrary(player: player, interface: interfaceController)
             self.library = library
             player.onLibraryChanged = { [weak library] in library?.reload() }
+            player.onHeartChange = { [weak library] heart in library?.showHeart(heart) }
+            library.showHeart(player.heart)
             interfaceController.setRootTemplate(library.root(), animated: false, completion: nil)
         }
     }
@@ -31,6 +33,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             self.interfaceController = nil
             library = nil
             CarLink.player?.onLibraryChanged = nil
+            CarLink.player?.onHeartChange = nil
         }
     }
 }
@@ -171,6 +174,27 @@ final class CarLibrary {
                 row.setImage(image)
             }
         }
+    }
+
+    /// The heart for a library song, or the download for a song found online, beside the
+    /// song on the car's now playing screen.
+    func showHeart(_ heart: NotificationHeart) {
+        var buttons: [CPNowPlayingButton] = []
+        switch heart {
+        case .like(let liked):
+            if let image = UIImage(systemName: liked ? "heart.fill" : "heart") {
+                buttons.append(CPNowPlayingImageButton(image: image) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.player.likeFromOutside() }
+                })
+            }
+        case .download:
+            buttons.append(CPNowPlayingAddToLibraryButton { [weak self] _ in
+                MainActor.assumeIsolated { self?.player.downloadFromOutside() }
+            })
+        case .none:
+            break
+        }
+        CPNowPlayingTemplate.shared.updateNowPlayingButtons(buttons)
     }
 
     private func play(_ ids: [String], from index: Int, name: String?) {

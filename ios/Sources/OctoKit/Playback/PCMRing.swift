@@ -5,11 +5,11 @@ import Synchronization
 /// chunks. One thread writes, one reads; neither waits on the other. Each chunk carries the song
 /// time of its first frame (so silence taken out never moves the clock) and the jump it belongs
 /// to: after a jump in the song the reader drops chunks of the jump before.
-final class PCMRing: @unchecked Sendable {
-    static let chunkFrames = 2048
-    static let channels = 2
+public final class PCMRing: @unchecked Sendable {
+    public static let chunkFrames = 2048
+    public static let channels = 2
 
-    let capacity: Int
+    public let capacity: Int
     private let samples: UnsafeMutablePointer<Float>
     private let counts: UnsafeMutablePointer<Int>
     private let songFrames: UnsafeMutablePointer<Int64>
@@ -22,12 +22,12 @@ final class PCMRing: @unchecked Sendable {
     /// Frames waiting in chunks of the current jump.
     private let waiting = Atomic<Int>(0)
     /// The jump being written now.
-    let generation = Atomic<Int>(0)
+    public let generation = Atomic<Int>(0)
 
     /// Reader only: how far into the chunk at `taken` it has read.
     private var readOffset = 0
 
-    init(seconds: Double, sampleRate: Double) {
+    public init(seconds: Double, sampleRate: Double) {
         capacity = max(8, Int(seconds * sampleRate) / Self.chunkFrames)
         samples = .allocate(capacity: capacity * Self.channels * Self.chunkFrames)
         counts = .allocate(capacity: capacity)
@@ -51,7 +51,7 @@ final class PCMRing: @unchecked Sendable {
     // MARK: Writer
 
     /// The buffers of the next free chunk, one per channel, or nil while every chunk is full.
-    func freeChunk() -> [UnsafeMutablePointer<Float>]? {
+    public func freeChunk() -> [UnsafeMutablePointer<Float>]? {
         let w = written.load(ordering: .relaxed)
         guard w - taken.load(ordering: .acquiring) < capacity else { return nil }
         let slot = w % capacity
@@ -60,7 +60,7 @@ final class PCMRing: @unchecked Sendable {
 
     /// Hands over the chunk last given by `freeChunk`, as part of the jump `gen` (the one that
     /// was current when its sound was read), so sound read before a later jump never plays.
-    func publish(frames: Int, songFrame: Int64, end: Bool, gen: Int) {
+    public func publish(frames: Int, songFrame: Int64, end: Bool, gen: Int) {
         let w = written.load(ordering: .relaxed)
         let slot = w % capacity
         counts[slot] = frames
@@ -73,28 +73,28 @@ final class PCMRing: @unchecked Sendable {
 
     /// A jump: what is waiting no longer counts. Answers the new jump.
     @discardableResult
-    func jump() -> Int {
+    public func jump() -> Int {
         let next = generation.add(1, ordering: .releasing).newValue
         waiting.store(0, ordering: .relaxed)
         return next
     }
 
     /// Frames waiting to play in the current jump.
-    var waitingFrames: Int { max(0, waiting.load(ordering: .relaxed)) }
+    public var waitingFrames: Int { max(0, waiting.load(ordering: .relaxed)) }
 
     // MARK: Reader
 
-    struct Pull {
-        var frames = 0
+    public struct Pull {
+        public var frames = 0
         /// The song frame of the first frame copied, when any was.
-        var songFrame: Int64?
+        public var songFrame: Int64?
         /// The song's last chunk was reached and read through.
-        var ended = false
+        public var ended = false
     }
 
     /// Copies up to `frames` frames into `out` (one buffer per channel) from `offset` on, from
     /// chunks of the current jump only, stopping at the song's end.
-    func pull(into out: [UnsafeMutablePointer<Float>], offset: Int, frames: Int) -> Pull {
+    public func pull(into out: [UnsafeMutablePointer<Float>], offset: Int, frames: Int) -> Pull {
         var result = Pull()
         let current = generation.load(ordering: .acquiring)
         var t = taken.load(ordering: .relaxed)
@@ -134,7 +134,7 @@ final class PCMRing: @unchecked Sendable {
     }
 
     /// Reader: lets go of chunks left from a jump before, so the writer has room again.
-    func dropStale() {
+    public func dropStale() {
         let current = generation.load(ordering: .acquiring)
         var t = taken.load(ordering: .relaxed)
         let w = written.load(ordering: .acquiring)
@@ -146,7 +146,7 @@ final class PCMRing: @unchecked Sendable {
     }
 
     /// The song frame the reader is at, from the chunk it reads next, when one is there.
-    func nextSongFrame() -> Int64? {
+    public func nextSongFrame() -> Int64? {
         let t = taken.load(ordering: .relaxed)
         guard t < written.load(ordering: .acquiring) else { return nil }
         let slot = t % capacity

@@ -324,6 +324,12 @@ public struct QueueUndo: Sendable, Equatable {
     public let items: [QueueItem]
     public let order: [Int]
     public let kept: [String]
+
+    public init(items: [QueueItem], order: [Int], kept: [String]) {
+        self.items = items
+        self.order = order
+        self.kept = kept
+    }
 }
 
 extension PlayQueue {

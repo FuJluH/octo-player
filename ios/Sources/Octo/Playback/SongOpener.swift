@@ -108,7 +108,7 @@ enum SongOpener {
                     token.adopt(file)
                     return OpenedSong(decoder: try SongDecoder(source: file, mimeType: saved.mimeType ?? mime, outputRate: outputRate), bytes: file)
                 }
-                let remote = try RemoteFile(savedKey: scouting ? nil : context.savedKey(pinned), online: { OnlineWatch.shared.online }) {
+                let remote = try RemoteFile(savedKey: context.savedKey(pinned), online: { OnlineWatch.shared.online }) {
                     try context.sign(pinned)
                 }
                 token.adopt(remote)

@@ -3,14 +3,18 @@ import OctoKit
 import UIKit
 
 /// The song on the lock screen, in Control Center, on a watch and in the car: its words, picture
-/// and place, and the buttons there (play, pause, previous, next, the scrub bar, the heart or the
-/// download that stands in for it, and Close).
+/// and place, and the buttons there (play, pause, previous, next, the scrub bar, and Close). The
+/// heart, or the download that stands in for it, goes on the car's now playing screen: on the
+/// lock screen it would take the place of Previous.
 @MainActor
 final class NowPlayingCenter {
     private unowned let player: Player
     private var artwork: MPMediaItemArtwork?
     private var artworkFor: String?
-    private var heart: NotificationHeart = .none
+    /// The heart or download for the song on now.
+    private(set) var heart: NotificationHeart = .none
+    /// Told when the heart changes, for the car's now playing screen.
+    var onHeartChange: ((NotificationHeart) -> Void)?
     /// Closed from the lock screen: nothing shows there until music plays again.
     private var closed = false
 
@@ -97,21 +101,7 @@ final class NowPlayingCenter {
         let next = notificationHeart(item?.trackId, isFind: item?.isFind ?? false, liked: liked, downloads: states)
         guard next != heart else { return }
         heart = next
-        let commands = MPRemoteCommandCenter.shared()
-        switch next {
-        case .like(let isLiked):
-            commands.likeCommand.isEnabled = true
-            commands.likeCommand.isActive = isLiked
-            commands.likeCommand.localizedTitle = isLiked ? "Unlike" : "Like"
-            commands.bookmarkCommand.isEnabled = false
-        case .download:
-            commands.likeCommand.isEnabled = false
-            commands.bookmarkCommand.isEnabled = true
-            commands.bookmarkCommand.localizedTitle = "Add to your library"
-        case .none:
-            commands.likeCommand.isEnabled = false
-            commands.bookmarkCommand.isEnabled = false
-        }
+        onHeartChange?(next)
     }
 
     private func serverIdOfFind(_ trackId: String) -> String {

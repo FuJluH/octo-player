@@ -83,6 +83,13 @@ final class Player {
     @ObservationIgnored var announce: (String) -> Void = { _ in }
     /// The car's browse tree, told when the library changes.
     @ObservationIgnored var onLibraryChanged: (() -> Void)?
+    /// The car's now playing screen, told when the heart beside the song changes.
+    @ObservationIgnored var onHeartChange: ((NotificationHeart) -> Void)? {
+        get { nowPlaying.onHeartChange }
+        set { nowPlaying.onHeartChange = newValue }
+    }
+    /// The heart or download beside the song on now.
+    var heart: NotificationHeart { nowPlaying.heart }
 
     @ObservationIgnored private let sound: SoundProcessor
     @ObservationIgnored private let clock = MainClock()
@@ -104,6 +111,10 @@ final class Player {
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     @ObservationIgnored private var lastPace: Pace?
     @ObservationIgnored private var lastSkipSilence: Bool?
+    /// Lengths learned by playing, kept with songs found online too.
+    @ObservationIgnored private var findLengths: FindLengths?
+    /// Play was asked for before the saved queue was back.
+    @ObservationIgnored private var playWhenRestored = false
 
     init(session: Session, sound: SoundProcessor, data: DataServices? = nil) {
         self.session = session
@@ -139,6 +150,11 @@ final class Player {
             data.plays.realLength = { [weak self] trackId, listedMs in
                 Int64(self?.lengths.lengthMs(trackId, listedMs: Int(listedMs)) ?? Int(listedMs))
             }
+            let store = data.library.store
+            let lengths = lengths
+            findLengths = FindLengths(
+                store: { id, ms in try await store.setFindLength(id, durationMs: ms) },
+                correct: { id, listed, measured in lengths.learn(id, listedMs: Int(listed), playerMs: Int(measured)).map(Int64.init) })
         }
         engine.songSetUp = { [sound] item in sound.songSetUp(soundSong(item)) }
         wireEngine()
@@ -236,6 +252,11 @@ final class Player {
     }
 
     func resume() {
+        if restoring && engine.queue.isEmpty {
+            // Asked to play while the saved queue is still coming back: it plays once it is.
+            playWhenRestored = true
+            return
+        }
         guard !engine.queue.isEmpty else { return }
         headset.forgetLoss()
         failuresInARow = 0
@@ -472,20 +493,10 @@ final class Player {
         var order: [Int] = []
     }
 
+    /// Puts back songs taken out since the snapshot, where they were.
     func restore(_ snapshot: QueueSnapshot) {
-        let playing = engine.queue.currentItem?.entryId
-        engine.edit { queue in
-            let items = snapshot.items
-            guard !items.isEmpty else { return }
-            let current = items.firstIndex { $0.entryId == playing } ?? min(snapshot.index, items.count - 1)
-            let wasShuffled = queue.shuffle, mode = queue.repeatMode
-            var rebuilt = PlayQueue()
-            rebuilt.setItems(items, startIndex: current)
-            rebuilt.setPlayOrder(snapshot.order)
-            rebuilt.shuffle = wasShuffled
-            rebuilt.repeatMode = mode
-            queue = rebuilt
-        }
+        guard !snapshot.items.isEmpty else { return }
+        undo(QueueUndo(items: snapshot.items, order: snapshot.order, kept: engine.queue.items.map { $0.entryId ?? "" }))
     }
 
     /// Where the song is at a moment between reads, for anything that moves smoothly (lyrics).
@@ -563,7 +574,12 @@ final class Player {
         }
         engine.onLengthFound = { [weak self] item, measured in
             guard let self else { return }
-            _ = self.lengths.learn(item.trackId, listedMs: item.durationMs, playerMs: measured)
+            if let findLengths = self.findLengths {
+                let trackId = item.trackId, listed = Int64(item.durationMs)
+                Task { try? await findLengths.learn(trackId, listedMs: listed, playerMs: Int64(measured)) }
+            } else {
+                _ = self.lengths.learn(item.trackId, listedMs: item.durationMs, playerMs: measured)
+            }
             self.tracker.lengthFound(item.trackId, length: playingLengthMs(listedMs: item.durationMs, playerMs: measured))
             self.publishPosition()
             self.publishQuality()
@@ -805,13 +821,18 @@ final class Player {
     /// Brings back the queue in use, paused at its song and place, once the library is there.
     private func restoreSaved() async {
         restoring = true
-        defer { restoring = false }
+        defer {
+            restoring = false
+            if playWhenRestored {
+                playWhenRestored = false
+                resume()
+            }
+        }
         if let data {
             let deadline = Date().addingTimeInterval(5)
             while data.library.ready == nil && Date() < deadline { try? await Task.sleep(for: .milliseconds(100)) }
         }
         guard let saved = await queueStore.load(), !saved.trackIds.isEmpty else {
-            engine.clear()
             publishQueue()
             return
         }
@@ -822,13 +843,12 @@ final class Player {
         for (position, id) in saved.trackIds.enumerated() {
             let old = savedItems.indices.contains(position) && savedItems[position].trackId == id ? savedItems[position] : nil
             if var fresh = resolved[position] {
-                if let old {
-                    fresh.entryId = old.entryId
-                    fresh.source = old.source
-                }
+                // Each song keeps where it came from; entries are given again as they go in.
+                if let old { fresh.source = old.source }
                 items.append(fresh)
-            } else if let old, let ref = parseStreamUri(old.uri), ref.sourceId == nil || ref.sourceId == sourceInUse {
+            } else if var old, let ref = parseStreamUri(old.uri), ref.sourceId == nil || ref.sourceId == sourceInUse {
                 // A server song the library does not hold still streams from its server.
+                old.entryId = nil
                 items.append(old)
             } else {
                 items.append(nil)
@@ -838,8 +858,9 @@ final class Player {
         let point = restorePoint(found, savedIndex: saved.index, positionMs: saved.positionMs)
         let order = restoredShuffle(saved.shuffleOrder, found)
         let kept = items.compactMap { $0 }
+        // Something started playing while the saved queue was read: that one stays.
+        guard engine.queue.isEmpty else { return }
         guard !kept.isEmpty else {
-            engine.clear()
             publishQueue()
             return
         }

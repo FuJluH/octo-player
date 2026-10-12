@@ -44,38 +44,6 @@ final class LocalFile: ByteSource, @unchecked Sendable {
     func cancel() {}
 }
 
-/// Byte ranges held, kept sorted and merged.
-struct ByteRanges {
-    private(set) var ranges: [Range<Int64>] = []
-
-    mutating func insert(_ range: Range<Int64>) {
-        guard !range.isEmpty else { return }
-        var merged = range
-        var kept: [Range<Int64>] = []
-        for existing in ranges {
-            if existing.upperBound < merged.lowerBound || existing.lowerBound > merged.upperBound {
-                kept.append(existing)
-            } else {
-                merged = min(existing.lowerBound, merged.lowerBound)..<max(existing.upperBound, merged.upperBound)
-            }
-        }
-        kept.append(merged)
-        ranges = kept.sorted { $0.lowerBound < $1.lowerBound }
-    }
-
-    func covers(_ range: Range<Int64>) -> Bool {
-        guard !range.isEmpty else { return true }
-        return ranges.contains { $0.lowerBound <= range.lowerBound && $0.upperBound >= range.upperBound }
-    }
-
-    /// How many bytes from `offset` on are held without a gap.
-    func contiguous(from offset: Int64) -> Int64 {
-        ranges.first { $0.lowerBound <= offset && $0.upperBound > offset }.map { $0.upperBound - offset } ?? 0
-    }
-
-    var total: Int64 { ranges.reduce(0) { $0 + ($1.upperBound - $1.lowerBound) } }
-}
-
 /// A song read from the server by parts: what is asked for downloads into a file of its own on
 /// the phone, from the place a read needs onwards, so the player can jump about and a part read
 /// once is not fetched again. Each request is signed as it goes out (`sign`), so no address is
