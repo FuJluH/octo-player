@@ -29,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -243,10 +244,10 @@ private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Col
             }
         }
         Spacer(Modifier.height(14.dp))
-        val position by rememberFramePosition(app.player)
+        val position = rememberFramePosition(app.player)
         val duration = state.durationMs
         LineSlider(
-            fraction = { if (duration > 0) position.toFloat() / duration else 0f },
+            fraction = { if (duration > 0) position.value.toFloat() / duration else 0f },
             onSeek = { app.player.seekTo((it * duration).toLong()) },
             modifier = Modifier.fillMaxWidth(),
             color = ink,
@@ -256,10 +257,7 @@ private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Col
             keyStep = if (duration > 0) (SEEK_STEP_MS.toFloat() / duration).coerceAtMost(1f) else 0.05f,
             reading = { "${lengthText((it * duration / 1000).toInt()).ifEmpty { "0:00" }} of ${lengthText((duration / 1000).toInt()).ifEmpty { "0:00" }}" },
         )
-        Row(Modifier.fillMaxWidth()) {
-            Txt(lengthText((position / 1000).toInt()).ifEmpty { "0:00" }, OctoType.caption, muted, Modifier.weight(1f))
-            Txt("-" + lengthText(((duration - position).coerceAtLeast(0) / 1000).toInt()).ifEmpty { "0:00" }, OctoType.caption, muted, align = TextAlign.End)
-        }
+        PlayTimes(position, duration, muted)
         Spacer(Modifier.height(10.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             IconAction(OctoIcons.Shuffle, "Shuffle", { app.player.setShuffle(!state.shuffle) }, size = 40.dp, iconSize = 22.dp, active = state.shuffle, tint = ink, toggled = state.shuffle)
@@ -297,5 +295,22 @@ private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Col
             LineSlider(fraction = { volume }, onSeek = app::setVolume, modifier = Modifier.weight(1f), live = true, color = ink, trackColor = ink.copy(alpha = 0.22f), label = "Volume")
             IconAction(OctoIcons.VolumeUp, "Louder", { app.setVolume(volume + 0.1f) }, size = 30.dp, iconSize = 18.dp, tint = muted)
         }
+    }
+}
+
+// The time played and the time left under the seek line. The place moves
+// every frame, but the two times only change about once a second, so only
+// they compose again, and only then.
+@Composable
+private fun PlayTimes(position: State<Long>, duration: Long, color: Color) {
+    val times by remember(position, duration) {
+        derivedStateOf {
+            val at = position.value
+            (at / 1000).toInt() to ((duration - at).coerceAtLeast(0) / 1000).toInt()
+        }
+    }
+    Row(Modifier.fillMaxWidth()) {
+        Txt(lengthText(times.first).ifEmpty { "0:00" }, OctoType.caption, color, Modifier.weight(1f))
+        Txt("-" + lengthText(times.second).ifEmpty { "0:00" }, OctoType.caption, color, align = TextAlign.End)
     }
 }

@@ -9,12 +9,19 @@ import androidx.compose.runtime.tooling.CompositionRegistrationObserver
 import androidx.compose.runtime.tooling.ObservableComposition
 import java.util.concurrent.atomic.AtomicLong
 
-// Counts how often composable scopes run again, in every composition the
-// running recomposers hold, from when it is made until it is closed.
+// Counts composing, in every composition the running recomposers hold,
+// from when it is made until it is closed: passes over a composition,
+// scopes visited, and scopes made to run their code again by a change of
+// a plain state they read. A scope that reads a derived state is visited
+// whenever what that state is worked out from changes, and left alone when
+// its value did not; only a plain state's change always runs it again.
 @OptIn(ExperimentalComposeRuntimeApi::class)
 internal class Recompositions : AutoCloseable {
-    private val scopes = AtomicLong()
+    class Counts(val passes: Long, val visited: Long, val rerun: Long)
+
     private val passes = AtomicLong()
+    private val visited = AtomicLong()
+    private val rerun = AtomicLong()
     private val handles = mutableListOf<CompositionObserverHandle>()
 
     private val counter = object : CompositionObserver {
@@ -23,13 +30,16 @@ internal class Recompositions : AutoCloseable {
         }
 
         override fun onScopeEnter(scope: RecomposeScope) {
-            scopes.incrementAndGet()
+            visited.incrementAndGet()
+        }
+
+        override fun onScopeInvalidated(scope: RecomposeScope, value: Any?) {
+            if (value == null || !isDerived(value)) rerun.incrementAndGet()
         }
 
         override fun onReadInScope(scope: RecomposeScope, value: Any) = Unit
         override fun onScopeExit(scope: RecomposeScope) = Unit
         override fun onEndComposition(composition: ObservableComposition) = Unit
-        override fun onScopeInvalidated(scope: RecomposeScope, value: Any?) = Unit
         override fun onScopeDisposed(scope: RecomposeScope) = Unit
     }
 
@@ -49,8 +59,11 @@ internal class Recompositions : AutoCloseable {
         }
     }
 
-    // Scopes run again, and composition passes, since the last call.
-    fun take(): Pair<Long, Long> = scopes.getAndSet(0) to passes.getAndSet(0)
+    // A derived state, by its class: the runtime keeps the type to itself.
+    private fun isDerived(value: Any): Boolean = value.javaClass.name == "androidx.compose.runtime.DerivedSnapshotState"
+
+    // What was counted since the last call.
+    fun take(): Counts = Counts(passes.getAndSet(0), visited.getAndSet(0), rerun.getAndSet(0))
 
     override fun close() {
         synchronized(handles) {

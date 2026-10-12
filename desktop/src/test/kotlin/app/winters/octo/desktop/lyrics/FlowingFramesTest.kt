@@ -76,7 +76,7 @@ class FlowingFramesTest {
                 if (pictures.line(index).copy.value != null) copied++
             }
         }
-        val (scopes, _) = recompositions.take()
+        val scopes = recompositions.take().rerun
         recompositions.close()
         scene.close()
         println("Over $counted frames: $scopes scopes composed, $redrawn of $onScreen lines drawn again, $copied of $blurred blurred lines from copies")

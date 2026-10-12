@@ -129,7 +129,7 @@ class LyricsPerfTest {
             }
         }
         val seconds = (System.nanoTime() - measuredFrom) / 1e9
-        val (scopes, _) = recompositions?.take() ?: (0L to 0L)
+        val scopes = recompositions?.take()?.rerun ?: 0L
         recompositions?.close()
         if (target == null && size == SIZES.first()) {
             File("build/perf").mkdirs()
