@@ -42,10 +42,13 @@ struct ImportScreen: View {
             guard case .success(let url) = result, let model else { return }
             ImportFiles.send(.file(ImportFiles.read(url), name: url.lastPathComponent, type: ImportFiles.type(of: url)), to: model)
         }
-        .glassSheet(isPresented: $pasting, scrolls: false) {
+        .sheet(isPresented: $pasting) {
             PasteSheet(close: { pasting = false }) { text, name in
                 model?.sendText(text, name: name.isEmpty ? ImportText.pastedListName : name)
             }
+            .padding(.top, 24)
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
     }
 
@@ -189,24 +192,19 @@ struct ImportScreen: View {
             if let note = list.playlistNote, !note.isEmpty { Text(note).font(.octoCaption).foregroundStyle(OctoColor.textMuted) }
             switchRow(ImportText.keepAsPlaylist, on: list.keepPlaylist, enabled: !model.working) { model.keepPlaylist(list.id, on: $0) }
             switchRow(ImportText.getMissingSongs, on: list.getMissing, enabled: !model.working) { model.getMissing(list.id, on: $0) }
-            if removing == list.id {
-                Text(ImportText.removeList).font(.octoBodySmall).foregroundStyle(OctoColor.textPrimary).padding(.top, 4)
-                Text(list.removeLine).font(.octoCaption).foregroundStyle(OctoColor.textSecondary)
-                HStack(spacing: 8) {
-                    AccentButton("Remove", size: .small, enabled: !model.working) {
-                        removing = nil
-                        model.remove(list.id)
-                    }
-                    GlazeButton("Cancel", size: .small) { removing = nil }
+            HStack(spacing: 8) {
+                GlazeButton("Open", size: .small) { model.open(list.id) }
+                if list.canRefresh {
+                    GlazeButton("Read again", size: .small, enabled: !model.working) { model.readList(list.id) }
                 }
-            } else {
-                HStack(spacing: 8) {
-                    GlazeButton("Open", size: .small) { model.open(list.id) }
-                    if list.canRefresh {
-                        GlazeButton("Read again", size: .small, enabled: !model.working) { model.readList(list.id) }
+                GlazeButton("Remove", size: .small, enabled: !model.working) { removing = list.id }
+                    .confirmationDialog(ImportText.removeList,
+                                        isPresented: Binding(get: { removing == list.id }, set: { if !$0 { removing = nil } }),
+                                        titleVisibility: .visible) {
+                        Button("Remove", role: .destructive) { model.remove(list.id) }
+                    } message: {
+                        Text(list.removeLine)
                     }
-                    GlazeButton("Remove", size: .small, enabled: !model.working) { removing = list.id }
-                }
             }
         }
         .padding(.horizontal, 20)

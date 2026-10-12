@@ -42,36 +42,18 @@ struct FamilyScreen: View {
         .background(OctoColor.background)
         .onAppear { model.watch() }
         .onDisappear { model.stop() }
-        .glassSheet(isPresented: Binding(get: { model.handOver.sheet != nil }, set: { if !$0 { model.handOver.close() } }), tall: true, scrolls: false) {
-            HandOverSheetHost(hub: hub)
+        .sheet(isPresented: Binding(get: { model.handOver.sheet != nil }, set: { if !$0 { model.handOver.close() } })) {
+            HandOverSheetHost(hub: hub).familySheet()
         }
-        .glassSheet(isPresented: Binding(get: { model.invite != nil }, set: { if !$0 { model.closeInvite() } }), tall: true, scrolls: false) {
-            InviteSheetHost(hub: hub)
+        .sheet(isPresented: Binding(get: { model.invite != nil }, set: { if !$0 { model.closeInvite() } })) {
+            InviteSheetHost(hub: hub).familySheet()
         }
-        .glassSheet(isPresented: $changingPassword, tall: true, scrolls: false) {
+        .sheet(isPresented: $changingPassword) {
             FamilyPasswordSheet(change: hub.changePassword, done: { words in
                 changingPassword = false
                 router.done(words)
             }, close: { changingPassword = false })
-        }
-        .glassSheet(item: $resetting) { member in
-            let name = member.displayName.isEmpty ? member.username : member.displayName
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Reset \(name)'s password?").font(.octoHeadline).foregroundStyle(OctoColor.textPrimary)
-                Text("Their password stops working at once, on every app and device. You get a new sign-in link to give them, to choose another.")
-                    .font(.octoBodySmall)
-                    .foregroundStyle(OctoColor.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 10) {
-                    GlazeButton("Cancel", size: .medium, fillWidth: true) { resetting = nil }
-                    AccentButton(FamilyText.resetPassword, size: .medium, fillWidth: true) {
-                        resetting = nil
-                        model.resetPassword(member)
-                    }
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 8)
+            .familySheet()
         }
     }
 
@@ -210,9 +192,17 @@ struct FamilyScreen: View {
         title(FamilyText.members)
         if manager.liveStreams > 0 { PanelLine(text: "\(manager.liveStreams) playing now") }
         ForEach(manager.members) { member in
-            FamilyItemLine(title: member.displayName.isEmpty ? member.username : member.displayName,
+            let name = member.displayName.isEmpty ? member.username : member.displayName
+            FamilyItemLine(title: name,
                            line: "\(memberLine(member)) · \(storageLine(usedBytes: member.storageUsedBytes, limitGb: member.storageLimitGb))") {
                 GlazeButton(FamilyText.resetPassword, size: .extraSmall, enabled: !model.working) { resetting = member }
+                    .confirmationDialog("Reset \(name)'s password?",
+                                        isPresented: Binding(get: { resetting?.id == member.id }, set: { if !$0 { resetting = nil } }),
+                                        titleVisibility: .visible) {
+                        Button(FamilyText.resetPassword, role: .destructive) { model.resetPassword(member) }
+                    } message: {
+                        Text("Their password stops working at once, on every app and device. You get a new sign-in link to give them, to choose another.")
+                    }
             }
         }
         AddMemberBlock(model: model)
@@ -420,9 +410,23 @@ struct FamilyRequestSheetHost: ViewModifier {
 
     func body(content: Content) -> some View {
         let hub = accounts.family
-        content.glassSheet(item: Binding(get: { hub.me == nil ? nil : hub.asking }, set: { if $0 == nil { hub.closeSheet() } })) { ask in
-            if let me = hub.me { RequestSheetBody(hub: hub, ask: ask, sheet: requestSheet(me)) }
+        content.sheet(item: Binding(get: { hub.me == nil ? nil : hub.asking }, set: { if $0 == nil { hub.closeSheet() } })) { ask in
+            if let me = hub.me {
+                RequestSheetBody(hub: hub, ask: ask, sheet: requestSheet(me))
+                    .padding(.top, 24)
+                    .fittedSheet()
+            }
         }
+    }
+}
+
+extension View {
+    /// A family sheet: as tall as the screen allows, with its handle showing, its own header
+    /// and footer inside.
+    func familySheet() -> some View {
+        padding(.top, 16)
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
     }
 }
 

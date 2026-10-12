@@ -12,6 +12,10 @@ private let liveFill = Color.white.opacity(0.14)
 /// or did lately, each opening to its log, and Find songs.
 struct ServerDownloadsSheet: View {
     @Environment(ServerDownloads.self) private var model
+    /// The last question stays put while its alert goes away.
+    @State private var asked: PickQuestion?
+    /// The question answered with a button, which the alert going away then leaves alone.
+    @State private var answered: PickQuestion?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -21,15 +25,46 @@ struct ServerDownloadsSheet: View {
             default: DownloadListPage()
             }
         }
-        .padding(.top, 20)
+        .padding(.top, 28)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .glassSheet(isPresented: replaceAnywayShown, scrolls: false) { ReplaceAnywaySheet() }
+        .alert(replaceTitle, isPresented: replaceAnywayShown, presenting: asked) { question in
+            Button(keepMineText, role: .cancel) {
+                answered = question
+                model.keepMine(question)
+            }
+            Button(replaceAnywayText, role: .destructive) {
+                answered = question
+                model.replaceAnyway()
+            }
+        } message: { question in
+            Text(replaceAnywayWords(question))
+        }
+        .onChange(of: model.findWatch.question, initial: true) { _, question in
+            if let question, question.kind == .confirm { asked = question }
+        }
     }
 
-    /// The question before a copy that needs the person's word replaces the library's.
+    /// The question before a copy that needs the person's word replaces the library's. Keep
+    /// mine, or the alert going away unanswered, keeps the library's; nothing is sent.
     private var replaceAnywayShown: Binding<Bool> {
-        Binding(get: { model.findWatch.question?.kind == .confirm },
-                set: { if !$0, let asked = model.findWatch.question, asked.kind == .confirm { model.keepMine(asked) } })
+        Binding(get: { model.findWatch.question.map { $0.kind == .confirm && $0 != answered } ?? false },
+                set: { shown in
+                    guard !shown else { return }
+                    // A button's own answer comes with the alert going away; only an alert gone
+                    // without one keeps mine.
+                    DispatchQueue.main.async {
+                        guard let asked = model.findWatch.question, asked.kind == .confirm, asked != answered else { return }
+                        model.keepMine(asked)
+                    }
+                })
+    }
+
+    /// The song's title, the two copies side by side, then the server's sentence word for word.
+    private func replaceAnywayWords(_ question: PickQuestion) -> String {
+        let fallback: String = if case .find(_, let title, _) = model.view { title } else { "" }
+        let title = question.title.isEmpty ? fallback : question.title
+        let compared = compareLines(question.compare).joined(separator: "\n")
+        return [title, compared, question.words].filter { !$0.isEmpty }.joined(separator: "\n\n")
     }
 }
 
@@ -691,92 +726,6 @@ private struct ReplaceItCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(chip, in: RoundedRectangle(cornerRadius: 14))
         .padding(.vertical, 8)
-    }
-}
-
-/// The question before a copy that needs the person's word replaces the library's: "Replace your
-/// copy?" and the song's title, the two copies side by side, then the server's sentence word for
-/// word. Back, a tap off it or pulling it down keep mine; nothing is sent.
-private struct ReplaceAnywaySheet: View {
-    @Environment(ServerDownloads.self) private var model
-    /// The last question stays drawn while its sheet slides away.
-    @State private var shown: PickQuestion?
-    @State private var overflows = false
-    @State private var atEnd = true
-
-    var body: some View {
-        let asked = model.findWatch.question.flatMap { $0.kind == .confirm ? $0 : nil } ?? shown
-        VStack(alignment: .leading, spacing: 12) {
-            if let asked {
-                let fallback: String = if case .find(_, let title, _) = model.view { title } else { "" }
-                let title = asked.title.isEmpty ? fallback : asked.title
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(replaceTitle).font(.octoHeadline).foregroundStyle(.white).accessibilityAddTraits(.isHeader)
-                    if !title.isEmpty { Text(title).font(.octoBodySmall).foregroundStyle(OctoColor.textSecondary) }
-                }
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 12) {
-                            let lines = compareLines(asked.compare)
-                            if !lines.isEmpty {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
-                                        Text(line).font(.octoBodySmall).foregroundStyle(index == 0 ? OctoColor.textSecondary : .white)
-                                    }
-                                }
-                                .padding(14)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(chip, in: RoundedRectangle(cornerRadius: 14))
-                                .accessibilityElement(children: .combine)
-                            }
-                            Text(asked.words).font(.octoBodySmall).foregroundStyle(.white)
-                            Color.clear.frame(height: 1).id("end")
-                        }
-                    }
-                    .scrollBounceBehavior(.basedOnSize)
-                    .onScrollGeometryChange(for: Bool.self) { geometry in
-                        geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height - 2
-                    } action: { _, end in
-                        atEnd = end
-                    }
-                    .overlay(alignment: .bottom) {
-                        if !atEnd {
-                            ZStack(alignment: .bottom) {
-                                LinearGradient(colors: [.clear, OctoColor.background.opacity(0.9)], startPoint: .top, endPoint: .bottom)
-                                    .frame(height: 48)
-                                    .allowsHitTesting(false)
-                                Button { withAnimation { proxy.scrollTo("end", anchor: .bottom) } } label: {
-                                    HStack(spacing: 6) {
-                                        Text("More below").font(.system(size: 12, weight: .semibold))
-                                        Image(systemName: "chevron.down").font(.system(size: 11, weight: .semibold))
-                                    }
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                                    .background(DiscoveryStyle.accentSelected, in: Capsule())
-                                    .overlay(Capsule().stroke(thread, lineWidth: 1))
-                                }
-                                .buttonStyle(.plain)
-                                .padding(.bottom, 4)
-                            }
-                            .transition(.opacity)
-                        }
-                    }
-                    .animation(.easeOut(duration: 0.2), value: atEnd)
-                }
-                HStack(spacing: 10) {
-                    GlazeButton(keepMineText, size: .medium, fillWidth: true) { model.keepMine(asked) }
-                    AccentButton(replaceAnywayText, size: .medium, fillWidth: true) { model.replaceAnyway() }
-                }
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 20)
-        .onChange(of: model.findWatch.question, initial: true) { _, question in
-            if let question, question.kind == .confirm { shown = question }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(replaceTitle)
     }
 }
 

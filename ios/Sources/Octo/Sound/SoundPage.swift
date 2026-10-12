@@ -35,11 +35,9 @@ private struct SoundPageContent: View {
     @Bindable var model: SoundPageModel
     /// The chosen filter in parametric mode.
     @State private var chosen = 0
-    @State private var sheet: SoundSheet?
-    /// The card last asked for, kept while it fades away.
-    @State private var lastSheet: SoundSheet?
-    @State private var popupOpen = false
-    @State private var anchor: CGRect?
+    @State private var saving = false
+    /// The own preset asked about before it is deleted.
+    @State private var deleting: String?
     @State private var importing = false
     @State private var exporting = false
     @State private var exportFile = SoundTextFile(text: "")
@@ -73,25 +71,6 @@ private struct SoundPageContent: View {
             }
         }
         .background(OctoColor.background)
-        .fullScreenCover(isPresented: $popupOpen) {
-            SoundPopupLayer(visible: sheet != nil, anchor: anchor, title: "Preset", onDismiss: { sheet = nil }, onGone: closePopup) {
-                switch lastSheet {
-                case .savePreset:
-                    SoundPresetNameForm { name in
-                        model.savePreset(name)
-                        sheet = nil
-                    }
-                case .deletePreset(let name):
-                    SoundDeleteQuestion(name: name, onConfirm: {
-                        model.deletePreset(name)
-                        sheet = nil
-                    }, onCancel: { sheet = nil })
-                case nil:
-                    EmptyView()
-                }
-            }
-            .presentationBackground(.clear)
-        }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.plainText, .text]) { result in
             if case .success(let url) = result { model.importCorrection(url) }
         }
@@ -141,10 +120,24 @@ private struct SoundPageContent: View {
                 filterEditor(settings, selected: selected).id("editor")
             }
             SoundPresetBar(choices: PresetChoice.row(label: label, own: store.presets), selected: label,
-                           onPick: pick, onLongPress: { choice, spot in open(.deletePreset(choice.name), from: spot) })
+                           onPick: pick, onLongPress: { choice, _ in deleting = choice.name })
+                .confirmationDialog("Delete \"\(deleting ?? "")\"?",
+                                    isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+                                    titleVisibility: .visible, presenting: deleting) { name in
+                    Button("Delete", role: .destructive) { model.deletePreset(name) }
+                }
             if !parametric {
-                SoundTextAction("Save as preset\u{2026}") { spot in open(.savePreset, from: spot) }
+                SoundTextAction("Save as preset\u{2026}") { saving = true }
                     .padding(.horizontal, 4)
+                    .namePopover(isPresented: $saving, title: "Save as preset", placeholder: "Preset name", action: "Save",
+                                 capitalization: .words, ready: { UserPresetRules.canSaveAs($0) },
+                                 note: { name in
+                                     !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !UserPresetRules.canSaveAs(name)
+                                         ? "A built-in preset has that name." : nil
+                                 }) { name in
+                        model.savePreset(name)
+                        saving = false
+                    }
             }
             SoundHairline()
             preamp(settings)
@@ -311,25 +304,6 @@ private struct SoundPageContent: View {
         }
     }
 
-    // MARK: The glass card
-
-    /// Opens a card beside the spot just pressed, or in the middle when nothing was pressed.
-    private func open(_ next: SoundSheet, from spot: CGPoint?) {
-        anchor = spot.map { CGRect(origin: $0, size: .zero) }
-        lastSheet = next
-        sheet = next
-        var still = Transaction()
-        still.disablesAnimations = true
-        withTransaction(still) { popupOpen = true }
-    }
-
-    private func closePopup() {
-        guard sheet == nil else { return }
-        var still = Transaction()
-        still.disablesAnimations = true
-        withTransaction(still) { popupOpen = false }
-    }
-
     /// A state asked for from outside the page.
     private func take(_ request: SoundPageRequest, scroller: ScrollViewProxy) {
         switch request {
@@ -338,9 +312,11 @@ private struct SoundPageContent: View {
         case .card(let name):
             withAnimation { scroller.scrollTo(name, anchor: .top) }
         case .savePreset:
-            open(.savePreset, from: nil)
+            withAnimation { scroller.scrollTo("equalizer", anchor: .top) }
+            saving = true
         case .deletePreset(let name):
-            open(.deletePreset(name), from: nil)
+            withAnimation { scroller.scrollTo("equalizer", anchor: .top) }
+            deleting = name
         }
     }
 }

@@ -9,7 +9,7 @@ import OctoKit
 /// - `sound:graphic` and `sound:parametric` open it in that mode
 /// - `sound:preset:NAME` opens it with that preset (built-in or own) applied
 /// - `sound:editor` opens the parametric filter editor, with a filter in it
-/// - `sound:save` opens the "Save as preset" card
+/// - `sound:save` opens the "Save as preset" popover
 /// - `sound:own:NAME` saves the ten bands as an own preset and marks the curve as it
 /// - `sound:delete:NAME` asks to delete that own preset
 /// - `sound:card:loudness`, `sound:card:balance`, `sound:card:correction` scroll to that card
