@@ -1,0 +1,96 @@
+# Builds the iPhone app for TestFlight and uploads it to App Store Connect, where it shows up for
+# the team's internal testers. Run by hand. The Xcode project is made from ios/project.yml, so
+# the Liquid Glass icon, the Siri and Shortcuts metadata and the extensions are built by Xcode
+# itself; signing is automatic through the App Store Connect API key.
+#
+# Repository secrets:
+#   ASC_KEY_ID         the API key's Key ID
+#   ASC_ISSUER_ID      the Issuer ID shown above the keys in App Store Connect
+#   ASC_KEY_P8         the whole text of the AuthKey_<KeyID>.p8 file
+name: iOS TestFlight
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version shown in TestFlight (CFBundleShortVersionString)
+        required: true
+        default: 0.1.0
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-testflight
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    runs-on: macos-26
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pick the newest Xcode
+        run: |
+          xcode=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Put the API key in place
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/keys"
+          printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/keys/AuthKey_$ASC_KEY_ID.p8"
+          echo "ASC_KEY_PATH=$RUNNER_TEMP/keys/AuthKey_$ASC_KEY_ID.p8" >> "$GITHUB_ENV"
+
+      # Every upload needs a build number App Store Connect has not seen for this version.
+      - name: Set the version and build number
+        working-directory: ios
+        run: |
+          build="${{ github.run_number }}"
+          for plist in Info.plist OctoShare-Info.plist OctoWidgets-Info.plist; do
+            /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ inputs.version }}" "$plist"
+            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build" "$plist"
+          done
+          echo "Version ${{ inputs.version }} ($build)"
+
+      - name: Make the Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Archive
+        working-directory: ios
+        run: |
+          xcodebuild archive \
+            -project Octo.xcodeproj \
+            -scheme Octo \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Octo.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      - name: Upload to App Store Connect
+        working-directory: ios
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/Octo.xcarchive" \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      - name: Remove the API key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/keys"

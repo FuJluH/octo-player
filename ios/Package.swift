@@ -19,6 +19,11 @@ let package = Package(
         .library(name: "Octo", targets: ["Octo"]),
         .library(name: "OctoShare", targets: ["OctoShare"]),
         .library(name: "OctoWidgets", targets: ["OctoWidgets"]),
+        // The modules the Xcode project (project.yml) links into its app and extension targets.
+        .library(name: "OctoKit", targets: ["OctoKit"]),
+        .library(name: "ShareInbox", targets: ["ShareInbox"]),
+        .library(name: "OctoSystem", targets: ["OctoSystem"]),
+        .library(name: "OctoIntents", targets: ["OctoIntents"]),
     ],
     targets: [
         // SQLite for the library database where Apple's own SQLite3 module is missing (Linux,

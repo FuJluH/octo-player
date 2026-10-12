@@ -98,8 +98,13 @@ public enum ProvisioningProfile {
         return Set(entitlements.compactMap { key, value in (value as? Bool) == false ? nil : key })
     }
 
-    /// The entitlements this build's own profile grants.
+    /// The entitlements this build's own profile grants. A build from TestFlight or the App Store
+    /// carries no profile: it was signed with every entitlement the app asks for.
     public static func grants(bundle: Bundle = .main) -> Set<String> {
-        grants(bundle.url(forResource: "embedded", withExtension: "mobileprovision").flatMap { try? Data(contentsOf: $0) })
+        guard let url = bundle.url(forResource: "embedded", withExtension: "mobileprovision") else { return distributed }
+        return grants(try? Data(contentsOf: url))
     }
+
+    /// The entitlements a TestFlight or App Store build is signed with.
+    public static let distributed: Set<String> = ["com.apple.developer.siri", "com.apple.security.application-groups"]
 }

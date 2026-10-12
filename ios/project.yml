@@ -1,0 +1,95 @@
+# The Xcode project for TestFlight and App Store builds, made on macOS with `xcodegen generate`.
+# Day-to-day builds and installs use xtool (xtool.yml) from the same sources. The app and its
+# extensions compile their own folders here; the shared modules come from Package.swift.
+name: Octo
+options:
+  bundleIdPrefix: app.winters
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    DEVELOPMENT_TEAM: C84UQRPAQ2
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "6.0"
+    TARGETED_DEVICE_FAMILY: "1"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    GENERATE_INFOPLIST_FILE: YES
+packages:
+  OctoPackage:
+    path: .
+targets:
+  Octo:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources/Octo
+        excludes:
+          - "CoverArt"
+          - "CoverArt/**"
+      # Fonts and backgrounds for drawn playlist covers, read from a CoverArt folder.
+      - path: Sources/Octo/CoverArt
+        type: folder
+        buildPhase: resources
+      - path: XcodeSupport
+      - path: AppIcon.icon
+        buildPhase: resources
+      - path: Launch.xcassets
+      - path: PrivacyInfo.xcprivacy
+        buildPhase: resources
+    dependencies:
+      - package: OctoPackage
+        products: [OctoKit, ShareInbox, OctoSystem, OctoIntents]
+      - target: OctoShare
+      - target: OctoWidgets
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.winters.octo
+        PRODUCT_NAME: Octo
+        INFOPLIST_FILE: Info.plist
+        CODE_SIGN_ENTITLEMENTS: Octo.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+  OctoShare:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Sources/OctoShare
+      - path: PrivacyInfo.xcprivacy
+        buildPhase: resources
+    dependencies:
+      - package: OctoPackage
+        product: ShareInbox
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.winters.octo.share
+        PRODUCT_NAME: OctoShare
+        INFOPLIST_FILE: OctoShare-Info.plist
+        CODE_SIGN_ENTITLEMENTS: OctoShare.entitlements
+        SKIP_INSTALL: YES
+  OctoWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Sources/OctoWidgets
+      - path: PrivacyInfo.xcprivacy
+        buildPhase: resources
+    dependencies:
+      - package: OctoPackage
+        products: [OctoSystem, OctoIntents]
+      - sdk: WidgetKit.framework
+      - sdk: SwiftUI.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.winters.octo.widgets
+        PRODUCT_NAME: OctoWidgets
+        INFOPLIST_FILE: OctoWidgets-Info.plist
+        CODE_SIGN_ENTITLEMENTS: OctoWidgets.entitlements
+        SKIP_INSTALL: YES
+schemes:
+  Octo:
+    build:
+      targets:
+        Octo: all
+    archive:
+      config: Release

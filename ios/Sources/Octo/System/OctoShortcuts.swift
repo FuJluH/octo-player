@@ -82,3 +82,8 @@ enum SystemHooks {
         }
     }
 }
+
+/// The intents the app takes from OctoIntents.
+struct OctoAppIntents: AppIntentsPackage {
+    static var includedPackages: [any AppIntentsPackage.Type] { [OctoIntentsPackage.self] }
+}

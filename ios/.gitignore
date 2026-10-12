@@ -6,3 +6,5 @@
 xcuserdata/
 DerivedData/
 .netrc
+# Made from project.yml by xcodegen
+/Octo.xcodeproj
