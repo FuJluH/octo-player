@@ -84,8 +84,6 @@ final class Player {
     @ObservationIgnored let data: DataServices?
     @ObservationIgnored let engine: PlaybackEngine
     @ObservationIgnored let lengths = RealLengths()
-    /// The real lengths learned by playing, by song id, for rows to show.
-    private(set) var learnedLengths: [String: Int] = [:]
     @ObservationIgnored let serverQueue: ServerQueueSync
     @ObservationIgnored var playable: PlayableItems { PlayableItems(session: session, data: data) }
     /// Shows a line at the bottom of the screen.
@@ -150,7 +148,6 @@ final class Player {
         sleepTimer = OctoKit.SleepTimer(clock: SleepClock())
         sleepTimer.attach(engine)
         sleepTimer.onChange = { [weak self] state in self?.sleepState = state }
-        lengths.onChange = { [weak self] values in Task { @MainActor in self?.learnedLengths = values } }
         nowPlaying = NowPlayingCenter(player: self)
         CarLink.player = self
         headset = HeadsetWatch(player: self)
