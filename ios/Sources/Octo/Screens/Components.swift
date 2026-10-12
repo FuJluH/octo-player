@@ -122,6 +122,7 @@ struct TrackRow: View {
 
     @Environment(Player.self) private var player
     @Environment(LibraryActions.self) private var actions
+    @Environment(Downloads.self) private var downloads
     @Environment(\.songSelection) private var selection
 
     private var key: String { selectKey ?? track.id }
@@ -134,7 +135,7 @@ struct TrackRow: View {
         if turns && track.isFound {
             // The check has its moment first where the row offers the add button; once turned,
             // the row's menu, swipe and what plays are the library song's.
-            FindSwap(find: song, offersAdd: offersAdd || ownership) { shown in
+            FindSwap(track: track, offersAdd: offersAdd || ownership) { shown in
                 turned(shown)
             }
         } else {
@@ -143,12 +144,15 @@ struct TrackRow: View {
     }
 
     /// This row as it draws `shown`: the find itself, or the library song it became.
-    private func turned(_ shown: Song) -> TrackRow {
+    private func turned(_ shown: LibraryTrack) -> TrackRow {
         var copy = self
         copy.turns = false
-        if !shown.isExternal { copy.track = actions.state.provisional(shown) }
+        copy.track = shown
         return copy
     }
+
+    /// Whether the find has reached the library.
+    private var adopted: Bool { track.isFound && downloads.phase(track.nativeId) == .done }
 
     private var row: some View {
         Button {
@@ -198,7 +202,7 @@ struct TrackRow: View {
     }
 
     /// With no connection, a song that cannot play is drawn faint.
-    private var outOfReach: Bool { !track.isFound && actions.state.isOutOfReach(track) }
+    private var outOfReach: Bool { actions.state.isOutOfReach(track) }
 
     private var shownSubtitle: String {
         subtitle ?? songSubtitle(title: track.title, artist: track.artist, album: track.album, find: track.isFound)
@@ -271,7 +275,7 @@ struct TrackRow: View {
     private var artwork: some View {
         ArtCover(artwork: track.artwork, size: 44, radius: OctoRadius.artS)
             .overlay(alignment: .bottomTrailing) {
-                if track.isFound && !offersAdd { NotInLibraryMark(artSize: 44) }
+                if rowAddSign(isFind: track.isFound, adopted: adopted, offersAdd: offersAdd) == .mark { NotInLibraryMark(artSize: 44) }
             }
             .overlay {
                 if picked || isNow {
@@ -289,7 +293,7 @@ struct TrackRow: View {
     @ViewBuilder
     private var ownershipMark: some View {
         ZStack {
-            if track.isFound {
+            if track.isFound && !adopted {
                 AddToLibraryButton(song: song, size: 32, iconSize: 20)
             } else {
                 IconView(.check, size: 20, color: OctoColor.accent)
@@ -312,18 +316,11 @@ struct TrackRow: View {
         }
     }
 
-    /// A song's length; for a find, the length the player learned for it when known, else its
-    /// listed one.
-    private var lengthMs: Int64 {
-        guard track.isFound else { return track.durationMs }
-        return shownLengthMs(track.durationMs, learnedMs: Int64(player.lengths.lengthMs(track.id, listedMs: Int(max(track.durationMs, 0)))))
-    }
-
     /// The length in a column at least as wide as "00:00", so lengths line up.
     private var lengthSlot: some View {
         ZStack(alignment: .trailing) {
             Text(lengthSlotSample).hidden()
-            Text(rowLength(lengthMs) ?? "")
+            Text(rowLength(shownLengthMs(track.durationMs, learnedMs: player.learnedLengths[track.id].map(Int64.init))) ?? "")
         }
         .font(.octoCaption.monospacedDigit())
         .foregroundStyle(OctoColor.textMuted)
@@ -374,6 +371,12 @@ struct SongRow: View {
     @Environment(Router.self) private var router
     @Environment(Downloads.self) private var downloads
     @Environment(LibraryActions.self) private var actions
+    @Environment(\.songSelection) private var selection
+
+    /// The row is picked by the song it was given, whichever song it shows.
+    private var key: String { song.id }
+    private var selecting: Bool { selection?.active == true }
+    private var picked: Bool { selection?.isPicked(key) == true }
 
     var body: some View {
         if song.isExternal {
@@ -385,7 +388,13 @@ struct SongRow: View {
 
     private func line(_ shown: Song) -> some View {
         Button {
-            if let tap { tap() } else { player.play(list, from: position) }
+            if selecting {
+                selection?.toggle(key)
+            } else if let tap {
+                tap()
+            } else {
+                player.play(list, from: position)
+            }
         } label: {
             HStack(spacing: 12) {
                 lead(shown)
@@ -411,8 +420,11 @@ struct SongRow: View {
                     }
                 }
                 Spacer(minLength: 8)
-                let seconds = shown.isExternal ? Int(knownLengthMs(shown) / 1_000) : shown.duration
-                Text(seconds > 0 ? Duration.seconds(seconds).formatted(.time(pattern: .minuteSecond)) : "")
+                // The length learned by playing, when the listing was off, else the listed one.
+                let listedMs = shown.isExternal ? knownLengthMs(shown) : Int64(max(shown.duration, 0)) * 1_000
+                let learned = (player.learnedLengths[actions.state.libraryId(shown) ?? shown.id] ?? player.learnedLengths[shown.id])
+                    .map(Int64.init)
+                Text(rowLength(shownLengthMs(listedMs, learnedMs: learned)) ?? "")
                     .font(.octoCaption.monospacedDigit())
                     .foregroundStyle(OctoColor.textMuted)
                 switch rowEnd(sign(shown), librarySpace: addSpace, hasTrailing: false) {
@@ -425,13 +437,36 @@ struct SongRow: View {
             .padding(.vertical, 4)
             .frame(minHeight: 56)
             .contentShape(Rectangle())
+            // With no connection, a song that cannot play is drawn faint.
+            .opacity(actions.state.isOutOfReach(actions.state.provisional(shown)) ? 0.4 : 1)
         }
         .buttonStyle(SqueezeStyle())
+        .background {
+            if picked {
+                RoundedRectangle(cornerRadius: OctoRadius.row)
+                    .fill(LibraryLook.accentSelected)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: OctoRadius.row)
+                            .strokeBorder(LinearGradient(colors: [.white.opacity(0.12), .black.opacity(0.25)], startPoint: .top, endPoint: .bottom),
+                                          lineWidth: 1)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+            }
+        }
         .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: OctoRadius.row))
-        .contextMenu { SongMenuItems(subject: SongSubject(track: actions.state.provisional(shown), song: shown, context: context)) }
-        .songSwipes(.playNext { actions.playNextUndoable(shown) }, enabled: true)
+        .contextMenu { SongMenuItems(subject: menuSubject(shown)) }
+        .songSwipes(.playNext { actions.playNextUndoable(shown) }, enabled: !selecting)
+        .accessibilityAddTraits(selecting && picked ? .isSelected : [])
         .accessibilityAction(named: "Play next") { actions.playNextUndoable(shown) }
         .accessibilityAction(named: "Add to queue") { player.append([shown]) }
+    }
+
+    /// The song's menu, which offers Select on a list that can pick.
+    private func menuSubject(_ shown: Song) -> SongSubject {
+        var context = context
+        if context.selectKey == nil, selection != nil { context.selectKey = key }
+        return SongSubject(track: actions.state.provisional(shown), song: shown, context: context, selection: selection)
     }
 
     /// How the row says its song is not in the library.
@@ -453,16 +488,22 @@ struct SongRow: View {
                 }
                 BadgedCover(id: shown.coverArt, size: 44, radius: OctoRadius.artS, external: sign(shown) == .mark)
                     .overlay {
-                        if isCurrent(shown) {
+                        if picked || isCurrent(shown) {
                             RoundedRectangle(cornerRadius: OctoRadius.artS).fill(.black.opacity(0.5))
-                            NowPlayingBars(playing: player.isPlaying)
+                            if picked {
+                                IconView(.check, size: 20, color: .white)
+                            } else {
+                                NowPlayingBars(playing: player.isPlaying)
+                            }
                         }
                     }
             }
         } else {
             let isCurrent = isCurrent(shown)
             ZStack(alignment: .trailing) {
-                if isCurrent {
+                if picked {
+                    IconView(.check, size: 18, color: .white)
+                } else if isCurrent {
                     NowPlayingBars(playing: player.isPlaying, size: 14)
                 } else if let number {
                     Text("\(number)")
@@ -547,22 +588,18 @@ struct SongCard: View {
                     }
                     HStack(spacing: 4) {
                         Text(song.byline).font(.octoCaption).foregroundStyle(OctoColor.textMuted).lineLimit(1)
-                        // Downloaded to the phone, or streamed from the server; nothing for a phone
-                        // file or a song found online.
-                        if !song.isExternal && !track.onPhone {
-                            if actions.state.kept(track.id)?.status == .done {
-                                IconView(.downloaded, size: 14, color: OctoColor.textMuted)
-                                    .accessibilityLabel("Downloaded")
-                            } else {
-                                IconView(.cloud, size: 14, color: OctoColor.textMuted)
-                                    .accessibilityLabel("Streams from your server")
-                            }
+                        if actions.state.isDownloaded(track) {
+                            IconView(.downloaded, size: 12, color: OctoColor.textMuted)
+                                .accessibilityLabel("Downloaded")
+                        } else if !track.onPhone && !track.isFound {
+                            IconView(.cloud, size: 12, color: OctoColor.textMuted)
+                                .accessibilityLabel("Streams from your server")
                         }
                     }
                 }
             }
             .frame(width: width, alignment: .leading)
-            .opacity(!song.isExternal && actions.state.isOutOfReach(track) ? 0.4 : 1)
+            .opacity(actions.state.isOutOfReach(track) ? 0.4 : 1)
         }
         .buttonStyle(PressScale(scale: 0.97))
         .contextMenu { SongMenuItems(subject: SongSubject(track: track, song: song)) }

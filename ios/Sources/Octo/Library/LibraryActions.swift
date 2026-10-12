@@ -583,7 +583,19 @@ final class LibraryActions {
             }
             let over = asks.count - 50
             if over > 0 { lines.append("At most 50 songs at a time, so \(songsCount(over)) \(over == 1 ? "was" : "were") left out") }
-            if !lines.isEmpty { router.show(lines.joined(separator: ". ")) }
+            if !lines.isEmpty { sayUpgrade(lines.joined(separator: ". ")) }
+        }
+    }
+
+    /// A line about higher quality copies, with "Show" opening the server downloads when the
+    /// server keeps their log.
+    private func sayUpgrade(_ text: String) {
+        let logs = session.client != nil && (session.profile?.extensions ?? []).contains("\(octoAcquisitions):\(octoDownloadLogVersion)")
+        if logs {
+            let router = router
+            router.show(text, action: "Show") { router.showServerDownloads() }
+        } else {
+            router.show(text)
         }
     }
 

@@ -76,7 +76,9 @@ struct AddToLibraryButton: View {
         .accessibilityAction(named: isFailed(phase) ? "Try again" : follows ? "Follow it" : "Add to your library") {
             if follows { router.showServerDownloads(songId: song.id) } else if enabled { ask() }
         }
-        .accessibilityAction(named: "Why") { explain() }
+        .accessibilityActions {
+            if isFailed(phase) { Button("Why") { explain() } }
+        }
         .onAppear { release = downloads.showing(song.id) }
         .onDisappear {
             release?()

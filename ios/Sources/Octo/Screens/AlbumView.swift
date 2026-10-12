@@ -83,19 +83,15 @@ struct AlbumView: View {
                 let ya = a.year ?? 0, yb = b.year ?? 0
                 return ya != yb ? ya > yb : a.sortKey < b.sortKey
             }
-        guard let client = session.client, isServerSource(found.sourceId) else { return }
-        if let full = try? await client.fullAlbum(found.nativeId) {
-            let songs = full.song.map(\.plain)
-            if songs.contains(where: \.isExternal) {
-                let held = Dictionary((await library.libraryTracks(for: songs.filter { !$0.isExternal })).map { ($0.nativeId, $0) },
-                                      uniquingKeysWith: { a, _ in a })
-                var listedTracks = songs.map { song in held[song.id] ?? state.provisional(song) }
-                let listedIds = Set(listedTracks.map(\.id))
-                listedTracks += tracks.filter { !listedIds.contains($0.id) }
-                whole = listedTracks
-            } else {
-                whole = nil
-            }
+        // The album as Octo lists it now, found from its songs' copies there: the songs it marks as
+        // outside the library join the library's in the server's order.
+        if let listing = try? await state.data.discovery.libraryAlbum(tracks.map(\.id)) {
+            let server = outsideAlbumSongs(listing.sent, listing.resolved)
+            var adoptions: [String: String] = [:]
+            for (serverId, trackId) in downloads.adoptions ?? [:] { adoptions[findId(serverId)] = trackId }
+            whole = server.contains(where: \.isFound) ? wholeAlbum(tracks, server: server, adoptions: adoptions) : nil
+        } else {
+            whole = nil
         }
         highlight = await mainSong(found)
     }
@@ -541,8 +537,12 @@ struct ArtistView: View {
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: 14) {
                     ForEach(similar, id: \.id) { other in
-                        ArtistCircle(id: other.id, name: other.name, coverArt: other.coverArt, external: other.library == nil,
-                                     library: other.library)
+                        // One the library does not have opens as the server shows it.
+                        if let mine = other.library {
+                            ArtistCircle(id: other.id, name: other.name, coverArt: other.coverArt, library: mine)
+                        } else {
+                            OnlineArtistCircle(id: other.id, name: other.name, coverArt: other.coverArt)
+                        }
                     }
                 }
                 .padding(.horizontal, 20)

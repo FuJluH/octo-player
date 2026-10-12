@@ -94,9 +94,9 @@ final class Discovery {
     /// Whether the server ranks songs: it lists octoTopSongs, or, running Octo, says so when asked.
     /// Kept only once the server itself said; a server out of reach is asked again next time.
     private func offersTopSongs() async -> Bool {
-        guard let client = session.client, let server = session.activeId else { return false }
-        if session.profile?.lists(octoTopSongs, version: 1) == true { return true }
-        if !session.isOcto { return false }
+        guard let client = session.client, let server = session.active?.sourceId else { return false }
+        if session.extensions.contains("\(octoTopSongs):1") { return true }
+        if !session.runsOcto { return false }
         if let known = offered[server] { return known }
         guard let yes = await client.supportsIfKnown(octoTopSongs, version: 1) else { return false }
         offered[server] = yes
@@ -129,9 +129,9 @@ final class Discovery {
     /// Whether the server offers the Charts page: octoTopSongs at version 2, or Octo saying so
     /// when asked.
     func offersCharts() async -> Bool {
-        guard let client = session.client, let server = session.activeId else { return false }
-        if chartsOffered(session.profile?.extensions ?? []) { return true }
-        if !session.isOcto { return false }
+        guard let client = session.client, let server = session.active?.sourceId else { return false }
+        if chartsOffered(session.extensions) { return true }
+        if !session.runsOcto { return false }
         if let known = chartsOfferedLive[server] { return known }
         guard let yes = await client.supportsIfKnown(octoTopSongs, version: octoTopSongsCharts) else { return false }
         chartsOfferedLive[server] = yes

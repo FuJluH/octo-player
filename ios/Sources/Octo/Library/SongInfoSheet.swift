@@ -58,7 +58,8 @@ struct SongInfoSheet: View {
         facts.bitrate = song.bitRate.map { $0 * 1_000 }
         facts.sampleRate = song.samplingRate
         facts.bitDepth = song.bitDepth
-        facts.suggestedBy = song.octoSuggestedBy
+        // The server names it on the song itself, or radio remembered it when the song came.
+        facts.suggestedBy = song.octoSuggestedBy ?? actions.state.data.discovery.suggestedBy(subject.track.id)
         facts.explicit = song.explicitStatus.map { $0 == "explicit" }
         if let gain = song.replayGain {
             facts.trackGain = gain.trackGain
