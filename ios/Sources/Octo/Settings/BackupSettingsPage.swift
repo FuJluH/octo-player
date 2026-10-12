@@ -113,6 +113,13 @@ final class BackupModel {
     }
 
     func cancel() { state = .idle }
+
+    #if DEBUG
+    /// Shows the review of a backup made here, as if it had been read from a file.
+    func review(_ backup: Backup) async {
+        state = .ready(backup, await Backups.shared.plan(backup))
+    }
+    #endif
 }
 
 /// A backup as a file the system's save picker writes.

@@ -26,8 +26,6 @@ final class SettingsNavigator {
     enum Request: Equatable {
         case page(SettingsRoute)
         case search(String)
-        case popup(String)
-        case whatsNew
     }
 
     var request: Request?
@@ -45,6 +43,8 @@ final class SettingsNavigator {
     /// - `popup:ROW` opens the popup of that row on the page in front (`speed`, or any choice
     ///   row's id such as `radio_discovery`, `ambient`, `cache_size`)
     /// - `whatsnew` opens About and its What's new panel
+    /// - `settings-state:NAME` shows a state a page reaches only with outside help (see
+    ///   `driveState`)
     func drive(_ name: String, _ value: String, router: Router) async {
         switch name {
         case "settings":
@@ -64,10 +64,50 @@ final class SettingsNavigator {
             request = .page(SettingsRoute(.about))
             try? await Task.sleep(for: .milliseconds(600))
             whatsNewOpen = true
+        #if DEBUG
+        case "settings-state":
+            await driveState(value)
+        #endif
         default:
             break
         }
     }
+
+    #if DEBUG
+    /// States a page reaches only with outside help, for checking them on the phone:
+    /// - `backup-review` reads a backup of this phone's settings as if from a file, showing the
+    ///   review before a restore; `backup-saved`, `backup-failed` and `backup-problem` show
+    ///   those notes
+    /// - `scrobbling-connected` shows ListenBrainz connected as "octo-check" (no token is
+    ///   kept, so sending marks it as needing a new one); `scrobbling-attention` shows the token
+    ///   needing replacing; Disconnect on the page clears either
+    /// - `updates-on` shows the update controls in a test build, and `updates-check` checks now
+    private func driveState(_ state: String) async {
+        let session = SettingsNavigator.session
+        switch state {
+        case "backup-review":
+            guard let session else { return }
+            let backup = await Backups.shared.make(session: session)
+            await BackupModel.shared.review(backup)
+        case "backup-saved": BackupModel.shared.saved(true)
+        case "backup-failed": BackupModel.shared.saved(false)
+        case "backup-problem": await BackupModel.shared.open(URL(fileURLWithPath: "/dev/null"))
+        case "scrobbling-connected", "scrobbling-attention":
+            let store = AppSettings.shared.listenBrainzStore
+            store.set(true, forKey: AppSettings.Keys.enabled)
+            store.set(true, forKey: AppSettings.Keys.tokenSealed)
+            store.set("octo-check", forKey: AppSettings.Keys.user)
+            store.set(state == "scrobbling-attention", forKey: AppSettings.Keys.needsAttention)
+            AppSettings.shared.refreshListenBrainz()
+        case "updates-on": AppUpdates.shared.showControls()
+        case "updates-check": AppUpdates.shared.checkNow()
+        default: break
+        }
+    }
+
+    /// The session, for steps that need it.
+    static weak var session: Session?
+    #endif
 }
 
 /// Opens the page a settings route names. Server and sync is built by its own part of the app;

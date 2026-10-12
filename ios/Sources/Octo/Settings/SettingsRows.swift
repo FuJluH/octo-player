@@ -73,18 +73,28 @@ private struct HighlightWash: ViewModifier {
     @State private var glow = 0.0
 
     func body(content: Content) -> some View {
-        content
-            .background(OctoColor.accent.opacity(0.14 * glow))
-            .id(entry?.id)
-            .task(id: highlight.id) {
-                guard let entry, highlight.id == entry.id else { return }
-                highlight.onShown()
+        Group {
+            if let id = entry?.id {
+                content.id(id)
+            } else {
+                content
+            }
+        }
+        .background(OctoColor.accent.opacity(0.14 * glow))
+        .task(id: highlight.id) {
+            guard let entry, highlight.id == entry.id else { return }
+            // Marking it shown clears the page's highlight, so the light runs on a task of its
+            // own that this one ending does not stop.
+            let scroll = highlight.scroll
+            highlight.onShown()
+            Task {
                 try? await Task.sleep(for: .milliseconds(settleMs))
-                withAnimation(.easeInOut(duration: 0.3)) { highlight.scroll(entry.id) }
+                withAnimation(.easeInOut(duration: 0.3)) { scroll(entry.id) }
                 withAnimation(.easeOut(duration: 0.25)) { glow = 1 }
                 try? await Task.sleep(for: .milliseconds(250 + holdMs))
                 withAnimation(.easeInOut(duration: 0.7)) { glow = 0 }
             }
+        }
     }
 }
 

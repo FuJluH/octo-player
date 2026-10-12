@@ -39,6 +39,9 @@ struct SettingsView: View {
         .navigationDestination(item: $driven) { SettingsDestination(route: $0) }
         .task {
             AccountQualityModel.shared.attach(session)
+            #if DEBUG
+            SettingsNavigator.session = session
+            #endif
             settings.attach(session: session) { AccountQualityModel.shared.appPicks }
             phone.start()
             listenBrainz.start()
@@ -54,7 +57,6 @@ struct SettingsView: View {
             switch request {
             case .page(let route): driven = route
             case .search(let text): query = text
-            case .popup, .whatsNew: break
             }
         }
     }

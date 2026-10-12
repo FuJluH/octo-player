@@ -84,6 +84,13 @@ final class AppUpdates {
         Task { await check() }
     }
 
+    #if DEBUG
+    /// Lets a test build show the update controls and check, for looking at them.
+    func showControls() {
+        state.off = nil
+    }
+    #endif
+
     /// One check. Answers when GitHub asked to come back, if it did.
     @discardableResult
     private func check() async -> Int64? {
