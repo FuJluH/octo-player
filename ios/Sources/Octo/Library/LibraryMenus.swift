@@ -69,8 +69,10 @@ struct SongMenuItems<Extras: View>: View {
     @Environment(Router.self) private var router
     @Environment(Downloads.self) private var downloads
     @Environment(Player.self) private var player
+    @Environment(Accounts.self) private var accounts
 
     private var track: LibraryTrack { subject.track }
+    private var family: FamilyHub { accounts.family }
     private var song: Song { subject.song }
     /// The song as the queue takes it: a library song by its library id, a find as it is.
     private var queued: Song { track.isFound ? song : track.queueSong }
@@ -114,6 +116,7 @@ struct SongMenuItems<Extras: View>: View {
         }
         let place = menuPlace(context, albumId: track.albumId, artistId: track.artistId)
         let kept = state.kept(track.id)
+        let ownSong = offersRemoveOn(personal: state.personalIds.contains(track.id), serverMarksPersonal: state.marksPersonal)
         return songActions(
             find: track.isFound,
             radio: true,
@@ -124,7 +127,9 @@ struct SongMenuItems<Extras: View>: View {
             lastPlaylist: state.lastPlaylist != nil,
             upgrade: actions.canUpgrade(track),
             findSongs: downloads.keepsLog && (track.serverSongId != nil || track.isFound),
-            disk: actions.canDeleteFromDisk(track))
+            disk: actions.canDeleteFromDisk(track),
+            requestCopy: family.outside.offersRequest,
+            removeFromMine: family.removesFromMine && track.serverSongId != nil && ownSong)
             // Phones have no way for an app to set a ringtone, a notification sound or an alarm.
             .filter { $0 != .setAsSound }
     }
@@ -139,10 +144,22 @@ struct SongMenuItems<Extras: View>: View {
         case .startRadio:
             item("Start radio", .radio) { Task { await actions.startRadio(queued) } }
         case .download:
-            let adding = downloads.state(song.id)
-            item(downloadLabel(adding), adding == .done ? .check : .addToLibrary) { Task { _ = await downloads.request(song) } }
-                .disabled(adding != .none)
-        case .requestCopy, .removeFromMyLibrary, .setAsSound:
+            if let save = family.outside.addLabel {
+                // A family member whose songs are saved rather than added.
+                let saved = family.isSaved(track.id)
+                item(saved ? "Remove from Saved" : save, saved ? .liked : .like) { family.toggleSaved(track.id, title: track.title) }
+            } else {
+                let adding = downloads.state(song.id)
+                item(downloadLabel(adding), adding == .done ? .check : .addToLibrary) { Task { _ = await downloads.request(song) } }
+                    .disabled(adding != .none)
+            }
+        case .requestCopy:
+            item(FamilyText.requestACopy, .download) { family.ask(track.id, title: track.title) }
+        case .removeFromMyLibrary:
+            item(FamilyText.removeFromMyLibrary, .delete, role: .destructive) {
+                family.removeFromMyLibrary(serverId: track.serverSongId, title: track.title)
+            }
+        case .setAsSound:
             EmptyView()
         case .addToLastPlaylist:
             if let last = state.lastPlaylist {
