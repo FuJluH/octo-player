@@ -30,123 +30,18 @@ extension SettingsQuestion {
     }
 }
 
-extension View {
-    /// Pops the answers up beside this view as a glass card: under it when there is room, over
-    /// it otherwise. A tap outside closes it; picking an answer runs it and closes it at once.
-    func choicePopover(isPresented: Binding<Bool>, question: SettingsQuestion) -> some View {
-        glassPopup(isPresented: isPresented) {
-            ChoiceList.request(question) { isPresented.wrappedValue = false }
-        }
-    }
-}
-
-/// The answers under the question, the current one in the darker pill with a white check.
-/// Hairlines part the answers, never touching the pill. The question stays at the top as a quiet
-/// heading while the answers scroll, when they have to.
-@MainActor
-enum ChoiceList {
-    /// The popup for a question: as wide as its widest answer within 220 to 320 points.
-    static func request(_ question: SettingsQuestion, close: @escaping () -> Void) -> PopupRequest {
-        PopupRequest(
-            title: question.title,
-            anchor: nil,
-            width: .fit(min: 220, max: 320),
-            padding: 6,
-            header: AnyView(
-                Text(question.title)
-                    .font(.settingsLabel)
-                    .foregroundStyle(OctoColor.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 14)
-                    .padding(.top, 10)
-                    .padding(.bottom, 6)
-                    .accessibilityAddTraits(.isHeader)
-            ),
-            body: AnyView(ChoiceAnswers(question: question, close: close))
-        )
-    }
-}
-
-/// The answers, one under another.
-struct ChoiceAnswers: View {
+/// The answers to a question as the items of a system menu: the question heads them, each
+/// answer has its line under it, and the current one is checked.
+struct QuestionMenuItems: View {
     let question: SettingsQuestion
-    let close: () -> Void
 
     var body: some View {
-        let looks = MenuRowLook.rows(count: question.answers.count, selected: question.selected)
-        VStack(spacing: 0) {
+        Section(question.title) {
             ForEach(Array(question.answers.enumerated()), id: \.offset) { index, answer in
-                if index > 0 {
-                    Rectangle()
-                        .fill(looks[index].lineAbove ? Color.white.opacity(0.08) : .clear)
-                        .frame(height: 1)
-                        .padding(.horizontal, 14)
-                }
-                ChoiceAnswerRow(answer: answer, selected: looks[index].selected, pickable: question.selected >= 0) {
+                MenuPick(answer.label, detail: answer.detail, checked: index == question.selected, enabled: answer.enabled) {
                     question.onPick(index)
-                    close()
                 }
             }
         }
-    }
-}
-
-private struct ChoiceAnswerRow: View {
-    let answer: SettingsAnswer
-    let selected: Bool
-    let pickable: Bool
-    let pick: () -> Void
-
-    var body: some View {
-        Button(action: pick) {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(answer.label)
-                        .font(.octoBodySmall)
-                        .foregroundStyle(answer.enabled ? OctoColor.textPrimary : OctoColor.textMuted)
-                    if let detail = answer.detail {
-                        Text(detail).font(.octoCaption).foregroundStyle(OctoColor.textMuted)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
-                if selected {
-                    Image(systemName: SettingsIcon.check)
-                        .font(.system(size: 14, weight: .bold))
-                        .frame(width: 18, height: 18)
-                        .foregroundStyle(.white)
-                } else if pickable {
-                    Color.clear.frame(width: 18, height: 18)
-                }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .frame(minHeight: 40)
-            .background {
-                if selected {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.black.opacity(0.32))
-                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.white.opacity(0.08), lineWidth: 1))
-                }
-            }
-            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        }
-        .buttonStyle(AnswerPress(selected: selected))
-        .disabled(!answer.enabled)
-        .accessibilityAddTraits(selected ? [.isSelected] : [])
-        .accessibilityHint(answer.detail ?? "")
-    }
-}
-
-/// A finger on an answer that is not chosen shows a quiet accent pill at once.
-private struct AnswerPress: ButtonStyle {
-    let selected: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .background {
-                if configuration.isPressed && !selected {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous).fill(OctoColor.accent.opacity(0.14))
-                }
-            }
     }
 }

@@ -2,7 +2,7 @@ import OctoKit
 import SwiftUI
 
 extension Font {
-    /// The quiet label size: group titles, choice list headings.
+    /// The quiet label size: group titles and small headings.
     static let settingsLabel = Font.system(size: 13.5, weight: .semibold)
 }
 
@@ -371,7 +371,7 @@ struct ToggleRow: View {
 }
 
 /// A setting with a few answers: its title on the left, the current one on the right, and a
-/// chevron. Tapping it pops the answers up beside the row.
+/// chevron. Tapping it opens the answers as a system menu beside the row.
 struct ChoiceRow: View {
     let entry: SettingEntry?
     var title: String?
@@ -390,16 +390,15 @@ struct ChoiceRow: View {
         self.question = question
     }
 
-    @State private var open = false
-    @State private var navigator = SettingsNavigator.shared
-
     var body: some View {
-        Button { open = true } label: {
+        Menu {
+            QuestionMenuItems(question: question)
+        } label: {
             RowFrame(entry: entry) {
                 TitleValueLayout {
                     RowLabel(title: title ?? entry?.title ?? "", below: helper, enabled: enabled).layoutValue(key: RowShare.self, value: 1)
                     Reading(value: value, enabled: enabled).layoutValue(key: RowShare.self, value: 0.8)
-                    Image(systemName: SettingsIcon.chevron)
+                    Image(systemName: "chevron.up.chevron.down")
                         .font(.system(size: 13, weight: .semibold))
                         .frame(width: 18, height: 18)
                         .foregroundStyle(OctoColor.textMuted)
@@ -408,17 +407,13 @@ struct ChoiceRow: View {
                 }
             }
         }
+        .menuStyle(.button)
         .buttonStyle(SettingsRowPress())
+        .menuOrder(.fixed)
         .disabled(!enabled)
         .accessibilityLabel(title ?? entry?.title ?? "")
         .accessibilityValue(value)
         .accessibilityHint(helper ?? "")
-        .choicePopover(isPresented: $open, question: question)
-        .onChange(of: navigator.popup, initial: true) { _, popup in
-            guard let popup, popup == entry?.id else { return }
-            navigator.popup = nil
-            open = true
-        }
     }
 }
 

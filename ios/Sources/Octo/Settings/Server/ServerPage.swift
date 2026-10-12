@@ -11,13 +11,12 @@ struct ServerPage: View {
     @Environment(Accounts.self) private var accounts
     @Environment(ServerControls.self) private var controls
     @Environment(Router.self) private var router
-    @Environment(Prompts.self) private var prompts
     @Environment(ServerSwitch.self) private var serverSwitch
     @State private var changingPassword = false
+    @State private var askingSignOut = false
     @State private var navigator = SettingsNavigator.shared
     @State private var folders: [ServerMusicFolder]?
     @State private var folderProblem: String?
-    @State private var pickingFolder = false
     @State private var look: (answerMs: Int64?, scan: ServerScanStatus?)?
     @State private var listening: [ServerNowPlaying] = []
     @Environment(\.dataServices) private var data
@@ -40,6 +39,13 @@ struct ServerPage: View {
                 }
                 SettingsGroup {
                     ActionRow(SettingsIndex.disconnect, chevron: false, destructive: true, action: askSignOut)
+                        .confirmationDialog(signOutQuestion, isPresented: $askingSignOut, titleVisibility: .visible) {
+                            Button("Sign out", role: .destructive) {
+                                if let id = session.activeId { serverSwitch.signOut(id) }
+                            }
+                        } message: {
+                            Text("Its music leaves your library on this phone until you sign in again. It stays in your list, and nothing on the server changes.")
+                        }
                 }
             } else if session.servers.isEmpty {
                 SettingsGroup(footer: "Your server's music joins your library here.") {
@@ -47,13 +53,17 @@ struct ServerPage: View {
                 }
             }
         }
-        .glassPopup(isPresented: $changingPassword, title: "Change password", usesPressSpot: false, maxWidth: 400) {
-            ChangePasswordForm { changingPassword = false }
+        .sheet(isPresented: $changingPassword) {
+            ChangePasswordForm { changingPassword = false }.fittedSheet()
         }
         .task(id: session.client == nil ? nil : session.activeId) { await lookAgain() }
+        .task(id: session.client == nil ? nil : session.activeId) { await readFolders() }
         .task(id: session.client == nil ? nil : session.activeId) { await watchListening() }
         .task(id: session.activeId) { _ = try? await controls.shares() }
-        .onChange(of: session.activeId) { folderProblem = nil }
+        .onChange(of: session.activeId) {
+            folderProblem = nil
+            folders = nil
+        }
         .onChange(of: navigator.popup, initial: true) { _, popup in openAsked(popup) }
     }
 
@@ -66,8 +76,7 @@ struct ServerPage: View {
                 InfoRow(SettingsIndex.serverConnection, value: place == .home ? "Connected at home" : "Connected away")
             }
             InfoRow(SettingsIndex.serverUser, value: server.username.isEmpty ? "API key" : server.username)
-            FolderRow(value: session.folder(for: server.id)?.name ?? "All") { Task { await openFolders() } }
-                .choicePopover(isPresented: $pickingFolder, question: folderQuestion(server))
+            FolderRow(value: session.folder(for: server.id)?.name ?? "All", question: folderQuestion(server))
             if let folderProblem { NoteRow(folderProblem, color: OctoColor.error) }
             ActionRow(SettingsIndex.editConnection) { router.signIn = .editConnection(server) }
             if server.mode != .apiKey {
@@ -84,13 +93,14 @@ struct ServerPage: View {
         }
     }
 
-    /// Reads the server's folders; when that fails a note says so and nothing opens.
-    private func openFolders() async {
+    /// Reads the server's folders for the menu as the page opens; when that fails a note says so
+    /// and the menu offers All alone.
+    private func readFolders() async {
         guard let client = session.client else { return }
         do {
             folders = try await client.serverMusicFolders()
             folderProblem = nil
-            pickingFolder = true
+        } catch is CancellationError {
         } catch {
             folderProblem = "Couldn't read the server's music folders."
         }
@@ -190,30 +200,27 @@ struct ServerPage: View {
         switch popup {
         case SettingsIndex.changePassword.id: changingPassword = true
         case SettingsIndex.disconnect.id: askSignOut()
-        case SettingsIndex.serverMusicFolder.id: Task { await openFolders() }
         default: return
         }
         navigator.popup = nil
     }
 
+    private var signOutQuestion: String { "Sign out of \(session.active?.name ?? "the server")?" }
+
     /// Asks beside the row before signing out of the server in use.
-    private func askSignOut() {
-        prompts.confirm("Sign out of \(session.active?.name ?? "the server")?",
-                        detail: "Its music leaves your library on this phone until you sign in again. It stays in your list, and nothing on the server changes.",
-                        confirm: "Sign out") {
-            if let id = session.activeId { serverSwitch.signOut(id) }
-        }
-    }
+    private func askSignOut() { askingSignOut = true }
 }
 
-/// The Music folder row: its title, the folder in use at the end, and the small chevron of a
-/// choice. The answers open beside it once the server's folders are read.
+/// The Music folder row: its title, the folder in use at the end, and the small mark of a
+/// choice. The folders open as a system menu beside it.
 private struct FolderRow: View {
     let value: String
-    let action: () -> Void
+    let question: SettingsQuestion
 
     var body: some View {
-        Button(action: action) {
+        Menu {
+            QuestionMenuItems(question: question)
+        } label: {
             RowFrame(entry: SettingsIndex.serverMusicFolder) {
                 Text(SettingsIndex.serverMusicFolder.title).font(.octoBody).foregroundStyle(OctoColor.textPrimary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -223,14 +230,16 @@ private struct FolderRow: View {
                     .multilineTextAlignment(.trailing)
                     .lineLimit(2)
                     .layoutPriority(-1)
-                Image(systemName: SettingsIcon.chevron)
+                Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 13, weight: .semibold))
                     .frame(width: 18, height: 18)
                     .foregroundStyle(OctoColor.textMuted)
                     .accessibilityHidden(true)
             }
         }
+        .menuStyle(.button)
         .buttonStyle(SettingsRowPress())
+        .menuOrder(.fixed)
         .accessibilityLabel(SettingsIndex.serverMusicFolder.title)
         .accessibilityValue(value)
     }

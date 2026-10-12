@@ -28,7 +28,7 @@ struct PlaybackSettingsPage: View {
                     }
                 }
                 PopoverRow(SettingsIndex.speed, value: SettingsWords.paceLabel(prefs), isPresented: $speedOpen) {
-                    PopupRequest(title: "Speed", anchor: nil, width: .fixed(320), padding: 0, header: nil, body: AnyView(PaceCard()))
+                    PaceCard().frame(width: 320)
                 }
                 ToggleRow(SettingsIndex.skipSilence, isOn: prefs.skipSilence, onChange: settings.setSkipSilence)
                 ToggleRow(SettingsIndex.autoplay, isOn: prefs.autoplay, helper: "When the queue ends, similar songs keep playing.",
@@ -83,14 +83,14 @@ struct PlaybackSettingsPage: View {
     }
 }
 
-/// A row like a choice row that opens its own card beside it instead of a list.
-struct PopoverRow: View {
+/// A row like a choice row that opens its own card in a popover beside it instead of a list.
+struct PopoverRow<Card: View>: View {
     let entry: SettingEntry?
     let value: String
     @Binding var isPresented: Bool
-    let card: () -> PopupRequest
+    let card: () -> Card
 
-    init(_ entry: SettingEntry?, value: String, isPresented: Binding<Bool>, card: @escaping () -> PopupRequest) {
+    init(_ entry: SettingEntry?, value: String, isPresented: Binding<Bool>, @ViewBuilder card: @escaping () -> Card) {
         self.entry = entry
         self.value = value
         _isPresented = isPresented
@@ -125,7 +125,7 @@ struct PopoverRow: View {
         .buttonStyle(SettingsRowPress())
         .accessibilityLabel(entry?.title ?? "")
         .accessibilityValue(value)
-        .glassPopup(isPresented: $isPresented, request: card)
+        .glassPopover(isPresented: $isPresented, content: card)
     }
 }
 

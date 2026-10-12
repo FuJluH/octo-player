@@ -8,7 +8,7 @@ struct SharesScreen: View {
     @Environment(Session.self) private var session
     @State private var shares: LoadState<[ServerShare]> = .loading
     @State private var deleteProblem: String?
-    @Environment(Prompts.self) private var prompts
+    @State private var deleting: ServerShare?
 
     var body: some View {
         ScrollView {
@@ -55,10 +55,7 @@ struct SharesScreen: View {
             }
             .buttonStyle(.plain)
             .disabled(share.url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            Button {
-                prompts.confirm("Delete this link?", detail: "\"\(shareTitle(share))\" stops working for everyone it was sent to.",
-                                confirm: "Delete") { delete(share) }
-            } label: {
+            Button { deleting = share } label: {
                 Image(systemName: "trash")
                     .font(.system(size: 17))
                     .foregroundStyle(OctoColor.textMuted)
@@ -67,6 +64,12 @@ struct SharesScreen: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Delete link")
+            .confirmationDialog("Delete this link?", isPresented: Binding(get: { deleting?.id == share.id }, set: { if !$0 { deleting = nil } }),
+                                titleVisibility: .visible) {
+                Button("Delete", role: .destructive) { delete(share) }
+            } message: {
+                Text("\"\(shareTitle(share))\" stops working for everyone it was sent to.")
+            }
         }
         .padding(.leading, 20)
         .padding(.trailing, 8)
@@ -139,61 +142,60 @@ struct ShareRequest: Identifiable, Equatable {
     let title: String
 }
 
-/// The share card: the expiry choices, made into a link at once, then the system's share sheet.
+/// The share card, in a sheet sized to it: the expiry choices, made into a link at once; the
+/// card closes and the system's share sheet opens with the link.
 struct ShareCard: View {
     let request: ShareRequest
-    /// Shown inside the song menu with a way back; on its own a heading.
-    var back: (() -> Void)?
-    let close: () -> Void
+    /// Closes the card, handing over the link to share once it has gone.
+    let close: (String?) -> Void
     @Environment(ServerControls.self) private var controls
     @State private var making: ShareExpiry?
     @State private var problem: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let back {
-                GlassMenuBack(title: "Share link", onBack: back)
-            } else {
-                GlassMenuHeading("Share \"\(request.title)\"")
-            }
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Anyone with the link can listen.")
-                        .font(.octoCaption)
-                        .foregroundStyle(OctoColor.textMuted)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                    Text("Link expires")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(OctoColor.textSecondary)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 6)
-                    ForEach(ShareExpiry.allCases, id: \.self) { expiry in
-                        Button { make(expiry) } label: {
-                            HStack {
-                                Text(expiry.label)
-                                    .font(.octoBodySmall)
-                                    .foregroundStyle(making == nil || making == expiry ? OctoColor.textPrimary : OctoColor.textMuted)
-                                Spacer()
-                                if making == expiry { LoadingSpinner(size: 18) }
-                            }
-                            .padding(.horizontal, 14)
-                            .frame(minHeight: 46)
-                            .contentShape(RoundedRectangle(cornerRadius: 14))
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(making != nil)
+            Text("Share \"\(request.title)\"")
+                .font(.octoLabel)
+                .foregroundStyle(OctoColor.textPrimary)
+                .lineLimit(2)
+                .padding(.horizontal, 14)
+                .padding(.top, 10)
+                .padding(.bottom, 6)
+                .accessibilityAddTraits(.isHeader)
+            Text("Anyone with the link can listen.")
+                .font(.octoCaption)
+                .foregroundStyle(OctoColor.textMuted)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+            Text("Link expires")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(OctoColor.textSecondary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+            ForEach(ShareExpiry.allCases, id: \.self) { expiry in
+                Button { make(expiry) } label: {
+                    HStack {
+                        Text(expiry.label)
+                            .font(.octoBodySmall)
+                            .foregroundStyle(making == nil || making == expiry ? OctoColor.textPrimary : OctoColor.textMuted)
+                        Spacer()
+                        if making == expiry { LoadingSpinner(size: 18) }
                     }
-                    if let problem {
-                        Text(problem).font(.octoCaption).foregroundStyle(OctoColor.error).padding(.horizontal, 14).padding(.top, 4)
-                    }
-                    Color.clear.frame(height: 4)
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: 46)
+                    .contentShape(RoundedRectangle(cornerRadius: 14))
                 }
+                .buttonStyle(.plain)
+                .disabled(making != nil)
             }
-            .scrollBounceBehavior(.basedOnSize)
+            if let problem {
+                Text(problem).font(.octoCaption).foregroundStyle(OctoColor.error).padding(.horizontal, 14).padding(.top, 4)
+            }
         }
-        .padding(6)
-        .frame(width: GlassMenu.width)
+        .padding(.horizontal, 12)
+        .padding(.top, 18)
+        .padding(.bottom, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Makes the link with that expiry at once. Closing the card meanwhile does not stop it.
@@ -210,8 +212,7 @@ struct ShareCard: View {
                 if let share, share.url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     problem = "The server made the link but did not say where it is."
                 } else if let share {
-                    close()
-                    SystemShare.present(text: share.url, subject: request.title)
+                    close(share.url)
                 } else {
                     problem = "The server made no share"
                 }
@@ -230,15 +231,24 @@ extension View {
 
 private struct ShareCardHost: ViewModifier {
     @Environment(Accounts.self) private var accounts
+    /// The link made, shared once the card has gone.
+    @State private var made: (url: String, title: String)?
 
     func body(content: Content) -> some View {
         @Bindable var accounts = accounts
-        content.glassPopup(isPresented: Binding(get: { accounts.sharing != nil }, set: { if !$0 { accounts.sharing = nil } }), title: "Share",
-                           revision: accounts.sharing?.id) {
-            if let request = accounts.sharing {
-                ShareCard(request: request) { accounts.sharing = nil }
+        content.sheet(item: $accounts.sharing, onDismiss: shareMade) { request in
+            ShareCard(request: request) { url in
+                if let url { made = (url, request.title) }
+                accounts.sharing = nil
             }
+            .fittedSheet()
         }
+    }
+
+    private func shareMade() {
+        guard let made else { return }
+        self.made = nil
+        SystemShare.present(text: made.url, subject: made.title)
     }
 }
 

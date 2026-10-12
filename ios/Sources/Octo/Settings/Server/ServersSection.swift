@@ -11,7 +11,6 @@ struct ServersSection: View {
     @Environment(ServerSwitch.self) private var serverSwitch
     @State private var checks: [String: ServerCheck] = [:]
     @State private var removing: StoredServer?
-    @State private var forgetHere = false
 
     var body: some View {
         let inUse = session.client == nil ? nil : session.active
@@ -25,10 +24,6 @@ struct ServersSection: View {
             }
         }
         .task(id: CheckKey(inUse: inUse?.id, count: session.servers.count)) { await checkAll() }
-        .glassPopup(isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }), title: "Remove",
-                    usesPressSpot: false, revision: "\(removing?.id ?? "")|\(forgetHere)") {
-            if let server = removing { removeQuestion(server, inUse: server.id == inUse?.id) }
-        }
     }
 
     private struct CheckKey: Hashable {
@@ -88,10 +83,7 @@ struct ServersSection: View {
                 } else {
                     Button("Sign out") { signOut(server, inUse: inUse) }
                 }
-                Button("Remove") {
-                    forgetHere = false
-                    removing = server
-                }
+                Button("Remove", role: .destructive) { removing = server }
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 16, weight: .semibold))
@@ -102,6 +94,14 @@ struct ServersSection: View {
             }
             .menuOrder(.fixed)
             .accessibilityLabel("More for \(server.name)")
+            .confirmationDialog("Remove \(server.name)?",
+                                isPresented: Binding(get: { removing?.id == server.id }, set: { if !$0 { removing = nil } }),
+                                titleVisibility: .visible) {
+                Button("Remove", role: .destructive) { remove(server, forgetHere: false) }
+                Button("Remove, and also delete what's kept here for it", role: .destructive) { remove(server, forgetHere: true) }
+            } message: {
+                Text(removeDetail(inUse: inUse))
+            }
         }
         .background {
             if inUse {
@@ -131,41 +131,17 @@ struct ServersSection: View {
         serverSwitch.signOut(server.id)
     }
 
-    private func removeQuestion(_ server: StoredServer, inUse: Bool) -> some View {
-        PopupQuestion(
-            title: "Remove \(server.name)?",
-            detail: "It leaves your list and Octo forgets its password." + (inUse ? " You'll be signed out of it now." : "")
-                + " Your music and playlists stay on the server.",
-            confirm: "Remove",
-            onConfirm: {
-                let forget = forgetHere
-                removing = nil
-                router.show("Removed \(server.name).", done: true)
-                serverSwitch.remove(server.id, forgetHere: forget)
-            },
-            onCancel: { removing = nil }
-        ) {
-            Button { forgetHere.toggle() } label: {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Also delete what's kept here for it").font(.octoBodySmall).foregroundStyle(OctoColor.textPrimary)
-                        Text(forgetHere ? "Its queue, live lists and downloads on this phone go too."
-                             : "Off keeps its queue, live lists and downloads on this phone, in case you add it again.")
-                            .font(.octoCaption)
-                            .foregroundStyle(OctoColor.textMuted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    Spacer(minLength: 0)
-                    OctoSwitch(isOn: $forgetHere).allowsHitTesting(false).accessibilityHidden(true)
-                }
-                .padding(.top, 14)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Also delete what's kept here for it")
-            .accessibilityValue(forgetHere ? "On" : "Off")
-            .accessibilityAddTraits(.isToggle)
-        }
+    /// What removing does, and what each way of removing keeps on this phone.
+    private func removeDetail(inUse: Bool) -> String {
+        "It leaves your list and Octo forgets its password." + (inUse ? " You'll be signed out of it now." : "")
+            + " Your music and playlists stay on the server.\n\n"
+            + "Remove keeps its queue, live lists and downloads on this phone, in case you add it again. "
+            + "Also deleting what's kept here for it takes them off this phone too."
+    }
+
+    private func remove(_ server: StoredServer, forgetHere: Bool) {
+        removing = nil
+        router.show("Removed \(server.name).", done: true)
+        serverSwitch.remove(server.id, forgetHere: forgetHere)
     }
 }

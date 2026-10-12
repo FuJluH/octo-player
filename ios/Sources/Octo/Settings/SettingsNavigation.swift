@@ -40,8 +40,9 @@ final class SettingsNavigator {
     ///   `server`, `streaming`, `audioquality`, `lyrics`, `scrobbling`, `backup`, `about`), and
     ///   `settings:PAGE@ROW` lights that row as a search result does
     /// - `settings-search:TEXT` types TEXT into the front page's search
-    /// - `popup:ROW` opens the popup of that row on the page in front (`speed`, or any choice
-    ///   row's id such as `radio_discovery`, `ambient`, `cache_size`)
+    /// - `popup:ROW` opens what that row opens on the page in front: `speed` (its popover),
+    ///   `change_password` (its sheet) or `disconnect` (its question). A choice row's answers are
+    ///   a system menu, which only a finger opens.
     /// - `whatsnew` opens About and its What's new panel
     /// - `settings-state:NAME` shows a state a page reaches only with outside help (see
     ///   `driveState`)
