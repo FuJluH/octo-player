@@ -84,12 +84,14 @@ final class FakeServer: @unchecked Sendable {
     }()
 
     fileprivate func answer(_ request: Request) -> Reply? {
-        lock.withLock {
+        let router: (@Sendable (Request) -> Reply?)? = lock.withLock {
             if down { return nil }
             kept.append(request)
-            if let routes, let reply = routes(request) { return reply }
-            return queued.isEmpty ? Reply(status: 500, body: Data("no reply queued".utf8)) : queued.removeFirst()
+            return routes
         }
+        if lock.withLock({ down }) { return nil }
+        if let router, let reply = router(request) { return reply }
+        return lock.withLock { queued.isEmpty ? Reply(status: 500, body: Data("no reply queued".utf8)) : queued.removeFirst() }
     }
 }
 
