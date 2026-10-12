@@ -93,106 +93,68 @@ extension SubsonicClient {
     }
 }
 
-/// lrclib.net, the open lyrics library the other apps ask last.
+/// lrclib.net, the open lyrics library the other apps ask last. Every call goes through
+/// OnlineLyrics, so lookups, matching and ranking are the same as on the other apps.
 public enum LrcLib {
-    struct Record: Decodable {
-        let id: Int
-        let trackName: String?
-        let artistName: String?
-        let albumName: String?
-        let duration: Double?
-        let instrumental: Bool?
-        let plainLyrics: String?
-        let syncedLyrics: String?
-    }
-
-    /// The best match for a song, by title, artist and length.
+    /// The best match for a song, by title, artist, album and length (whole seconds).
     public static func find(title: String, artist: String, album: String?, duration: Int?, userAgent: String,
                             session: URLSession = .shared) async throws -> StructuredLyrics? {
-        var parts = URLComponents(string: "https://lrclib.net/api/get")!
-        parts.queryItems = [URLQueryItem(name: "track_name", value: title), URLQueryItem(name: "artist_name", value: artist)]
-            + (album.map { [URLQueryItem(name: "album_name", value: $0)] } ?? [])
-            + (duration.map { [URLQueryItem(name: "duration", value: String($0))] } ?? [])
-        var request = URLRequest(url: parts.url!, timeoutInterval: 10)
-        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-        let (data, response) = try await session.data(for: request)
-        if (response as? HTTPURLResponse)?.statusCode == 404 { return nil }
-        return lyrics(of: try JSONDecoder().decode(Record.self, from: data))
+        let library = OnlineLyrics(session: session, userAgent: userAgent)
+        let found = try await library.find(title, artist: artist, album: album ?? "", durationMs: (duration ?? 0) * 1000)
+        return found.map(StructuredLyrics.init(lyrics:))
     }
 
-    /// Every copy lrclib holds for a title and artist, for the chooser.
+    /// Every copy lrclib holds of a title and artist, any version of it, for the chooser: timed
+    /// copies first.
     public static func search(title: String, artist: String, userAgent: String, session: URLSession = .shared) async throws -> [LyricsCandidate] {
-        var parts = URLComponents(string: "https://lrclib.net/api/search")!
-        parts.queryItems = [URLQueryItem(name: "track_name", value: title), URLQueryItem(name: "artist_name", value: artist)]
-        var request = URLRequest(url: parts.url!, timeoutInterval: 10)
-        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-        let (data, _) = try await session.data(for: request)
-        let records = try JSONDecoder().decode([Record].self, from: data)
-        return records.prefix(20).compactMap { record in
-            guard let found = lyrics(of: record) else { return nil }
-            return LyricsCandidate(
-                id: "lrclib:\(record.id)", source: "lrclib", title: record.trackName ?? title, artist: record.artistName ?? artist,
-                album: record.albumName, duration: record.duration.map { Int($0) },
-                kind: record.instrumental == true ? "instrumental" : (found.synced ? "line" : "plain"),
-                sameSong: false, chosen: false,
-                preview: Array(found.line.map(\.value).filter { !$0.isEmpty }.prefix(3)), lyrics: found)
-        }
+        let library = OnlineLyrics(session: session, userAgent: userAgent)
+        return try await library.copiesOf(title, artist: artist, album: "", durationMs: 0).map { candidate($0, artist: artist) }
     }
 
     /// One copy by its lrclib id ("lrclib:123" or "123").
     public static func copy(_ id: String, userAgent: String, session: URLSession = .shared) async throws -> StructuredLyrics? {
-        guard let number = id.split(separator: ":").last else { return nil }
-        var request = URLRequest(url: URL(string: "https://lrclib.net/api/get/\(number)")!, timeoutInterval: 10)
-        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-        let (data, _) = try await session.data(for: request)
-        return lyrics(of: try JSONDecoder().decode(Record.self, from: data))
+        guard let number = id.split(separator: ":").last.flatMap({ Int($0) }) else { return nil }
+        let library = OnlineLyrics(session: session, userAgent: userAgent)
+        return try await library.byId(number).map(StructuredLyrics.init(lyrics:))
     }
 
-    static func lyrics(of record: Record) -> StructuredLyrics? {
-        if let synced = record.syncedLyrics, !synced.isEmpty { return Lrc.parse(synced) }
-        if let plain = record.plainLyrics, !plain.isEmpty {
-            return StructuredLyrics(synced: false, lines: plain.components(separatedBy: "\n").map { LyricsLine(start: nil, value: $0) })
+    static func candidate(_ copy: OnlineCopy, artist: String) -> LyricsCandidate {
+        let lyrics = StructuredLyrics(lyrics: copy.lyrics)
+        let kind: String
+        if copy.lyrics.instrumental {
+            kind = "instrumental"
+        } else if !copy.lyrics.synced {
+            kind = "plain"
+        } else {
+            kind = copy.lyrics.lines.contains { !$0.words.isEmpty } ? "word" : "line"
         }
-        return nil
+        return LyricsCandidate(
+            id: "lrclib:\(copy.id)", source: "lrclib", title: copy.title, artist: copy.artist.isEmpty ? artist : copy.artist,
+            album: copy.album.isEmpty ? nil : copy.album, duration: copy.durationMs > 0 ? copy.durationMs / 1000 : nil,
+            kind: kind, sameSong: false, chosen: false,
+            preview: Array(lyrics.line.map(\.value).filter { !$0.isEmpty }.prefix(3)), lyrics: lyrics)
     }
 }
 
-/// Reads LRC text: "[01:02.34]words" lines, several stamps on one line allowed.
+/// Reads LRC text: "[01:02.34]words" lines, several stamps on one line allowed, through
+/// parseLyricsText, with the offset already in every start. Text without stamps comes back plain.
 public enum Lrc {
     public static func parse(_ text: String) -> StructuredLyrics {
-        var lines: [LyricsLine] = []
-        var offset = 0
-        for raw in text.components(separatedBy: .newlines) {
-            var rest = Substring(raw)
-            var stamps: [Int] = []
-            while rest.hasPrefix("["), let close = rest.firstIndex(of: "]") {
-                let tag = rest[rest.index(after: rest.startIndex)..<close]
-                if tag.hasPrefix("offset:"), let value = Int(tag.dropFirst(7).trimmingCharacters(in: .whitespaces)) {
-                    offset = value
-                } else if let ms = milliseconds(tag) {
-                    stamps.append(ms)
-                }
-                rest = rest[rest.index(after: close)...]
-            }
-            for stamp in stamps { lines.append(LyricsLine(start: stamp, value: rest.trimmingCharacters(in: .whitespaces))) }
-        }
-        lines.sort { ($0.start ?? 0) < ($1.start ?? 0) }
-        // In LRC and in OpenSubsonic alike, a positive offset shows the words sooner.
-        return StructuredLyrics(synced: true, lines: lines, offset: offset)
-    }
-
-    static func milliseconds(_ tag: Substring) -> Int? {
-        let parts = tag.split(separator: ":")
-        guard parts.count == 2, let minutes = Int(parts[0]), let seconds = Double(parts[1]) else { return nil }
-        return minutes * 60_000 + Int((seconds * 1000).rounded())
+        parseLyricsText(text, source: .lyricsFile).map(StructuredLyrics.init(lyrics:)) ?? StructuredLyrics(synced: true, lines: [])
     }
 }
 
 extension StructuredLyrics {
     public init(synced: Bool, lines: [LyricsLine], offset: Int = 0) {
-        self.lang = nil
-        self.synced = synced
-        self.offset = offset
-        self.line = lines
+        self.init(lang: nil, synced: synced, line: lines, offset: offset)
+    }
+
+    /// Lyrics as plain lines: each line's text, and its start when they are synced.
+    public init(lyrics: Lyrics) {
+        self.init(
+            lang: nil,
+            synced: lyrics.synced,
+            line: lyrics.lines.map { LyricsLine(start: lyrics.synced ? $0.startMs : nil, value: $0.text) }
+        )
     }
 }

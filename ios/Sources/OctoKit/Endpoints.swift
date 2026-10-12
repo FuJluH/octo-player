@@ -309,35 +309,164 @@ public struct LyricsLine: Decodable, Sendable, Equatable {
         value = c.string(.value) ?? ""
     }
 
-    public init(start: Int?, value: String) {
+    public init(start: Int? = nil, value: String = "") {
         self.start = start
         self.value = value
     }
 }
 
-/// A song's lyrics as an OpenSubsonic server sends them.
+/// A song's lyrics as an OpenSubsonic server sends them (songLyrics). There can be several:
+/// synced and plain, other languages, and with version 2 a translation or pronunciation beside
+/// the main one.
 public struct StructuredLyrics: Decodable, Sendable, Equatable {
     public var lang: String?
     public var synced: Bool
-    /// Milliseconds the words show sooner than their stamps say.
+    /// Milliseconds the words show sooner than their stamps say. It follows the LRC offset tag:
+    /// above zero, the words come sooner. A fraction is rounded to the nearest millisecond, a
+    /// half up.
     public var offset: Int
     public var line: [LyricsLine]
+    public var displayArtist: String?
+    public var displayTitle: String?
+    /// "main", "translation" or "pronunciation". Missing means main.
+    public var kind: String?
+    /// Who sings, when the lines are split between voices.
+    public var agents: [LyricsAgent]
+    /// Word timings, one or more per line, matched to a line by its index.
+    public var cueLine: [CueLine]
 
-    enum CodingKeys: String, CodingKey { case lang, synced, offset, line }
+    enum CodingKeys: String, CodingKey { case lang, synced, offset, line, displayArtist, displayTitle, kind, agents, cueLine }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         lang = c.string(.lang)
         synced = c.bool(.synced) ?? false
-        offset = c.int(.offset) ?? 0
+        if let whole = try? c.decodeIfPresent(Int.self, forKey: .offset) {
+            offset = whole
+        } else if let ms = try? c.decodeIfPresent(Double.self, forKey: .offset), ms.isFinite {
+            offset = roundToLong(ms)
+        } else {
+            offset = c.int(.offset) ?? 0
+        }
         line = (try? c.decodeIfPresent([LyricsLine].self, forKey: .line)) ?? []
+        displayArtist = c.string(.displayArtist)
+        displayTitle = c.string(.displayTitle)
+        kind = c.string(.kind)
+        agents = (try? c.decodeIfPresent([LyricsAgent].self, forKey: .agents)) ?? []
+        cueLine = (try? c.decodeIfPresent([CueLine].self, forKey: .cueLine)) ?? []
     }
 
-    /// The line sung at `seconds`, for synced lyrics.
+    public init(
+        lang: String? = "und",
+        synced: Bool = false,
+        line: [LyricsLine] = [],
+        displayArtist: String? = nil,
+        displayTitle: String? = nil,
+        offset: Int = 0,
+        kind: String? = nil,
+        agents: [LyricsAgent] = [],
+        cueLine: [CueLine] = []
+    ) {
+        self.lang = lang
+        self.synced = synced
+        self.line = line
+        self.displayArtist = displayArtist
+        self.displayTitle = displayTitle
+        self.offset = offset
+        self.kind = kind
+        self.agents = agents
+        self.cueLine = cueLine
+    }
+
+    /// The line sung at `seconds`, for synced lyrics: the last one that has started.
     public func lineIndex(at seconds: Double) -> Int? {
         guard synced else { return nil }
         let ms = Int(seconds * 1000) + offset
-        return line.lastIndex { ($0.start ?? .max) <= ms }
+        let found = line.map { LyricLine(startMs: $0.start ?? .max, text: $0.value) }.lineAt(ms)
+        return found >= 0 ? found : nil
+    }
+}
+
+/// One voice in lyrics split between voices.
+public struct LyricsAgent: Decodable, Sendable, Equatable {
+    public var id: String
+    /// "main", "voice" (another singer), "bg" (backing vocals) or "group".
+    public var role: String
+    public var name: String?
+
+    enum CodingKeys: String, CodingKey { case id, role, name }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = c.string(.id) ?? ""
+        role = c.string(.role) ?? "main"
+        name = c.string(.name)
+    }
+
+    public init(id: String = "", role: String = "main", name: String? = nil) {
+        self.id = id
+        self.role = role
+        self.name = name
+    }
+}
+
+/// The word timings of one lyric line, or of one voice in it.
+public struct CueLine: Decodable, Sendable, Equatable {
+    public var index: Int
+    public var agentId: String?
+    public var start: Int?
+    public var end: Int?
+    public var value: String
+    public var cue: [Cue]
+
+    enum CodingKeys: String, CodingKey { case index, agentId, start, end, value, cue }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        index = c.int(.index) ?? 0
+        agentId = c.string(.agentId)
+        start = c.int(.start)
+        end = c.int(.end)
+        value = c.string(.value) ?? ""
+        cue = (try? c.decodeIfPresent([Cue].self, forKey: .cue)) ?? []
+    }
+
+    public init(index: Int = 0, agentId: String? = nil, start: Int? = nil, end: Int? = nil, value: String = "", cue: [Cue] = []) {
+        self.index = index
+        self.agentId = agentId
+        self.start = start
+        self.end = end
+        self.value = value
+        self.cue = cue
+    }
+}
+
+/// One timed word or syllable. Its place in the cue line's value is given in UTF-8 bytes, both
+/// ends included, not in characters.
+public struct Cue: Decodable, Sendable, Equatable {
+    public var start: Int
+    public var end: Int?
+    public var value: String
+    public var byteStart: Int
+    public var byteEnd: Int
+
+    enum CodingKeys: String, CodingKey { case start, end, value, byteStart, byteEnd }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        start = c.int(.start) ?? 0
+        end = c.int(.end)
+        value = c.string(.value) ?? ""
+        byteStart = c.int(.byteStart) ?? 0
+        byteEnd = c.int(.byteEnd) ?? 0
+    }
+
+    public init(start: Int = 0, end: Int? = nil, value: String = "", byteStart: Int = 0, byteEnd: Int = 0) {
+        self.start = start
+        self.end = end
+        self.value = value
+        self.byteStart = byteStart
+        self.byteEnd = byteEnd
     }
 }
 
@@ -350,10 +479,18 @@ struct LyricsListBody: Decodable {
 }
 
 extension SubsonicClient {
-    /// A song's lyrics, synced ones first.
+    /// A song's lyrics as plain lines: the main lyrics, synced ones first and word-timed ones
+    /// before those, with the offset already in every start.
     public func lyrics(songId: String) async throws -> StructuredLyrics? {
+        try await songLyrics(songId: songId, language: nil).map(StructuredLyrics.init(lyrics:))
+    }
+
+    /// A song's lyrics from the server, word cues, backing vocals and voices included, with a
+    /// translation into `language` beside each line when the server has one and the song is
+    /// sung in another language. Nil when the server has nothing to show.
+    public func songLyrics(songId: String, language: String?) async throws -> Lyrics? {
         let body: LyricsListBody = try await get("getLyricsBySongId", [("id", songId)], key: "lyricsList")
-        return body.structuredLyrics.first(where: \.synced) ?? body.structuredLyrics.first
+        return serverLyrics(body.structuredLyrics, language: language)
     }
 
     public func createPlaylist(name: String, songIds: [String]) async throws {
