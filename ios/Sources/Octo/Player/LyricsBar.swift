@@ -2,12 +2,14 @@ import OctoKit
 import SwiftUI
 
 /// While lyrics show, the controls fold into one glass bar: the song (a tap on it leaves the
-/// lyrics), previous, play and next, the lit lyrics switch and the lyrics menu, with the song's
-/// progress along the bottom edge. A sideways drag starting along that edge scrubs.
+/// lyrics), previous, play and next, the lit lyrics switch and the lyrics menu, a system menu
+/// whose timing opens in a popover beside it, with the song's progress along the bottom edge.
+/// A sideways drag starting along that edge scrubs.
 struct LyricsBar: View {
     let ink: Color
     let close: () -> Void
-    let menu: () -> Void
+    @Binding var timing: Bool
+    let chooseOther: () -> Void
     @Environment(Player.self) private var player
     @State private var scrub: Double?
     @State private var width: CGFloat = 0
@@ -50,14 +52,18 @@ struct LyricsBar: View {
             .buttonStyle(NoPress())
             .accessibilityLabel("Lyrics")
             .accessibilityValue("Showing")
-            Button(action: menu) {
+            Menu {
+                LyricsMenuItems(trackId: player.current?.id, openTiming: { timing = true }, chooseOther: chooseOther)
+            } label: {
                 IconView(.more, size: 22, color: ink.opacity(0.7))
                     .frame(width: 40, height: 40)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(NoPress())
-            .pressAnchor()
+            .menuOrder(.fixed)
             .accessibilityLabel("Lyrics menu")
+            .glassPopover(isPresented: $timing) {
+                if let trackId = player.current?.id { TimingCard(trackId: trackId) }
+            }
         }
         .padding(.leading, 12)
         .padding(.trailing, 6)

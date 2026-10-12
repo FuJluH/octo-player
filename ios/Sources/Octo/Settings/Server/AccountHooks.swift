@@ -38,7 +38,7 @@ enum AccountHooks {
 /// - `account:server` opens Settings > Server and sync (also `settings:server`)
 /// - `account:shares`, `account:radio`, `account:family`, `account:admin`, `account:import`
 ///   open those pages on the Settings tab
-/// - `account:password` opens the Server page's Change password popup
+/// - `account:password` opens the Server page's Change password sheet
 /// - `account:signout` asks before signing out of the server in use
 /// - `account:handover` opens Family and its Sign in on another device sheet
 /// - `account:invite` shows the invite sheet with a sample link (nothing is sent)

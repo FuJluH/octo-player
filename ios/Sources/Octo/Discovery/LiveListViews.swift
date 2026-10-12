@@ -67,8 +67,8 @@ struct LiveListView: View {
     @Environment(Router.self) private var router
     @Environment(Session.self) private var session
     @Environment(\.dismiss) private var dismiss
-    @Environment(Prompts.self) private var prompts
     @State private var renaming = false
+    @State private var deleting = false
     @State private var newName = ""
 
     var body: some View {
@@ -123,12 +123,12 @@ struct LiveListView: View {
         .task(id: PickKey(version: liveLibrary.version, query: list?.query)) { if let list { await liveLibrary.pick(list.query) } }
         // Leaves the page once the list is deleted.
         .onChange(of: list == nil) { _, gone in if gone { dismiss() } }
-        .glassPopup(isPresented: $renaming, title: "Rename live list") {
-            PopupNameForm(title: "Rename live list", placeholder: "Live list name", action: "Save", onDone: { name in
-                store.rename(id, to: name)
-                renaming = false
-            }, initial: newName)
+        .opensWhenAsked("rename_live_list") {
+            guard let list else { return }
+            newName = list.name
+            renaming = true
         }
+        .opensWhenAsked("delete_live_list") { if list != nil { deleting = true } }
     }
 
     /// The live list's options, under its name.
@@ -146,11 +146,7 @@ struct LiveListView: View {
                 } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
                 Button { Task { await saveCopy(list, songs) } } label: { Label("Save a copy as a playlist", systemImage: "music.note.list") }
             }
-            Button(role: .destructive) {
-                prompts.confirm("Delete \"\(list.name)\"?", detail: "The songs stay in your library.", confirm: "Delete") {
-                    store.remove(list.id)
-                }
-            } label: { Label("Delete", systemImage: "trash") }
+            Button(role: .destructive) { deleting = true } label: { Label("Delete", systemImage: "trash") }
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 18, weight: .semibold))
@@ -159,6 +155,16 @@ struct LiveListView: View {
                 .contentShape(Rectangle())
         }
         .accessibilityLabel("More")
+        .namePopover(isPresented: $renaming, title: "Rename live list", placeholder: "Live list name", action: "Save",
+                     initial: newName) { name in
+            store.rename(id, to: name)
+            renaming = false
+        }
+        .confirmationDialog("Delete \"\(list.name)\"?", isPresented: $deleting, titleVisibility: .visible) {
+            Button("Delete", role: .destructive) { store.remove(list.id) }
+        } message: {
+            Text("The songs stay in your library.")
+        }
     }
 
     /// A playlist named as the live list with the songs it holds now; it does not follow the rules.
@@ -192,7 +198,6 @@ struct LiveListEditView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draft: LiveListDraft?
     @State private var starters = false
-    @Environment(Prompts.self) private var prompts
 
     var body: some View {
         let draft = self.draft ?? editorStart(id.flatMap { store.byId($0) }, start: start)
@@ -216,7 +221,7 @@ struct LiveListEditView: View {
                     ForEach(Array(query.rules.enumerated()), id: \.offset) { _, rule in
                         OnOffChip(text: rule.label(), on: true) { update(query.without(rule)) }
                     }
-                    OnOffChip(text: query.rules.isEmpty ? "Add a rule" : "Add another rule", on: false) { addRule() }
+                    addRuleMenu(query)
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
@@ -231,9 +236,9 @@ struct LiveListEditView: View {
                 }
                 HStack(spacing: 0) {
                     Text("Order").font(.octoCaption).foregroundStyle(OctoColor.textMuted)
-                    QuietButton(query.sort.flatMap(sortWords).map(capitalizedFirst) ?? "In library order") { chooseOrder() }
+                    orderMenu(query)
                     Text("How many").font(.octoCaption).foregroundStyle(OctoColor.textMuted).padding(.leading, 12)
-                    QuietButton(limitWords(query.limit)) { chooseLimit() }
+                    limitMenu(query)
                 }
                 .padding(.horizontal, 20)
                 HStack(spacing: 10) {
@@ -285,49 +290,81 @@ struct LiveListEditView: View {
         }
     }
 
-    /// Asks which rule to add, a page at a time.
-    private func addRule() {
-        let menu = liveListRuleMenu()
-        prompts.choose("Add a rule", menu.map { Choice($0.0) }) { picked in
-            guard menu.indices.contains(picked) else { return }
-            pick(menu[picked].1)
-        }
-    }
-
-    /// The order, from the orders a live list can keep; picking the one in use turns it round.
-    private func chooseOrder() {
-        let sorts = liveListSorts
-        let now = currentQuery.sort?.order
-        prompts.choose("Order", sorts.map { Choice($0.label) }, selected: now.flatMap { sorts.firstIndex(of: $0) } ?? -1) { picked in
-            guard sorts.indices.contains(picked) else { return }
-            let by = sorts[picked]
-            if by == now, let sort = currentQuery.sort {
-                update(currentQuery.sorted(by: QuerySort(by, descending: !sort.descending)))
-            } else {
-                update(currentQuery.sorted(by: by))
+    /// Add a rule, as a system menu: the groups of rules and the pages that ask which from the
+    /// library each open as a menu of their own, the current pick checked; a pick adds or takes
+    /// off the rule.
+    private func addRuleMenu(_ query: LibraryQuery) -> some View {
+        Menu {
+            Section("Add a rule") {
+                ForEach(Array(liveListRuleMenu().enumerated()), id: \.offset) { _, item in
+                    let (words, pick) = item
+                    if case .rule(let rule) = pick {
+                        MenuPick(words, checked: query.rules.contains(rule)) { update(currentQuery.toggling(rule)) }
+                    } else {
+                        Menu(words) {
+                            RulePageItems(title: words, rules: { rules(for: pick) }, query: query) { update(currentQuery.toggling($0)) }
+                        }
+                    }
+                }
             }
+        } label: {
+            Text(query.rules.isEmpty ? "Add a rule" : "Add another rule")
+                .font(DiscoveryStyle.label)
+                .foregroundStyle(OctoColor.textSecondary)
+                .lineLimit(1)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .frame(minHeight: 36)
+                .background(Color.white.opacity(0.07), in: Capsule())
+                .contentShape(Capsule())
         }
+        .menuOrder(.fixed)
     }
 
-    private func chooseLimit() {
-        let limits = liveListLimits
-        prompts.choose("How many songs", limits.map { Choice(limitWords($0)) }, selected: limits.firstIndex(of: currentQuery.limit) ?? -1) { picked in
-            guard limits.indices.contains(picked) else { return }
-            update(currentQuery.limited(to: limits[picked]))
-        }
-    }
-
-    /// One page of rules: the current pick is ticked; a pick adds or takes off the rule. It opens
-    /// once the page before has closed.
-    private func ask(_ title: String, _ rules: [(String, QueryRule)]) {
-        if rules.isEmpty { return }
-        Task {
-            try? await Task.sleep(for: .milliseconds(350))
-            prompts.choose(title, rules.map { Choice($0.0) }, selected: pickedIn(rules.map(\.1), query: currentQuery)) { picked in
-                guard rules.indices.contains(picked) else { return }
-                update(currentQuery.toggling(rules[picked].1))
+    /// The order, from the orders a live list can keep, as a system menu; picking the one in use
+    /// turns it round.
+    private func orderMenu(_ query: LibraryQuery) -> some View {
+        let now = query.sort?.order
+        return Menu {
+            Section("Order") {
+                ForEach(liveListSorts, id: \.self) { by in
+                    MenuPick(by.label, checked: by == now) {
+                        if by == now, let sort = currentQuery.sort {
+                            update(currentQuery.sorted(by: QuerySort(by, descending: !sort.descending)))
+                        } else {
+                            update(currentQuery.sorted(by: by))
+                        }
+                    }
+                }
             }
+        } label: {
+            quietLabel(query.sort.flatMap(sortWords).map(capitalizedFirst) ?? "In library order")
         }
+        .menuOrder(.fixed)
+    }
+
+    private func limitMenu(_ query: LibraryQuery) -> some View {
+        Menu {
+            Section("How many songs") {
+                ForEach(Array(liveListLimits.enumerated()), id: \.offset) { _, limit in
+                    MenuPick(limitWords(limit), checked: limit == query.limit) { update(currentQuery.limited(to: limit)) }
+                }
+            }
+        } label: {
+            quietLabel(limitWords(query.limit))
+        }
+        .menuOrder(.fixed)
+    }
+
+    /// A menu's label drawn as the quiet button beside its name.
+    private func quietLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.octoLabel)
+            .foregroundStyle(OctoColor.textSecondary)
+            .lineLimit(1)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .contentShape(Capsule())
     }
 
     private var currentQuery: LibraryQuery { (draft ?? editorStart(id.flatMap { store.byId($0) }, start: start)).query }
@@ -337,17 +374,17 @@ struct LiveListEditView: View {
         draft = LiveListDraft(name: now.name, query: query)
     }
 
-    /// The page of choices to ask next.
-    private func pick(_ pick: RulePick) {
+    /// The rules a page of Add a rule offers: a group's own, or those the library holds.
+    private func rules(for pick: RulePick) -> [(String, QueryRule)] {
         let tracks = liveLibrary.tracks
         let fields = liveLibrary.fields
         switch pick {
-        case .group(let group): ask(group.title, group.choices.map { ($0.words, $0.rule) })
-        case .rating: ask("Rating", ratingRules)
-        case .genre: ask("Genre", genresIn(tracks, fields: fields).map { ($0, FilterPresets.genre($0)) })
-        case .artist: ask("Artist", artistsIn(tracks, fields: fields).map { ($0, FilterPresets.artist($0)) })
-        case .year: ask("Year", decadesIn(tracks, fields: fields).reversed().map { ("The \($0)s", FilterPresets.decade($0)) })
-        case .rule(let rule): update(currentQuery.toggling(rule))
+        case .group(let group): return group.choices.map { ($0.words, $0.rule) }
+        case .rating: return ratingRules
+        case .genre: return genresIn(tracks, fields: fields).map { ($0, FilterPresets.genre($0)) }
+        case .artist: return artistsIn(tracks, fields: fields).map { ($0, FilterPresets.artist($0)) }
+        case .year: return decadesIn(tracks, fields: fields).reversed().map { ("The \($0)s", FilterPresets.decade($0)) }
+        case .rule(let rule): return [("", rule)]
         }
     }
 
@@ -376,6 +413,26 @@ struct LiveListEditView: View {
 }
 
 
+
+/// One page of Add a rule, as the items of its own menu: the current pick is checked; a pick
+/// adds or takes off the rule. Its rules are worked out when the menu draws it, not with the
+/// editor.
+private struct RulePageItems: View {
+    let title: String
+    let rules: () -> [(String, QueryRule)]
+    let query: LibraryQuery
+    let toggle: (QueryRule) -> Void
+
+    var body: some View {
+        let rules = rules()
+        let picked = pickedIn(rules.map(\.1), query: query)
+        Section(title) {
+            ForEach(Array(rules.enumerated()), id: \.offset) { index, choice in
+                MenuPick(choice.0, checked: index == picked) { toggle(choice.1) }
+            }
+        }
+    }
+}
 
 /// Which songs to work out: a query, against the library as last read.
 private struct PickKey: Hashable {

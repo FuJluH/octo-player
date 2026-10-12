@@ -159,20 +159,3 @@ public enum SettingsWords {
     }
 }
 
-/// How one answer in a choice list is drawn: whether it is the chosen one, and whether a line
-/// parts it from the answer above. No line touches the chosen answer's pill.
-public struct MenuRowLook: Sendable, Equatable {
-    public var selected: Bool
-    public var lineAbove: Bool
-
-    public init(selected: Bool, lineAbove: Bool) {
-        self.selected = selected
-        self.lineAbove = lineAbove
-    }
-
-    public static func rows(count: Int, selected: Int) -> [MenuRowLook] {
-        (0..<max(count, 0)).map { index in
-            MenuRowLook(selected: index == selected, lineAbove: index > 0 && index != selected && index - 1 != selected)
-        }
-    }
-}

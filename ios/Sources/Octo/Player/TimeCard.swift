@@ -4,20 +4,44 @@ import SwiftUI
 /// The time card's two pages.
 enum TimePage: Equatable { case sleep, speed }
 
-/// The sleep timer and the speed, one glass card of two pages. Opened from the sleep button it
-/// starts on the timer, with the speed a page further; opened from the speed mark it starts on
-/// the speed, with no way back.
+/// The sleep timer and the speed, one card of two pages in a popover. Opened from the sleep
+/// button it starts on the timer, with the speed a page further; opened from the speed mark it
+/// starts on the speed, with no way back. A new page slides in from the side it is going; with
+/// Reduce motion it fades.
 struct TimeCard: View {
-    let pages: PopupPages<TimePage>
+    let start: TimePage
     let dismiss: () -> Void
+    @State private var page: TimePage
+    @State private var deeper = true
+    @Environment(\.octoReduceMotion) private var calm
+
+    init(start: TimePage, opening: TimePage? = nil, dismiss: @escaping () -> Void) {
+        self.start = start
+        self.dismiss = dismiss
+        _page = State(initialValue: opening ?? start)
+    }
 
     var body: some View {
-        PopupPager(pages: pages) { page, canGoBack in
+        ZStack(alignment: .topLeading) {
             switch page {
-            case .sleep: SleepPage(dismiss: dismiss) { pages.open(.speed) }
-            case .speed: SpeedPage(back: canGoBack ? { pages.back() } : nil)
+            case .sleep:
+                SleepPage(dismiss: dismiss) { go(.speed, deeper: true) }
+                    .transition(slide)
+            case .speed:
+                SpeedPage(back: start == .sleep ? { go(.sleep, deeper: false) } : nil)
+                    .transition(slide)
             }
         }
+        .clipped()
+    }
+
+    private var slide: AnyTransition {
+        calm ? .opacity : .push(from: deeper ? .trailing : .leading)
+    }
+
+    private func go(_ next: TimePage, deeper: Bool) {
+        self.deeper = deeper
+        withAnimation(calm ? .easeOut(duration: 0.15) : .octo(OctoSprings.calm)) { page = next }
     }
 }
 
@@ -172,7 +196,7 @@ struct SpeedPage: View {
         let prefs = settings.player
         VStack(alignment: .leading, spacing: 0) {
             if let back {
-                GlassMenuBack(title: "Sleep timer", onBack: back).padding(6)
+                PopoverBack(title: "Sleep timer", onBack: back).padding(.top, 6)
             }
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 12) {

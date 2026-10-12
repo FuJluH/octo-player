@@ -96,8 +96,9 @@ extension EnvironmentValues {
 let nowPlayingArtID = "now-playing-art"
 
 /// The app's frame: every tab's pages, kept alive while another tab is in front, the artwork's
-/// glow behind them, the floating bar over them, the full player over that, then sheets, the
-/// message line and pop-ups, in that order.
+/// glow behind them, the floating bar over them, the full player over that, and the selection
+/// bar. Sheets, popovers, menus and questions are the system's own, and the message line floats
+/// over all of them in its own window.
 struct MainShell: View {
     @Environment(Player.self) private var player
     @Environment(Router.self) private var router
@@ -165,13 +166,10 @@ struct MainShell: View {
             // The cover flying between the bar and the player, above both.
             CoverFlightLayer().zIndex(1.2)
 
-            // Over the bar and even the player, under the sheets and menus.
+            // Over the bar and even the player.
             SelectionBarHost().zIndex(1.5)
-            SheetsLayer().zIndex(2)
-            ToastHost().zIndex(3)
-            PopupsLayer().zIndex(4)
-            PromptsHost().zIndex(5)
         }
+        .background(ToastWindowProbe(router: router))
         .environment(\.nowPlayingArt, art)
         .environment(drift)
         .task(id: drifting) { if drifting { await drift.run() } }
@@ -233,9 +231,12 @@ struct MainShell: View {
             router.serverDownloads = nil
             serverDownloads.show(page)
         }
-        .glassSheet(isPresented: Binding(get: { serverDownloads.view != nil }, set: { if !$0 { serverDownloads.close() } }), tall: true, scrolls: false) {
+        .sheet(isPresented: Binding(get: { serverDownloads.view != nil }, set: { if !$0 { serverDownloads.close() } })) {
             ServerDownloadsSheet()
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
+        .modifier(CodeSheetHost())
         .fullScreenCover(item: Bindable(router).signIn) { form in
             SignInView(form: form, session: session) { notice in
                 if let notice { router.done(notice) }
@@ -334,8 +335,8 @@ struct MainShell: View {
 
     private func closePlayer() { playerOpen = false }
 
-    /// Back: a pop-up or sheet first, then the player, then the page on top; at the first page
-    /// of another tab, Home.
+    /// Back: a sheet opened from code first, then the player, then the page on top; at the first
+    /// page of another tab, Home.
     private func back() {
         if overlays.back() { return }
         if playerOpen && hasTrack {

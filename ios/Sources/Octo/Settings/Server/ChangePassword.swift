@@ -2,7 +2,7 @@ import OctoKit
 import SwiftUI
 
 /// The current password, then the new one twice. Nothing is sent until the form is right; what
-/// the server says comes back in plain words. Made fresh each time the popup opens.
+/// the server says comes back in plain words. Made fresh each time its sheet opens.
 struct ChangePasswordForm: View {
     let close: () -> Void
     @Environment(Session.self) private var session

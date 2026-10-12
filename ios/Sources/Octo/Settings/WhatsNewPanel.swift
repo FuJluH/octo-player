@@ -42,74 +42,39 @@ final class WhatsNewStore {
 }
 
 extension View {
-    /// The What's new panel over everything, closed by a tap outside it.
+    /// The What's new panel in a system sheet, at half height with room to pull it up; pulling
+    /// it away closes it.
     func whatsNewPanel(isPresented: Binding<Bool>, onClose: @escaping () -> Void = {}) -> some View {
-        fullScreenCover(isPresented: isPresented) {
-            WhatsNewPanel { isPresented.wrappedValue = false; onClose() }
-                .presentationBackground(.clear)
+        sheet(isPresented: isPresented, onDismiss: onClose) {
+            WhatsNewPanel()
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
-        .transaction { if isPresented.wrappedValue { $0.disablesAnimations = true } }
     }
 }
 
-/// What this update brings: a glass card in the middle of the screen with the version and the
-/// notes, scrolling inside when they are long.
+/// What this update brings: the version and the notes, scrolling when they are long.
 struct WhatsNewPanel: View {
-    let close: () -> Void
-    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
-    @State private var shown = false
-    private var reduceMotion: Bool { systemReduceMotion || AppSettings.shared.player.reduceMotion }
-
     var body: some View {
-        GeometryReader { box in
-            ZStack {
-                Color.black.opacity(shown ? 0.35 : 0)
-                    .ignoresSafeArea()
-                    .contentShape(Rectangle())
-                    .onTapGesture { dismiss() }
-                    .accessibilityHidden(true)
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("What's new").font(.settingsLabel).foregroundStyle(OctoColor.textSecondary)
-                        Text("Octo \(Session.appVersion)")
-                            .font(.octoTitle)
-                            .foregroundStyle(OctoColor.textPrimary)
-                            .padding(.top, 2)
-                            .padding(.bottom, 18)
-                            .accessibilityAddTraits(.isHeader)
-                        MarkdownView(blocks: Markdown.parse(WhatsNew.notes))
-                    }
-                    .padding(.leading, 24)
-                    .padding(.trailing, 24)
-                    .padding(.top, 26)
-                    .padding(.bottom, 28)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .scrollBounceBehavior(.basedOnSize)
-                .frame(maxWidth: min(460, box.size.width - 24))
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxHeight: min(box.size.height * 0.82, box.size.height - 24))
-                .glassEffect(.regular, in: .rect(cornerRadius: 20))
-                .background(Color.black.opacity(0.52), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                .scaleEffect(shown || reduceMotion ? 1 : 0.92)
-                .opacity(shown ? 1 : 0)
-                .accessibilityAddTraits(.isModal)
-                .accessibilityLabel("What's new")
-                .accessibilityAction(.escape) { dismiss() }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("What's new").font(.settingsLabel).foregroundStyle(OctoColor.textSecondary)
+                Text("Octo \(Session.appVersion)")
+                    .font(.octoTitle)
+                    .foregroundStyle(OctoColor.textPrimary)
+                    .padding(.top, 2)
+                    .padding(.bottom, 18)
+                    .accessibilityAddTraits(.isHeader)
+                MarkdownView(blocks: Markdown.parse(WhatsNew.notes))
             }
-            .frame(width: box.size.width, height: box.size.height)
+            .padding(.leading, 24)
+            .padding(.trailing, 24)
+            .padding(.top, 30)
+            .padding(.bottom, 28)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .onAppear {
-            withAnimation(reduceMotion ? .easeOut(duration: 0.08) : .spring(response: 0.16, dampingFraction: 0.9)) { shown = true }
-        }
-    }
-
-    private func dismiss() {
-        withAnimation(reduceMotion ? .easeIn(duration: 0.08) : .easeIn(duration: 0.16)) { shown = false }
-        Task {
-            try? await Task.sleep(for: .milliseconds(170))
-            close()
-        }
+        .scrollBounceBehavior(.basedOnSize)
+        .accessibilityLabel("What's new")
     }
 }
 

@@ -15,12 +15,12 @@ private enum Searched: Equatable {
     case failed
 }
 
-/// The lyrics to choose from for the song playing, in a large glass card in the middle of the
-/// screen: a search by hand at the top, for a song whose title or artist is filed wrong, then
-/// the lyrics showing now in the darker pill, then every other copy found. Each says where it is
-/// from, what its source calls it, and its first lines. Picking one uses it for this song from
-/// then on and closes the card. With a server that keeps lyrics choices for every app, the list
-/// and the search come from the server, and a pick from it holds for every app.
+/// The lyrics to choose from for the song playing, in a sheet: a search by hand at the top, for
+/// a song whose title or artist is filed wrong, then the lyrics showing now in the darker pill,
+/// then every other copy found. Each says where it is from, what its source calls it, and its
+/// first lines. Picking one uses it for this song from then on and closes the sheet. With a
+/// server that keeps lyrics choices for every app, the list and the search come from the
+/// server, and a pick from it holds for every app.
 struct LyricsChooserContent: View {
     let song: Song
     let dismiss: () -> Void
@@ -33,12 +33,13 @@ struct LyricsChooserContent: View {
     @State private var searching: Task<Void, Never>?
 
     var body: some View {
-        HuggingScroll {
+        ScrollView {
             list
-                .padding(.top, 18)
+                .padding(.top, 24)
                 .padding(.bottom, 6)
         }
-        .frame(width: 440)
+        .scrollBounceBehavior(.basedOnSize)
+        .scrollDismissesKeyboard(.interactively)
         .task(id: song.id) { look() }
     }
 
@@ -252,8 +253,8 @@ private struct CandidateRow: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .frame(minHeight: 56)
-            .background { if showing { GlazeSelected(shape: GlassMenu.optionShape) } }
-            .contentShape(GlassMenu.optionShape)
+            .background { if showing { GlazeSelected(shape: chooserRowShape) } }
+            .contentShape(chooserRowShape)
         }
         .buttonStyle(ChooserRowPress(shows: !showing))
         .accessibilityHint(showing ? "Keep these lyrics" : "Use these lyrics")
@@ -284,13 +285,16 @@ private struct CandidateRow: View {
     }
 }
 
+/// The shape of a candidate's pill.
+private let chooserRowShape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+
 /// A row under the finger shows the quiet accent pill at once, in place of a ripple.
 private struct ChooserRowPress: ButtonStyle {
     let shows: Bool
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.background {
-            if configuration.isPressed && shows { GlassMenu.optionShape.fill(OctoColor.menuPress) }
+            if configuration.isPressed && shows { chooserRowShape.fill(OctoColor.menuPress) }
         }
     }
 }

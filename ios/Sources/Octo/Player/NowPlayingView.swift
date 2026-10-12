@@ -46,11 +46,12 @@ struct NowPlayingView: View {
 
     // What opens over the player.
     @State private var showsQueue = false
-    @State private var showsTime = false
-    @State private var timePages = PopupPages(TimePage.sleep)
+    @State private var showsSleep = false
+    /// The sleep card's page as it opens: the timer, or the speed a page further.
+    @State private var sleepOpening = TimePage.sleep
+    @State private var showsSpeed = false
     @State private var airPlay = AirPlayTrigger()
-    @State private var showsLyricsMenu = false
-    @State private var lyricsPages = PopupPages(LyricsMenuPage.options)
+    @State private var showsTiming = false
     @State private var showsChooser = false
 
     private static let pullShare: CGFloat = 0.45
@@ -132,26 +133,24 @@ struct NowPlayingView: View {
         }
         .onAppear(perform: arrive)
         .accessibilityAction(.escape) { close() }
-        .glassPopup(isPresented: $showsTime, title: "Sleep timer and speed", maxWidth: 340, onBack: { timePages.back() }) {
-            TimeCard(pages: timePages) { showsTime = false }
-        }
-        .glassPopup(isPresented: $showsLyricsMenu, title: "Lyrics", onBack: { lyricsPages.back() }) {
-            LyricsMenuContent(pages: lyricsPages, trackId: player.current?.id, dismiss: { showsLyricsMenu = false }) {
-                showsChooser = true
-            }
-        }
-        .glassPopup(isPresented: $showsChooser, title: "Choose lyrics", usesPressSpot: false, maxWidth: 440, heightShare: 0.8) {
+        .sheet(isPresented: $showsChooser) {
             if let song = player.current {
                 LyricsChooserContent(song: song) { showsChooser = false }
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
             }
         }
-        .glassSheet(isPresented: $showsQueue, scrolls: false) { QueueSheet() }
+        .sheet(isPresented: $showsQueue) {
+            QueueSheet()
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
     }
 
     /// The wash slows to 10 frames a second while a card is open over it or the app is not in
     /// front.
     private var focused: Bool {
-        scenePhase == .active && !(showsTime || showsLyricsMenu || showsChooser)
+        scenePhase == .active && !(showsSleep || showsSpeed || showsTiming || showsChooser)
     }
 
     // MARK: Layouts
@@ -163,7 +162,7 @@ struct NowPlayingView: View {
             artStage(maxSide: 312, folds: true)
             ZStack(alignment: .bottom) {
                 if open {
-                    LyricsBar(ink: ink, close: toggleLyrics, menu: openLyricsMenu)
+                    LyricsBar(ink: ink, close: toggleLyrics, timing: $showsTiming) { showsChooser = true }
                         .padding(.horizontal, -12)
                         .padding(.bottom, 12)
                         .transition(swap)
@@ -199,7 +198,7 @@ struct NowPlayingView: View {
                     topLine
                     LyricsPane(edgeBleed: 0, ink: ink)
                         .padding(.vertical, 4)
-                    LyricsBar(ink: ink, close: toggleLyrics, menu: openLyricsMenu)
+                    LyricsBar(ink: ink, close: toggleLyrics, timing: $showsTiming) { showsChooser = true }
                         .padding(.horizontal, -12)
                         .padding(.bottom, 8)
                 } else {
@@ -306,7 +305,7 @@ struct NowPlayingView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.top, 2)
                 }
-                PlayerProgress(ink: ink, muted: muted, song: song) { openTime(.speed) }
+                PlayerProgress(ink: ink, muted: muted, song: song, speedOpen: $showsSpeed)
                     .padding(.top, 12)
                 PlayerTransport(ink: ink)
                     .padding(.top, gap)
@@ -368,12 +367,15 @@ struct NowPlayingView: View {
             PlayerSwitch(icon: .queue, label: "Up next", lit: false, ink: ink, state: "Off") { showsQueue = true }
             let state = player.sleepState
             PlayerSwitch(icon: .sleepTimer, label: "Sleep timer", lit: state != .off, ink: ink,
-                         state: sleepSummary(state)) { openTime(.sleep) }
+                         state: sleepSummary(state)) { openSleep(.sleep) }
                 .overlay(alignment: .topTrailing) {
                     if case .counting(let left) = state {
                         SleepBadge(minutes: (left + 59_999) / 60_000)
                             .offset(x: 6, y: -4)
                     }
+                }
+                .glassPopover(isPresented: $showsSleep) {
+                    TimeCard(start: .sleep, opening: sleepOpening) { showsSleep = false }
                 }
             PlayerSwitch(icon: .shuffle, label: "Shuffle", lit: player.shuffled, ink: ink) { player.toggleShuffle() }
             PlayerSwitch(icon: player.repeatMode == .one ? .repeatOne : .repeatAll, label: "Repeat", lit: player.repeatMode != .off,
@@ -443,14 +445,10 @@ struct NowPlayingView: View {
         }
     }
 
-    private func openTime(_ page: TimePage) {
-        timePages.reset(page)
-        showsTime = true
-    }
-
-    private func openLyricsMenu() {
-        lyricsPages.reset(.options)
-        showsLyricsMenu = true
+    /// Opens the sleep card on its timer, or on the speed a page further.
+    private func openSleep(_ page: TimePage) {
+        sleepOpening = page
+        showsSleep = true
     }
 
     // MARK: Gestures
@@ -561,19 +559,18 @@ struct NowPlayingView: View {
         case "queue": showsQueue = true
         case "sleep":
             if let minutes = Int(request.value) { player.startSleep(minutes: minutes) }
-            openTime(.sleep)
-        case "speed": openTime(.speed)
-        case "speedpage":
-            timePages.reset(.sleep)
-            timePages.open(.speed)
-            showsTime = true
+            openSleep(.sleep)
+        case "speed": showsSpeed = true
+        case "speedpage": openSleep(.speed)
         case "more", "rate":
             if let menuSubject { libraryActions.previewMenu(.song(menuSubject)) }
-        case "lyricsmenu", "timing":
+        case "timing":
             if !lyrics.open { toggleLyrics() }
-            lyricsPages.reset(.options)
-            if request.name == "timing" { lyricsPages.open(.timing) }
-            showsLyricsMenu = true
+            // The lyrics bar comes in with the lyrics; its popover opens once it is there.
+            Task {
+                try? await Task.sleep(for: .milliseconds(500))
+                showsTiming = true
+            }
         case "chooser":
             if !lyrics.open { toggleLyrics() }
             showsChooser = true

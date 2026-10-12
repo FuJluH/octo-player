@@ -48,9 +48,17 @@ struct RadioStationsScreen: View {
         .barClearance()
         .background(OctoColor.background)
         .task { await reload() }
-        .glassPopup(isPresented: Binding(get: { draft != nil }, set: { if !$0, !saving { draft = nil } }), title: "Station",
-                    usesPressSpot: false, revision: "\(draft?.id ?? "new")|\(saving)|\(problem ?? "")", maxWidth: 400) {
-            if let draft { StationForm(draft: draft, saving: saving, problem: problem, save: save, delete: delete) }
+        .opensWhenAsked("add_station") {
+            guard controls.isAdmin else { return }
+            problem = nil
+            draft = StationDraft()
+        }
+        .sheet(isPresented: Binding(get: { draft != nil }, set: { if !$0, !saving { draft = nil } })) {
+            if let draft {
+                StationForm(draft: draft, saving: saving, problem: problem, save: save, delete: delete)
+                    .fittedSheet()
+                    .interactiveDismissDisabled(saving)
+            }
         }
     }
 
@@ -171,7 +179,7 @@ struct RadioStationsScreen: View {
 }
 
 /// The station form: a name, its stream and an optional home page; Save, and for a station
-/// already there, Delete after asking inline.
+/// already there, Delete after asking.
 private struct StationForm: View {
     @State var draft: StationDraft
     let saving: Bool
@@ -202,18 +210,13 @@ private struct StationForm: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
             if let problem { Text(problem).font(.octoCaption).foregroundStyle(OctoColor.error) }
-            if confirming {
-                Text("Delete \"\(draft.name)\" from the server?").font(.octoBodySmall).foregroundStyle(OctoColor.textSecondary)
-                HStack(spacing: 12) {
-                    AccentButton("Delete", size: .medium, loading: saving) { delete(draft) }
-                    GlazeButton("Cancel", size: .medium, enabled: !saving) { confirming = false }
-                }
-            } else {
-                HStack(spacing: 12) {
-                    AccentButton("Save", size: .medium, enabled: draft.ready, loading: saving) { save(draft) }
-                    if draft.id != nil {
-                        GlazeButton("Delete", size: .medium, enabled: !saving) { confirming = true }
-                    }
+            HStack(spacing: 12) {
+                AccentButton("Save", size: .medium, enabled: draft.ready, loading: saving) { save(draft) }
+                if draft.id != nil {
+                    GlazeButton("Delete", size: .medium, enabled: !saving) { confirming = true }
+                        .confirmationDialog("Delete \"\(draft.name)\" from the server?", isPresented: $confirming, titleVisibility: .visible) {
+                            Button("Delete", role: .destructive) { delete(draft) }
+                        }
                 }
             }
         }

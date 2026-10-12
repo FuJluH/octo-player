@@ -5,9 +5,11 @@ import SwiftUI
 /// from a little smaller and lower and fades; a newer message swaps its words in at once. It
 /// stays 3.5 s (6 s with an action) once it has come in, then fades away. Tapping a message with
 /// no action puts it away. It keeps its place whether the bar shows or not, and the keyboard
-/// does not move it.
+/// does not move it. It is drawn in a window of its own (see `ToastWindow`), so it shows over
+/// sheets, popovers and menus too.
 struct ToastHost: View {
     @Environment(Router.self) private var router
+    @Environment(ToastSpot.self) private var spot: ToastSpot?
     @Environment(\.accessibilityReduceMotion) private var calm
     @State private var shown: Router.Toast?
     @State private var progress: Double = 0
@@ -18,6 +20,8 @@ struct ToastHost: View {
                 Color.clear
                 if let toast = shown {
                     ToastPill(toast: toast) { router.dismiss(toast) }
+                        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { spot?.frame = $0 }
+                        .onDisappear { spot?.frame = nil }
                         .opacity(min(1, max(0, progress)))
                         .scaleEffect(calm ? 1 : 0.92 + 0.08 * progress, anchor: .bottom)
                         .offset(y: calm ? 0 : (1 - progress) * 10)

@@ -159,7 +159,6 @@ private struct SelectionBar: View {
     @Environment(Player.self) private var player
     @Environment(Session.self) private var session
     @Environment(SelectionActions.self) private var actions
-    @Environment(Prompts.self) private var prompts
     @State private var onDisk: [String] = []
 
     var body: some View {
@@ -185,15 +184,23 @@ private struct SelectionBar: View {
                         .frame(width: 44)
                 }
                 if allOnPhone && allOnDisk {
-                    BarButton(icon: .delete, label: "Delete") {
-                        act {
-                            prompts.choose("Delete", [Choice("Delete from phone"), Choice("Delete from disk")]) { index in
-                                if index == 0 { actions.deleteFromPhone?(library) } else { actions.askDeleteFromDisk?(library) }
+                    Menu {
+                        Section("Delete") {
+                            Button("Delete from phone", systemImage: "iphone", role: .destructive) {
+                                act { actions.deleteFromPhone?(library) }
+                            }
+                            Button("Delete from disk", systemImage: "externaldrive", role: .destructive) {
+                                act { actions.askDeleteFromDisk?(library) }
                             }
                         }
+                    } label: {
+                        IconView(.delete, size: 22, color: .white)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .contentShape(Rectangle())
                     }
+                    .menuOrder(.fixed)
                     .frame(width: 44)
-                    .choiceAnchor()
+                    .accessibilityLabel("Delete")
                 } else if allOnPhone, let delete = actions.deleteFromPhone {
                     BarButton(icon: .delete, label: "Delete from phone") { act { delete(library) } }
                         .frame(width: 44)

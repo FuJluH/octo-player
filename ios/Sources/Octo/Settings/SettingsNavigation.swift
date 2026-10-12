@@ -40,8 +40,13 @@ final class SettingsNavigator {
     ///   `server`, `streaming`, `audioquality`, `lyrics`, `scrobbling`, `backup`, `about`), and
     ///   `settings:PAGE@ROW` lights that row as a search result does
     /// - `settings-search:TEXT` types TEXT into the front page's search
-    /// - `popup:ROW` opens the popup of that row on the page in front (`speed`, or any choice
-    ///   row's id such as `radio_discovery`, `ambient`, `cache_size`)
+    /// - `popup:NAME` opens that popover, sheet or question on the page in front: `speed`,
+    ///   `change_password`, `disconnect` and `remove_server` (Server and sync), `delete_link`
+    ///   (Shared links, the first), `add_station` (Radio stations, for an admin),
+    ///   `reset_password` (Family, the first member), `paste_list` and `remove_list` (Import, the
+    ///   first list), `rename_live_list` and `delete_live_list` (a live list), `save_playlist`
+    ///   (Up next). A choice row's answers and every other menu are system menus, which only a
+    ///   finger opens.
     /// - `whatsnew` opens About and its What's new panel
     /// - `settings-state:NAME` shows a state a page reaches only with outside help (see
     ///   `driveState`)
@@ -108,6 +113,27 @@ final class SettingsNavigator {
     /// The session, for steps that need it.
     static weak var session: Session?
     #endif
+}
+
+extension View {
+    /// Runs `open` when a launch step asks the page in front for `name` (`popup:NAME`).
+    func opensWhenAsked(_ name: String, _ open: @escaping () -> Void) -> some View {
+        modifier(AskedPopup(name: name, open: open))
+    }
+}
+
+private struct AskedPopup: ViewModifier {
+    let name: String
+    let open: () -> Void
+    @State private var navigator = SettingsNavigator.shared
+
+    func body(content: Content) -> some View {
+        content.onChange(of: navigator.popup, initial: true) { _, popup in
+            guard popup == name else { return }
+            navigator.popup = nil
+            open()
+        }
+    }
 }
 
 /// Opens the page a settings route names.
