@@ -185,7 +185,7 @@ final class Downloads {
         guard !waiting.isEmpty else { return }
         let keys = Array(Set(waiting.flatMap { titleKeys($0.title) }))
         let candidates = ((try? await store.tracksWithKeys(keys)) ?? []).filter { !isFind($0.id) }
-        let adopted = adoptionsOf(waiting, candidates)
+        let adopted = OctoKit.adoptions(waiting, candidates)
         for find in waiting {
             if let track = adopted[find.id] { try? await store.adopt(find.id, trackId: track.id) }
         }
@@ -330,20 +330,6 @@ final class Downloads {
             }
         }
     }
-}
-
-/// The library song each find arrived as: the first with the same title, the same kind of
-/// recording and the same artist, of about the same length when both are known. Finds not in the
-/// library yet are left out.
-func adoptionsOf(_ waiting: [OnlineSong], _ library: [LibraryTrack]) -> [String: LibraryTrack] {
-    let byTitle = TitleIndex(library, title: \.title, artist: \.artist)
-    var found: [String: LibraryTrack] = [:]
-    for find in waiting {
-        if let track = byTitle.candidates(find.title, find.artist).first(where: { sameSong(find.title, find.artist, find.durationMs, $0) }) {
-            found[find.id] = track
-        }
-    }
-    return found
 }
 
 /// The downloads follower's line to the rest of the app.
