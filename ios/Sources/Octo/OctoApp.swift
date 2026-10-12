@@ -29,7 +29,9 @@ struct OctoApp: App {
         _downloads = State(initialValue: data.downloads)
         _session = State(initialValue: session)
         _sound = State(initialValue: sound)
-        _player = State(initialValue: Player(session: session, sound: sound.processor))
+        let player = Player(session: session, sound: sound.processor, data: data)
+        player.announce = { router.show($0) }
+        _player = State(initialValue: player)
         _lyrics = State(initialValue: LyricsStore(session: session))
         _artworkColors = State(initialValue: ArtworkColorStore(session: session))
         data.start()
