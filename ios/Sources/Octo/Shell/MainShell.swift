@@ -32,6 +32,8 @@ enum Route: Hashable {
     case artists, albums, playlists, favorites
     /// The library pages beyond these: songs, genres, folders, history, downloads and the rest.
     case library(LibraryPage)
+    /// The Sound page: equalizer, loudness, balance and headphone correction.
+    case sound
 }
 
 /// The app's frame: every tab's pages, kept alive while another tab is in front, the floating
@@ -154,6 +156,7 @@ extension View {
                 case .playlists: PlaylistsView()
                 case .favorites: FavoritesView()
                 case .library(let page): LibraryPageView(page: page)
+                case .sound: SoundPage()
                 }
             }
             .detailPage()

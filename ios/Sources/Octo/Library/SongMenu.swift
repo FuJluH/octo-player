@@ -474,7 +474,7 @@ struct SongInfoSheet: View {
                         }
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
-                        ForEach(Array(lines.enumerated()), id: \.offset) { _, line in InfoRow(line: line) }
+                        ForEach(Array(lines.enumerated()), id: \.offset) { _, line in SongInfoRow(line: line) }
                     } else {
                         Text("Reading the song")
                             .font(.octoCaption)
@@ -571,7 +571,7 @@ struct SongInfoSheet: View {
 }
 
 /// One line of the info page: its label, its value, and a Copy button for copyable ones.
-private struct InfoRow: View {
+private struct SongInfoRow: View {
     let line: InfoLine
     @State private var copied = false
 
