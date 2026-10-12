@@ -16,8 +16,6 @@ struct OctoApp: App {
     @State private var liveLibrary: LiveLibrary
     @State private var artistExtras: ArtistExtrasSource
     @State private var overlays = Overlays()
-    @State private var prompts = Prompts()
-    @State private var presses = PressSpots()
     @State private var motion = MotionSettings()
     @State private var ambience = AmbientSettings()
     @State private var pageArtworks = PageArtworks()
@@ -81,8 +79,6 @@ struct OctoApp: App {
                 .environment(liveLibrary)
                 .environment(artistExtras)
                 .environment(overlays)
-                .environment(prompts)
-                .environment(presses)
                 .environment(motion)
                 .environment(ambience)
                 .environment(pageArtworks)
@@ -92,13 +88,11 @@ struct OctoApp: App {
                 .environment(accounts)
                 .task { accounts.start() }
                 .motionScaled(motion)
-                .recordsPresses(presses)
-                .onAppear { prompts.spots = presses }
                 .tint(OctoColor.accent)
                 .preferredColorScheme(.dark)
                 #if DEBUG
                 .task { PlaybackDrive.install(player: player, router: router, overlays: overlays)
-                        await Drive.run(session: session, player: player, router: router, prompts: prompts, motion: motion,
+                        await Drive.run(session: session, player: player, router: router, motion: motion,
                                          overlays: overlays, ambience: ambience, selectionBar: selectionBar) }
                 #endif
         }

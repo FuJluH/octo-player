@@ -2,6 +2,7 @@
 import Foundation
 import OctoKit
 import SwiftUI
+import UIKit
 
 /// Steps named in the OCTO_DRIVE launch variable, run one after another once the app has
 /// started, to bring it to a given state from outside. Steps are separated by ";":
@@ -13,20 +14,21 @@ import SwiftUI
 /// - `barplayer` grows the bar's small player; `showtabs` folds it back into the round button
 /// - `player` opens the full player, `close` closes it, `lyrics` opens its lyrics
 /// - `player:STATE` opens the full player in a state: `player:queue` (Up next), `player:sleep`
-///   (the time card), `player:sleep:MINUTES` (a countdown started, then the card), `player:speed`
-///   (the card on its speed page, from the speed mark), `player:speedpage` (the speed page opened
-///   from the timer), `player:more` (the song menu), `player:rate` (its Rate page),
-///   `player:lyricsmenu`, `player:timing` (the lyrics menu, on its timing page), `player:chooser`
-///   (Choose lyrics), `player:look:flowing`, `player:look:classic` (lyrics open in that style),
-///   `player:background:immersive|artwork|color|classic`
+///   (the sleep card's popover), `player:sleep:MINUTES` (a countdown started, then the card),
+///   `player:speed` (the speed card's popover, from the speed mark), `player:speedpage` (the sleep
+///   card opened on its speed page), `player:timing` (lyrics open, then the lyrics timing
+///   popover), `player:chooser` (the Choose lyrics sheet), `player:look:flowing`,
+///   `player:look:classic` (lyrics open in that style),
+///   `player:background:immersive|artwork|color|classic`. The song menu and the lyrics menu are
+///   system menus, which only a finger opens.
 /// - `list:NAME` plays the server playlist with that name
 /// - `found:TEXT` plays the songs not in the library that a search for TEXT finds
 /// - `search:TEXT` plays the library songs a search for TEXT finds
 /// - `pause`
 /// - discovery steps: see `DiscoveryDrive`
 /// - `toast:TEXT` a plain message; `undo:TEXT` a message with Undo; `done:TEXT` one with a check
-/// - `dialog` a question with Delete and Cancel; `choice` a choice list; `sheet` a glass sheet;
-///   `menu` a glass menu with a second page; `menu:page` opens it on its second page
+/// - `dialog` the system question with Delete and Cancel; `sheet` a system sheet opened from
+///   code
 /// - `reducemotion:on`, `reducemotion:off` sets Octo's own Reduce motion
 /// - `glow:off`, `glow:subtle`, `glow:rich` sets the artwork's glow
 /// - `select:N` picks N songs of the queue (or of a sample list), showing the selection bar;
@@ -40,7 +42,7 @@ import SwiftUI
 /// - `account:WHAT`: the account pages, sheets, sign-in modes and ways in; see `AccountDrive`
 @MainActor
 enum Drive {
-    static func run(session: Session, player: Player, router: Router, prompts: Prompts, motion: MotionSettings,
+    static func run(session: Session, player: Player, router: Router, motion: MotionSettings,
                     overlays: Overlays? = nil, ambience: AmbientSettings? = nil,
                     selectionBar: SelectionBarState? = nil) async {
         guard let script = ProcessInfo.processInfo.environment["OCTO_DRIVE"], !script.isEmpty else { return }
@@ -67,18 +69,9 @@ enum Drive {
             case "toast": router.show(value.isEmpty ? "Added to the queue" : value)
             case "undo": router.undoable(value.isEmpty ? "Removed from the queue" : value) { router.done("Put back") }
             case "done": router.done(value.isEmpty ? "Added to Liked songs" : value)
-            case "dialog":
-                prompts.confirm("Delete this song from disk?",
-                                detail: "This takes it off the server's disk and out of your library.",
-                                confirm: "Delete") { router.done("Deleted") }
-            case "choice":
-                prompts.choose("Sort by", [Choice("Name"), Choice("Artist"), Choice("Recently added"),
-                                           Choice("Year", detail: "Only albums have a year", enabled: false)],
-                               selected: 0) { router.show("Sorted by \(["Name", "Artist", "Recently added", "Year"][$0])") }
+            case "dialog": DriveSamples.dialog(router: router)
             case "sheet":
                 if let overlays { DriveSamples.sheet(overlays, router: router) }
-            case "menu":
-                if let overlays { DriveSamples.menu(overlays, router: router, deeper: value == "page") }
             case "reducemotion": motion.reduceMotion = value != "off"
             case "select":
                 guard let selectionBar else { continue }
@@ -132,7 +125,7 @@ enum Drive {
     }
 }
 
-/// The shell's sheet and menu as the drive steps show them.
+/// The system sheet and question as the drive steps show them.
 @MainActor
 enum DriveSamples {
     /// The picks the drive steps made, so `unselect` can end them.
@@ -163,42 +156,15 @@ enum DriveSamples {
         )) { overlays.hideSheet(id) }
     }
 
-    static func menu(_ overlays: Overlays, router: Router, deeper: Bool) {
-        let id = UUID()
-        let pages = PopupPages("actions")
-        if deeper { pages.open("rate") }
-        overlays.showPopup(id, anchor: nil, title: "Song", content: AnyView(
-            PopupPager(pages: pages) { page, canGoBack in
-                if page == "actions" {
-                    GlassMenuPage {
-                        GlassMenuHeader(title: "A song", subtitle: "An artist") {
-                            RoundedRectangle(cornerRadius: OctoRadius.artS).fill(OctoColor.backgroundTertiary).frame(width: 40, height: 40)
-                        }
-                        GlassMenuSeparator()
-                    } content: {
-                        GlassMenuAction(.playNext, "Play next") {
-                            overlays.hidePopup(id)
-                            router.done("Playing next")
-                        }
-                        GlassMenuAction(.addToQueue, "Add to queue") {
-                            overlays.hidePopup(id)
-                            router.undoable("Added to the queue") {}
-                        }
-                        GlassMenuSeparator()
-                        GlassMenuAction(.star, "Rate", opensPage: true) { pages.open("rate") }
-                        GlassMenuAction(.delete, "Delete from disk", destructive: true) {}
-                        GlassMenuAction(.download, "Download", detail: "Not while offline", enabled: false) {}
-                    }
-                } else {
-                    GlassMenuPage {
-                        GlassMenuBack(title: "Rate") { pages.back() }
-                    } content: {
-                        GlassMenuOptions(options: (0...5).map { Choice($0 == 0 ? "No rating" : String(repeating: "★", count: $0)) },
-                                         selected: 0) { _ in overlays.hidePopup(id) }
-                    }
-                }
-            }
-        ), dismiss: { overlays.hidePopup(id) }, back: { pages.back() })
+    /// The system question a delete asks, with the words a song's delete from disk uses.
+    static func dialog(router: Router) {
+        guard let top = SystemShare.topController() else { return }
+        let ask = UIAlertController(title: "Delete this song from disk?",
+                                    message: "This takes it off the server's disk and out of your library.", preferredStyle: .actionSheet)
+        ask.addAction(UIAlertAction(title: "Delete", style: .destructive) { _ in router.done("Deleted") })
+        ask.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        ask.popoverPresentationController?.sourceView = top.view
+        top.present(ask, animated: true)
     }
 }
 

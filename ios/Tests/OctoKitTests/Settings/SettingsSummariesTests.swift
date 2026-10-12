@@ -156,16 +156,4 @@ import Testing
         #expect(SettingsWords.streamDetail(.original) == nil)
     }
 
-    @Test func theChosenAnswerHasThePillAndNoLinesTouchIt() {
-        func looks(_ count: Int, _ selected: Int) -> [String] {
-            MenuRowLook.rows(count: count, selected: selected).map { ($0.selected ? "pill" : "plain") + ($0.lineAbove ? " line" : "") }
-        }
-        #expect(looks(4, 1) == ["plain", "pill", "plain", "plain line"])
-        #expect(looks(3, -1) == ["plain", "plain line", "plain line"])
-        #expect(looks(3, 0) == ["pill", "plain", "plain line"])
-        #expect(looks(3, 2) == ["plain", "plain line", "pill"])
-        #expect(MenuRowLook.rows(count: 6, selected: 3).filter(\.selected).count == 1)
-        #expect(MenuRowLook.rows(count: 6, selected: 9).filter(\.selected).isEmpty)
-        #expect(MenuRowLook.rows(count: 0, selected: 0).isEmpty)
-    }
 }

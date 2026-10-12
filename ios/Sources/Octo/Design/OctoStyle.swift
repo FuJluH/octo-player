@@ -38,8 +38,6 @@ enum OctoColor {
     static let sheetFill = Color(OctoPalette.sheetFill)
     /// The film in Octo's glass: the faintest dim.
     static let glazeFilm = Color(OctoPalette.glazeFilm)
-    /// The film under a pop-up: darker, since words sit on it.
-    static let popupFilm = Color(OctoPalette.popupFilm)
     /// The darker pill that marks the chosen item inside glass.
     static let glazeSelected = Color(OctoPalette.glazeSelected)
     /// Hairlines between rows of a menu.
