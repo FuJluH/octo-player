@@ -36,7 +36,8 @@ import UIKit
 /// - library steps (see `LibraryDrive`): `page:NAME`, `album:NAME`, `artist:NAME`, `playlist:NAME`,
 ///   `genre:NAME`, `menu:KIND` (song, album, artist, playlist; `menu:KIND=NAME`), `info:TITLE`,
 ///   `sort:LIST:OPTION:asc|desc`, `pick:COUNT` (picks songs on the open library page),
-///   `songs-search:TEXT`
+///   `songs-search:TEXT`, `songs-filter:CHIPS` (like `songs-filter:lossless,rating4`), and
+///   `menu:live` (a live list's options; `menu:live:rename`, `menu:live:delete`)
 /// - `sound`, `sound:graphic`, `sound:parametric`, `sound:preset:NAME`, `sound:editor`,
 ///   `sound:save`, `sound:own:NAME`, `sound:delete:NAME`, `sound:card:NAME`, `sound:eq:on|off`,
 ///   `sound:each:on|off`
