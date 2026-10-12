@@ -366,7 +366,6 @@ struct NowPlayingFace: View {
             .contentShape(Circle())
         }
         .buttonStyle(NoHighlight())
-        .background(PaceFollower())
         .accessibilityLabel("Now playing")
     }
 }
@@ -408,7 +407,6 @@ struct MiniPlayerPill: View {
         .padding(.trailing, 4)
         .contentShape(Capsule())
         .onTapGesture(perform: open)
-        .background(PaceFollower())
         .task(id: player.current?.coverArt) {
             // The player's card is at most 312 points; the flight draws the cover at that size.
             await flight.prepare(player.current?.coverArt, size: Int(312 * scale), client: session.client)
@@ -443,23 +441,6 @@ struct ProgressRing: View {
                 .rotationEffect(.degrees(-90))
         }
         .accessibilityHidden(true)
-    }
-}
-
-/// Keeps the player at the speed and pitch the settings hold, from start and as they change.
-struct PaceFollower: View {
-    @Environment(Player.self) private var player
-    @State private var settings = AppSettings.shared
-
-    var body: some View {
-        Color.clear
-            .allowsHitTesting(false)
-            .onChange(of: settings.player.speed, initial: true) { _, speed in
-                if player.speed != speed { player.setSpeed(speed) }
-            }
-            .onChange(of: settings.player.keepPitch, initial: true) { _, keep in
-                if player.keepsPitch != keep { player.setKeepsPitch(keep) }
-            }
     }
 }
 

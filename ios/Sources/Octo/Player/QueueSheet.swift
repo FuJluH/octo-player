@@ -2,20 +2,21 @@ import OctoKit
 import SwiftUI
 import UIKit
 
-/// One song in the queue, with a key it keeps while it stays there: the same song twice is two
-/// entries.
+/// One song in the queue, by the key it keeps while it stays there (the same song twice is two
+/// entries), with where it came from.
 struct QueueEntry: Identifiable, Equatable {
     let id: String
     let position: Int
     let song: Song
+    let source: QueueSource
 
-    /// The queue's songs as entries, each keyed by its song and which time that song comes up.
-    static func of(_ queue: [Song]) -> [QueueEntry] {
-        var seen: [String: Int] = [:]
-        return queue.enumerated().map { position, song in
-            let time = seen[song.id, default: 0]
-            seen[song.id] = time + 1
-            return QueueEntry(id: "\(song.id)#\(time)", position: position, song: song)
+    /// The player's songs at these places, in the order given.
+    @MainActor
+    static func of(_ slots: [QueueSlot], _ player: Player) -> [QueueEntry] {
+        slots.compactMap { slot in
+            guard player.queue.indices.contains(slot.index) else { return nil }
+            let source = player.items.indices.contains(slot.index) ? player.items[slot.index].source : QueueSource.none
+            return QueueEntry(id: slot.key, position: slot.index, song: player.queue[slot.index], source: source)
         }
     }
 }
@@ -47,11 +48,13 @@ struct QueueSheet: View {
     @State private var viewport: CGRect = .zero
 
     var body: some View {
-        let entries = QueueEntry.of(player.queue).filter { !removed.contains($0.id) }
-        let index = entries.firstIndex { $0.position == player.index } ?? 0
-        let played = Array(entries.prefix(index))
-        let now = entries.indices.contains(index) ? entries[index] : nil
-        let coming = drawn(Array(entries.dropFirst(index + 1)))
+        let played = QueueEntry.of(player.playedSlots, player).filter { !removed.contains($0.id) }
+        let upcoming = QueueEntry.of(player.upNextSlots, player).filter { !removed.contains($0.id) }
+        let now = upcoming.first
+        let coming = drawn(Array(upcoming.dropFirst()))
+        let runs = sourceRuns(coming) { $0.source }
+        // A single unnamed list needs no heading under "Up next".
+        let headed = runs.count > 1 || runs.first.map { $0.source != QueueSource.none } ?? false
         ScrollViewReader { reader in
             VStack(alignment: .leading, spacing: 0) {
                 Text("Up next")
@@ -63,7 +66,7 @@ struct QueueSheet: View {
                     .font(.octoCaption)
                     .foregroundStyle(OctoColor.textMuted)
                     .padding(.horizontal, 20)
-                tools(reader, now: now, hasPlayed: !played.isEmpty, hasOthers: entries.count > 1)
+                tools(reader, now: now, hasPlayed: !played.isEmpty, hasOthers: !played.isEmpty || !coming.isEmpty)
                 QueueScroll(position: $position, onGeometry: scrolled) {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(played) { entry in
@@ -79,16 +82,18 @@ struct QueueSheet: View {
                                 .padding(.horizontal, 20)
                                 .padding(.vertical, 8)
                         }
-                        if let heading = heading, !coming.isEmpty {
-                            Text(heading)
-                                .font(.octoCaption)
-                                .foregroundStyle(OctoColor.textMuted)
-                                .padding(.horizontal, 20)
-                                .padding(.top, 12)
-                                .padding(.bottom, 4)
-                        }
-                        ForEach(Array(coming.enumerated()), id: \.element.id) { offset, entry in
-                            comingRow(entry, offset: offset, count: coming.count)
+                        ForEach(Array(runs.enumerated()), id: \.offset) { _, run in
+                            if headed {
+                                Text(queueSourceTitle(run.source))
+                                    .font(.octoCaption)
+                                    .foregroundStyle(OctoColor.textMuted)
+                                    .padding(.horizontal, 20)
+                                    .padding(.top, 12)
+                                    .padding(.bottom, 4)
+                            }
+                            ForEach(run.items) { entry in
+                                comingRow(entry, offset: coming.firstIndex(of: entry) ?? 0, count: coming.count)
+                            }
                         }
                     }
                     .padding(.top, 4)
@@ -112,7 +117,8 @@ struct QueueSheet: View {
             }
         }
         .sensoryFeedback(.impact(weight: .medium), trigger: presses)
-        .onChange(of: player.queue) { _, _ in removed = [] }
+        .onChange(of: player.upNextSlots) { _, _ in removed = [] }
+        .onChange(of: player.playedSlots) { _, _ in removed = [] }
         .glassPopup(isPresented: $showsMenu, title: "Song in the queue") {
             if let menuEntry { QueueRowMenu(entry: menuEntry, dismiss: { showsMenu = false }, remove: remove) }
         }
@@ -125,16 +131,12 @@ struct QueueSheet: View {
 
     // MARK: Heading and tools
 
-    /// "N songs · length" still to come.
+    /// The listener's own songs still to come, "N songs · length", and how many Autoplay added.
     private func summary(_ coming: [QueueEntry]) -> String {
-        let seconds = coming.reduce(0) { $0 + $1.song.duration }
-        return "\(songsCount(coming.count)) · \(asLength(seconds))"
-    }
-
-    /// A heading over the songs to come, only for a list with a name.
-    private var heading: String? {
-        guard let seed = player.radioSeed else { return nil }
-        return PlayerRule.queueSourceTitle(.played("\(seed.title) radio"))
+        let own = coming.filter { $0.source != .autoplay }
+        let seconds = own.reduce(0) { $0 + $1.song.duration }
+        let added = coming.count - own.count
+        return "\(songsCount(own.count)) · \(asLength(seconds))" + (added > 0 ? " · \(added) from Autoplay" : "")
     }
 
     private func tools(_ reader: ScrollViewProxy, now: QueueEntry?, hasPlayed: Bool, hasOthers: Bool) -> some View {
@@ -176,9 +178,9 @@ struct QueueSheet: View {
             .opacity(0.5)
             .padding(.horizontal, 20)
             .contentShape(Rectangle())
-            .onTapGesture { player.jump(to: entry.position) }
+            .onTapGesture { player.jump(toKey: entry.id) }
             .onLongPressGesture { openMenu(entry) }
-            .accessibilityAction(named: "Play") { player.jump(to: entry.position) }
+            .accessibilityAction(named: "Play") { player.jump(toKey: entry.id) }
             .accessibilityAction(named: "Song options") { openMenu(entry) }
             .id(entry.id)
     }
@@ -200,6 +202,9 @@ struct QueueSheet: View {
         let moving = drag?.key == entry.id
         return SwipeAway(enabled: drag == nil, onRemove: { remove(entry) }) {
             QueueSongRow(song: entry.song) {
+                if entry.source == .autoplay {
+                    Text("Autoplay").font(.octoCaption).foregroundStyle(OctoColor.textMuted).lineLimit(1)
+                }
                 if !player.shuffled {
                     ReorderHandle()
                         .gesture(reorder(entry, offset: offset, count: count))
@@ -208,13 +213,13 @@ struct QueueSheet: View {
             .padding(.horizontal, 20)
             .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(comingFill))
             .contentShape(Rectangle())
-            .onTapGesture { player.jump(to: entry.position) }
+            .onTapGesture { player.jump(toKey: entry.id) }
             .onLongPressGesture { openMenu(entry) }
         }
         .elevation3Shape(moving)
         .offset(y: moving ? (drag?.lift ?? 0) : 0)
         .zIndex(moving ? 1 : 0)
-        .accessibilityAction(named: "Play") { player.jump(to: entry.position) }
+        .accessibilityAction(named: "Play") { player.jump(toKey: entry.id) }
         .accessibilityAction(named: "Song options") { openMenu(entry) }
         .accessibilityAction(named: "Remove") { remove(entry) }
         .id(entry.id)
@@ -237,8 +242,7 @@ struct QueueSheet: View {
         DragGesture(minimumDistance: 0, coordinateSpace: .global)
             .onChanged { value in
                 if drag == nil {
-                    let upcoming = QueueEntry.of(player.queue).filter { $0.position > player.index }
-                    let from = upcoming.firstIndex { $0.id == entry.id } ?? offset
+                    let from = player.upNextSlots.dropFirst().firstIndex { $0.key == entry.id }.map { $0 - 1 } ?? offset
                     drag = QueueDrag(key: entry.id, from: from, count: count, target: from, lift: 0, startOffset: scrollOffset,
                                      fingerY: value.location.y, travel: 0)
                 }
@@ -317,61 +321,41 @@ struct QueueSheet: View {
 
     /// Takes the song out by its key: it leaves the list at once, then the queue.
     private func remove(_ entry: QueueEntry) {
-        guard let position = QueueEntry.of(player.queue).first(where: { $0.id == entry.id })?.position,
-              position > player.index
-        else { return }
-        let before = player.snapshot
         removed.insert(entry.id)
-        player.remove(at: IndexSet(integer: position - player.index - 1))
-        let after = player.queue
-        router.undoable("Removed from the queue") { [player] in
-            if player.queue == after { player.restore(before) }
+        guard let undo = player.removeEntry(entry.id) else {
+            removed.remove(entry.id)
+            return
         }
+        router.undoable("Removed from the queue") { [player] in _ = player.undo(undo) }
     }
 
+    /// Everything but the song on now goes.
     private func clear() {
-        guard player.queue.count > 1 else { return }
-        let before = player.snapshot
-        let hadPlayed = player.index > 0
-        player.clearUpcoming()
-        if hadPlayed { player.removePlayed() }
-        let after = player.queue
-        router.undoable("Queue cleared") { [player] in
-            if player.queue == after { player.restore(before) }
-        }
+        guard let undo = player.clearUpcoming() else { return }
+        router.undoable("Queue cleared") { [player] in _ = player.undo(undo) }
     }
 
     private func removePlayed() {
-        guard player.index > 0 else { return }
-        let before = player.snapshot
-        player.removePlayed()
-        let after = player.queue
-        router.undoable("Played songs removed") { [player] in
-            if player.queue == after { player.restore(before) }
-        }
+        guard let undo = player.removePlayed() else { return }
+        router.undoable("Played songs removed") { [player] in _ = player.undo(undo) }
     }
 
-    /// A new playlist of the whole queue in play order.
+    /// A new playlist of the queue in play order (played, on now, to come), leaving out what
+    /// Autoplay added, stations and songs not in the library.
     private func save(_ name: String) {
         saving = false
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let songs = player.queue
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-        guard let data else { return }
-        Task {
-            let library = data.library
-            var ids: [String] = []
-            var links: [String: String] = [:]
-            if let server = library.serverInUse,
-               let found = try? await library.store.libraryLinks(server, songs.map(\.id)) {
-                for link in found { links[link.serverId] = link.trackId }
-            }
-            for song in songs where !song.isExternal {
-                if let id = links[song.id] { ids.append(id) } else if await library.track(song.id) != nil { ids.append(song.id) }
-            }
-            data.playlists.create(trimmed, trackIds: ids)
-            router.show("Saved as \(trimmed)")
+        let ids = (player.playedSlots + player.upNextSlots).compactMap { slot -> String? in
+            guard player.items.indices.contains(slot.index) else { return nil }
+            let item = player.items[slot.index]
+            guard item.source != .autoplay, !item.isFind, !item.trackId.hasPrefix("radio:"), !item.trackId.hasPrefix("file:")
+            else { return nil }
+            return item.trackId
         }
+        guard let data else { return }
+        data.playlists.create(trimmed, trackIds: ids)
+        router.show("Saved as \(trimmed)")
     }
 }
 
@@ -566,31 +550,22 @@ private struct QueueRowMenu: View {
         }
     }
 
-    private var position: Int? { QueueEntry.of(player.queue).first { $0.id == entry.id }?.position }
-
     private var place: QueuePlace {
-        guard let position else { return .coming }
-        return position < player.index ? .played : position == player.index ? .now : .coming
+        if player.playedSlots.contains(where: { $0.key == entry.id }) { return .played }
+        return player.upNextSlots.first?.key == entry.id ? .now : .coming
     }
 
     /// The same entry, moved to right after the song on now.
     private func playNext() {
-        guard let position, position != player.index else { return }
-        var songs = player.queue
-        let song = songs.remove(at: position)
-        let current = position < player.index ? player.index - 1 : player.index
-        songs.insert(song, at: current + 1)
-        player.restore(Player.QueueSnapshot(songs: songs, index: current))
+        player.playEntryNext(entry.id)
     }
 
     private func stopAfter(_ place: QueuePlace) {
-        guard let position else { return }
-        let sleep = PlayerSleep.shared
         if place == .now {
-            sleep.stopAfter(songs: 1, player)
+            player.sleepAtEndOfSong()
         } else {
-            sleep.stopAfter(ahead: position - player.index, title: entry.song.title, player)
+            player.sleepAfter(key: entry.id, title: entry.song.title)
         }
-        router.undoable("Stops after \(entry.song.title)") { [player] in sleep.cancel(player) }
+        router.undoable("Stops after \(entry.song.title)") { [player] in player.cancelSleep() }
     }
 }

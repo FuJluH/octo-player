@@ -35,34 +35,31 @@ final class PlayerSongFacts {
     private(set) var bpm: Int?
     @ObservationIgnored private var reading: Task<Void, Never>?
 
-    /// Reads the facts for `song`; `version` changes whenever the library does.
-    func follow(_ song: Song?, library: Library, version: Int) {
+    /// Reads the facts for `song`, which the queue holds as `item`.
+    func follow(_ song: Song?, item: QueueItem?, library: Library) {
         reading?.cancel()
         let changed = song?.id != songId
         songId = song?.id
+        bpm = item?.bpm
         if changed {
             trackId = nil
             rating = 0
             albumSongs = 0
-            bpm = nil
         }
         guard let song else { return }
+        // Finds, stations and opened files are not library songs.
+        let outside = item.map { $0.isFind || $0.trackId.hasPrefix("radio:") || $0.trackId.hasPrefix("file:") } ?? false
+        let known = outside ? nil : item?.trackId
         reading = Task {
-            let id = await Self.libraryId(song, library: library)
+            let id: String? = if outside { nil } else if let known { known } else { await Self.libraryId(song, library: library) }
             guard !Task.isCancelled else { return }
             trackId = id
-            guard let id, let track = await library.track(id) else {
-                albumSongs = song.isExternal ? 0 : albumSongs
-                return
-            }
+            guard let id, let track = await library.track(id) else { return }
             guard !Task.isCancelled else { return }
             rating = track.rating
             if !track.albumId.isEmpty, let album = await library.album(track.albumId) {
                 albumSongs = album.songCount
             }
-            let copies = await library.copies(id)
-            guard !Task.isCancelled else { return }
-            bpm = copies.compactMap(\.bpm).first { $0 > 0 }
         }
     }
 

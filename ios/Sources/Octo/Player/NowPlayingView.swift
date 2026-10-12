@@ -21,7 +21,6 @@ struct NowPlayingView: View {
     @State private var look = PlayerLook()
     @State private var facts = PlayerSongFacts()
     @State private var drive = PlayerDrive.shared
-    @State private var sleep = PlayerSleep.shared
     @State private var flight = CoverFlight.shared
 
     // The way in and out.
@@ -114,7 +113,7 @@ struct NowPlayingView: View {
             look.follow(coverId: ask.coverId, prefs: ask.prefs, live: ask.live, artwork: ask.artwork, client: session.client)
         }
         .onChange(of: factsAsk, initial: true) { _, _ in
-            facts.follow(player.current, library: library, version: library.libraryVersion + library.ratingsVersion)
+            facts.follow(player.current, item: player.currentItem, library: library)
         }
         .onChange(of: player.current?.id, initial: true) { _, id in
             lyrics.attach(player)
@@ -365,17 +364,15 @@ struct NowPlayingView: View {
             PlayerSwitch(icon: .lyrics, label: "Lyrics", lit: lyrics.open, ink: ink, state: lyrics.open ? "Showing" : "Hidden",
                          action: toggleLyrics)
             PlayerSwitch(icon: .queue, label: "Up next", lit: false, ink: ink, state: "Off") { showsQueue = true }
-            TimelineView(.periodic(from: .now, by: 1)) { time in
-                let state = sleep.state(player, at: time.date)
-                PlayerSwitch(icon: .sleepTimer, label: "Sleep timer", lit: state != .off, ink: ink,
-                             state: PlayerRule.sleepSummary(state)) { openTime(.sleep) }
-                    .overlay(alignment: .topTrailing) {
-                        if let left = state.remaining {
-                            SleepBadge(minutes: (left + 59_999) / 60_000)
-                                .offset(x: 6, y: -4)
-                        }
+            let state = player.sleepState
+            PlayerSwitch(icon: .sleepTimer, label: "Sleep timer", lit: state != .off, ink: ink,
+                         state: sleepSummary(state)) { openTime(.sleep) }
+                .overlay(alignment: .topTrailing) {
+                    if case .counting(let left) = state {
+                        SleepBadge(minutes: (left + 59_999) / 60_000)
+                            .offset(x: 6, y: -4)
                     }
-            }
+                }
             PlayerSwitch(icon: .shuffle, label: "Shuffle", lit: player.shuffled, ink: ink) { player.toggleShuffle() }
             PlayerSwitch(icon: player.repeatMode == .one ? .repeatOne : .repeatAll, label: "Repeat", lit: player.repeatMode != .off,
                          ink: ink, state: repeatWords) { player.cycleRepeat() }
@@ -561,7 +558,7 @@ struct NowPlayingView: View {
         switch request.name {
         case "queue": showsQueue = true
         case "sleep":
-            if let minutes = Int(request.value) { sleep.start(minutes: minutes, player) }
+            if let minutes = Int(request.value) { player.startSleep(minutes: minutes) }
             openTime(.sleep)
         case "speed": openTime(.speed)
         case "speedpage":
