@@ -113,20 +113,31 @@ struct QuietAction: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 6) {
-                IconView(icon, size: 18)
-                Text(text).font(LibraryLook.label).lineLimit(1)
-            }
-            .foregroundStyle(checked == true ? Color.white : OctoColor.textSecondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 12)
-            .contentShape(Capsule())
+            QuietActionLabel(icon: icon, text: text, lit: checked == true)
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
         .opacity(enabled ? 1 : 0.6)
         .accessibilityAddTraits(checked != nil ? .isToggle : [])
         .accessibilityValue(checked == nil ? "" : (checked == true ? "On" : "Off"))
+    }
+}
+
+/// A quiet action's icon and words, also the label of a quiet menu button.
+struct QuietActionLabel: View {
+    let icon: OctoIcon
+    let text: String
+    var lit = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            IconView(icon, size: 18)
+            Text(text).font(LibraryLook.label).lineLimit(1)
+        }
+        .foregroundStyle(lit ? Color.white : OctoColor.textSecondary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 12)
+        .contentShape(Capsule())
     }
 }
 

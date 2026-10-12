@@ -176,10 +176,12 @@ struct AlbumView: View {
         if canShare || !serverOnly.isEmpty {
             HStack(spacing: 0) {
                 if canShare {
-                    QuietAction(icon: .share, text: "Share") {
-                        actions.openMenu(.share(.album(album.id), title: album.title))
+                    Menu {
+                        ShareLinkItems(target: .album(album.id), title: album.title)
+                    } label: {
+                        QuietActionLabel(icon: .share, text: "Share")
                     }
-                    .pressAnchor()
+                    .buttonStyle(.plain)
                 }
                 if !serverOnly.isEmpty {
                     let held = serverOnly.filter { state.kept($0.id) != nil }.count
@@ -539,11 +541,10 @@ struct PlaylistsView: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     TitleWithButtons(title: "Playlists") { if playlists != nil { SortButton(list: .playlists) } }
                         .padding(.top, detailTopGap)
-                    Button { actions.openMenu(.newPlaylist([])) } label: {
+                    Button { actions.askNewPlaylist(.tracks([])) } label: {
                         PlaylistLine(name: "New playlist") { LeadTile(icon: .addToLibrary) }
                     }
                     .buttonStyle(SqueezeStyle())
-                    .pressAnchor()
                     if let open = LiveListHook.newLiveList {
                         Button { open(nil) } label: {
                             PlaylistLine(name: "New live list", subtitle: "Songs picked by rules, always up to date") {
@@ -565,7 +566,8 @@ struct PlaylistsView: View {
                         }
                         .buttonStyle(SqueezeStyle())
                         .id(playlist.id)
-                        .longPressMenu { actions.openMenu(.playlist(playlist)) }
+                        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: OctoRadius.row))
+                        .contextMenu { CollectionMenuItems(subject: .playlist(playlist)) }
                     }
                 }
                 .padding(.bottom, 20)
@@ -761,11 +763,12 @@ struct PlaylistPage: View {
                     .foregroundStyle(OctoColor.textMuted)
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                QuietAction(icon: .more, text: "More") {
-                    actions.openMenu(.playlistOptions(playlist, serverOnly: tracks.contains { !$0.onPhone && !$0.isFound },
-                                                      deleted: { dismiss() }))
+                Menu {
+                    PlaylistOptionsItems(playlist: playlist, serverOnly: tracks.contains { !$0.onPhone && !$0.isFound }) { dismiss() }
+                } label: {
+                    QuietActionLabel(icon: .more, text: "More")
                 }
-                .pressAnchor()
+                .buttonStyle(.plain)
                 .accessibilityLabel("More")
             }
             .padding(.top, 14)

@@ -152,17 +152,18 @@ struct TrackRow: View {
                     .padding(.vertical, 2)
             }
         }
-        .longPressMenu { openMenu() }
+        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: OctoRadius.row))
+        .contextMenu { SongMenuItems(subject: menuSubject) }
         .rowSwipe(rowSwipe, enabled: !selecting)
         .accessibilityAddTraits(selecting && picked ? .isSelected : [])
         .accessibilityAction(named: "Play next") { actions.playNextUndoable(song) }
         .accessibilityAction(named: "Add to queue") { player.append([song]) }
     }
 
-    private func openMenu() {
+    private var menuSubject: SongSubject {
         var context = context
         if context.selectKey == nil, selection != nil { context.selectKey = key }
-        actions.openMenu(.song(SongSubject(track: track, song: song, context: context, selection: selection)))
+        return SongSubject(track: track, song: song, context: context, selection: selection)
     }
 
     private var rowSwipe: RowSwipe {
@@ -396,9 +397,8 @@ struct SongRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(SqueezeStyle())
-        .longPressMenu {
-            actions.openMenu(.song(SongSubject(track: actions.state.provisional(shown), song: shown, context: context)))
-        }
+        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: OctoRadius.row))
+        .contextMenu { SongMenuItems(subject: SongSubject(track: actions.state.provisional(shown), song: shown, context: context)) }
         .rowSwipe(.playNext { actions.playNextUndoable(shown) }, enabled: true)
         .accessibilityAction(named: "Play next") { actions.playNextUndoable(shown) }
         .accessibilityAction(named: "Add to queue") { player.append([shown]) }
@@ -478,9 +478,11 @@ struct AlbumCard: View {
             .frame(width: width, alignment: .leading)
         }
         .buttonStyle(PressScale(scale: 0.97))
-        card.longPressMenu(enabled: !album.isExternal) {
-            actions.openMenu(.album(library ?? actions.state.provisionalAlbum(album)))
-        }
+        card
+            .contextMenu {
+                if !album.isExternal { CollectionMenuItems(subject: .album(library ?? actions.state.provisionalAlbum(album))) }
+            }
+            .onAppear { if let id = library?.id { actions.loadAlbumFacts(id) } }
     }
 }
 
@@ -526,7 +528,7 @@ struct SongCard: View {
             .opacity(!song.isExternal && actions.state.isOutOfReach(track) ? 0.4 : 1)
         }
         .buttonStyle(PressScale(scale: 0.97))
-        .longPressMenu { actions.openMenu(.song(SongSubject(track: track, song: song))) }
+        .contextMenu { SongMenuItems(subject: SongSubject(track: track, song: song)) }
     }
 }
 
@@ -575,7 +577,7 @@ struct ArtistCircle: View {
             }
         }
         .buttonStyle(PressScale(scale: 0.97))
-        .longPressMenu(enabled: library != nil) { if let library { actions.openMenu(.artist(library)) } }
+        .contextMenu { if let library { CollectionMenuItems(subject: .artist(library)) } }
     }
 }
 
@@ -600,7 +602,8 @@ struct ArtistRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(SqueezeStyle())
-        .longPressMenu { actions.openMenu(.artist(artist)) }
+        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: OctoRadius.row))
+        .contextMenu { CollectionMenuItems(subject: .artist(artist)) }
     }
 }
 
@@ -675,7 +678,7 @@ extension PlaylistCover {
 }
 
 /// A playlist line: its picture, the name, and a line under it with a cloud for one kept with
-/// the server. A long press opens its menu.
+/// the server.
 struct PlaylistLine<Picture: View>: View {
     let name: String
     var subtitle: String?

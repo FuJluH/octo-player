@@ -9,10 +9,12 @@ import SwiftUI
 ///   favorite-artists, artists, albums, songs, genres, folders, history, mostplayed, downloads,
 ///   health, removed, or a health check by name (`page:health-Duplicates`)
 /// - `album:NAME`, `artist:NAME`, `playlist:NAME`, `genre:NAME` open that page, by name
-/// - `menu:song`, `menu:album`, `menu:artist`, `menu:playlist` (or `menu:song=TITLE`) open that
-///   menu for the first such item (or the one named), beside nothing, in the middle;
-///   `menu:song:PAGE` opens it on a page: rate, share, info, playlist, delete
-/// - `info:TITLE` opens the song info pop-up
+/// - `menu:song`, `menu:album`, `menu:artist`, `menu:playlist`, `menu:options` (a playlist page's
+///   options), or `menu:song=TITLE` for the one named: the menu laid out as a list on a sheet,
+///   since a menu opens only under a finger. `menu:KIND:WHAT` opens what a row of it opens
+///   instead: `info` (song info), `playlist` (the playlist sheet), `new` (a new playlist's name),
+///   `rename`, `delete` (the question before deleting)
+/// - `info:TITLE` opens the song info sheet
 /// - `sort:LIST:OPTION:asc|desc` sets a list's order, like `sort:songs:Year:desc`
 /// - `pick:COUNT` picks the first COUNT songs of the open page that can pick songs
 /// - `songs-search:TEXT` opens Songs with the search open and the words typed
@@ -56,11 +58,11 @@ enum LibraryDrive {
             router.go(.library(.genre(value)))
         case "menu":
             let parts = value.split(separator: ":", maxSplits: 1).map(String.init)
-            guard let subject = await menu(parts.first ?? "song", library: library, state: actions.state) else { return }
-            actions.openMenu(subject, page: parts.count > 1 ? page(parts[1]) : nil)
+            guard let content = await menu(parts.first ?? "song", library: library) else { return }
+            open(content, parts.count > 1 ? parts[1] : nil, actions: actions)
         case "info":
             if let track = await library.search(value, artists: 0, albums: 0, songs: 5).tracks.first {
-                actions.openMenu(.songInfo(SongSubject(track: track, song: track.asSong)))
+                actions.showInfo(SongSubject(track: track, song: track.asSong))
             }
         case "sort":
             let parts = value.split(separator: ":").map(String.init)
@@ -102,19 +104,29 @@ enum LibraryDrive {
         }
     }
 
-    private static func page(_ name: String) -> MenuPage? {
-        switch name {
-        case "rate": .rate
-        case "share": .share
-        case "info": .info
-        case "playlist": .addToPlaylist(startAt: nil)
-        case "delete": .deleteFromDisk
-        case "rename": .rename
-        default: nil
+    /// Opens a menu laid out on a sheet, or what one of its rows opens.
+    private static func open(_ content: MenuPreview.Content, _ what: String?, actions: LibraryActions) {
+        switch (content, what) {
+        case (.song(let subject), "info"):
+            actions.showInfo(subject)
+        case (.song(let subject), "playlist"):
+            actions.playlistPick = PlaylistPick(source: .tracks([subject.track]))
+        case (.song(let subject), "new"):
+            actions.askNewPlaylist(.tracks([subject.track]))
+        case (.song(let subject), "delete"):
+            actions.askDeleteFromDisk([subject.track])
+        case (.collection(let subject), "playlist"):
+            actions.playlistPick = PlaylistPick(source: .collection(subject.target))
+        case (.collection(.playlist(let playlist)), "rename"), (.playlistOptions(let playlist), "rename"):
+            actions.askRename(playlist)
+        case (.collection(.playlist(let playlist)), "delete"), (.playlistOptions(let playlist), "delete"):
+            actions.askDeletePlaylist(playlist)
+        default:
+            actions.previewMenu(content)
         }
     }
 
-    private static func menu(_ value: String, library: Library, state: LibraryState) async -> MenuSubject? {
+    private static func menu(_ value: String, library: Library) async -> MenuPreview.Content? {
         let parts = value.split(separator: "=", maxSplits: 1).map(String.init)
         let kind = parts.first ?? "song"
         let named = parts.count > 1 ? parts[1] : nil
@@ -128,16 +140,16 @@ enum LibraryDrive {
             let album = if let named { await library.search(named, artists: 0, albums: 5, songs: 0).albums.first } else {
                 await library.albums().first
             }
-            return album.map { .album($0) }
+            return album.map { .collection(.album($0)) }
         case "artist":
             let artist = if let named { await library.search(named, artists: 5, albums: 0, songs: 0).artists.first } else {
                 await library.artists().first
             }
-            return artist.map { .artist($0) }
-        case "playlist":
+            return artist.map { .collection(.artist($0)) }
+        case "playlist", "options":
             let lists = await library.playlists()
             let playlist = named.flatMap { name in lists.first { $0.name.caseInsensitiveCompare(name) == .orderedSame } } ?? lists.first
-            return playlist.map { .playlist($0) }
+            return playlist.map { kind == "options" ? .playlistOptions($0) : .collection(.playlist($0)) }
         default:
             return nil
         }

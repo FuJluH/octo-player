@@ -2,27 +2,45 @@ import OctoKit
 import SwiftUI
 import UIKit
 
-/// Everything known about a song, as plain labelled lines, read once as the page opens.
-struct SongInfoPage: View {
+/// Everything known about a song, as labelled lines on a sheet, read once as it opens.
+struct SongInfoSheet: View {
     let subject: SongSubject
-    let canGoBack: Bool
-    let back: () -> Void
     @Environment(LibraryActions.self) private var actions
     @Environment(Session.self) private var session
+    @Environment(\.dismiss) private var dismiss
     @State private var lines: [InfoLine]?
 
     var body: some View {
-        GlassMenuPage(width: 320) {
-            if canGoBack { GlassMenuBack(title: "Song info", onBack: back) } else { GlassMenuHeading("Song info") }
-        } content: {
-            if let lines {
-                SongMenuHeader(track: subject.track)
-                ForEach(Array(lines.enumerated()), id: \.offset) { _, line in SongInfoRow(line: line) }
-                Color.clear.frame(height: 8)
-            } else {
-                GlassMenuNote("Reading the song")
+        NavigationStack {
+            List {
+                Section {
+                    HStack(spacing: 12) {
+                        ArtCover(artwork: subject.track.artwork, size: 56, radius: OctoRadius.artS)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(subject.track.title).font(.headline).lineLimit(2)
+                            Text(subject.track.artist).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+                if let lines {
+                    Section {
+                        ForEach(Array(lines.enumerated()), id: \.offset) { _, line in SongInfoRow(line: line) }
+                    }
+                } else {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("Reading the song").foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .navigationTitle("Song info")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
         }
+        .presentationDetents([.medium, .large])
         .task { lines = await read() }
     }
 
@@ -113,23 +131,19 @@ struct SongInfoPage: View {
     }
 }
 
-/// One line of the info page: its label, its value, and a Copy button for copyable ones.
+/// One line of the info sheet: its label over its value, and a Copy button for copyable ones.
 struct SongInfoRow: View {
     let line: InfoLine
     @State private var copied = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Text(line.label)
-                .font(.octoCaption)
-                .foregroundStyle(OctoColor.textMuted)
-                .frame(width: 92, alignment: .leading)
-                .padding(.top, 2)
-            Text(line.value)
-                .font(.octoBodySmall)
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(line.label).font(.footnote).foregroundStyle(.secondary)
+                Text(line.value).font(.body).textSelection(.enabled)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
             if line.copyable {
                 Button(copied ? "Copied" : "Copy") {
                     UIPasteboard.general.string = line.value
@@ -139,16 +153,9 @@ struct SongInfoRow: View {
                         copied = false
                     }
                 }
-                .font(.octoLabel)
-                .foregroundStyle(.white)
-                .buttonStyle(.plain)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 2)
+                .buttonStyle(.borderless)
+                .font(.subheadline)
             }
         }
-        .padding(.leading, 14)
-        .padding(.trailing, 6)
-        .padding(.vertical, 5)
-        .accessibilityElement(children: .combine)
     }
 }

@@ -132,53 +132,6 @@ private struct SidePan: UIGestureRecognizerRepresentable {
     }
 }
 
-/// A long press, for a row's or a card's menu. Once it begins, the touch no longer counts as a
-/// tap, so the row does not also play.
-struct MenuPress: UIGestureRecognizerRepresentable {
-    var enabled = true
-    let onPress: () -> Void
-
-    func makeUIGestureRecognizer(context: Context) -> UILongPressGestureRecognizer {
-        let press = UILongPressGestureRecognizer()
-        press.minimumPressDuration = 0.45
-        press.isEnabled = enabled
-        return press
-    }
-
-    func updateUIGestureRecognizer(_ recognizer: UILongPressGestureRecognizer, context: Context) {
-        recognizer.isEnabled = enabled
-    }
-
-    func handleUIGestureRecognizerAction(_ recognizer: UILongPressGestureRecognizer, context: Context) {
-        if recognizer.state == .began { onPress() }
-    }
-}
-
-extension View {
-    /// Opens a menu on a long press, beside the pressed control, with a light tick; screen
-    /// readers get it as the "Menu" action.
-    func longPressMenu(enabled: Bool = true, _ open: @escaping () -> Void) -> some View {
-        modifier(LongPressMenu(enabled: enabled, open: open))
-    }
-}
-
-private struct LongPressMenu: ViewModifier {
-    let enabled: Bool
-    let open: () -> Void
-    @State private var ticks = 0
-
-    func body(content: Content) -> some View {
-        content
-            .pressAnchor()
-            .gesture(MenuPress(enabled: enabled) {
-                ticks += 1
-                open()
-            })
-            .sensoryFeedback(.impact(weight: .light), trigger: ticks)
-            .accessibilityAction(named: "Menu") { if enabled { open() } }
-    }
-}
-
 extension View {
     /// While the list is picking songs, going back stops the picking instead of leaving the
     /// page. Goes inside `selectableSongs`, which hands down the picks.

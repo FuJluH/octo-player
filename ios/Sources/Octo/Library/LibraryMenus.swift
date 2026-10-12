@@ -1,11 +1,10 @@
-import Observation
 import OctoKit
 import SwiftUI
-import UIKit
 
-// The library's menus: glass pop-ups beside what was pressed, each with its pages (rate, add
-// to a playlist, share a link, song info, questions and names), every row with the same groups,
-// words and states as the other apps.
+// The library's menus as menu content: buttons, sub-menus and sections that a button's `Menu`
+// and a long press's `.contextMenu` both show, every row with the same groups, words and states
+// as the other apps. What a menu cannot hold (a name to type, a question, the song's info, the
+// playlists to pick from a list) opens as an alert or a sheet once the menu closes.
 
 /// A song a menu is about: the library's row for it (or one shaped like it), the plain song the
 /// player takes, where the menu was opened, and the list's picks when it can pick songs.
@@ -22,172 +21,47 @@ enum AddSource {
     case collection(CollectionTarget)
 }
 
-/// What a menu pop-up is about.
-enum MenuSubject {
-    case song(SongSubject)
+/// A collection a menu is about.
+enum CollectionSubject {
     case album(LibraryAlbum)
     case artist(LibraryArtist)
     case playlist(PlaylistSummary)
-    /// A playlist page's options; `deleted` runs once the playlist is gone.
-    case playlistOptions(PlaylistSummary, serverOnly: Bool, deleted: (@MainActor () -> Void)?)
-    case addToPlaylist(AddSource, startAt: String? = nil)
-    case newPlaylist([LibraryTrack])
-    /// A page's Share: a link to it, named by the title.
-    case share(ShareTarget, title: String)
-    case songInfo(SongSubject)
 
-    var firstPage: MenuPage {
+    var target: CollectionTarget {
         switch self {
-        case .song, .album, .artist, .playlist, .playlistOptions: .actions
-        case .addToPlaylist(_, let startAt): .addToPlaylist(startAt: startAt)
-        case .newPlaylist: .newPlaylist
-        case .share: .share
-        case .songInfo: .info
+        case .album(let album): .album(album.id)
+        case .artist(let artist): .artist(artist.id)
+        case .playlist(let playlist): .playlist(playlist.id)
         }
     }
 
-    /// What a screen reader calls the pop-up.
-    var paneTitle: String {
+    var pinKind: PinKind {
         switch self {
-        case .song: "Song menu"
-        case .album, .artist, .playlist: "Menu"
-        case .playlistOptions, .addToPlaylist, .newPlaylist: "Playlist"
-        case .share: "Share"
-        case .songInfo: "Song info"
+        case .album: .album
+        case .artist: .artist
+        case .playlist: .playlist
         }
     }
 
-    var heightShare: Double { PopupMeasures.heightShare }
-
-    /// Whether asking for this while `self` is open opens it as the next page: the playlist
-    /// pop-up's pages follow one another.
-    func continues(_ next: MenuSubject) -> Bool {
-        switch (self, next) {
-        case (.playlistOptions, .addToPlaylist), (.playlistOptions, .newPlaylist), (.addToPlaylist, .newPlaylist): true
-        default: false
+    var itemId: String {
+        switch self {
+        case .album(let album): album.id
+        case .artist(let artist): artist.id
+        case .playlist(let playlist): playlist.id
         }
     }
 }
 
-/// The pages of a menu pop-up.
-enum MenuPage: Equatable {
-    case actions, rate, share, info, deleteFromDisk
-    case addToPlaylist(startAt: String?)
-    case addAsk, newPlaylist, rename, deletePlaylist, findHigherQuality
-}
-
-/// One menu pop-up while it is open: what it is about and the page it is on.
-@MainActor
-@Observable
-final class MenuSession {
-    let id = UUID()
-    let subject: MenuSubject
-    let pages: PopupPages<MenuPage>
-    /// An add waiting on its question: the playlist and what adding would do.
-    var pendingAdd: (playlist: PlaylistSummary, plan: AddPlan)?
-
-    init(subject: MenuSubject, first: MenuPage) {
-        self.subject = subject
-        pages = PopupPages(first)
-    }
-}
-
-/// A menu pop-up's current page.
-struct LibraryMenuView: View {
-    let session: MenuSession
-
-    var body: some View {
-        PopupPager(pages: session.pages) { page, canGoBack in
-            MenuPageView(session: session, page: page, canGoBack: canGoBack)
-        }
-    }
-}
-
-private struct MenuPageView: View {
-    let session: MenuSession
-    let page: MenuPage
-    let canGoBack: Bool
-    @Environment(LibraryActions.self) private var actions
-
-    var body: some View {
-        switch (session.subject, page) {
-        case (.song(let subject), .actions):
-            SongActionsPage(session: session, subject: subject)
-        case (.song(let subject), .rate):
-            RatePage(session: session, subject: subject)
-        case (.song(let subject), .share):
-            SharePage(session: session, target: .song(subject.track.id), title: subject.track.title, fromMenu: true)
-        case (.song(let subject), .info), (.songInfo(let subject), .info):
-            SongInfoPage(subject: subject, canGoBack: canGoBack) { session.pages.back() }
-        case (.song(let subject), .deleteFromDisk):
-            let words = actions.deleteFromDiskQuestion([subject.track])
-            PopupQuestion(title: words.title, detail: words.body, confirm: "Delete") {
-                actions.closeMenu(session)
-                actions.deleteFromDisk([subject.track])
-            } onCancel: { session.pages.back() }
-        case (.song(let subject), .addToPlaylist(let startAt)):
-            PlaylistPickerPage(session: session, source: .tracks([subject.track]), startAt: startAt, canGoBack: canGoBack)
-        case (.album, .actions), (.artist, .actions), (.playlist, .actions):
-            CollectionActionsPage(session: session)
-        case (.album(let album), .addToPlaylist(let startAt)):
-            PlaylistPickerPage(session: session, source: .collection(.album(album.id)), startAt: startAt, canGoBack: canGoBack)
-        case (.artist(let artist), .addToPlaylist(let startAt)):
-            PlaylistPickerPage(session: session, source: .collection(.artist(artist.id)), startAt: startAt, canGoBack: canGoBack)
-        case (.playlist(let playlist), .addToPlaylist(let startAt)):
-            PlaylistPickerPage(session: session, source: .collection(.playlist(playlist.id)), startAt: startAt, canGoBack: canGoBack)
-        case (.album(let album), .findHigherQuality):
-            FindHigherQualityPage(session: session, albumId: album.id)
-        case (.playlist(let playlist), .rename), (.playlistOptions(let playlist, _, _), .rename):
-            PopupNameForm(title: "Rename playlist", placeholder: "Playlist name", action: "Save",
-                          onBack: canGoBack ? { session.pages.back() } : nil, onDone: { name in
-                              actions.rename(playlist, to: name)
-                              actions.closeMenu(session)
-                          }, initial: playlist.name)
-        case (.playlist(let playlist), .deletePlaylist):
-            DeletePlaylistPage(session: session, playlist: playlist, canGoBack: canGoBack, deleted: nil)
-        case (.playlistOptions(let playlist, _, let deleted), .deletePlaylist):
-            DeletePlaylistPage(session: session, playlist: playlist, canGoBack: canGoBack, deleted: deleted)
-        case (.playlistOptions(let playlist, let serverOnly, _), .actions):
-            PlaylistOptionsPage(session: session, playlist: playlist, serverOnly: serverOnly)
-        case (.addToPlaylist(let source, _), .addToPlaylist(let startAt)):
-            PlaylistPickerPage(session: session, source: source, startAt: startAt, canGoBack: canGoBack)
-        case (_, .addAsk):
-            AddAskPage(session: session)
-        case (.newPlaylist(let tracks), .newPlaylist):
-            PopupNameForm(title: "New playlist", placeholder: "Playlist name", action: "Create",
-                          onBack: canGoBack ? { session.pages.back() } : nil) { name in
-                actions.createPlaylist(name: name, tracks: tracks)
-                actions.closeMenu(session)
-            }
-        case (_, .newPlaylist):
-            PopupNameForm(title: "New playlist", placeholder: "Playlist name", action: "Create",
-                          onBack: canGoBack ? { session.pages.back() } : nil) { name in
-                actions.createPlaylist(name: name, tracks: [])
-                actions.closeMenu(session)
-            }
-        case (.share(let target, let title), .share):
-            SharePage(session: session, target: target, title: title, fromMenu: canGoBack)
-        default:
-            GlassMenuPage { GlassMenuNote("Nothing to show") }
-        }
-    }
-}
-
-/// The header of a song's menu pages: its artwork, title and artist.
-struct SongMenuHeader: View {
-    let track: LibraryTrack
-
-    var body: some View {
-        GlassMenuHeader(title: track.title, subtitle: track.artist) {
-            ArtCover(artwork: track.artwork, size: 40, radius: OctoRadius.artS)
-        }
-    }
+/// A menu button with its SF Symbol.
+private func item(_ title: String, _ icon: OctoIcon, role: ButtonRole? = nil, action: @escaping () -> Void) -> some View {
+    Button(title, systemImage: icon.symbol, role: role, action: action)
 }
 
 // MARK: Song menu
 
-private struct SongActionsPage: View {
-    let session: MenuSession
+/// A song's menu, in its groups: playing it (a row of quick actions), keeping it, going to its
+/// album or artist, sharing and looking into it, and last, what takes it away.
+struct SongMenuItems: View {
     let subject: SongSubject
     @Environment(LibraryActions.self) private var actions
     @Environment(Router.self) private var router
@@ -201,11 +75,17 @@ private struct SongActionsPage: View {
     private var state: LibraryState { actions.state }
 
     var body: some View {
-        GlassMenuPage {
-            SongMenuHeader(track: track)
-            GlassMenuSeparator()
-        } content: {
-            GlassMenuGroups(groups: songMenuGroups(offered)) { action in row(action) }
+        let groups = songMenuGroups(offered)
+        ForEach(Array(groups.enumerated()), id: \.offset) { index, group in
+            if index == 0, group.first == .playNext {
+                ControlGroup {
+                    ForEach(group, id: \.self) { row($0) }
+                }
+            } else {
+                Section {
+                    ForEach(group, id: \.self) { row($0) }
+                }
+            }
         }
     }
 
@@ -232,92 +112,77 @@ private struct SongActionsPage: View {
             .filter { $0 != .setAsSound }
     }
 
-    private func close(then run: () -> Void) {
-        actions.closeMenu(session)
-        run()
-    }
-
     @ViewBuilder
     private func row(_ action: SongAction) -> some View {
         switch action {
         case .playNext:
-            GlassMenuAction(.playNext, "Play next") { close { player.playNext([queued]) } }
+            item("Play next", .playNext) { player.playNext([queued]) }
         case .addToQueue:
-            GlassMenuAction(.addToQueue, "Add to queue") { close { player.append([queued]) } }
+            item("Add to queue", .addToQueue) { player.append([queued]) }
         case .startRadio:
-            GlassMenuAction(.radio, "Start radio") { close { Task { await actions.startRadio(queued) } } }
+            item("Start radio", .radio) { Task { await actions.startRadio(queued) } }
         case .download:
-            let state = downloads.state(song.id)
-            GlassMenuAction(state == .done ? .check : .addToLibrary, downloadLabel(state), enabled: state == .none) {
-                Task { _ = await downloads.request(song) }
-            }
+            let adding = downloads.state(song.id)
+            item(downloadLabel(adding), adding == .done ? .check : .addToLibrary) { Task { _ = await downloads.request(song) } }
+                .disabled(adding != .none)
         case .requestCopy, .removeFromMyLibrary, .setAsSound:
             EmptyView()
         case .addToLastPlaylist:
             if let last = state.lastPlaylist {
-                GlassMenuAction(.addToPlaylist, "Add to last playlist: \(last.name)") {
-                    session.pages.open(.addToPlaylist(startAt: last.id))
-                }
+                item("Add to last playlist: \(last.name)", .addToPlaylist) { actions.add(.tracks([track]), to: last) }
             }
         case .addToPlaylist:
-            GlassMenuAction(.addToPlaylist, "Add to playlist", opensPage: true) { session.pages.open(.addToPlaylist(startAt: nil)) }
+            AddToPlaylistMenu(source: .tracks([track]))
         case .removeFromPlaylist:
-            GlassMenuAction(.removeFromPlaylist, "Remove from this playlist") {
-                close {
-                    if let id = subject.context.playlistId, let item = subject.context.playlistItemId,
-                       let playlist = state.playlists.first(where: { $0.id == id }) {
-                        actions.remove([item], from: playlist)
-                    }
+            item("Remove from this playlist", .removeFromPlaylist, role: .destructive) {
+                if let id = subject.context.playlistId, let row = subject.context.playlistItemId,
+                   let playlist = state.playlists.first(where: { $0.id == id }) {
+                    actions.remove([row], from: playlist)
                 }
             }
         case .select:
-            GlassMenuAction(.select, "Select") {
-                close { subject.selection?.start(subject.context.selectKey ?? track.id) }
-            }
+            item("Select", .select) { subject.selection?.start(subject.context.selectKey ?? track.id) }
         case .keepOffline:
             let kept = state.kept(track.id)
-            GlassMenuAction(keptIcon(kept?.status), keepOfflineLabel(kept?.status, byHand: kept?.byHand ?? false),
-                            enabled: keepOfflineEnabled(kept?.status, byHand: kept?.byHand ?? false)) {
+            item(keepOfflineLabel(kept?.status, byHand: kept?.byHand ?? false), keptIcon(kept?.status)) {
                 actions.keepOfflineTapped(track)
             }
+            .disabled(!keepOfflineEnabled(kept?.status, byHand: kept?.byHand ?? false))
         case .findFlac:
-            GlassMenuAction(.lossless, findHigherQualityWords) { close { actions.findHigherQuality([track]) } }
+            item(findHigherQualityWords, .lossless) { actions.findHigherQuality([track]) }
         case .shareFile:
-            GlassMenuAction(.shareFile, "Share file") { close { actions.shareFiles([track]) } }
+            item("Share file", .shareFile) { actions.shareFiles([track]) }
         case .share:
-            GlassMenuAction(.share, "Share link", opensPage: true) { session.pages.open(.share) }
+            Menu {
+                ShareLinkItems(target: .song(track.id), title: track.title)
+            } label: {
+                Label("Share link", systemImage: OctoIcon.link.symbol)
+            }
         case .like:
             let liked = actions.isLiked(track)
-            GlassMenuAction(liked ? .liked : .like, liked ? "Remove from Liked songs" : "Add to Liked songs") {
-                actions.toggleLike(track)
-            }
+            item(liked ? "Remove from Liked songs" : "Add to Liked songs", liked ? .liked : .like) { actions.toggleLike(track) }
         case .rate:
-            let rating = state.rating(of: track)
-            GlassMenuAction(rating > 0 ? .starFilled : .star, "Rate", detail: starsLabel(rating), opensPage: true) {
-                session.pages.open(.rate)
-            }
+            RateMenu(track: track)
         case .goToAlbum:
-            GlassMenuAction(.album, "Go to album", enabled: !track.albumId.isEmpty) {
-                close { router.go(.album(Album(id: track.albumId, name: track.album, artist: track.artist, coverArt: coverId(of: track.artwork)))) }
+            item("Go to album", .album) {
+                router.go(.album(Album(id: track.albumId, name: track.album, artist: track.artist, coverArt: coverId(of: track.artwork))))
             }
+            .disabled(track.albumId.isEmpty)
         case .goToArtist:
-            GlassMenuAction(.artist, "Go to artist", enabled: !track.artistId.isEmpty) {
-                close { router.go(.artist(id: track.artistId, name: track.artist)) }
-            }
+            item("Go to artist", .artist) { router.go(.artist(id: track.artistId, name: track.artist)) }
+                .disabled(track.artistId.isEmpty)
         case .deleteFromPhone:
-            GlassMenuAction(.delete, "Delete from phone", destructive: true) { close { actions.deleteFromPhone([track]) } }
+            item("Delete from phone", .delete, role: .destructive) { actions.deleteFromPhone([track]) }
         case .deleteFromDisk:
-            GlassMenuAction(.delete, deleteFromDiskWords, opensPage: true, destructive: true) { session.pages.open(.deleteFromDisk) }
+            item(deleteFromDiskWords, .delete, role: .destructive) { actions.askDeleteFromDisk([track]) }
         case .info:
-            GlassMenuAction(.info, "Song info", opensPage: true) { session.pages.open(.info) }
+            item("Song info", .info) { actions.showInfo(subject) }
         case .findSongs:
-            GlassMenuAction(.search, "Find songs") {
-                close {
-                    if let id = track.serverSongId ?? (track.isFound ? song.id : nil) {
-                        router.serverDownloads = .find(id: id, title: track.title, from: nil)
-                    } else {
-                        router.show("This server has no copy of the song to look for")
-                    }
+            item("Find songs", .search) {
+                if let id = track.serverSongId ?? (track.isFound ? song.id : nil) {
+                    router.serverDownloads = .find(id: id, title: track.title, from: nil)
+                } else {
+                    router.show("This server has no copy of the song to look for")
                 }
             }
         }
@@ -332,400 +197,342 @@ private struct SongActionsPage: View {
     }
 }
 
-/// Five stars: a tap sets that many, a tap on the star the song has takes the rating off. The
-/// page stays open so the stars show the choice.
-private struct RatePage: View {
-    let session: MenuSession
-    let subject: SongSubject
+/// The song's rating as a sub-menu: its stars ticked, picking another sets it, "No rating" takes
+/// it off.
+struct RateMenu: View {
+    let track: LibraryTrack
     @Environment(LibraryActions.self) private var actions
 
     var body: some View {
-        let rating = actions.state.rating(of: subject.track)
-        GlassMenuPage {
-            GlassMenuBack(title: "Rate") { session.pages.back() }
-            SongMenuHeader(track: subject.track)
-        } content: {
-            HStack(spacing: 2) {
-                ForEach(1...5, id: \.self) { star in
-                    Button { actions.rate(subject.track, nextRating(current: rating, tapped: star)) } label: {
-                        IconView(star <= rating ? .starFilled : .star, size: 30, color: star <= rating ? .white : OctoColor.textMuted)
-                            .frame(width: 48, height: 48)
-                            .contentShape(Rectangle())
+        let rating = actions.state.rating(of: track)
+        Picker(selection: Binding(get: { rating }, set: { actions.rate(track, $0) })) {
+            Text("No rating").tag(0)
+            ForEach(1...5, id: \.self) { stars in
+                Text(starsLabel(stars) ?? "").tag(stars)
+            }
+        } label: {
+            Label("Rate", systemImage: (rating > 0 ? OctoIcon.starFilled : OctoIcon.star).symbol)
+        }
+        .pickerStyle(.menu)
+    }
+}
+
+/// The playlists to add songs to, as a sub-menu: "New playlist" first, then every playlist shown
+/// with this server, those added to most recently first, each with its song count.
+struct AddToPlaylistMenu: View {
+    let source: AddSource
+    @Environment(LibraryActions.self) private var actions
+
+    var body: some View {
+        Menu {
+            item("New playlist", .addToLibrary) { actions.askNewPlaylist(source) }
+            Section {
+                ForEach(actions.state.pickablePlaylists) { playlist in
+                    Button { actions.add(source, to: playlist) } label: {
+                        Label(playlist.name, systemImage: (playlist.onServer ? OctoIcon.cloud : OctoIcon.playlists).symbol)
+                        Text(songsCount(playlist.songCount))
                     }
-                    .buttonStyle(PressScale())
-                    .accessibilityLabel(star == 1 ? "1 star" : "\(star) stars")
-                    .accessibilityAddTraits(star == rating ? .isSelected : [])
                 }
             }
-            .frame(maxWidth: .infinity)
-            .padding(.bottom, 10)
+        } label: {
+            Label("Add to playlist", systemImage: OctoIcon.addToPlaylist.symbol)
         }
     }
 }
 
 /// How long a shared link lasts, under the note that anyone with it can listen. Picking one
 /// makes the link, then hands it to the phone's share sheet.
-private struct SharePage: View {
-    let session: MenuSession
+struct ShareLinkItems: View {
     let target: ShareTarget
     let title: String
-    let fromMenu: Bool
     @Environment(LibraryActions.self) private var actions
-    @State private var making: ShareExpiry?
-    @State private var failure: String?
 
     var body: some View {
-        GlassMenuPage {
-            if fromMenu {
-                GlassMenuBack(title: "Share link") { session.pages.back() }
-            } else {
-                GlassMenuHeading("Share \"\(title)\"")
-            }
-        } content: {
-            GlassMenuNote("Anyone with the link can listen.")
-            GlassMenuTitle("Link expires")
+        Text("Anyone with the link can listen.")
+        Section("Link expires") {
             ForEach(ShareExpiry.allCases, id: \.self) { expiry in
-                Button { make(expiry) } label: {
-                    HStack {
-                        Text(expiry.label)
-                            .font(.octoBodySmall)
-                            .foregroundStyle(making == nil || making == expiry ? Color.white : OctoColor.textMuted)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        if making == expiry { Spinner(size: 16) }
-                    }
-                    .padding(.horizontal, 14)
-                    .frame(minHeight: 46)
-                    .contentShape(GlassMenu.optionShape)
-                }
-                .buttonStyle(.plain)
-                .disabled(making != nil)
+                Button(expiry.label) { actions.makeLink(target, title: title, expiry: expiry) }
             }
-            if let failure { GlassMenuNote(failure, color: OctoColor.error) }
-        }
-    }
-
-    private func make(_ expiry: ShareExpiry) {
-        making = expiry
-        failure = nil
-        Task {
-            let words = await actions.share(target, title: title, expiry: expiry)
-            making = nil
-            if let words { failure = words } else { actions.closeMenu(session) }
         }
     }
 }
 
 // MARK: Collection menus
 
-private struct CollectionActionsPage: View {
-    let session: MenuSession
+/// An album's, an artist's or a playlist's menu, in its groups: playing it (play, shuffle and
+/// radio as a row of quick actions), keeping it, Home's pins, going to the artist, and last,
+/// changing the playlist.
+struct CollectionMenuItems: View {
+    let subject: CollectionSubject
     @Environment(LibraryActions.self) private var actions
     @Environment(Router.self) private var router
-    /// For an album: how many of its songs are only on a server and not kept, and how many the
-    /// server could replace with a better copy.
-    @State private var serverOnly = 0
-    @State private var lossy = 0
 
     private var state: LibraryState { actions.state }
-
-    private var target: CollectionTarget {
-        switch session.subject {
-        case .album(let album): .album(album.id)
-        case .artist(let artist): .artist(artist.id)
-        case .playlist(let playlist): .playlist(playlist.id)
-        default: .album("")
-        }
-    }
-
-    private var kind: PinKind {
-        switch target {
-        case .album: .album
-        case .artist: .artist
-        case .playlist: .playlist
-        }
-    }
-
-    private var itemId: String {
-        switch target {
-        case .album(let id), .artist(let id), .playlist(let id): id
-        }
-    }
+    private static let quick: Set<CollectionAction> = [.play, .shuffle, .startRadio]
 
     var body: some View {
-        GlassMenuPage {
-            header
-            GlassMenuSeparator()
-        } content: {
-            GlassMenuGroups(groups: collectionMenuGroups(offered)) { action in row(action) }
+        let groups = collectionMenuGroups(offered)
+        ForEach(Array(groups.enumerated()), id: \.offset) { index, group in
+            if index == 0, group.first == .play {
+                ControlGroup {
+                    ForEach(group.filter(Self.quick.contains), id: \.self) { row($0) }
+                }
+                Section {
+                    ForEach(group.filter { !Self.quick.contains($0) }, id: \.self) { row($0) }
+                }
+            } else {
+                Section {
+                    ForEach(group, id: \.self) { row($0) }
+                }
+            }
         }
-        .task(id: itemId) {
-            guard case .album(let id) = target else { return }
-            let tracks = await state.library.albumTracks(id)
-            serverOnly = tracks.filter { !$0.onPhone && state.kept($0.id) == nil }.count
-            lossy = tracks.filter(actions.canUpgrade).count
-        }
+        .onAppear { if case .album(let album) = subject { actions.loadAlbumFacts(album.id) } }
     }
 
-    @ViewBuilder
-    private var header: some View {
-        switch session.subject {
-        case .album(let album):
-            GlassMenuHeader(title: album.title, subtitle: album.artist) {
-                ArtCover(artwork: album.artwork, size: 40, radius: OctoRadius.artS)
-            }
-        case .artist(let artist):
-            GlassMenuHeader(title: artist.name, subtitle: albumsCount(artist.albumCount)) {
-                ArtCover(artwork: artist.artwork, size: 40, radius: 20)
-            }
-        case .playlist(let playlist):
-            GlassMenuHeader(title: playlist.name, subtitle: songsCount(playlist.songCount)) {
-                PlaylistCover(playlist: playlist, size: 40, radius: OctoRadius.artS)
-            }
-        default:
-            EmptyView()
-        }
-    }
-
+    /// For an album whose songs are not read yet, Download and Find higher quality show while
+    /// they might do something.
     private var offered: [CollectionAction] {
-        let spot = state.pinSpot(kind: kind.rawValue, id: itemId)
-        switch session.subject {
+        let spot = state.pinSpot(kind: subject.pinKind.rawValue, id: subject.itemId)
+        switch subject {
         case .album(let album):
-            return albumActions(canDownload: serverOnly > 0, favorite: state.favoriteAlbumIds.contains(album.id), pin: spot,
+            let facts = actions.albumFacts[album.id]
+            let canDownload = facts.map { $0.serverOnly.contains { state.kept($0) == nil } } ?? true
+            let lossy = facts?.lossy ?? (state.fileActions?.canUpgrade == true ? 1 : 0)
+            return albumActions(canDownload: canDownload, favorite: state.favoriteAlbumIds.contains(album.id), pin: spot,
                                 radio: true, lossy: lossy)
         case .artist(let artist):
             return artistActions(radio: true, favorite: state.favoriteArtistIds.contains(artist.id), pin: spot)
         case .playlist(let playlist):
             return playlistActions(empty: playlist.songCount == 0, pin: spot)
-        default:
-            return []
         }
-    }
-
-    /// Closes the menu, then acts on the collection's songs once they are read.
-    private func withSongs(_ use: @escaping @MainActor ([LibraryTrack]) -> Void) {
-        actions.closeMenu(session)
-        let target = target
-        Task {
-            let tracks = await state.songs(of: target)
-            if !tracks.isEmpty { use(tracks) }
-        }
-    }
-
-    private func close(then run: () -> Void) {
-        actions.closeMenu(session)
-        run()
     }
 
     @ViewBuilder
     private func row(_ action: CollectionAction) -> some View {
+        let target = subject.target
         switch action {
         case .play:
-            GlassMenuAction(.play, "Play") { withSongs { actions.play($0) } }
+            item("Play", .play) { actions.withSongs(of: target) { actions.play($0) } }
         case .shuffle:
-            GlassMenuAction(.shuffle, "Shuffle") { withSongs { actions.play($0, shuffled: true) } }
+            item("Shuffle", .shuffle) { actions.withSongs(of: target) { actions.play($0, shuffled: true) } }
         case .playNext:
-            GlassMenuAction(.playNext, "Play next") { withSongs { actions.playNext($0) } }
+            item("Play next", .playNext) { actions.withSongs(of: target) { actions.playNext($0) } }
         case .addToQueue:
-            GlassMenuAction(.addToQueue, "Add to queue") { withSongs { actions.addToQueue($0) } }
+            item("Add to queue", .addToQueue) { actions.withSongs(of: target) { actions.addToQueue($0) } }
         case .startRadio:
-            GlassMenuAction(.radio, "Start radio") {
-                let target = target
-                close {
-                    Task {
-                        switch target {
-                        case .album(let id): await actions.startAlbumRadio(id)
-                        case .artist(let id): await actions.startArtistRadio(id)
-                        case .playlist: break
-                        }
-                    }
-                }
-            }
-        case .addToPlaylist:
-            GlassMenuAction(.addToPlaylist, "Add to playlist", opensPage: true) { session.pages.open(.addToPlaylist(startAt: nil)) }
-        case .download:
-            GlassMenuAction(.download, "Download") {
-                withSongs { tracks in state.offline.download(tracks.filter { !$0.onPhone }.map(\.id)) }
-            }
-        case .findFlac:
-            GlassMenuAction(.lossless, findHigherQualityLabel(lossy), opensPage: true) { session.pages.open(.findHigherQuality) }
-        case .addToFavorites, .removeFromFavorites:
-            let on = action == .addToFavorites
-            GlassMenuAction(on ? .like : .liked, on ? "Add to favorites" : "Remove from favorites") {
-                close {
+            item("Start radio", .radio) {
+                Task {
                     switch target {
-                    case .album(let id): actions.setFavorite(album: id, on)
-                    case .artist(let id): actions.setFavorite(artist: id, on)
+                    case .album(let id): await actions.startAlbumRadio(id)
+                    case .artist(let id): await actions.startArtistRadio(id)
                     case .playlist: break
                     }
                 }
             }
+        case .addToPlaylist:
+            AddToPlaylistMenu(source: .collection(target))
+        case .download:
+            item("Download", .download) { actions.downloadSongs(of: target) }
+        case .findFlac:
+            let lossy = actions.albumFacts[subject.itemId]?.lossy
+            item(lossy.map(findHigherQualityLabel) ?? findHigherQualityWords, .lossless) {
+                actions.askFindHigherQuality(albumId: subject.itemId)
+            }
+        case .addToFavorites, .removeFromFavorites:
+            let on = action == .addToFavorites
+            item(on ? "Add to favorites" : "Remove from favorites", on ? .like : .liked) {
+                switch target {
+                case .album(let id): actions.setFavorite(album: id, on)
+                case .artist(let id): actions.setFavorite(artist: id, on)
+                case .playlist: break
+                }
+            }
         case .pinToHome:
-            GlassMenuAction(.pin, "Pin to Home") { close { actions.pin(kind, itemId) } }
+            item("Pin to Home", .pin) { actions.pin(subject.pinKind, subject.itemId) }
         case .unpin:
-            GlassMenuAction(.pin, "Unpin") { close { actions.unpin(kind, itemId) } }
+            item("Unpin", .pinned) { actions.unpin(subject.pinKind, subject.itemId) }
         case .moveToFront:
-            GlassMenuAction(.pin, "Move to front") { close { actions.moveToFront(kind, itemId) } }
+            item("Move to front", .pin) { actions.moveToFront(subject.pinKind, subject.itemId) }
         case .goToArtist:
-            GlassMenuAction(.artist, "Go to artist") {
-                close { if case .album(let album) = session.subject { router.go(.artist(id: album.artistId, name: album.artist)) } }
+            if case .album(let album) = subject {
+                item("Go to artist", .artist) { router.go(.artist(id: album.artistId, name: album.artist)) }
+                    .disabled(album.artistId.isEmpty)
             }
         case .rename:
-            GlassMenuAction(.rename, "Rename", opensPage: true) { session.pages.open(.rename) }
+            if case .playlist(let playlist) = subject {
+                item("Rename", .rename) { actions.askRename(playlist) }
+            }
         case .duplicate:
-            GlassMenuAction(.addToPlaylist, "Duplicate") {
-                close { if case .playlist(let playlist) = session.subject { actions.duplicate(playlist) } }
+            if case .playlist(let playlist) = subject {
+                item("Duplicate", .copy) { actions.duplicate(playlist) }
             }
         case .delete:
-            GlassMenuAction(.delete, "Delete", opensPage: true, destructive: true) { session.pages.open(.deletePlaylist) }
-        }
-    }
-}
-
-/// The question before an album's lossy songs go to the server to be looked for at a better copy.
-private struct FindHigherQualityPage: View {
-    let session: MenuSession
-    let albumId: String
-    @Environment(LibraryActions.self) private var actions
-    @State private var asks: [LibraryTrack]?
-
-    var body: some View {
-        Group {
-            if let asks {
-                PopupQuestion(title: findHigherQualityAsk(asks.count, source: actions.state.fileActions?.upgradeSource),
-                              detail: keepsOriginalWords, confirm: findHigherQualityWords) {
-                    actions.closeMenu(session)
-                    actions.findHigherQuality(asks)
-                } onCancel: { session.pages.back() }
-            } else {
-                GlassMenuPage { GlassMenuNote("Gathering the songs") }
+            if case .playlist(let playlist) = subject {
+                item("Delete", .delete, role: .destructive) { actions.askDeletePlaylist(playlist) }
             }
         }
-        .task { asks = await actions.state.library.albumTracks(albumId).filter(actions.canUpgrade) }
     }
 }
 
-// MARK: Playlist pop-up
-
-/// A playlist page's options.
-private struct PlaylistOptionsPage: View {
-    let session: MenuSession
+/// A playlist page's options: rename it, save it to the server, download its songs, write it as
+/// an M3U file, or delete it.
+struct PlaylistOptionsItems: View {
     let playlist: PlaylistSummary
+    /// Whether some of its songs are only on a server.
     let serverOnly: Bool
+    /// Runs once the playlist is gone.
+    let deleted: @MainActor () -> Void
     @Environment(LibraryActions.self) private var actions
 
     var body: some View {
-        GlassMenuPage {
-            GlassMenuHeading(playlist.name)
-        } content: {
-            GlassMenuAction(.rename, "Rename", opensPage: true) { session.pages.open(.rename) }
+        Section {
+            item("Rename", .rename) { actions.askRename(playlist) }
             if actions.canSaveToServer(playlist) {
-                GlassMenuAction(.cloud, "Save to server") {
-                    actions.closeMenu(session)
-                    actions.saveToServer(playlist)
-                }
+                item("Save to server", .cloud) { actions.saveToServer(playlist) }
             }
             if serverOnly {
-                GlassMenuAction(.download, "Download") {
-                    actions.closeMenu(session)
-                    let state = actions.state
-                    Task { state.offline.download(await state.playlistTracks(playlist.id).map(\.track).filter { !$0.onPhone }.map(\.id)) }
-                }
+                item("Download", .download) { actions.downloadSongs(of: .playlist(playlist.id)) }
             }
-            GlassMenuAction(.share, "Export as M3U") {
-                actions.closeMenu(session)
-                actions.exportPlaylist(playlist)
-            }
-            GlassMenuAction(.delete, "Delete", opensPage: true, destructive: true) { session.pages.open(.deletePlaylist) }
+            item("Export as M3U", .share) { actions.exportPlaylist(playlist) }
+        }
+        Section {
+            item("Delete", .delete, role: .destructive) { actions.askDeletePlaylist(playlist, deleted: deleted) }
         }
     }
 }
 
-/// Asks before a playlist goes; one kept with the server goes from there too.
-private struct DeletePlaylistPage: View {
-    let session: MenuSession
+// MARK: Sheets and alerts
+
+/// A name asked for in an alert with its field: a new playlist's, or a new name for one.
+struct NameRequest: Identifiable {
+    let id = UUID()
+    let title: String
+    let action: String
+    var initial = ""
+    let done: @MainActor (String) -> Void
+}
+
+/// The question when some songs are on the playlist already.
+struct AddAsk: Identifiable {
+    let id = UUID()
     let playlist: PlaylistSummary
-    let canGoBack: Bool
-    let deleted: (@MainActor () -> Void)?
-    @Environment(LibraryActions.self) private var actions
+    let plan: AddPlan
+}
 
-    var body: some View {
-        PopupQuestion(title: "Delete \"\(playlist.name)\"?",
-                      detail: playlist.onServer ? "It is deleted from your server too. The songs stay in your library."
-                          : "The songs stay in your library.",
-                      confirm: "Delete") {
-            actions.closeMenu(session)
-            actions.delete(playlist)
-            deleted?()
-        } onCancel: {
-            if canGoBack { session.pages.back() } else { actions.closeMenu(session) }
+/// A question before something that cannot be taken back, or that goes to the server.
+struct Question: Identifiable {
+    let id = UUID()
+    let title: String
+    var detail: String?
+    let confirm: String
+    var destructive = true
+    let run: @MainActor () -> Void
+}
+
+extension View {
+    /// The alert asking for a name, while `request` is set.
+    func nameAlert(_ request: Binding<NameRequest?>) -> some View { modifier(NameAlert(request: request)) }
+
+    /// The alert asking whether songs on the playlist already go on it again.
+    func addAskAlert(_ ask: Binding<AddAsk?>, add: @escaping @MainActor ([String], PlaylistSummary) -> Void) -> some View {
+        alert(ask.wrappedValue.map { addAgainQuestion($0.playlist.name, $0.plan) } ?? "",
+              isPresented: Binding(get: { ask.wrappedValue != nil }, set: { if !$0 { ask.wrappedValue = nil } }),
+              presenting: ask.wrappedValue) { ask in
+            if ask.plan.offersNewOnly {
+                Button(addNewOnes) { add(ask.plan.fresh, ask.playlist) }
+            }
+            Button(addAgainChoice(ask.plan)) { add(ask.plan.songs, ask.playlist) }
+            Button("Cancel", role: .cancel) {}
+        }
+    }
+
+    /// The alert asking a question, while `question` is set.
+    func questionAlert(_ question: Binding<Question?>) -> some View {
+        alert(question.wrappedValue?.title ?? "",
+              isPresented: Binding(get: { question.wrappedValue != nil }, set: { if !$0 { question.wrappedValue = nil } }),
+              presenting: question.wrappedValue) { asked in
+            Button(asked.confirm, role: asked.destructive ? .destructive : nil) { asked.run() }
+            Button("Cancel", role: .cancel) {}
+        } message: { asked in
+            if let detail = asked.detail { Text(detail) }
         }
     }
 }
 
-/// The playlists to add songs to: "New playlist" first (it turns into a name field in place),
-/// then every playlist shown with this server, those added to most recently first.
-private struct PlaylistPickerPage: View {
-    let session: MenuSession
+private struct NameAlert: ViewModifier {
+    @Binding var request: NameRequest?
+    @State private var name = ""
+
+    func body(content: Content) -> some View {
+        content
+            .alert(request?.title ?? "", isPresented: Binding(get: { request != nil }, set: { if !$0 { request = nil } }),
+                   presenting: request) { asked in
+                TextField("Playlist name", text: $name)
+                    .textInputAutocapitalization(.sentences)
+                Button(asked.action) { asked.done(name) }
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("Cancel", role: .cancel) {}
+            }
+            .onChange(of: request?.id, initial: true) { _, _ in name = request?.initial ?? "" }
+    }
+}
+
+/// The playlists to add songs to, on a sheet: for picked songs, where there is no menu to open.
+/// Its questions (a new playlist's name, adding songs again) open over the sheet.
+struct PlaylistPickerSheet: View {
     let source: AddSource
-    let startAt: String?
-    let canGoBack: Bool
     @Environment(LibraryActions.self) private var actions
-    @State private var tracks: [LibraryTrack]?
-    @State private var naming = false
-    @State private var checking = false
+    @Environment(\.dismiss) private var dismiss
+    @State private var naming: NameRequest?
+    @State private var ask: AddAsk?
+    @State private var checking: String?
 
     private var title: String {
-        let count = tracks?.count ?? 1
-        return count == 1 ? "Add to playlist" : "Add \(grouped(count)) songs to a playlist"
+        guard case .tracks(let tracks) = source, tracks.count > 1 else { return "Add to playlist" }
+        return "Add \(grouped(tracks.count)) songs to a playlist"
     }
 
     var body: some View {
-        GlassMenuPage {
-            if canGoBack { GlassMenuBack(title: title) { session.pages.back() } } else { GlassMenuHeading(title) }
-        } content: {
-            if tracks == nil {
-                GlassMenuNote("Gathering the songs")
-            } else if checking {
-                GlassMenuNote("Checking the playlist")
-            } else {
-                if naming {
-                    PopupNameField(placeholder: "Playlist name", action: "Create") { name in
-                        actions.createPlaylist(name: name, tracks: tracks ?? [])
-                        actions.closeMenu(session)
+        NavigationStack {
+            List {
+                Button {
+                    naming = actions.newPlaylistRequest(source) { dismiss() }
+                } label: {
+                    Label("New playlist", systemImage: OctoIcon.addToLibrary.symbol)
+                }
+                Section {
+                    ForEach(actions.state.pickablePlaylists) { playlist in
+                        Button { pick(playlist) } label: {
+                            PlaylistPickRow(playlist: playlist, checking: checking == playlist.id)
+                        }
+                        .disabled(checking != nil)
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                } else {
-                    GlassMenuAction(.addToLibrary, "New playlist") { naming = true }
                 }
-                ForEach(actions.state.pickablePlaylists) { playlist in
-                    PlaylistPickRow(playlist: playlist) { pick(playlist) }
-                }
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             }
         }
-        .task {
-            switch source {
-            case .tracks(let given): tracks = given
-            case .collection(let target): tracks = await actions.state.songs(of: target)
-            }
-            if let startAt, let playlist = actions.state.playlists.first(where: { $0.id == startAt }) {
-                checking = true
-                pick(playlist)
-            }
+        .presentationDetents([.medium, .large])
+        .nameAlert($naming)
+        .addAskAlert($ask) { ids, playlist in
+            dismiss()
+            actions.addNow(ids, to: playlist)
         }
     }
 
     /// Adds at once when none is on the playlist yet; otherwise asks first.
     private func pick(_ playlist: PlaylistSummary) {
-        let given = tracks ?? []
+        checking = playlist.id
         Task {
-            let (plan, _) = await actions.planAdding(given, to: playlist)
-            checking = false
+            let plan = await actions.plan(source, to: playlist)
+            checking = nil
             if plan.asks {
-                session.pendingAdd = (playlist, plan)
-                session.pages.open(.addAsk)
+                ask = AddAsk(playlist: playlist, plan: plan)
             } else {
-                actions.closeMenu(session)
+                dismiss()
                 actions.addNow(plan.songs, to: playlist)
             }
         }
@@ -736,71 +543,56 @@ private struct PlaylistPickerPage: View {
 /// the server.
 private struct PlaylistPickRow: View {
     let playlist: PlaylistSummary
-    let action: () -> Void
+    let checking: Bool
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                PlaylistCover(playlist: playlist, size: 36, radius: 6)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(playlist.name).font(.octoBodySmall).foregroundStyle(.white).lineLimit(1)
-                    HStack(spacing: 4) {
-                        Text(songsCount(playlist.songCount)).font(.octoCaption).foregroundStyle(OctoColor.textMuted)
-                        if playlist.onServer {
-                            IconView(.cloud, size: 12, color: OctoColor.textMuted).accessibilityLabel("On your server")
-                        }
+        HStack(spacing: 12) {
+            PlaylistCover(playlist: playlist, size: 44, radius: 6)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(playlist.name).foregroundStyle(.primary).lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(songsCount(playlist.songCount))
+                    if playlist.onServer {
+                        Image(systemName: OctoIcon.cloud.symbol).accessibilityLabel("On your server")
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .frame(minHeight: 52)
-            .contentShape(GlassMenu.optionShape)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if checking { ProgressView() }
         }
-        .buttonStyle(MenuPressStyle())
         .accessibilityElement(children: .combine)
     }
 }
 
-/// The question when some songs are on the playlist already.
-private struct AddAskPage: View {
-    let session: MenuSession
-    @Environment(LibraryActions.self) private var actions
-
-    var body: some View {
-        if let pending = session.pendingAdd {
-            let question = addAgainQuestion(pending.playlist.name, pending.plan)
-            if pending.plan.offersNewOnly {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(question).font(.octoBody).foregroundStyle(.white).lineLimit(3).accessibilityAddTraits(.isHeader)
-                    HStack(spacing: 10) {
-                        AccentButton(addNewOnes) { add(pending.plan.fresh, pending.playlist) }
-                        GlazeButton(addAgainChoice(pending.plan)) { add(pending.plan.songs, pending.playlist) }
-                    }
-                    .padding(.top, 18)
-                }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 18)
-                .frame(width: GlassMenu.width, alignment: .leading)
-            } else {
-                PopupQuestion(title: question, confirm: addAgainChoice(pending.plan)) {
-                    add(pending.plan.songs, pending.playlist)
-                } onCancel: { session.pages.back() }
-            }
-        }
+/// A menu laid out as a list on a sheet, for the drive's screenshots of what a menu holds.
+struct MenuPreview: Identifiable {
+    enum Content {
+        case song(SongSubject)
+        case collection(CollectionSubject)
+        case playlistOptions(PlaylistSummary)
     }
 
-    private func add(_ ids: [String], _ playlist: PlaylistSummary) {
-        actions.closeMenu(session)
-        actions.addNow(ids, to: playlist)
-    }
+    let id = UUID()
+    let content: Content
 }
 
-/// A row under the finger shows the quiet pressed pill, as the menu's own rows do.
-struct MenuPressStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .background { if configuration.isPressed { GlassMenu.optionShape.fill(OctoColor.menuPress) } }
+struct MenuPreviewSheet: View {
+    let preview: MenuPreview
+
+    var body: some View {
+        NavigationStack {
+            List {
+                switch preview.content {
+                case .song(let subject): SongMenuItems(subject: subject)
+                case .collection(let subject): CollectionMenuItems(subject: subject)
+                case .playlistOptions(let playlist): PlaylistOptionsItems(playlist: playlist, serverOnly: true, deleted: {})
+                }
+            }
+            .navigationTitle("Menu")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .presentationDetents([.large])
     }
 }

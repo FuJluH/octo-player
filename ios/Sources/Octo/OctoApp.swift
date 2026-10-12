@@ -63,7 +63,7 @@ struct OctoApp: App {
         _selectionActions = State(initialValue: selectionActions)
         _libraryActions = State(initialValue: LibraryActions(
             state: LibraryState(data: data, session: session), player: player, router: router, session: session,
-            prompts: prompts, overlays: overlays, spots: presses, selection: selectionActions, selectionBar: selectionBar))
+            selection: selectionActions, selectionBar: selectionBar))
         _lyrics = State(initialValue: LyricsStore(session: session))
         _artworkColors = State(initialValue: ArtworkColorStore(session: session))
         data.start()

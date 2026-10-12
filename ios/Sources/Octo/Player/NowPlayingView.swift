@@ -149,7 +149,7 @@ struct NowPlayingView: View {
     /// The wash slows to 10 frames a second while a card is open over it or the app is not in
     /// front.
     private var focused: Bool {
-        scenePhase == .active && !(showsTime || libraryActions.menu != nil || showsLyricsMenu || showsChooser)
+        scenePhase == .active && !(showsTime || showsLyricsMenu || showsChooser)
     }
 
     // MARK: Layouts
@@ -337,22 +337,22 @@ struct NowPlayingView: View {
         }
     }
 
-    /// The song menu for the song playing, the same one every song row opens.
-    private func openSongMenu(page: MenuPage? = nil) {
-        guard let song = player.current else { return }
-        libraryActions.openMenu(.song(SongSubject(track: libraryActions.state.provisional(song), song: song)), page: page)
+    /// The song playing as the song menu takes it.
+    private var menuSubject: SongSubject? {
+        player.current.map { SongSubject(track: libraryActions.state.provisional($0), song: $0) }
     }
 
+    /// The song menu for the song playing, the same one every song row opens.
     private var moreButton: some View {
-        Button {
-            openSongMenu()
+        Menu {
+            if let menuSubject { SongMenuItems(subject: menuSubject) }
         } label: {
             IconView(.more, size: 24, color: ink.opacity(0.6))
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
         .buttonStyle(NoPress())
-        .pressAnchor()
+        .disabled(menuSubject == nil)
         .accessibilityLabel("More")
     }
 
@@ -562,10 +562,8 @@ struct NowPlayingView: View {
             timePages.reset(.sleep)
             timePages.open(.speed)
             showsTime = true
-        case "more":
-            openSongMenu()
-        case "rate":
-            openSongMenu(page: .rate)
+        case "more", "rate":
+            if let menuSubject { libraryActions.previewMenu(.song(menuSubject)) }
         case "lyricsmenu", "timing":
             if !lyrics.open { toggleLyrics() }
             lyricsPages.reset(.options)

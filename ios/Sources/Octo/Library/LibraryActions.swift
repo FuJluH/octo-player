@@ -7,7 +7,8 @@ import UniformTypeIdentifiers
 
 /// What the menus, the rows and the selection bar do beyond a single call: playing, radios,
 /// likes and ratings, adding to playlists, links, phone files, deleting from disk and finding
-/// better copies. The menus themselves open as glass pop-ups beside what was pressed.
+/// better copies. The menus are menu content (`LibraryMenus.swift`); what they cannot hold opens
+/// from here as an alert or a sheet.
 @MainActor
 @Observable
 final class LibraryActions {
@@ -23,8 +24,20 @@ final class LibraryActions {
     var export: PlaylistExport?
     /// Songs being looked for at a better copy, by server id.
     private(set) var upgrading = Set<String>()
-    /// The menu pop-up open now, if any.
-    private(set) var menu: MenuSession?
+    /// A name being asked for.
+    var naming: NameRequest?
+    /// Songs on a playlist already, asked about before they go on again.
+    var addAsk: AddAsk?
+    /// A question before an action.
+    var question: Question?
+    /// The song whose info sheet is open.
+    var info: InfoRequest?
+    /// Picked songs to add to a playlist chosen on a sheet.
+    var playlistPick: PlaylistPick?
+    /// A menu laid out on a sheet.
+    var menuPreview: MenuPreview?
+    /// What album menus know of their songs, by album id.
+    private(set) var albumFacts: [String: AlbumFacts] = [:]
 
     /// The one in use, for steps run from outside the pages.
     static weak var current: LibraryActions?
@@ -33,22 +46,16 @@ final class LibraryActions {
     @ObservationIgnored let player: Player
     @ObservationIgnored let router: Router
     @ObservationIgnored let session: Session
-    @ObservationIgnored let prompts: Prompts
-    @ObservationIgnored let overlays: Overlays
-    @ObservationIgnored let spots: PressSpots
     @ObservationIgnored weak var selectionBar: SelectionBarState?
     /// The library's part of a backup, kept here since backups hold it weakly.
     @ObservationIgnored private var backups: LibraryBackups?
 
-    init(state: LibraryState, player: Player, router: Router, session: Session, prompts: Prompts, overlays: Overlays,
-         spots: PressSpots, selection: SelectionActions, selectionBar: SelectionBarState) {
+    init(state: LibraryState, player: Player, router: Router, session: Session, selection: SelectionActions,
+         selectionBar: SelectionBarState) {
         self.state = state
         self.player = player
         self.router = router
         self.session = session
-        self.prompts = prompts
-        self.overlays = overlays
-        self.spots = spots
         self.selectionBar = selectionBar
         Self.current = self
         state.files.router = router
@@ -69,7 +76,7 @@ final class LibraryActions {
         let state = state
         selection.addToPlaylist = { [weak self] songs in
             guard let self else { return }
-            self.openMenu(.addToPlaylist(.tracks(state.tracks(for: songs))))
+            self.playlistPick = PlaylistPick(source: .tracks(state.tracks(for: songs)))
         }
         selection.download = { songs in
             state.offline.download(state.tracks(for: songs).filter { !$0.onPhone }.map(\.id))
@@ -88,28 +95,48 @@ final class LibraryActions {
 
     // MARK: Menus
 
-    /// Opens a menu beside what was just pressed. Asking for a playlist page while the menu is
-    /// open opens it as the next page, with a way back.
-    func openMenu(_ subject: MenuSubject, page: MenuPage? = nil, anchor: CGRect? = nil) {
-        if let open = menu, open.subject.continues(subject) {
-            open.pages.open(page ?? subject.firstPage)
-            return
+    /// Shows the song info sheet.
+    func showInfo(_ subject: SongSubject) { info = InfoRequest(subject: subject) }
+
+    /// Lays a menu out on a sheet.
+    func previewMenu(_ content: MenuPreview.Content) { menuPreview = MenuPreview(content: content) }
+
+    /// Reads a collection's songs, then acts on them when there are any.
+    func withSongs(of target: CollectionTarget, _ use: @escaping @MainActor ([LibraryTrack]) -> Void) {
+        let state = state
+        Task {
+            let tracks = await state.songs(of: target)
+            if !tracks.isEmpty { use(tracks) }
         }
-        let session = MenuSession(subject: subject, first: page ?? subject.firstPage)
-        menu = session
-        overlays.showPopup(session.id, anchor: anchor ?? spots.recent(), title: subject.paneTitle,
-                           maxWidth: CGFloat(PopupMeasures.maxWidth), heightShare: subject.heightShare,
-                           content: AnyView(LibraryMenuView(session: session)),
-                           dismiss: { [weak self] in self?.closeMenu(session) },
-                           back: { session.pages.back() })
     }
 
-    /// Closes the menu, keeping what it showed while it fades.
-    func closeMenu(_ session: MenuSession? = nil) {
-        guard let open = session ?? menu else { return }
-        overlays.hidePopup(open.id)
-        if menu === open { menu = nil }
+    /// Downloads a collection's songs that are only on a server and not downloaded yet.
+    func downloadSongs(of target: CollectionTarget) {
+        let state = state
+        let router = router
+        withSongs(of: target) { tracks in
+            let wanted = tracks.filter { !$0.onPhone && !$0.isFound && state.kept($0.id) == nil }
+            if wanted.isEmpty {
+                router.show("Every song here is on this phone already")
+            } else {
+                state.offline.download(wanted.map(\.id))
+            }
+        }
     }
+
+    /// Reads what an album's menu needs from its songs, once until the library changes.
+    func loadAlbumFacts(_ albumId: String) {
+        guard albumFacts[albumId] == nil else { return }
+        let library = library
+        Task {
+            let tracks = await library.albumTracks(albumId)
+            albumFacts[albumId] = AlbumFacts(serverOnly: tracks.filter { !$0.onPhone }.map(\.id),
+                                             lossy: tracks.filter(canUpgrade).count)
+        }
+    }
+
+    /// Forgets what album menus knew, when the library changes.
+    func forgetAlbumFacts() { if !albumFacts.isEmpty { albumFacts = [:] } }
 
     // MARK: Playing
 
@@ -228,6 +255,62 @@ final class LibraryActions {
         let library = tracks.filter { !$0.isFound }
         let onPlaylist = Set(await state.playlistTracks(playlist.id).map(\.track.id))
         return (planAdd(library.map(\.id), onPlaylist: onPlaylist), library)
+    }
+
+    /// What adding the songs to a playlist would do, reading a collection's songs first.
+    func plan(_ source: AddSource, to playlist: PlaylistSummary) async -> AddPlan {
+        await planAdding(await tracks(of: source), to: playlist).0
+    }
+
+    private func tracks(of source: AddSource) async -> [LibraryTrack] {
+        switch source {
+        case .tracks(let given): given
+        case .collection(let target): await state.songs(of: target)
+        }
+    }
+
+    /// Adds at once when none is on the playlist yet; otherwise asks first.
+    func add(_ source: AddSource, to playlist: PlaylistSummary) {
+        Task {
+            let plan = await plan(source, to: playlist)
+            if plan.asks {
+                addAsk = AddAsk(playlist: playlist, plan: plan)
+            } else if plan.songs.isEmpty {
+                router.show("No library songs to add")
+            } else {
+                addNow(plan.songs, to: playlist)
+            }
+        }
+    }
+
+    /// Asks for a new playlist's name, then makes it with the songs.
+    func askNewPlaylist(_ source: AddSource) { naming = newPlaylistRequest(source) }
+
+    /// The name question for a new playlist; `made` runs once a name is given.
+    func newPlaylistRequest(_ source: AddSource, made: (@MainActor () -> Void)? = nil) -> NameRequest {
+        NameRequest(title: "New playlist", action: "Create") { [weak self] name in
+            guard let self else { return }
+            made?()
+            Task { self.createPlaylist(name: name, tracks: await self.tracks(of: source)) }
+        }
+    }
+
+    func askRename(_ playlist: PlaylistSummary) {
+        naming = NameRequest(title: "Rename playlist", action: "Save", initial: playlist.name) { [weak self] name in
+            self?.rename(playlist, to: name)
+        }
+    }
+
+    /// Asks before a playlist goes; one kept with the server goes from there too. `deleted` runs
+    /// once it is gone.
+    func askDeletePlaylist(_ playlist: PlaylistSummary, deleted: (@MainActor () -> Void)? = nil) {
+        question = Question(title: "Delete \"\(playlist.name)\"?",
+                            detail: playlist.onServer ? "It is deleted from your server too. The songs stay in your library."
+                                : "The songs stay in your library.",
+                            confirm: "Delete") { [weak self] in
+            self?.delete(playlist)
+            deleted?()
+        }
     }
 
     /// Adds songs at the end and says so, with an Undo that takes exactly those rows back out.
@@ -352,6 +435,13 @@ final class LibraryActions {
         }
     }
 
+    /// Makes a shared link from a menu; a failure says why.
+    func makeLink(_ target: ShareTarget, title: String, expiry: ShareExpiry) {
+        Task {
+            if let words = await share(target, title: title, expiry: expiry) { router.show(words) }
+        }
+    }
+
     // MARK: Phone files
 
     /// Hands the songs' phone files to the share sheet; songs from the Music app's library are
@@ -373,9 +463,9 @@ final class LibraryActions {
     func deleteFromPhone(_ tracks: [LibraryTrack]) {
         let songs = tracks.filter(\.onPhone)
         guard !songs.isEmpty else { return }
-        prompts.confirm(songs.count == 1 ? "Delete this song from the phone?" : "Delete \(songs.count) songs from the phone?",
-                        detail: songs.count == 1 ? "Its file is removed for good" : "Their files are removed for good",
-                        confirm: "Delete") { [weak self] in
+        question = Question(title: songs.count == 1 ? "Delete this song from the phone?" : "Delete \(songs.count) songs from the phone?",
+                            detail: songs.count == 1 ? "Its file is removed for good" : "Their files are removed for good",
+                            confirm: "Delete") { [weak self] in
             guard let self else { return }
             Task {
                 if let words = await self.data.device.delete(songs.map(\.id)) { self.router.show(words) }
@@ -402,7 +492,7 @@ final class LibraryActions {
         guard !songs.isEmpty else { return }
         let words = deleteFromDiskQuestion(songs)
         let asked = state.files.server()
-        prompts.confirm(words.title, detail: words.body, confirm: "Delete") { [weak self] in
+        question = Question(title: words.title, detail: words.body, confirm: "Delete") { [weak self] in
             self?.deleteFromDisk(songs, on: asked)
         }
     }
@@ -463,12 +553,13 @@ final class LibraryActions {
         Task {
             let asks = await library.albumTracks(albumId).filter(canUpgrade)
             if asks.isEmpty {
-                router.show("Every song here is being looked for already")
+                router.show("No song here can be looked for at a higher quality now")
                 return
             }
-            prompts.confirm(findHigherQualityAsk(asks.count, source: state.fileActions?.upgradeSource),
-                            detail: keepsOriginalWords, confirm: findHigherQualityWords) {
+            question = Question(title: findHigherQualityAsk(asks.count, source: state.fileActions?.upgradeSource),
+                                detail: keepsOriginalWords, confirm: findHigherQualityWords, destructive: false) {
                 self.findHigherQuality(asks)
+                self.albumFacts[albumId] = nil
             }
         }
     }
@@ -480,6 +571,25 @@ enum ShareTarget: Hashable {
     case album(String)
 }
 
+/// The song an info sheet is about.
+struct InfoRequest: Identifiable {
+    let id = UUID()
+    let subject: SongSubject
+}
+
+/// Songs to add to a playlist picked on a sheet.
+struct PlaylistPick: Identifiable {
+    let id = UUID()
+    let source: AddSource
+}
+
+/// What an album's menu knows of its songs: those only on a server, and how many a server could
+/// look for at a better copy.
+struct AlbumFacts {
+    var serverOnly: [String]
+    var lossy: Int
+}
+
 /// A playlist to write to a file the person picks.
 struct PlaylistExport: Identifiable {
     let id = UUID()
@@ -487,8 +597,9 @@ struct PlaylistExport: Identifiable {
     var text: String
 }
 
-/// The system pieces the library hands work to, over everything: the share sheet and the file
-/// picker for exports. It also keeps the menus' playlists and ratings fresh.
+/// The system pieces the library hands work to, over everything: its alerts, the song info and
+/// playlist sheets, the share sheet and the file picker for exports. It also keeps the menus'
+/// playlists, ratings and album facts fresh.
 struct LibraryPresenter: ViewModifier {
     @Environment(LibraryActions.self) private var actions
     @Environment(Router.self) private var router
@@ -498,8 +609,17 @@ struct LibraryPresenter: ViewModifier {
     func body(content: Content) -> some View {
         @Bindable var actions = actions
         return content
-            .task(id: library.stamp(.library, .playlists, .ratings)) { await actions.state.refreshCaches() }
+            .task(id: library.stamp(.library, .playlists, .ratings)) {
+                actions.forgetAlbumFacts()
+                await actions.state.refreshCaches()
+            }
             .task(id: session.activeId) { await actions.state.serverChanged() }
+            .nameAlert($actions.naming)
+            .addAskAlert($actions.addAsk) { ids, playlist in actions.addNow(ids, to: playlist) }
+            .questionAlert($actions.question)
+            .sheet(item: $actions.info) { request in SongInfoSheet(subject: request.subject) }
+            .sheet(item: $actions.playlistPick) { pick in PlaylistPickerSheet(source: pick.source) }
+            .sheet(item: $actions.menuPreview) { preview in MenuPreviewSheet(preview: preview) }
             .sheet(item: $actions.shareItem) { item in
                 ActivitySheet(items: item.items, subject: item.subject)
                     .presentationDetents([.medium, .large])

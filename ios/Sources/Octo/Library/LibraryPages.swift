@@ -166,7 +166,6 @@ struct SongsPage: View {
     @Environment(Library.self) private var library
     @Environment(LibraryState.self) private var state
     @Environment(LibraryActions.self) private var actions
-    @Environment(Prompts.self) private var prompts
     @State private var sorted: Sorted<LibraryTrack>?
     @State private var shown: [LibraryTrack]?
     @State private var shownHeadings: [String]?
@@ -369,13 +368,16 @@ struct SongsPage: View {
         if let on {
             FilterChip(text: on, on: true, action: clear)
         } else {
-            Button {
-                prompts.choose(title, answers.map { Choice($0.1) }) { index in pick(answers[index].0) }
+            Menu {
+                Section(title) {
+                    ForEach(answers.indices, id: \.self) { index in
+                        Button(answers[index].1) { pick(answers[index].0) }
+                    }
+                }
             } label: {
                 chipLabel(off, on: false)
             }
             .buttonStyle(.plain)
-            .choiceAnchor()
             .accessibilityAddTraits(.isToggle)
         }
     }
@@ -502,7 +504,6 @@ struct HistoryPage: View {
     @State var mostPlayed: Bool
     @Environment(Library.self) private var library
     @Environment(LibraryActions.self) private var actions
-    @Environment(Prompts.self) private var prompts
     @State private var days: [HistoryDay]?
     @State private var most: [PlayedTrack]?
     @State private var range: HistoryRange = .fourWeeks
@@ -566,10 +567,10 @@ struct HistoryPage: View {
     private var mostPlayedList: some View {
         HStack {
             Spacer()
-            Button {
-                let ranges = HistoryRange.allCases
-                prompts.choose("Most played in", ranges.map { Choice($0.label) },
-                               selected: ranges.firstIndex(of: range) ?? -1) { range = ranges[$0] }
+            Menu {
+                Picker("Most played in", selection: $range) {
+                    ForEach(HistoryRange.allCases, id: \.self) { range in Text(range.label).tag(range) }
+                }
             } label: {
                 HStack(spacing: 4) {
                     Text(range.label).font(LibraryLook.label)
@@ -581,7 +582,6 @@ struct HistoryPage: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .choiceAnchor()
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Most played, \(range.label)")
             .accessibilityHint("Change the time range")
@@ -721,7 +721,11 @@ struct DownloadsPage: View {
         }
         .buttonStyle(SqueezeStyle())
         .rowSwipe(.remove { remove(row) }, enabled: byHand)
-        .gesture(MenuPress(enabled: byHand) { remove(row) })
+        .contextMenu {
+            if byHand {
+                Button("Remove download", systemImage: OctoIcon.delete.symbol, role: .destructive) { remove(row) }
+            }
+        }
         .accessibilityAction(named: "Remove download") { if byHand { remove(row) } }
     }
 
