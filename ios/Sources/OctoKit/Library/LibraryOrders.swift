@@ -1,9 +1,8 @@
 import Foundation
 
-// Every library list in the order the listener chose. Only the first key follows the chosen
-// direction; the keys after it break ties the same way whichever way the list runs, so an
-// album's songs stay in album order in a list of newest first. Missing values (no year, no
-// rating, never liked) go last whichever way the list runs.
+// Orders put together in memory: by plays, the short lists (playlists, downloads, a folder's
+// songs, favorites) and the listening of albums and artists. The long lists are ordered by
+// SortQueries' SQL.
 
 /// How much something was listened to: how many plays, and when the last was.
 public struct Listening: Hashable, Sendable {
@@ -31,9 +30,9 @@ public func byListening<T>(_ base: [T], id: (T) -> String, listening: [String: L
         }
     }
     func compare(_ a: Listening, _ b: Listening) -> Int {
-        let first = mostPlayed ? (a.plays, b.plays) : (Int(clamping: a.lastPlayedAt), Int(clamping: b.lastPlayedAt))
+        let first = mostPlayed ? (Int64(a.plays), Int64(b.plays)) : (a.lastPlayedAt, b.lastPlayedAt)
         if first.0 != first.1 { return first.0 < first.1 ? -1 : 1 }
-        let second = mostPlayed ? (Int(clamping: a.lastPlayedAt), Int(clamping: b.lastPlayedAt)) : (a.plays, b.plays)
+        let second = mostPlayed ? (a.lastPlayedAt, b.lastPlayedAt) : (Int64(a.plays), Int64(b.plays))
         if second.0 != second.1 { return second.0 < second.1 ? -1 : 1 }
         return 0
     }
@@ -47,7 +46,7 @@ public func byListening<T>(_ base: [T], id: (T) -> String, listening: [String: L
     return descending ? listened + never : never + listened
 }
 
-/// One key of an order that can be missing: missing ones go last either way.
+/// One key of an in-memory order.
 public enum SortKey: Comparable, Sendable {
     case int(Int64)
     case text(String)
@@ -64,13 +63,10 @@ public enum SortKey: Comparable, Sendable {
 
 /// Sorts by one key the chosen way, with items missing it last either way, then by `ties`,
 /// which always run the same way. Each key is worked out once.
-public func sortedByKey<T, K: Comparable>(_ items: [T], descending: Bool, key: (T) -> K?,
-                                          ties: (T, T) -> Bool) -> [T] {
+public func sortedByKey<T, K: Comparable>(_ items: [T], descending: Bool, key: (T) -> K?, ties: (T, T) -> Bool) -> [T] {
     let keys = items.map(key)
     let order = items.indices.sorted { a, b in
-        let ka = keys[a]
-        let kb = keys[b]
-        switch (ka, kb) {
+        switch (keys[a], keys[b]) {
         case (nil, nil): break
         case (nil, _): return false
         case (_, nil): return true
@@ -84,12 +80,11 @@ public func sortedByKey<T, K: Comparable>(_ items: [T], descending: Bool, key: (
     return order.map { items[$0] }
 }
 
-/// Builds a "comes before" test from keys compared in turn, each the way it is written.
+/// A "comes before" test from keys compared in turn, each the way it is written.
 public func ascending<T>(_ keys: ((T) -> SortKey)...) -> (T, T) -> Bool {
     { a, b in
         for key in keys {
-            let ka = key(a)
-            let kb = key(b)
+            let ka = key(a), kb = key(b)
             if ka != kb { return ka < kb }
         }
         return false
@@ -109,8 +104,6 @@ public func sortFavorites<T>(_ items: [T], order: ListOrder, likedAt: (T) -> Int
     })
 }
 
-// MARK: Songs
-
 /// A list in the order it was asked for. When the order is by name, each item's name to file it
 /// under a letter; nil otherwise.
 public struct Sorted<T: Sendable>: Sendable {
@@ -125,173 +118,9 @@ public struct Sorted<T: Sendable>: Sendable {
     }
 }
 
-/// A key that runs as written, one that follows the chosen direction, or a test that puts
-/// missing values last.
-private enum Key<T> {
-    case asWritten((T) -> SortKey)
-    case chosen((T) -> SortKey)
-    case asWrittenDescending((T) -> SortKey)
-    case missingLast((T) -> Bool)
-}
-
-private func order<T>(_ items: [T], keys: [Key<T>], descending: Bool) -> [T] {
-    items.sorted { a, b in
-        for key in keys {
-            switch key {
-            case .asWritten(let k):
-                let x = k(a), y = k(b)
-                if x != y { return x < y }
-            case .asWrittenDescending(let k):
-                let x = k(a), y = k(b)
-                if x != y { return y < x }
-            case .chosen(let k):
-                let x = k(a), y = k(b)
-                if x != y { return descending ? y < x : x < y }
-            case .missingLast(let missing):
-                let x = missing(a), y = missing(b)
-                if x != y { return !x }
-            }
-        }
-        return false
-    }
-}
-
-private var inAlbumOrder: [Key<ShownSong>] {
-    [.asWritten { .text($0.albumId) }, .asWritten { .int(Int64($0.albumOrder)) },
-     .asWritten { .text($0.sortKey) }, .asWritten { .text($0.id) }]
-}
-
-private func songKeys(_ sort: SongSort) -> [Key<ShownSong>] {
-    switch sort {
-    case .title, .mostPlayed, .recentlyPlayed, .folderOrder:
-        [.chosen { .text($0.sortKey) }, .asWritten { .text($0.artistKey) }, .asWritten { .text($0.id) }]
-    case .artist:
-        [.chosen { .text($0.artistKey) }, .asWritten { .text($0.albumKey) }] + inAlbumOrder
-    case .album:
-        [.chosen { .text($0.albumKey) }, .asWritten { .text($0.artistKey) }] + inAlbumOrder
-    case .recentlyAdded:
-        [.chosen { .int($0.addedAt) }] + inAlbumOrder
-    case .year:
-        [.missingLast { $0.year == nil }, .chosen { .int(Int64($0.year ?? 0)) }, .asWritten { .text($0.albumKey) }] + inAlbumOrder
-    case .length:
-        [.chosen { .int($0.durationMs) }, .asWritten { .text($0.sortKey) }, .asWritten { .text($0.id) }]
-    case .rating:
-        [.missingLast { $0.rating == 0 }, .chosen { .int(Int64($0.rating)) }, .asWrittenDescending { .int($0.liked ? 1 : 0) },
-         .asWritten { .text($0.sortKey) }, .asWritten { .text($0.id) }]
-    case .liked:
-        [.chosen { .int($0.liked ? 1 : 0) }, .asWritten { .text($0.sortKey) }, .asWritten { .text($0.id) }]
-    case .dateLiked:
-        [.missingLast { $0.likedAt == nil }, .chosen { .int($0.likedAt ?? 0) }, .asWritten { .text($0.sortKey) },
-         .asWritten { .text($0.id) }]
-    }
-}
-
-/// The name a song files under in a list ordered by name.
-private func songHeading(_ sort: SongSort, _ track: ShownSong) -> String? {
-    switch sort {
-    case .title: track.sortKey
-    case .artist: track.artistKey
-    case .album: track.albumKey
-    default: nil
-    }
-}
-
-/// Songs in an order. Orders by plays are put together from the title order and each song's
-/// listening; they have no headings.
-public func sortSongs(_ tracks: [ShownSong], _ order: ListOrder) -> Sorted<ShownSong> {
-    let sort = order.by.song ?? .title
-    let sorted = OctoKit.order(tracks, keys: songKeys(sort), descending: order.descending)
-    if sort.byListening {
-        var listening: [String: Listening] = [:]
-        for track in tracks { listening[track.id] = Listening(plays: track.plays, lastPlayedAt: track.lastPlayedAt) }
-        return Sorted(items: byListening(sorted, id: \.id, listening: listening, mostPlayed: sort == .mostPlayed,
-                                         descending: order.descending),
-                      order: order, headings: nil)
-    }
-    let headings = sort.byName ? sorted.map { songHeading(sort, $0) ?? "" } : nil
-    return Sorted(items: sorted, order: order, headings: headings)
-}
-
-/// The liked songs only, in an order.
-public func likedSongs(_ tracks: [ShownSong], _ order: ListOrder) -> Sorted<ShownSong> {
-    sortSongs(tracks.filter(\.liked), order)
-}
-
-/// A genre's songs: those whose genre is the name, ignoring case.
-public func genreSongs(_ tracks: [ShownSong], genre: String, _ order: ListOrder) -> Sorted<ShownSong> {
-    let name = genre.lowercased()
-    return sortSongs(tracks.filter { $0.genre.lowercased() == name }, order)
-}
-
-// MARK: Albums
-
-private func albumKeys(_ sort: AlbumSort) -> [Key<ShownAlbum>] {
-    switch sort {
-    case .title, .mostPlayed, .recentlyPlayed:
-        [.chosen { .text($0.sortKey) }, .asWritten { .text($0.artistKey) }, .asWritten { .text($0.id) }]
-    case .artist:
-        [.chosen { .text($0.artistKey) }, .asWritten { .text($0.sortKey) }, .asWritten { .text($0.id) }]
-    case .year:
-        [.missingLast { $0.year == nil }, .chosen { .int(Int64($0.year ?? 0)) }, .asWritten { .text($0.artistKey) },
-         .asWritten { .text($0.sortKey) }, .asWritten { .text($0.id) }]
-    case .recentlyAdded:
-        [.chosen { .int($0.addedAt) }, .asWritten { .text($0.sortKey) }, .asWritten { .text($0.id) }]
-    case .songCount:
-        [.chosen { .int(Int64($0.songCount)) }, .asWritten { .text($0.sortKey) }, .asWritten { .text($0.id) }]
-    case .length:
-        [.chosen { .int($0.durationMs) }, .asWritten { .text($0.sortKey) }, .asWritten { .text($0.id) }]
-    }
-}
-
-/// Albums in an order. Headings only for Title and Artist.
-public func sortAlbums(_ albums: [ShownAlbum], _ order: ListOrder) -> Sorted<ShownAlbum> {
-    let sort = order.by.album ?? .title
-    let sorted = OctoKit.order(albums, keys: albumKeys(sort), descending: order.descending)
-    if sort.byListening {
-        var listening: [String: Listening] = [:]
-        for album in albums { listening[album.id] = Listening(plays: album.plays, lastPlayedAt: album.lastPlayedAt) }
-        return Sorted(items: byListening(sorted, id: \.id, listening: listening, mostPlayed: sort == .mostPlayed,
-                                         descending: order.descending),
-                      order: order, headings: nil)
-    }
-    let headings: [String]? = switch sort {
-    case .title: sorted.map(\.sortKey)
-    case .artist: sorted.map(\.artistKey)
-    default: nil
-    }
-    return Sorted(items: sorted, order: order, headings: headings)
-}
-
-// MARK: Artists
-
-private func artistKeys(_ sort: ArtistSort) -> [Key<ShownArtist>] {
-    switch sort {
-    case .name, .mostPlayed, .recentlyPlayed: [.chosen { .text($0.sortKey) }, .asWritten { .text($0.id) }]
-    case .songCount: [.chosen { .int(Int64($0.songCount)) }, .asWritten { .text($0.sortKey) }, .asWritten { .text($0.id) }]
-    case .albumCount: [.chosen { .int(Int64($0.albumCount)) }, .asWritten { .text($0.sortKey) }, .asWritten { .text($0.id) }]
-    case .recentlyAdded: [.chosen { .int($0.addedAt) }, .asWritten { .text($0.sortKey) }, .asWritten { .text($0.id) }]
-    }
-}
-
-/// Artists in an order. Headings only for Name.
-public func sortArtists(_ artists: [ShownArtist], _ order: ListOrder) -> Sorted<ShownArtist> {
-    let sort = order.by.artist ?? .name
-    let sorted = OctoKit.order(artists, keys: artistKeys(sort), descending: order.descending)
-    if sort.byListening {
-        var listening: [String: Listening] = [:]
-        for artist in artists { listening[artist.id] = Listening(plays: artist.plays, lastPlayedAt: artist.lastPlayedAt) }
-        return Sorted(items: byListening(sorted, id: \.id, listening: listening, mostPlayed: sort == .mostPlayed,
-                                         descending: order.descending),
-                      order: order, headings: nil)
-    }
-    return Sorted(items: sorted, order: order, headings: sort == .name ? sorted.map(\.sortKey) : nil)
-}
-
-// MARK: Short lists
-
-/// Playlists: by when changed or made, or song count, ties by name then id; or by name.
-public func sortPlaylists(_ playlists: [ShownPlaylist], _ order: ListOrder) -> [ShownPlaylist] {
-    let byName = ascending({ (p: ShownPlaylist) in .text(sortKey(p.name)) }, { .text($0.id) })
+/// Playlists: by when changed or made, or song count, ties by name key then id; or by name.
+public func sortPlaylists(_ playlists: [PlaylistSummary], _ order: ListOrder) -> [PlaylistSummary] {
+    let byName = ascending({ (p: PlaylistSummary) in .text(sortKey(p.name)) }, { .text($0.id) })
     let descending = order.descending
     switch order.by.playlist {
     case .recentlyChanged: return sortedByKey(playlists, descending: descending, key: { $0.updatedAt }, ties: byName)
@@ -301,13 +130,32 @@ public func sortPlaylists(_ playlists: [ShownPlaylist], _ order: ListOrder) -> [
     }
 }
 
-/// A folder's songs. By artist here means the song's own artist.
-public func sortFolderSongs(_ songs: [ShownSong], _ order: ListOrder) -> [ShownSong] {
+/// Downloads on their way stay at the top as they were (downloading, then waiting, then
+/// failed); the finished ones below go in the chosen order.
+public func sortDownloads<T>(_ rows: [T], _ order: ListOrder, done: (T) -> Bool, title: (T) -> String, id: (T) -> String,
+                             size: (T) -> Int64, addedAt: (T) -> Int64) -> [T] {
+    let finished = rows.filter(done)
+    let active = rows.filter { !done($0) }
+    let byTitle: (T, T) -> Bool = { a, b in
+        let ka = sortKey(title(a)), kb = sortKey(title(b))
+        return ka != kb ? ka < kb : id(a) < id(b)
+    }
     let descending = order.descending
-    let inAlbum: [(ShownSong) -> SortKey] = [
+    let sorted: [T] = switch order.by.download {
+    case .title: sortedByKey(finished, descending: descending, key: { sortKey(title($0)) }, ties: { id($0) < id($1) })
+    case .size: sortedByKey(finished, descending: descending, key: size, ties: byTitle)
+    default: sortedByKey(finished, descending: descending, key: addedAt, ties: byTitle)
+    }
+    return active + sorted
+}
+
+/// A folder's songs. By artist here means the song's own artist.
+public func sortFolderSongs(_ songs: [LibraryTrack], _ order: ListOrder) -> [LibraryTrack] {
+    let descending = order.descending
+    let inAlbum: [(LibraryTrack) -> SortKey] = [
         { .text($0.albumId) }, { .int(Int64($0.albumOrder)) }, { .text($0.sortKey) }, { .text($0.id) },
     ]
-    func then(_ first: @escaping (ShownSong) -> SortKey, _ rest: [(ShownSong) -> SortKey]) -> (ShownSong, ShownSong) -> Bool {
+    func then(_ first: @escaping (LibraryTrack) -> SortKey, _ rest: [(LibraryTrack) -> SortKey]) -> (LibraryTrack, LibraryTrack) -> Bool {
         let all = [first] + rest
         return { a, b in
             for key in all {
@@ -319,8 +167,7 @@ public func sortFolderSongs(_ songs: [ShownSong], _ order: ListOrder) -> [ShownS
     }
     switch order.by.song {
     case .title:
-        return sortedByKey(songs, descending: descending, key: { $0.sortKey },
-                           ties: ascending({ .text(sortKey($0.artist)) }, { .text($0.id) }))
+        return sortedByKey(songs, descending: descending, key: { $0.sortKey }, ties: ascending({ .text(sortKey($0.artist)) }, { .text($0.id) }))
     case .artist:
         return sortedByKey(songs, descending: descending, key: { sortKey($0.artist) }, ties: then({ .text(sortKey($0.album)) }, inAlbum))
     case .album:
@@ -336,38 +183,45 @@ public func sortFolderSongs(_ songs: [ShownSong], _ order: ListOrder) -> [ShownS
     }
 }
 
-// MARK: Listening of albums and artists
+// MARK: Listening of songs, albums and artists
 
-/// Each album's listening: its songs' plays added up, and the latest play of any of them, with
-/// the server's album history (`albumsPlayed`, the last time each album was played) too.
-public func albumListening(_ tracks: [ShownSong], albumsPlayed: [String: Int64] = [:]) -> [String: Listening] {
+/// Each song's listening, by song id.
+public func songListening(_ played: [PlayedTrack]) -> [String: Listening] {
+    var out: [String: Listening] = [:]
+    for row in played { out[row.track.id] = Listening(plays: row.plays, lastPlayedAt: row.lastPlayedAt) }
+    return out
+}
+
+/// Each album's listening: its songs' plays added up, and the latest play of any of them, the
+/// server's album history included.
+public func albumListening(_ played: [PlayedTrack], _ albums: [PlayedAlbum]) -> [String: Listening] {
     var byAlbum: [String: Listening] = [:]
-    for track in tracks where track.plays > 0 || track.lastPlayedAt > 0 {
-        if let before = byAlbum[track.albumId] {
-            byAlbum[track.albumId] = Listening(plays: before.plays + track.plays, lastPlayedAt: max(before.lastPlayedAt, track.lastPlayedAt))
+    for song in played {
+        if let before = byAlbum[song.track.albumId] {
+            byAlbum[song.track.albumId] = Listening(plays: before.plays + song.plays, lastPlayedAt: max(before.lastPlayedAt, song.lastPlayedAt))
         } else {
-            byAlbum[track.albumId] = Listening(plays: track.plays, lastPlayedAt: track.lastPlayedAt)
+            byAlbum[song.track.albumId] = Listening(plays: song.plays, lastPlayedAt: song.lastPlayedAt)
         }
     }
-    for (albumId, at) in albumsPlayed {
-        if let before = byAlbum[albumId] {
-            byAlbum[albumId] = Listening(plays: before.plays, lastPlayedAt: max(before.lastPlayedAt, at))
+    for album in albums {
+        if let before = byAlbum[album.album.id] {
+            byAlbum[album.album.id] = Listening(plays: before.plays, lastPlayedAt: max(before.lastPlayedAt, album.lastPlayedAt))
         } else {
-            byAlbum[albumId] = Listening(plays: 0, lastPlayedAt: at)
+            byAlbum[album.album.id] = Listening(plays: 0, lastPlayedAt: album.lastPlayedAt)
         }
     }
     return byAlbum
 }
 
-/// Each artist's listening, from their songs, grouped by `artistId`.
-public func artistListening(_ tracks: [ShownSong], artistId: (ShownSong) -> String = \.artistId) -> [String: Listening] {
+/// Each artist's listening, from the songs on their albums.
+public func artistListening(_ played: [PlayedTrack]) -> [String: Listening] {
     var byArtist: [String: Listening] = [:]
-    for track in tracks where track.plays > 0 || track.lastPlayedAt > 0 {
-        let id = artistId(track)
+    for song in played {
+        let id = song.track.artistId
         if let before = byArtist[id] {
-            byArtist[id] = Listening(plays: before.plays + track.plays, lastPlayedAt: max(before.lastPlayedAt, track.lastPlayedAt))
+            byArtist[id] = Listening(plays: before.plays + song.plays, lastPlayedAt: max(before.lastPlayedAt, song.lastPlayedAt))
         } else {
-            byArtist[id] = Listening(plays: track.plays, lastPlayedAt: track.lastPlayedAt)
+            byArtist[id] = Listening(plays: song.plays, lastPlayedAt: song.lastPlayedAt)
         }
     }
     return byArtist

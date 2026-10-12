@@ -126,14 +126,9 @@ public func downloadLabel(_ state: DownloadState) -> String {
     }
 }
 
-/// Where a download to the phone stands.
-public enum KeptStatus: String, Sendable {
-    case queued, downloading, done, failed
-}
-
 /// The row's words for a library song downloaded to the phone, or not yet. `byHand` is a
 /// download asked for from a menu, which can be removed here; one a rule keeps goes with its rule.
-public func keepOfflineLabel(_ state: KeptStatus?, byHand: Bool) -> String {
+public func keepOfflineLabel(_ state: DownloadStatus?, byHand: Bool) -> String {
     switch state {
     case nil: "Download"
     case .queued: "Waiting to download"
@@ -144,7 +139,7 @@ public func keepOfflineLabel(_ state: KeptStatus?, byHand: Bool) -> String {
 }
 
 /// Whether the row can be tapped.
-public func keepOfflineEnabled(_ state: KeptStatus?, byHand: Bool) -> Bool {
+public func keepOfflineEnabled(_ state: DownloadStatus?, byHand: Bool) -> Bool {
     state == nil || state == .failed || (state == .done && byHand)
 }
 

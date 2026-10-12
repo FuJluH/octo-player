@@ -50,12 +50,12 @@ import Testing
     }
 
     @Test func serverErrorsInPlainWords() {
-        #expect(serverErrorWords(URLError(.cannotConnectToHost)) == "Couldn't reach the server. Check the address, and that you're on the right network.")
-        #expect(serverErrorWords(OctoError.http(503)) == "The server isn't answering right now. It may be restarting, so try again in a moment.")
-        #expect(serverErrorWords(OctoError.notSubsonic) == "That address answered, but not like a music server. Check the port.")
-        #expect(serverErrorWords(OctoError.wrongCredentials("x")) == "Wrong username or password.")
-        #expect(serverErrorWords(OctoError.notFound("x")) == "That isn't on the server any more.")
-        #expect(serverErrorWords(OctoError.server(code: 0, message: "Nope")) == "The server said: Nope")
+        #expect(userMessage(URLError(.cannotConnectToHost)) == "Couldn't reach the server. Check the address, and that you're on the right network.")
+        #expect(userMessage(OctoError.http(503)) == "The server isn't answering right now. It may be restarting, so try again in a moment.")
+        #expect(userMessage(OctoError.notSubsonic) == "That address answered, but not like a music server. Check the port.")
+        #expect(userMessage(OctoError.wrongCredentials("x")) == "Wrong username or password.")
+        #expect(userMessage(OctoError.notFound("x")) == "That isn't on the server any more.")
+        #expect(userMessage(OctoError.server(code: 0, message: "Nope")) == "The server said: Nope")
         #expect(accessButtonLabel(deniedForever: true) == "Open settings")
         #expect(accessButtonLabel(deniedForever: false) == "Allow access")
     }

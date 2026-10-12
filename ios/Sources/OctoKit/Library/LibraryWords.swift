@@ -73,27 +73,6 @@ public func titleFitsBeside(titleWidth: Double, buttonsWidth: Double, width: Dou
     titleWidth + buttonsWidth <= width
 }
 
-/// Why a request to the server failed, in words a person can act on.
-public func serverErrorWords(_ error: Error) -> String {
-    if let octo = error as? OctoError {
-        switch octo {
-        case .wrongCredentials: return "Wrong username or password."
-        case .authUnsupported(let code, _):
-            return code == 41 ? "This account can't sign in with a token. Turn on Legacy sign-in under Advanced."
-                : "The server doesn't take this way of signing in."
-        case .notFound: return "That isn't on the server any more."
-        case .server(_, let message): return "The server said: \(message)"
-        case .notSubsonic: return "That address answered, but not like a music server. Check the port."
-        case .http(let status):
-            return [502, 503, 504, 520, 521, 522, 523, 524, 530].contains(status)
-                ? "The server isn't answering right now. It may be restarting, so try again in a moment."
-                : "That address answered, but not like a music server. Check the port."
-        }
-    }
-    if error is URLError { return "Couldn't reach the server. Check the address, and that you're on the right network." }
-    return "Something went wrong."
-}
-
 /// The button for the phone's music, worded for whether the system still asks.
 public func accessButtonLabel(deniedForever: Bool) -> String { deniedForever ? "Open settings" : "Allow access" }
 
@@ -260,7 +239,7 @@ public func keptBy(_ reasons: Set<String>, playlistNames: [String: String]) -> S
 }
 
 /// The line under a download: where it is, or why it is kept.
-public func downloadDetail(_ state: KeptStatus, progress: Double, sizeBytes: Int64, reasons: Set<String>,
+public func downloadDetail(_ state: DownloadStatus, progress: Double, sizeBytes: Int64, reasons: Set<String>,
                            playlistNames: [String: String]) -> String {
     switch state {
     case .queued: return "Waiting"
