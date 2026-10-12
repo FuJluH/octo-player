@@ -57,6 +57,7 @@ struct AlbumView: View {
             }
         }
         .barClearance()
+        .pageArtwork(.album(album), shown?.coverId ?? album.coverArt)
         .backStopsPicking()
         .selectableSongs(state.pickables(listed))
         .libraryRefreshable {}
@@ -352,6 +353,7 @@ struct ArtistView: View {
             .onChange(of: order) { _, _ in proxy.scrollTo("albums", anchor: .top) }
         }
         .barClearance()
+        .pageArtwork(.artist(id: id, name: name), artist?.coverId)
         .backStopsPicking()
         .selectableSongs(state.pickables(songs))
         .libraryRefreshable {}
