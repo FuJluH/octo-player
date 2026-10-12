@@ -47,8 +47,7 @@ struct NowPlayingView: View {
     @State private var showsQueue = false
     @State private var showsTime = false
     @State private var timePages = PopupPages(TimePage.sleep)
-    @State private var showsMenu = false
-    @State private var menuPages = PopupPages(PlayerMenuPage.actions)
+    @State private var airPlay = AirPlayTrigger()
     @State private var showsLyricsMenu = false
     @State private var lyricsPages = PopupPages(LyricsMenuPage.options)
     @State private var showsChooser = false
@@ -131,15 +130,9 @@ struct NowPlayingView: View {
             take(request)
         }
         .onAppear(perform: arrive)
+        .accessibilityAction(.escape) { close() }
         .glassPopup(isPresented: $showsTime, title: "Sleep timer and speed", maxWidth: 340, onBack: { timePages.back() }) {
             TimeCard(pages: timePages) { showsTime = false }
-        }
-        .glassPopup(isPresented: $showsMenu, title: "Song menu", onBack: { menuPages.back() }) {
-            if let song = player.current {
-                PlayerSongMenu(song: song, facts: facts, pages: menuPages, dismiss: { showsMenu = false }) { route in
-                    close { router.go(route) }
-                }
-            }
         }
         .glassPopup(isPresented: $showsLyricsMenu, title: "Lyrics", onBack: { lyricsPages.back() }) {
             LyricsMenuContent(pages: lyricsPages, trackId: player.current?.id, dismiss: { showsLyricsMenu = false }) {
@@ -157,7 +150,7 @@ struct NowPlayingView: View {
     /// The wash slows to 10 frames a second while a card is open over it or the app is not in
     /// front.
     private var focused: Bool {
-        scenePhase == .active && !(showsTime || showsMenu || showsLyricsMenu || showsChooser)
+        scenePhase == .active && !(showsTime || showsLyricsMenu || showsChooser)
     }
 
     // MARK: Layouts
@@ -235,19 +228,18 @@ struct NowPlayingView: View {
 
     // MARK: Top line
 
+    /// The album the song is from, alone at the top: the player closes with a pull down, and
+    /// AirPlay and Sound are in the More menu.
     private var topLine: some View {
         ZStack {
             if let song = player.current, let name = albumLabel(song.album, song.title, facts.albumSongs) {
                 albumName(name, song: song)
             }
-            HStack(spacing: 0) {
-                PlayerCloseButton(ink: ink) { close() }
-                Spacer(minLength: 0)
-                PlayerCastButton(ink: ink)
-                PlayerSoundButton(ink: ink) { close { router.go(.sound) } }
-            }
+            HiddenRoutePicker(trigger: airPlay)
+                .frame(width: 1, height: 1)
+                .accessibilityHidden(true)
         }
-        .frame(height: 56)
+        .frame(height: 40)
     }
 
     @ViewBuilder
@@ -263,9 +255,9 @@ struct NowPlayingView: View {
             } label: { words }
                 .buttonStyle(NoPress())
                 .accessibilityHint("Open album")
-                .padding(.horizontal, 104)
+                .padding(.horizontal, 24)
         } else {
-            words.padding(.horizontal, 104)
+            words.padding(.horizontal, 24)
         }
     }
 
@@ -346,16 +338,16 @@ struct NowPlayingView: View {
     }
 
     private var moreButton: some View {
-        Button {
-            menuPages.reset(.actions)
-            showsMenu = true
+        Menu {
+            if let song = player.current {
+                PlayerSongMenu(song: song, facts: facts, airPlay: airPlay) { route in close { router.go(route) } }
+            }
         } label: {
             IconView(.more, size: 24, color: ink.opacity(0.6))
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(NoPress())
-        .pressAnchor()
+        .menuOrder(.fixed)
         .accessibilityLabel("More")
     }
 
@@ -565,13 +557,6 @@ struct NowPlayingView: View {
             timePages.reset(.sleep)
             timePages.open(.speed)
             showsTime = true
-        case "more":
-            menuPages.reset(.actions)
-            showsMenu = true
-        case "rate":
-            menuPages.reset(.actions)
-            menuPages.open(.rate)
-            showsMenu = true
         case "lyricsmenu", "timing":
             if !lyrics.open { toggleLyrics() }
             lyricsPages.reset(.options)
