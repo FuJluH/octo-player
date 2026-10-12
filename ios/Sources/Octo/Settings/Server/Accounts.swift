@@ -10,10 +10,22 @@ enum AccountRoute: Hashable, Codable {
     case family
     case admin
     case imports
+
+    /// What kind of page this is, as the glow sees it: each is a Settings page.
+    var ambientPage: AmbientPage {
+        switch self {
+        case .shares: .shares
+        case .radioStations: .radioStations
+        case .family: .family
+        case .admin: .octoAdmin
+        case .imports: .importList
+        }
+    }
 }
 
 extension View {
-    /// The account pages a tab can open, each without the system's bar.
+    /// The account pages a tab can open, each without the system's bar, on the glow of the
+    /// Settings pages.
     func accountRoutes() -> some View {
         navigationDestination(for: AccountRoute.self) { route in
             Group {
@@ -25,6 +37,7 @@ extension View {
                 case .imports: ImportScreen()
                 }
             }
+            .background { PageBackdrop(page: route.ambientPage, route: nil) }
             .detailPage()
         }
     }

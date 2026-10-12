@@ -345,12 +345,15 @@ private struct BarSwipes: ViewModifier {
 struct NowPlayingFace: View {
     let tap: () -> Void
     @Environment(Player.self) private var player
+    /// Where the sound goes when it is not the phone itself: AirPlay, for one.
+    @State private var route = AudioRoute()
 
     var body: some View {
         Button(action: tap) {
             ZStack {
-                if let song = player.current {
-                    Cover(id: song.coverArt, size: OctoBar.height - 12, radius: (OctoBar.height - 12) / 2)
+                // With no artwork, no picture and no dim: the sign sits on the glass.
+                if let cover = player.current?.coverArt {
+                    Cover(id: cover, size: OctoBar.height - 12, radius: (OctoBar.height - 12) / 2)
                         .overlay(Circle().fill(.black.opacity(0.35)))
                 }
                 if player.isPlaying {
@@ -363,6 +366,15 @@ struct NowPlayingFace: View {
                 }
             }
             .frame(width: OctoBar.height, height: OctoBar.height)
+            .overlay(alignment: .bottomTrailing) {
+                // Playing on another device: its mark in the corner.
+                if route.elsewhere != nil {
+                    IconView(.castConnected, size: 11, color: .white)
+                        .frame(width: 18, height: 18)
+                        .background(Circle().fill(Color.black.opacity(0.72)))
+                        .padding(2)
+                }
+            }
             .contentShape(Circle())
         }
         .buttonStyle(NoHighlight())

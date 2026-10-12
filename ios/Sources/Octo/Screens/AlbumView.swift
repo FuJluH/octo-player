@@ -655,8 +655,14 @@ enum LiveListHook {
 /// What a page's filters give a new live list to start from.
 struct LiveListSeed {
     var words: String
-    var rules: [String]
+    var rules: [QueryRule]
     var order: ListOrder?
+
+    /// The new live list's start: the filters over the whole library, in the page's order.
+    var query: LibraryQuery {
+        liveListQueryFrom([], filters: LibraryQuery(rules, text: words),
+                          order: order.map { QuerySort(by: $0.by.id, descending: $0.descending) })
+    }
 }
 
 // MARK: Playlist

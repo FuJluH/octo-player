@@ -9,6 +9,7 @@ struct FamilyScreen: View {
     @Environment(Accounts.self) private var accounts
     @Environment(Router.self) private var router
     @Environment(Session.self) private var session
+    @Environment(\.scenePhase) private var scenePhase
     @State private var changingPassword = false
     @State private var resetting: FamilyMember?
 
@@ -36,12 +37,13 @@ struct FamilyScreen: View {
                     PanelLine(text: model.problem ?? "Asking the server about your plan.")
                 }
             }
-            .padding(.top, detailTopGap)
+            .padding(.top, 8 + detailTopGap)
         }
         .barClearance()
-        .background(OctoColor.background)
         .onAppear { model.watch() }
         .onDisappear { model.stop() }
+        // Renewing the hand-over code pauses while the app is out of sight.
+        .onChange(of: scenePhase, initial: true) { _, phase in model.handOver.sheetOnScreen(phase != .background) }
         .opensWhenAsked("reset_password") { resetting = model.info?.manager?.members.first }
         .sheet(isPresented: Binding(get: { model.handOver.sheet != nil }, set: { if !$0 { model.handOver.close() } })) {
             HandOverSheetHost(hub: hub).familySheet()
@@ -152,7 +154,7 @@ struct FamilyScreen: View {
             Text(FamilyText.signOutEverywhereLine).font(.octoCaption).foregroundStyle(OctoColor.textMuted)
             HStack(spacing: 8) {
                 GlazeButton(FamilyText.changePassword, size: .small) { changingPassword = true }
-                GlazeButton(HandOverText.title, size: .small) { model.handOver.open() }
+                GlazeButton(HandOverText.title, icon: .qrCode, size: .small) { model.handOver.open() }
             }
         }
         .padding(.horizontal, 20)
@@ -325,14 +327,16 @@ private struct AddMemberBlock: View {
     @SceneStorage("family.add.username") private var username = ""
     @SceneStorage("family.add.preset") private var presetName = FamilyPreset.member.rawValue
     @SceneStorage("family.add.away") private var away = true
+    @State private var typingUsername = false
 
     var body: some View {
         let preset = FamilyPreset(rawValue: presetName) ?? .member
         VStack(alignment: .leading, spacing: 8) {
             Text("Add a member").font(.octoBody).foregroundStyle(OctoColor.textPrimary)
-            GlassInput("Their name, like Sam", text: $name, submitLabel: .next)
+            GlassInput("Their name, like Sam", text: $name, submitLabel: .next) { typingUsername = true }
                 .textInputAutocapitalization(.words)
-            GlassInput("Username, like sam", text: Binding(get: { username }, set: { username = $0.filter { !$0.isWhitespace }.lowercased() }))
+            GlassInput("Username, like sam", text: Binding(get: { username }, set: { username = $0.filter { !$0.isWhitespace }.lowercased() }),
+                       focus: $typingUsername)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
             HStack(spacing: 6) {

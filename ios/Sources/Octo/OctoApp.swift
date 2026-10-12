@@ -68,7 +68,7 @@ struct OctoApp: App {
         SystemEntries.shared = entries
         SystemHooks.start(player: player, router: router)
         FamilyNotices.session = session
-        AccountHooks.install(data, session: session)
+        AccountHooks.install(data, session: session, family: accounts.family)
         #if DEBUG
         DataDrive.install(data) { router.show($0) }
         #endif

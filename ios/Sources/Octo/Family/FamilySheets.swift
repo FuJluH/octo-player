@@ -147,11 +147,11 @@ struct HandOverSheetView: View {
     private func codeAndLink(_ link: String?, side: CGFloat) -> some View {
         if let link {
             VStack(spacing: 6) {
-                QrWell(link: link, label: "QR code to sign in on another device", side: side, dim: sheet.stale) {
+                QrWell(link: link, label: "QR code to sign in on another device", side: side, dim: sheet.stale, tag: "family-sheet-qr") {
                     if sheet.stale {
                         VStack(spacing: 10) {
                             Text(FamilySheetText.stillThere).font(.octoBody).foregroundStyle(OctoColor.textPrimary)
-                            AccentButton(FamilySheetText.makeNewCode, size: .small, action: source.newCode)
+                            AccentButton(FamilySheetText.makeNewCode, size: .small, bright: true, action: source.newCode)
                         }
                     }
                 }
@@ -222,8 +222,8 @@ struct AskingView: View {
             Spacer(minLength: 0)
             SoftHairline()
             HStack(spacing: 10) {
-                GlazeButton(HandOverText.deny, enabled: !sending, fillWidth: true, action: deny)
-                AccentButton(HandOverText.allow, loading: sending, fillWidth: true, action: allow)
+                GlazeButton(HandOverText.deny, size: .medium, enabled: !sending, fillWidth: true, action: deny)
+                AccentButton(HandOverText.allow, size: .medium, bright: true, loading: sending, fillWidth: true, action: allow)
             }
             .padding(.horizontal, 20)
             .padding(.top, 10)
@@ -242,6 +242,8 @@ struct FamilyPasswordSheet: View {
     @State private var draft = PasswordDraft()
     @State private var busy = false
     @State private var problem: String?
+    /// The field with the focus, by its place.
+    @State private var typing: Int?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -259,8 +261,8 @@ struct FamilyPasswordSheet: View {
             }
             SoftHairline()
             HStack(spacing: 10) {
-                GlazeButton("Cancel", enabled: !busy, fillWidth: true, action: close)
-                AccentButton(FamilyText.changePassword, loading: busy, fillWidth: true, action: go)
+                GlazeButton("Cancel", size: .medium, enabled: !busy, fillWidth: true, action: close)
+                AccentButton(FamilyText.changePassword, size: .medium, bright: true, loading: busy, fillWidth: true, action: go)
             }
             .padding(.horizontal, 20)
             .padding(.top, 10)
@@ -268,10 +270,14 @@ struct FamilyPasswordSheet: View {
         }
     }
 
+    /// One password field; Next hands the focus to the field after it, Done on the last sends.
     private func field(_ placeholder: String, _ text: Binding<String>, _ index: Int) -> some View {
         GlassInput(placeholder, text: Binding(get: { text.wrappedValue }, set: { text.wrappedValue = $0; problem = nil }), secure: true,
-                   submitLabel: index == 2 ? .done : .next) { if index == 2 { go() } }
-            .textContentType(index == 0 ? .password : .newPassword)
+                   submitLabel: index == 2 ? .done : .next,
+                   focus: Binding(get: { typing == index }, set: { now in if now { typing = index } else if typing == index { typing = nil } })) {
+            if index == 2 { go() } else { typing = index + 1 }
+        }
+        .textContentType(index == 0 ? .password : .newPassword)
     }
 
     private func go() {
@@ -350,7 +356,7 @@ struct LoginCard: View {
                 .padding(.vertical, 8)
             }
             HStack(spacing: 8) {
-                AccentButton(HandOverText.title, size: .small, action: showQr)
+                AccentButton(HandOverText.title, icon: .qrCode, size: .small, bright: true, action: showQr)
                 GlazeButton(FamilyText.openInOcto, size: .small) {
                     let link = FamilyLink.prefill(FamilySignInPrefill(server: main, username: login.username, home: home.flatMap { $0 == main ? nil : $0 }))
                     SystemEntries.shared?.family.open(.join(link))

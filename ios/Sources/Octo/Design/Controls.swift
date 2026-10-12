@@ -195,6 +195,9 @@ struct GlassInput<Leading: View, Trailing: View>: View {
     @ViewBuilder var trailing: Trailing
     /// Takes the focus, and so opens the keyboard, as it appears.
     var focusOnAppear = false
+    /// Whether the field has the focus, kept in step both ways, so the field before it can hand
+    /// the focus on.
+    var focus: Binding<Bool>?
     @FocusState private var focused: Bool
     @Environment(\.motionScale) private var motion
 
@@ -251,14 +254,16 @@ struct GlassInput<Leading: View, Trailing: View>: View {
         .contentShape(shape)
         .onTapGesture { focused = true }
         .onAppear { if focusOnAppear { focused = true } }
+        .onChange(of: focused) { _, now in if let focus, focus.wrappedValue != now { focus.wrappedValue = now } }
+        .onChange(of: focus?.wrappedValue) { _, wanted in if let wanted, wanted != focused { focused = wanted } }
     }
 }
 
 extension GlassInput where Leading == EmptyView, Trailing == EmptyView {
     init(_ placeholder: String, text: Binding<String>, secure: Bool = false, submitLabel: SubmitLabel = .done,
-         onSubmit: @escaping () -> Void = {}) {
+         focus: Binding<Bool>? = nil, onSubmit: @escaping () -> Void = {}) {
         self.init(placeholder: placeholder, text: text, secure: secure, submitLabel: submitLabel, onSubmit: onSubmit,
-                  leading: { EmptyView() }, trailing: { EmptyView() })
+                  leading: { EmptyView() }, trailing: { EmptyView() }, focus: focus)
     }
 }
 

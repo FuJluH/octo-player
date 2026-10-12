@@ -22,17 +22,20 @@ struct ImportScreen: View {
                     content(model)
                 }
             }
-            .padding(.top, detailTopGap)
+            .padding(.top, 8 + detailTopGap)
         }
         .scrollDismissesKeyboard(.interactively)
         .barClearance()
-        .background(OctoColor.background)
         .onAppear {
             let model = model ?? makeModel()
             self.model = model
             model.watch()
+            accounts.imports.showing = true
         }
-        .onDisappear { model?.stop() }
+        .onDisappear {
+            model?.stop()
+            accounts.imports.showing = false
+        }
         .onChange(of: session.activeId) {
             model?.forget()
             model?.watch()

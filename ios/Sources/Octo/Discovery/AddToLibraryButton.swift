@@ -11,10 +11,21 @@ struct AddToLibraryButton: View {
     var iconSize: CGFloat = 24
     @Environment(Downloads.self) private var downloads
     @Environment(Router.self) private var router
+    @Environment(Accounts.self) private var accounts
     @Environment(\.octoReduceMotion) private var calm
     @State private var release: (@Sendable () -> Void)?
 
     var body: some View {
+        // A family member whose songs are saved rather than added gets a heart.
+        if accounts.family.outside.addLabel != nil {
+            SaveHeart(song: song, family: accounts.family, size: size, iconSize: iconSize)
+        } else {
+            addButton
+        }
+    }
+
+    @ViewBuilder
+    private var addButton: some View {
         let phase = downloads.phase(song.id)
         let onItsWay = phase.state == .requested
         let follows = onItsWay && downloads.keepsLog
@@ -75,6 +86,31 @@ struct AddToLibraryButton: View {
     private func isFailed(_ phase: DownloadPhase) -> Bool {
         if case .failed = phase { return true }
         return false
+    }
+}
+
+/// The heart that saves a song found online for a family member whose songs are saved rather
+/// than added: it plays from the internet, and shows in Family under Saved, where a copy can be
+/// asked for. Lit white when saved, a quieter outline when not.
+private struct SaveHeart: View {
+    let song: Song
+    let family: FamilyHub
+    let size: CGFloat
+    let iconSize: CGFloat
+
+    var body: some View {
+        let saved = family.isSaved(song.id)
+        Button {
+            family.toggleSaved(song.id, title: song.title)
+        } label: {
+            IconView(saved ? .liked : .like, size: iconSize, color: saved ? .white : .white.opacity(0.6))
+                .iconGlow(saved)
+                .frame(width: size, height: size)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(NoPress())
+        .accessibilityLabel(FamilyText.save)
+        .accessibilityValue(saved ? "Saved" : "Not saved")
     }
 }
 

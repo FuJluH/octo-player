@@ -43,10 +43,9 @@ struct RadioStationsScreen: View {
                     ForEach(list) { station in row(station, readOnly: !controls.canEdit(stationId: station.id, coverArt: station.coverArt), admin: controls.isAdmin) }
                 }
             }
-            .padding(.top, detailTopGap)
+            .padding(.top, 8 + detailTopGap)
         }
         .barClearance()
-        .background(OctoColor.background)
         .task { await reload() }
         .opensWhenAsked("add_station") {
             guard controls.isAdmin else { return }

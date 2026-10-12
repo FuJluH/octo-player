@@ -74,6 +74,19 @@ enum QuickFilter: CaseIterable, Hashable {
         }
     }
 
+    /// The rule the filter is.
+    var rule: QueryRule {
+        switch self {
+        case .favorites: FilterPresets.favorites
+        case .week: FilterPresets.addedThisWeek
+        case .month: FilterPresets.addedThisMonth
+        case .year: FilterPresets.addedThisYear
+        case .neverPlayed: FilterPresets.neverPlayed
+        case .notLately: FilterPresets.notPlayedLately
+        case .lossless: FilterPresets.lossless
+        }
+    }
+
     /// Filters on the same field replace each other.
     var field: Int {
         switch self {
@@ -92,6 +105,15 @@ struct SongFilters: Equatable {
     var rating: Int?
     var genre: String?
     var decade: Int?
+
+    /// The filters on, as live list rules, in the order the chips run.
+    var queryRules: [QueryRule] {
+        var out = quick.map(\.rule)
+        if let rating { out.append(FilterPresets.ratingAtLeast(rating)) }
+        if let genre { out.append(FilterPresets.genre(genre)) }
+        if let decade { out.append(FilterPresets.decade(decade)) }
+        return out
+    }
 
     var any: Bool {
         !words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !quick.isEmpty || rating != nil || genre != nil || decade != nil
@@ -328,7 +350,7 @@ struct SongsPage: View {
                         if let open = LiveListHook.newLiveList {
                             FilterChip(text: "Save as live list", on: false) {
                                 open(LiveListSeed(words: filters.words.trimmingCharacters(in: .whitespacesAndNewlines),
-                                                  rules: chipWords, order: state.order(.songs)))
+                                                  rules: filters.queryRules, order: state.order(.songs)))
                             }
                         }
                     }
@@ -354,15 +376,6 @@ struct SongsPage: View {
         }
         .padding(.top, 2)
         .padding(.bottom, 10)
-    }
-
-    /// The words of every filter on, for a live list made from them.
-    private var chipWords: [String] {
-        var out = filters.quick.map(\.label)
-        if let rating = filters.rating { out.append("Rating at least \(rating)") }
-        if let genre = filters.genre { out.append("Genre is \(genre)") }
-        if let decade = filters.decade { out.append("From the \(decade)s") }
-        return out
     }
 
     /// A chip that asks a question when off and reads as its filter when on; a tap on it then

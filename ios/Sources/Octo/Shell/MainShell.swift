@@ -38,9 +38,10 @@ enum Route: Hashable, Codable {
     case onlineAlbum(id: String, name: String)
     case onlineArtist(id: String, name: String)
     case charts
-    /// A live list, and its editor (a new one when `id` is nil).
+    /// A live list, and its editor (a new one when `id` is nil, begun from a page's filters in
+    /// `start`, the query as saved).
     case liveList(id: String)
-    case liveListEditor(id: String?)
+    case liveListEditor(id: String?, start: String? = nil)
     /// The Sound page: equalizer, loudness, balance and headphone correction.
     case sound
 }
@@ -109,6 +110,7 @@ struct MainShell: View {
     @Environment(AmbientSettings.self) private var ambience
     @Environment(ArtworkColorStore.self) private var colorStore
     @Environment(Overlays.self) private var overlays
+    @Environment(Accounts.self) private var accounts
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.motionScale) private var motion
     @SceneStorage("tab") private var tab: AppTab = .home
@@ -183,8 +185,15 @@ struct MainShell: View {
         .onChange(of: router.accountRoute) { _, route in
             guard let route else { return }
             closePlayer()
-            if tab != .settings { select(.settings) }
-            paths[.settings, default: NavigationPath()].append(route)
+            let switching = tab != .settings
+            if switching { select(.settings) }
+            // A list shared in while Import is already on top stays on that page.
+            if !(route == .imports && accounts.imports.showing) {
+                // A page that comes with a change of tab arrives with the tab's motion, not a slide.
+                var quiet = Transaction()
+                quiet.disablesAnimations = switching
+                withTransaction(quiet) { paths[.settings, default: NavigationPath()].append(route) }
+            }
             router.accountRouteTaken()
         }
         .onChange(of: hasTrack) { _, has in
@@ -208,7 +217,11 @@ struct MainShell: View {
             if request == .lyrics { router.lyricsRequested = true }
         }
         .modifier(LibraryPresenter())
-        .onAppear(perform: restorePaths)
+        .onAppear {
+            restorePaths()
+            let router = router
+            LiveListHook.newLiveList = { seed in router.go(.liveListEditor(id: nil, start: seed?.query.toJSON())) }
+        }
         .onChange(of: paths) { _, now in
             // A stack holding a page that cannot be kept starts afresh next time.
             let byName = Dictionary(uniqueKeysWithValues: now.compactMap { entry in
@@ -241,6 +254,7 @@ struct MainShell: View {
             SignInView(form: form, session: session) { notice in
                 if let notice { router.done(notice) }
             }
+            .environment(drift)
         }
     }
 
@@ -430,7 +444,7 @@ extension View {
                 case .onlineArtist(let id, let name): OnlineArtistView(id: id, name: name)
                 case .charts: ChartsView()
                 case .liveList(let id): LiveListView(id: id)
-                case .liveListEditor(let id): LiveListEditView(id: id)
+                case .liveListEditor(let id, let start): LiveListEditView(id: id, start: start.flatMap(LibraryQuery.fromJSON))
                 case .sound: SoundPage()
                 }
             }
