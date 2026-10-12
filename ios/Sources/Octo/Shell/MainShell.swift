@@ -176,13 +176,13 @@ struct MainShell: View {
         .environment(\.nowMark, NowMark(songId: player.current?.id, isPlaying: player.isPlaying))
         .onChange(of: router.route) { _, route in
             guard let route else { return }
-            closePlayer()
+            leavePlayer()
             paths[tab, default: NavigationPath()].append(route)
             router.routeTaken()
         }
         .onChange(of: router.accountRoute) { _, route in
             guard let route else { return }
-            closePlayer()
+            leavePlayer()
             if tab != .settings { select(.settings) }
             paths[.settings, default: NavigationPath()].append(route)
             router.accountRouteTaken()
@@ -199,7 +199,7 @@ struct MainShell: View {
             switch request {
             case .tab(let item): select(item)
             case .openPlayer, .lyrics: openPlayer()
-            case .closePlayer: closePlayer()
+            case .closePlayer: leavePlayer()
             case .barPlayer: if hasTrack { barPlayer = true }
             case .showTabs: barPlayer = false
             case .reselect: select(tab)
@@ -335,12 +335,22 @@ struct MainShell: View {
 
     private func closePlayer() { playerOpen = false }
 
+    /// Closes the player the way it closes itself, the cover flying home and the background
+    /// drawing back, whatever asks.
+    private func leavePlayer() {
+        if playerOpen && hasTrack {
+            PlayerDrive.shared.ask("close")
+        } else {
+            closePlayer()
+        }
+    }
+
     /// Back: a sheet opened from code first, then the player, then the page on top; at the first
     /// page of another tab, Home.
     private func back() {
         if overlays.back() { return }
         if playerOpen && hasTrack {
-            closePlayer()
+            leavePlayer()
         } else if paths[tab]?.isEmpty == false {
             paths[tab]?.removeLast()
         } else if tab != .home {

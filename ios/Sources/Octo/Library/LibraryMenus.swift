@@ -194,7 +194,9 @@ struct SongMenuItems<Extras: View>: View {
             }
         case .like:
             let liked = actions.isLiked(track)
+            // Liking changes the row in place; the menu stays open.
             item(liked ? "Remove from Liked songs" : "Add to Liked songs", liked ? .liked : .like) { actions.toggleLike(track) }
+                .menuActionDismissBehavior(.disabled)
         case .rate:
             RateMenu(track: track)
         case .goToAlbum:

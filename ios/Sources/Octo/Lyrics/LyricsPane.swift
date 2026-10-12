@@ -13,6 +13,7 @@ struct LyricsPane: View {
     let ink: Color
     @Environment(LyricsStore.self) private var store
     @Environment(Player.self) private var player
+    @Environment(\.octoReduceMotion) private var calm
     @State private var settings = AppSettings.shared
     @State private var timing = LyricsSongTiming.shared
     @State private var refreshHz = 60.0
@@ -56,7 +57,7 @@ struct LyricsPane: View {
                         QuietLyrics(text: "Instrumental")
                     } else if lyrics.synced && flowing {
                         FlowingHost(lyrics: lyrics, songOffsetMs: songOffset, outputOffsetMs: outputOffset, ink: ink,
-                                    calm: settings.motionReduced)
+                                    calm: calm)
                     } else if lyrics.synced {
                         ClassicLyrics(lyrics: lyrics, offsetMs: totalOffset(songMs: songOffset, outputMs: outputOffset))
                     } else {
@@ -95,7 +96,7 @@ private struct StateKey: Hashable {
     }
 }
 
-/// The flowing lyrics for one set of lyrics, made afresh for new lyrics.
+/// The flowing lyrics for one set of lyrics, made afresh for any change to the lyrics.
 private struct FlowingHost: View {
     let lyrics: Lyrics
     let songOffsetMs: Int
@@ -111,11 +112,13 @@ private struct FlowingHost: View {
                 FlowingLyricsView(model: model, songOffsetMs: songOffsetMs, outputOffsetMs: outputOffsetMs, ink: ink, calm: calm) {
                     player.seek(to: $0)
                 }
+                .id(ObjectIdentifier(model))
             } else {
                 Color.clear
             }
         }
         .onAppear { if model == nil { model = FlowingModel(LyricMapper.map(lyrics)) } }
+        .onChange(of: lyrics) { _, new in model = FlowingModel(LyricMapper.map(new)) }
     }
 }
 

@@ -178,7 +178,7 @@ final class LibraryActions {
             return
         }
         let first = seed.queueSong
-        player.play([first] + ids.map { Song(id: $0, title: "") }, from: 0, radio: first)
+        player.play([first] + ids.map { Song(id: $0, title: "") }, from: 0, radio: first, source: .played("\(seed.title) radio"))
     }
 
     /// A radio from an album: its most played song here, else its first, then the album's songs as

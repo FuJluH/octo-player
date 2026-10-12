@@ -520,7 +520,7 @@ private struct QueueRowMenu: View {
         }
         if place != .now {
             Section {
-                Button("Remove from queue", systemImage: OctoIcon.delete.symbol, role: .destructive) { remove(entry) }
+                Button("Remove from queue", systemImage: OctoIcon.delete.symbol) { remove(entry) }
             }
         }
     }

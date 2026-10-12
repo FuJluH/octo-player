@@ -123,6 +123,7 @@ struct PlayerTitleBlock: View {
                     ExplicitMark(size: 14, color: accent).fixedSize()
                 }
             }
+            // Only the name itself opens the artist.
             Group {
                 if let openArtist {
                     Button(action: openArtist) { artist }
@@ -131,6 +132,7 @@ struct PlayerTitleBlock: View {
                     artist
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -140,7 +142,6 @@ struct PlayerTitleBlock: View {
             .font(.octoBody)
             .foregroundStyle(accent)
             .lineLimit(1)
-            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -186,17 +187,16 @@ struct PlayerProgress: View {
     var body: some View {
         VStack(spacing: 0) {
             TimelineView(.animation(paused: !player.isPlaying)) { _ in
-                let position = player.livePosition
-                let length = max(player.duration, position)
-                OctoSlider(value: length > 0 ? min(max(position / length, 0), 1) : 0, onChange: { fraction in
-                    let target = fraction * max(player.duration, player.livePosition)
-                    player.seek(to: target)
+                let length = player.duration
+                OctoSlider(value: length > 0 ? min(max(player.livePosition / length, 0), 1) : 0, onChange: { fraction in
+                    player.seek(to: fraction * player.duration)
                 }, color: ink, trackColor: ink.opacity(0.24))
                 .accessibilityHidden(true)
             }
             ZStack {
+                // An unknown length shows 0:00 both sides.
                 TimelineView(.periodic(from: .now, by: 1)) { _ in
-                    let length = max(player.duration, player.livePosition)
+                    let length = max(player.duration, 0)
                     let gone = Int(min(max(player.livePosition, 0), length))
                     let left = max(Int(length) - gone, 0)
                     HStack {
