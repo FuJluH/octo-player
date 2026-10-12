@@ -80,9 +80,11 @@ final class DataServices {
 }
 
 extension View {
-    /// Hands every data part to the pages below.
+    /// Hands every data part to the pages below; pulling down on a library page runs the
+    /// library's refresh.
     func dataEnvironment(_ data: DataServices) -> some View {
-        environment(data.library)
+        let refresh = data.refresh
+        return environment(data.library)
             .environment(data.serverSync)
             .environment(data.likes)
             .environment(data.favorites)
@@ -94,6 +96,7 @@ extension View {
             .environment(data.controls)
             .environment(data.connectivity)
             .environment(\.dataServices, data)
+            .environment(\.refreshLibrary, { @MainActor in await refresh.refresh() })
     }
 }
 

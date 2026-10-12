@@ -9,7 +9,16 @@
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>UILaunchScreen</key>
-    <dict/>
+    <dict>
+        <key>UIColorName</key>
+        <string>LaunchBackground</string>
+        <key>UIImageName</key>
+        <string>LaunchOctopus</string>
+        <key>UIImageRespectsSafeAreaInsets</key>
+        <false/>
+    </dict>
+    <key>UIUserInterfaceStyle</key>
+    <string>Dark</string>
     <key>UIBackgroundModes</key>
     <array>
         <string>audio</string>

@@ -41,12 +41,12 @@ actor Covers {
     }
 }
 
-/// A cover from the server, in a rounded square, with a quiet stand-in while it loads or when
-/// there is none.
+/// A cover from the server, in a rounded square, on the plain tile while it loads or when there
+/// is none. Covers 96 points and larger carry a faint rim on the picture.
 struct Cover: View {
     let id: String?
     var size: CGFloat
-    var radius: CGFloat = OctoRadius.artM
+    var radius: CGFloat = OctoRadius.artS
     @Environment(Session.self) private var session
     @Environment(\.displayScale) private var scale
     @State private var image: UIImage?
@@ -59,11 +59,13 @@ struct Cover: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
+                    .overlay {
+                        if size >= 96 {
+                            RoundedRectangle(cornerRadius: radius, style: .continuous)
+                                .strokeBorder(Color(hex: 0xC8C8C8, opacity: 0.16), lineWidth: 1)
+                        }
+                    }
                     .transition(.opacity)
-            } else {
-                Image(systemName: "music.note")
-                    .font(.system(size: size * 0.3, weight: .semibold))
-                    .foregroundStyle(OctoColor.textMuted)
             }
         }
         .frame(width: size, height: size)

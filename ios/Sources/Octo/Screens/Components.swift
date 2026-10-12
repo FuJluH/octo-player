@@ -3,26 +3,22 @@ import SwiftUI
 
 // Octo's rows and cards, the same sizes as the other apps'.
 
-/// The mark on the artwork of something not in the library: a small glass disc with a plus,
-/// at the bottom right.
+/// The mark on the artwork of something not in the library: a small glass disc with a thin
+/// plus at the bottom right, an eighth of the artwork's side (12 to 20 points). On a round
+/// picture it sits along the diagonal, far enough in that the whole disc stays inside.
 struct NotInLibraryMark: View {
     let artSize: CGFloat
     var round = false
 
     var body: some View {
-        let size = min(20, max(12, artSize * 0.125))
-        let inset = max(3, artSize * 0.04)
-        Circle()
-            .fill(.black.opacity(0.42))
+        let size = CGFloat(notInLibraryMarkSize(Double(artSize)))
+        let inset = CGFloat(notInLibraryMarkInset(Double(artSize), mark: Double(size), round: round))
+        IconView(.notInLibrary, size: size * 0.68, color: .white.opacity(0.9))
             .frame(width: size, height: size)
-            .overlay {
-                Image(systemName: "plus")
-                    .font(.system(size: size * 0.6, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.9))
-            }
-            .glassEffect(.regular, in: .circle)
-            .padding(round ? artSize * 0.1 : inset)
-            .accessibilityLabel("Not in your library")
+            .octoGlass(Circle(), film: .black.opacity(0.42))
+            .padding(.trailing, inset)
+            .padding(.bottom, inset)
+            .accessibilityLabel(notInLibraryText)
     }
 }
 
@@ -41,29 +37,46 @@ struct BadgedCover: View {
     }
 }
 
-/// Three bars that dance while a song plays and rest when it is paused.
+/// Three small bars that mark the song playing now: moving and softly lit while it plays,
+/// still and quiet while it is paused. With Reduce motion a playing song's bars rest, still lit.
 struct NowPlayingBars: View {
     let playing: Bool
     var size: CGFloat = 16
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motionScale) private var motion
+
+    private static let rest: [Double] = [0.45, 0.8, 0.6]
+    private static let speeds: [Double] = [2, 3, 4]
+    private static let offsets: [Double] = [0, 0.3, 0.65]
 
     var body: some View {
-        TimelineView(.animation(paused: !playing || reduceMotion)) { time in
-            let phase = time.date.timeIntervalSinceReferenceDate / 2.4
-            HStack(alignment: .bottom, spacing: size / 7 / 3) {
-                ForEach(0..<3, id: \.self) { i in
-                    let rest = [0.45, 0.8, 0.6][i]
-                    let speed = [2.0, 3.0, 4.0][i]
-                    let offset = [0, 0.3, 0.65][i]
-                    let height = playing && !reduceMotion ? 0.25 + 0.75 * abs(sin((phase * speed + offset) * .pi)) : rest
-                    Capsule().frame(width: size / 4, height: size * height)
+        Group {
+            if playing && !motion.still {
+                TimelineView(.animation) { time in
+                    let phase = time.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2.4) / 2.4
+                    ZStack {
+                        bars(phase: phase, color: .white).blur(radius: 4).opacity(0.7)
+                        bars(phase: phase, color: .white)
+                    }
                 }
+            } else {
+                bars(phase: nil, color: playing ? .white : OctoColor.textMuted)
             }
-            .frame(width: size, height: size, alignment: .bottom)
-            .foregroundStyle(playing ? .white : OctoColor.textMuted)
-            .shadow(color: playing ? .white.opacity(0.7) : .clear, radius: 2)
         }
+        .frame(width: size, height: size)
         .accessibilityHidden(true)
+    }
+
+    private func bars(phase: Double?, color: Color) -> some View {
+        Canvas { context, canvas in
+            let gap = canvas.width / 7
+            let width = (canvas.width - gap * 2) / 3
+            for i in 0..<3 {
+                let share = phase.map { 0.25 + 0.75 * abs(sin(($0 * Self.speeds[i] + Self.offsets[i]) * .pi)) } ?? Self.rest[i]
+                let height = canvas.height * share
+                let rect = CGRect(x: CGFloat(i) * (width + gap), y: canvas.height - height, width: width, height: height)
+                context.fill(Path(roundedRect: rect, cornerRadius: width / 2), with: .color(color))
+            }
+        }
     }
 }
 
@@ -424,16 +437,7 @@ struct LoadFailed: View {
     let retry: () async -> Void
 
     var body: some View {
-        VStack(spacing: 16) {
-            Text(message)
-                .font(.octoBodySmall)
-                .foregroundStyle(OctoColor.textSecondary)
-                .multilineTextAlignment(.center)
-            Button("Try again") { Task { await retry() } }
-                .buttonStyle(.glassProminent)
-        }
-        .padding(32)
-        .frame(maxWidth: .infinity)
+        FailedView(message: message) { Task { await retry() } }
     }
 }
 

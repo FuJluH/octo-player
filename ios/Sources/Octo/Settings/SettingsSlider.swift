@@ -129,10 +129,3 @@ struct GlowSlider: View {
         }
     }
 }
-
-/// The height of the screen the app is on, for popups that may take a share of it.
-@MainActor
-var screenHeight: CGFloat {
-    let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
-    return scene?.screen.bounds.height ?? 844
-}
