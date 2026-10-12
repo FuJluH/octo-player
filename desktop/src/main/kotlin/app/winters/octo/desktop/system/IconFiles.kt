@@ -12,9 +12,9 @@ import javax.imageio.ImageIO
 import kotlin.math.ceil
 import kotlin.math.floor
 
-// Makes the app's icon files from the phone app's square store icon: a PNG
-// for Linux and the window, an ICO for Windows and an ICNS for macOS. Each
-// is the art in a rounded square, the way each system draws app icons.
+// Makes the app's icon files from the square icon in icons/octo-square.png:
+// a PNG for Linux and the window, an ICO for Windows and an ICNS for macOS.
+// Each is the art in a rounded square, the way each system draws app icons.
 //
 // Run with ./gradlew :desktop:makeIcons; the files are kept in the
 // repository, in desktop/icons.
