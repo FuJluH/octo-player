@@ -5,6 +5,7 @@ struct SettingsView: View {
     @Environment(Session.self) private var session
     @Environment(Player.self) private var player
     @Environment(Router.self) private var router
+    @Environment(SoundStore.self) private var sound
     @State private var removing: StoredServer?
     @State private var switching: String?
 
@@ -22,6 +23,20 @@ struct SettingsView: View {
                     .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
+            }
+            Section {
+                NavigationLink(value: Route.sound) {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Sound").font(.octoBody)
+                            Text(SoundEdits.soundSummary(sound.current)).font(.octoCaption).foregroundStyle(OctoColor.textMuted)
+                        }
+                    } icon: {
+                        Image(systemName: "slider.horizontal.3").foregroundStyle(OctoColor.accent)
+                    }
+                }
+            } header: {
+                Text("Listening")
             }
             if !session.servers.isEmpty {
                 Section {

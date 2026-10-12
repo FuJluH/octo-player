@@ -106,6 +106,7 @@ struct NowPlayingView: View {
                 RoutePicker(tint: UIColor(tone.ink))
                     .frame(width: 44, height: 44)
                     .accessibilityLabel("Play on")
+                PlayerSoundButton(ink: tone.ink) { router.go(.sound) }
             }
         }
         .frame(height: 56)
