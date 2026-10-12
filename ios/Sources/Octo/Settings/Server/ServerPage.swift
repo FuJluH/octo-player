@@ -21,7 +21,7 @@ struct ServerPage: View {
     @State private var look: (answerMs: Int64?, scan: ServerScanStatus?)?
     @State private var listening: [ServerNowPlaying] = []
     @Environment(\.dataServices) private var data
-    @State private var queueSync = ServerPage.queueStore.object(forKey: "sync_on") as? Bool ?? true
+    @State private var queueSync = ServerSyncChoices().syncQueue
 
     var body: some View {
         SettingsPageFrame(title: SettingsPage.server.title, highlight: highlight) {
@@ -147,7 +147,7 @@ struct ServerPage: View {
             ToggleRow(SettingsIndex.queueSync, isOn: queueSync,
                       helper: "Keeps what's playing on the server, so you can pick up where another device left off.") { on in
                 queueSync = on
-                ServerPage.queueStore.set(on, forKey: "sync_on")
+                ServerSyncChoices().setSyncQueue(on)
             }
             ToggleRow(SettingsIndex.playlistsToServer, isOn: data?.playlistSync.newOnServer ?? false,
                       helper: "New playlists are made on your server too.") { on in
@@ -204,11 +204,6 @@ struct ServerPage: View {
             if let id = session.activeId { serverSwitch.signOut(id) }
         }
     }
-}
-
-extension ServerPage {
-    /// Where "Sync play queue with the server" is kept, one value for every server, read by backups too.
-    static let queueStore = UserDefaults(suiteName: "server_queue") ?? .standard
 }
 
 /// The Music folder row: its title, the folder in use at the end, and the small chevron of a
