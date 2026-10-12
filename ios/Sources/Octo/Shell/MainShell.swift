@@ -41,6 +41,8 @@ enum Route: Hashable, Codable {
     /// A live list, and its editor (a new one when `id` is nil).
     case liveList(id: String)
     case liveListEditor(id: String?)
+    /// A new live list's editor, started from a page's filters (a saved query).
+    case liveListFrom(query: String)
     /// The Sound page: equalizer, loudness, balance and headphone correction.
     case sound
 }
@@ -62,7 +64,7 @@ extension Route {
         case .onlineArtist: .onlineArtist
         case .charts: .charts
         case .liveList: .liveList
-        case .liveListEditor: .liveListEdit
+        case .liveListEditor, .liveListFrom: .liveListEdit
         }
     }
 }
@@ -109,6 +111,7 @@ struct MainShell: View {
     @Environment(AmbientSettings.self) private var ambience
     @Environment(ArtworkColorStore.self) private var colorStore
     @Environment(Overlays.self) private var overlays
+    @Environment(Accounts.self) private var accounts
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.motionScale) private var motion
     @SceneStorage("tab") private var tab: AppTab = .home
@@ -176,16 +179,21 @@ struct MainShell: View {
         .environment(\.nowMark, NowMark(songId: player.current?.id, isPlaying: player.isPlaying))
         .onChange(of: router.route) { _, route in
             guard let route else { return }
-            closePlayer()
+            leavePlayer()
             paths[tab, default: NavigationPath()].append(route)
             router.routeTaken()
         }
         .onChange(of: router.accountRoute) { _, route in
             guard let route else { return }
-            closePlayer()
-            if tab != .settings { select(.settings) }
-            if !(route == .imports && router.importInFront) {
-                paths[.settings, default: NavigationPath()].append(route)
+            leavePlayer()
+            let switching = tab != .settings
+            if switching { select(.settings) }
+            // A list shared in while Import is already on top stays on that page.
+            if !(route == .imports && accounts.imports.showing) {
+                // A page that comes with a change of tab arrives with the tab's motion, not a slide.
+                var quiet = Transaction()
+                quiet.disablesAnimations = switching
+                withTransaction(quiet) { paths[.settings, default: NavigationPath()].append(route) }
             }
             router.accountRouteTaken()
         }
@@ -201,7 +209,7 @@ struct MainShell: View {
             switch request {
             case .tab(let item): select(item)
             case .openPlayer, .lyrics: openPlayer()
-            case .closePlayer: closePlayer()
+            case .closePlayer: leavePlayer()
             case .barPlayer: if hasTrack { barPlayer = true }
             case .showTabs: barPlayer = false
             case .reselect: select(tab)
@@ -243,6 +251,7 @@ struct MainShell: View {
             SignInView(form: form, session: session) { notice in
                 if let notice { router.done(notice) }
             }
+            .environment(drift)
         }
     }
 
@@ -337,12 +346,22 @@ struct MainShell: View {
 
     private func closePlayer() { playerOpen = false }
 
+    /// Closes the player the way it closes itself, the cover flying home and the background
+    /// drawing back, whatever asks.
+    private func leavePlayer() {
+        if playerOpen && hasTrack {
+            PlayerDrive.shared.ask("close")
+        } else {
+            closePlayer()
+        }
+    }
+
     /// Back: a sheet opened from code first, then the player, then the page on top; at the first
     /// page of another tab, Home.
     private func back() {
         if overlays.back() { return }
         if playerOpen && hasTrack {
-            closePlayer()
+            leavePlayer()
         } else if paths[tab]?.isEmpty == false {
             paths[tab]?.removeLast()
         } else if tab != .home {
@@ -433,6 +452,7 @@ extension View {
                 case .charts: ChartsView()
                 case .liveList(let id): LiveListView(id: id)
                 case .liveListEditor(let id): LiveListEditView(id: id)
+                case .liveListFrom(let query): LiveListEditView(id: nil, start: LibraryQuery.fromJSON(query))
                 case .sound: SoundPage()
                 }
             }

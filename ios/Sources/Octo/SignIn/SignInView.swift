@@ -20,7 +20,7 @@ struct SignInView: View {
     @FocusState private var focus: Field?
     let done: (String?) -> Void
 
-    enum Field: Hashable { case address, label, username, password, apiKey, home }
+    enum Field: Hashable { case address, label, username, password, apiKey, home, joinName, joinPassword, joinAgain }
 
     #if DEBUG
     /// Set by a launch step: the next sign-in screen opens with the family QR scanner.
@@ -69,7 +69,7 @@ struct SignInView: View {
             .frame(maxWidth: .infinity)
         }
         .scrollDismissesKeyboard(.interactively)
-        .background { PageBackdrop(page: model.ambientPage, route: nil) }
+        .background { PageBackdrop(page: glowPage, route: nil) }
         .overlay(alignment: .topLeading) {
             Button { dismiss() } label: {
                 Image(systemName: "chevron.left").font(.system(size: 17, weight: .semibold)).frame(width: 44, height: 44)
@@ -135,6 +135,16 @@ struct SignInView: View {
             Button("Cancel", role: .cancel) { pendingCertificate = nil }
         } message: {
             Text(certificateError ?? "The password the certificate file was saved with.")
+        }
+    }
+
+    /// What kind of page the form is, as the glow sees it: each is a Settings page.
+    private var glowPage: AmbientPage {
+        switch model.form {
+        case .signIn: .signIn
+        case .editConnection: .editConnection
+        case .add, .edit, .again: .serverForm
+        case .join: .familyJoin
         }
     }
 
@@ -248,13 +258,17 @@ struct SignInView: View {
                 TextField("Your name", text: $model.joinName)
                     .textInputAutocapitalization(.words)
                     .textContentType(.name)
+                    .focused($focus, equals: .joinName)
                     .submitLabel(.next)
+                    .onSubmit { focus = .joinPassword }
             }
             GlassField {
                 FieldIcon("key")
                 SecureField("Password, at least \(minPassword) characters", text: $model.joinPassword)
                     .textContentType(.newPassword)
+                    .focused($focus, equals: .joinPassword)
                     .submitLabel(.next)
+                    .onSubmit { focus = .joinAgain }
             }
             if let strength = model.strength {
                 Text(strength).font(.octoCaption).foregroundStyle(OctoColor.textMuted).frame(maxWidth: .infinity, alignment: .leading)
@@ -263,6 +277,7 @@ struct SignInView: View {
                 FieldIcon("key")
                 SecureField("The same password again", text: $model.joinAgain)
                     .textContentType(.newPassword)
+                    .focused($focus, equals: .joinAgain)
                     .submitLabel(.done)
                     .onSubmit { Task { await model.signUp(session) } }
             }

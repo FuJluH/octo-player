@@ -73,9 +73,14 @@ private struct PageArtworkMark: ViewModifier {
 @Observable
 final class ArtworkColorStore {
     private(set) var colors: [String: ArtworkColors] = [:]
+    /// Covers whose colors could not be read, and when: Quiet stands in for them, uncached, and
+    /// they are read again when asked for after a while.
+    private var failed: [String: Date] = [:]
     @ObservationIgnored private var order: [String] = []
     @ObservationIgnored private var loading: Set<String> = []
     @ObservationIgnored private let session: Session
+
+    private static let retryAfter: TimeInterval = 30
 
     init(session: Session) { self.session = session }
 
@@ -83,6 +88,8 @@ final class ArtworkColorStore {
     func colors(for coverId: String?) -> ArtworkColors? {
         guard let coverId else { return .quiet }
         if let known = colors[coverId] { return known }
+        if let when = failed[coverId], Date().timeIntervalSince(when) < Self.retryAfter { return .quiet }
+        guard session.client != nil else { return .quiet }
         load(coverId)
         return nil
     }
@@ -94,7 +101,12 @@ final class ArtworkColorStore {
             let image = await Covers.shared.image(coverId, size: artworkSampleSize, client: client)
             let found = await Task.detached(priority: .utility) { image.flatMap(Self.extract) }.value
             loading.remove(coverId)
-            keep(coverId, found ?? .quiet)
+            if let found {
+                failed[coverId] = nil
+                keep(coverId, found)
+            } else {
+                failed[coverId] = Date()
+            }
         }
     }
 

@@ -573,6 +573,14 @@ extension SubsonicClient {
         try await answerOK("removeFromMyLibrary", [("id", id)])
     }
 
+    /// Makes a family playlist every member can add to. `approveAdditions` (managers only) holds
+    /// additions for a manager to approve.
+    public func createFamilyPlaylist(name: String, approveAdditions: Bool = false) async throws -> Playlist {
+        var params = [("name", name.trimmingCharacters(in: .whitespacesAndNewlines))]
+        if approveAdditions { params.append(("approveAdditions", "true")) }
+        return try await answer("createFamilyPlaylist", params, key: "playlist")
+    }
+
     /// Starts handing this device's sign-in to the same person's other device.
     public func startFamilySignIn() async throws -> FamilySignInStart {
         try await answer("startFamilySignIn", key: "familySignIn")

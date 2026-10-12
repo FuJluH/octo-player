@@ -47,7 +47,6 @@ struct RadioStationsScreen: View {
             .padding(.top, 8 + detailTopGap)
         }
         .barClearance()
-        .background { PageBackdrop(page: .radioStations, route: nil) }
         .task { await reload() }
         .opensWhenAsked("add_station") {
             guard controls.isAdmin else { return }
@@ -202,9 +201,9 @@ private struct StationForm: View {
     let delete: (StationDraft) -> Void
     @State private var confirming = false
     @State private var height: CGFloat?
-    @FocusState private var nameFocused: Bool
-    @FocusState private var streamFocused: Bool
-    @FocusState private var homePageFocused: Bool
+    @State private var nameFocused = false
+    @State private var streamFocused = false
+    @State private var homePageFocused = false
 
     init(draft: StationDraft, saving: Bool, problem: String?, save: @escaping (StationDraft) -> Void, delete: @escaping (StationDraft) -> Void) {
         _draft = State(initialValue: draft)

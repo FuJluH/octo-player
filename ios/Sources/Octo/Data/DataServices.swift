@@ -7,6 +7,7 @@ import SwiftUI
 /// handed to the pages through the environment.
 @MainActor
 final class DataServices {
+    let session: Session
     let library: Library
     let connectivity: Connectivity
     let serverSync: ServerSync
@@ -38,6 +39,7 @@ final class DataServices {
 
     /// `announce` shows a line: the words, and whether it marks something done.
     init(session: Session, announce: @escaping @MainActor (String, Bool) -> Void) {
+        self.session = session
         library = Library.open()
         connectivity = Connectivity()
         serverSync = ServerSync(session: session, library: library)
@@ -56,12 +58,6 @@ final class DataServices {
         offline = OfflineDownloads(session: session, library: library, connectivity: connectivity, sync: serverSync) { words in announce(words, false) }
         marks = OfflineMarkings(downloads: offline, connectivity: connectivity)
         prefetcher = Prefetcher(session: session, connectivity: connectivity)
-        // A family account whose plan has offline copies off gets no new downloads from that
-        // server. Without a family, or when the plan cannot be read, downloads go.
-        offline.offlineCopiesAllowed = { [weak session] in
-            guard let session, session.family, let family = SystemEntries.shared?.family else { return true }
-            return OctoKit.offlineCopiesAllowed(await family.model.plan())
-        }
         controls = ServerControls(session: session, library: library, sync: serverSync)
         refresh = LibraryRefresh(device: device, sync: serverSync, downloads: downloads, session: session)
         serverSwitch = ServerSwitch(session: session, library: library, sync: serverSync, listening: listening,

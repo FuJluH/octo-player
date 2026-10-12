@@ -12,6 +12,8 @@ struct HomeView: View {
     @Environment(Discovery.self) private var discovery
     @Environment(ServerSync.self) private var serverSync
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.refreshLibrary) private var refreshLibrary
+    @Environment(\.shellAwake) private var awake
     @State private var model = HomeModel()
     @State private var reading = false
 
@@ -44,7 +46,8 @@ struct HomeView: View {
                         SectionTitle("Artists").padding(.top, 18)
                         SideScroller {
                             ForEach(model.artists) { artist in
-                                ArtistCircle(id: artist.pageId(discovery.sourceId), name: artist.name, coverArt: coverId(of: artist.artwork))
+                                ArtistCircle(id: artist.pageId(discovery.sourceId), name: artist.name, coverArt: coverId(of: artist.artwork),
+                                             library: artist)
                             }
                         }
                     }
@@ -54,7 +57,14 @@ struct HomeView: View {
             .animation(.easeInOut(duration: 0.25), value: layout)
         }
         .barClearance()
-        .libraryRefreshable { await model.refresh() }
+        // A pull looks at the library again first, then picks the random shelves from what it
+        // holds now; the stations are asked for at once.
+        .refreshable {
+            model.refreshStations()
+            let words = await refreshLibrary?()
+            await model.refresh()
+            if let words { router.show(words) }
+        }
         .onAppear {
             model.attach(library: library, discovery: discovery, player: player, router: router)
             model.shown()
@@ -65,6 +75,8 @@ struct HomeView: View {
         }
         .onChange(of: discovery.stationsFrom, initial: true) { _, _ in model.stationsSourceChanged() }
         .onChange(of: scenePhase) { _, phase in if phase == .active { model.shown() } }
+        // Home is in front again after another tab or the full player.
+        .onChange(of: awake) { _, now in if now { model.shown() } }
         .whatsNewPanel(isPresented: $reading) { model.dismissWhatsNew() }
     }
 
@@ -194,7 +206,7 @@ struct HomeView: View {
                 .font(.octoBodySmall)
                 .foregroundStyle(OctoColor.textMuted)
             if askAccess || signIn {
-                HStack(spacing: 12) {
+                FlowRow(spacing: 12) {
                     if askAccess { GlazeButton(accessButtonLabel(model.access)) { model.requestAccess() } }
                     if signIn { GlazeButton("Sign in to a server") { router.signIn = .signIn } }
                 }

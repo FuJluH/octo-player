@@ -18,15 +18,22 @@ import SwiftUI
 /// - `sort:LIST:OPTION:asc|desc` sets a list's order, like `sort:songs:Year:desc`
 /// - `pick:COUNT` picks the first COUNT songs of the open page that can pick songs
 /// - `songs-search:TEXT` opens Songs with the search open and the words typed
+/// - `songs-filter:CHIPS` opens Songs with chips on, comma separated: favorites, week, month,
+///   year, never, lately, lossless, rating4 (any stars), decade1990 (any decade)
+/// - `menu:live` (or `menu:live=NAME`) lays a live list's options out on a sheet;
+///   `menu:live:rename` and `menu:live:delete` ask its name and its delete question
 @MainActor
 enum LibraryDrive {
     /// Words for the Songs page's search when it opens.
     static var pendingSearch: String?
+    /// Chips to switch on as the Songs page opens.
+    static var pendingFilters: [QueryRule]?
 
     /// Adds the library's steps to the drive.
     static func install(router: Router) {
         Drive.steps.append { name, value in
-            guard ["page", "album", "artist", "playlist", "genre", "menu", "info", "sort", "pick", "songs-search"].contains(name) else {
+            guard ["page", "album", "artist", "playlist", "genre", "menu", "info", "sort", "pick", "songs-search", "songs-filter"]
+                .contains(name) else {
                 return false
             }
             await step(name, value, router: router)
@@ -76,8 +83,28 @@ enum LibraryDrive {
         case "songs-search":
             pendingSearch = value
             router.go(.library(.songs))
+        case "songs-filter":
+            pendingFilters = value.split(separator: ",").compactMap { chip(String($0)) }
+            router.go(.library(.songs))
         default:
             break
+        }
+    }
+
+    /// A Songs chip by a short name.
+    private static func chip(_ name: String) -> QueryRule? {
+        let lower = name.lowercased()
+        if lower.hasPrefix("rating"), let stars = Int(lower.dropFirst("rating".count)) { return FilterPresets.ratingAtLeast(stars) }
+        if lower.hasPrefix("decade"), let start = Int(lower.dropFirst("decade".count)) { return FilterPresets.decade(start) }
+        switch lower {
+        case "favorites": return FilterPresets.favorites
+        case "week": return FilterPresets.addedThisWeek
+        case "month": return FilterPresets.addedThisMonth
+        case "year": return FilterPresets.addedThisYear
+        case "never": return FilterPresets.neverPlayed
+        case "lately": return FilterPresets.notPlayedLately
+        case "lossless": return FilterPresets.lossless
+        default: return lower.hasPrefix("genre=") ? FilterPresets.genre(String(name.dropFirst("genre=".count))) : nil
         }
     }
 
@@ -121,6 +148,10 @@ enum LibraryDrive {
             actions.askRename(playlist)
         case (.collection(.playlist(let playlist)), "delete"), (.playlistOptions(let playlist), "delete"):
             actions.askDeletePlaylist(playlist)
+        case (.liveListOptions(let list), "rename"):
+            if let store = LiveListStore.current { actions.askRename(list, in: store) }
+        case (.liveListOptions(let list), "delete"):
+            if let store = LiveListStore.current { actions.askDelete(list, in: store) }
         default:
             actions.previewMenu(content)
         }
@@ -150,6 +181,10 @@ enum LibraryDrive {
             let lists = await library.playlists()
             let playlist = named.flatMap { name in lists.first { $0.name.caseInsensitiveCompare(name) == .orderedSame } } ?? lists.first
             return playlist.map { kind == "options" ? .playlistOptions($0) : .collection(.playlist($0)) }
+        case "live":
+            let lists = LiveListStore.current?.lists ?? []
+            let list = named.flatMap { name in lists.first { $0.name.caseInsensitiveCompare(name) == .orderedSame } } ?? lists.first
+            return list.map { .liveListOptions($0) }
         default:
             return nil
         }

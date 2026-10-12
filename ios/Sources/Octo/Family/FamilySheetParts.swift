@@ -84,6 +84,8 @@ struct QrWell<Overlay: View>: View {
     let label: String
     let side: CGFloat
     var dim = false
+    /// The code's identifier for tests, when it has one.
+    var tag: String?
     @ViewBuilder var overlay: Overlay
 
     var body: some View {
@@ -91,6 +93,7 @@ struct QrWell<Overlay: View>: View {
             QrTile(link: link, label: label, side: side, dim: dim)
                 .id(link)
                 .transition(.opacity.animation(.easeInOut(duration: 0.3)))
+                .accessibilityIdentifier(tag ?? "")
             overlay
         }
         .frame(width: side + 16, height: side + 16)
@@ -101,8 +104,8 @@ struct QrWell<Overlay: View>: View {
 }
 
 extension QrWell where Overlay == EmptyView {
-    init(link: String, label: String, side: CGFloat, dim: Bool = false) {
-        self.init(link: link, label: label, side: side, dim: dim) { EmptyView() }
+    init(link: String, label: String, side: CGFloat, dim: Bool = false, tag: String? = nil) {
+        self.init(link: link, label: label, side: side, dim: dim, tag: tag) { EmptyView() }
     }
 }
 
@@ -233,7 +236,9 @@ struct SheetFooter<Start: View>: View {
             Rectangle().fill(OctoColor.hairline).frame(height: 1)
             HStack(spacing: 10) {
                 start.frame(maxWidth: .infinity, alignment: .leading)
-                AccentButton("Done", action: done)
+                AccentButton("Done", size: .medium, bright: true, fillWidth: true, action: done)
+                    .frame(width: 108)
+                    .accessibilityIdentifier("family-sheet-done")
             }
             .padding(.horizontal, 20)
             .padding(.top, 10)
@@ -395,6 +400,7 @@ struct ReachChooser: View {
             HStack(spacing: 6) {
                 Image(systemName: icon).font(.system(size: 16, weight: .medium))
                 Text(choice.label).font(.system(size: 15, weight: .semibold)).lineLimit(1).minimumScaleFactor(10 / 15)
+                    .accessibilityIdentifier("reach-\(choice.rawValue)-label")
             }
             .foregroundStyle(ink)
             .padding(.leading, 10)
@@ -412,6 +418,7 @@ struct ReachChooser: View {
         .buttonStyle(.plain)
         .accessibilityAddTraits(chosen ? [.isSelected, .isButton] : .isButton)
         .accessibilityLabel(choice.label)
+        .accessibilityIdentifier("reach-\(choice.rawValue)")
     }
 }
 

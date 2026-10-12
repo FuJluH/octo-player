@@ -16,11 +16,10 @@ struct OctoAdminScreen: View {
                 ScreenTitle("Octo admin")
                 if let model { content(model) }
             }
-            .padding(.top, detailTopGap)
+            .padding(.top, 8 + detailTopGap)
         }
         .refreshable { await model?.refresh() }
         .barClearance()
-        .background { PageBackdrop(page: .octoAdmin, route: nil) }
         .onAppear {
             guard model == nil else { return }
             let made = OctoAdminModel(admin: OctoAdminPages.shared, signIn: { [session] in OctoAdminPages.signIn(session) })
@@ -247,7 +246,7 @@ private struct DownloadRow: View {
     var body: some View {
         HStack(spacing: 12) {
             ZStack {
-                RoundedRectangle(cornerRadius: 6).fill(OctoColor.surfaceRaised)
+                RoundedRectangle(cornerRadius: 6).fill(OctoColor.backgroundTertiary)
                 if let cover = record.coverArtUrl, let url = URL(string: cover) {
                     AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { Color.clear }
                         .accessibilityHidden(true)

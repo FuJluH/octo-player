@@ -188,15 +188,6 @@ final class SignInModel {
     /// The way of signing in the form is set to.
     private var mode: AuthMode { useApiKey ? .apiKey : (legacy ? .legacyPassword : .token) }
 
-    /// Where the page sits, for the glow behind it.
-    var ambientPage: AmbientPage {
-        switch form {
-        case .signIn, .join: .signIn
-        case .editConnection: .editConnection
-        case .add, .edit, .again: .serverForm
-        }
-    }
-
     /// The client certificate's name to show, or nil for none.
     var certificateShown: String? {
         if let certificate { return certificate.name }

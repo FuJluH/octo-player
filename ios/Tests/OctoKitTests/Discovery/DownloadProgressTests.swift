@@ -185,6 +185,17 @@ private struct Away: Error {}
         #expect(watch.live.isEmpty)
     }
 
+    @Test func aCanceledWatchStopsEvenWhileSongsWait() async {
+        let host = FakeHost(find("a", "Nightcall"))
+        host.answer = { _ in [entry("a", "downloading", 0.4)] }
+        let watch = ProgressWatch(host: host, sleep: { _ in try? await Task.sleep(for: .seconds(60)) })
+        let running = Task { await watch.run() }
+        while host.asked == 0 { await Task.yield() }
+        running.cancel()
+        #expect(await running.value)
+        #expect(host.asked == 1)
+    }
+
     @Test func aFinishedSongIsFetchedThenSyncedThenAdopted() async {
         let host = FakeHost(find("a", "Roadgame"))
         host.answer = { _ in [entry("a", "done", title: "Roadgame", libraryId: "nd-77")] }

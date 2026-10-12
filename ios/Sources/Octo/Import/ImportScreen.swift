@@ -8,7 +8,6 @@ import UniformTypeIdentifiers
 struct ImportScreen: View {
     @Environment(Session.self) private var session
     @Environment(Accounts.self) private var accounts
-    @Environment(Router.self) private var router
     @State private var model: ImportModel?
     @State private var picking = false
     @State private var pasting = false
@@ -23,20 +22,19 @@ struct ImportScreen: View {
                     content(model)
                 }
             }
-            .padding(.top, detailTopGap)
+            .padding(.top, 8 + detailTopGap)
         }
         .scrollDismissesKeyboard(.interactively)
         .barClearance()
-        .background { PageBackdrop(page: .importList, route: nil) }
         .onAppear {
-            router.importInFront = true
             let model = model ?? makeModel()
             self.model = model
             model.watch()
+            accounts.imports.showing = true
         }
         .onDisappear {
-            router.importInFront = false
             model?.stop()
+            accounts.imports.showing = false
         }
         .onChange(of: session.activeId) {
             model?.forget()

@@ -17,7 +17,6 @@ struct AlbumView: View {
     @State private var tracks: [LibraryTrack] = []
     /// The server's listing with songs found online in their places, when it lists any.
     @State private var whole: [LibraryTrack]?
-    @State private var discTitles: [Int: String] = [:]
     @State private var more: [LibraryAlbum] = []
     @State private var highlight: String?
     @State private var onlyMine = false
@@ -96,43 +95,43 @@ struct AlbumView: View {
                 let ya = a.year ?? 0, yb = b.year ?? 0
                 return ya != yb ? ya > yb : a.sortKey < b.sortKey
             }
-        guard let client = session.client, isServerSource(found.sourceId) else { return }
-        if let full = try? await client.fullAlbum(found.nativeId) {
-            discTitles = Dictionary(full.discTitles.map { ($0.disc, $0.title) }, uniquingKeysWith: { a, _ in a })
-            let songs = full.song.map(\.plain)
-            if songs.contains(where: \.isExternal) {
-                let held = Dictionary((await library.libraryTracks(for: songs.filter { !$0.isExternal })).map { ($0.nativeId, $0) },
-                                      uniquingKeysWith: { a, _ in a })
-                var listedTracks = songs.map { song in held[song.id] ?? state.provisional(song) }
-                let listedIds = Set(listedTracks.map(\.id))
-                listedTracks += tracks.filter { !listedIds.contains($0.id) }
-                whole = listedTracks
-            } else {
-                whole = nil
-            }
+        // The album as Octo lists it now, found from its songs' copies there: the songs it marks as
+        // outside the library join the library's in the server's order.
+        if let listing = try? await state.data.discovery.libraryAlbum(tracks.map(\.id)) {
+            let server = outsideAlbumSongs(listing.sent, listing.resolved)
+            var adoptions: [String: String] = [:]
+            for (serverId, trackId) in downloads.adoptions ?? [:] { adoptions[findId(serverId)] = trackId }
+            whole = server.contains(where: \.isFound) ? wholeAlbum(tracks, server: server, adoptions: adoptions) : nil
+        } else {
+            whole = nil
         }
         highlight = await mainSong(found)
     }
 
-    /// The album's main song: the first of the artist's top songs on the server that is on this
-    /// album, by id, else by title and artist.
+    /// The album's main song: of its songs, the one that comes first in the artist's top songs on
+    /// the server, by id, else by title (features left out) and artist.
     private func mainSong(_ found: LibraryAlbum) async -> String? {
-        guard let client = session.client, !tracks.isEmpty else { return nil }
-        let top: [Song]
-        if session.profile?.has("octoTopSongs") == true,
-           let ranked = try? await client.artistTopSongs(artist: found.artist, id: tracks.first?.serverArtistId, count: 30) {
-            top = ranked.songs
+        guard let client = session.client, !tracks.isEmpty, !found.artist.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        let key = "\(client.credentials.username)@\(client.baseURL.absoluteString)|\(SongIdentity.key(found.artist))"
+        let ranked: [TopSongRef]
+        if let kept = TopSongsKept.byKey[key] {
+            ranked = kept
         } else {
-            top = (try? await client.topSongs(artist: found.artist, count: 30)) ?? []
+            let top: [Song]?
+            if session.profile?.has("octoTopSongs") == true,
+               let answer = try? await client.artistTopSongs(artist: found.artist, id: tracks.first?.serverArtistId,
+                                                             count: albumHighlightRanked) {
+                top = answer.songs
+            } else {
+                top = try? await client.topSongs(artist: found.artist, count: albumHighlightRanked)
+            }
+            // Nothing kept when the server could not be reached, so it is asked again next time.
+            guard let top else { return nil }
+            ranked = top.map { TopSongRef(id: $0.id, title: $0.title, artist: $0.artist ?? $0.byline) }
+            TopSongsKept.byKey[key] = ranked
         }
-        for song in top {
-            if let match = tracks.first(where: { $0.nativeId == song.id }) { return match.id }
-            if let match = tracks.first(where: {
-                SongIdentity.sameTitle(SongIdentity.stripFeatures($0.title), SongIdentity.stripFeatures(song.title)).isSame
-                    && sameArtist($0.artist, song.artist ?? "")
-            }) { return match.id }
-        }
-        return nil
+        let hit = albumHighlight(tracks.map { (id: $0.nativeId, title: $0.title, artist: $0.artist) }, ranked)
+        return hit.flatMap { native in tracks.first { $0.nativeId == native }?.id }
     }
 
     private func details(_ album: LibraryAlbum) -> String {
@@ -169,9 +168,9 @@ struct AlbumView: View {
             }
             .padding(.top, 14)
             PlayShuffle(enabled: !listed.isEmpty) {
-                actions.play(listed)
+                actions.play(listed, source: album.title)
             } shuffle: {
-                actions.play(listed, shuffled: true)
+                actions.play(listed, shuffled: true, source: album.title)
             }
             .padding(.top, 10)
             quietActions(album)
@@ -189,7 +188,7 @@ struct AlbumView: View {
             HStack(spacing: 0) {
                 if canShare {
                     Menu {
-                        ShareLinkItems(target: .album(album.id), title: album.title)
+                        ShareLinkItems(target: .album(album.id), title: album.title, heading: "Share \"\(album.title)\"")
                     } label: {
                         HStack(spacing: 0) {
                             QuietActionLabel(icon: .share, text: "Share")
@@ -275,7 +274,7 @@ struct AlbumView: View {
         let discs = discGroups(list)
         ForEach(Array(discs.enumerated()), id: \.offset) { _, disc in
             if discs.count > 1 {
-                Text(discTitles[disc.number].map { "Disc \(disc.number) · \($0)" } ?? "Disc \(disc.number)")
+                Text("Disc \(disc.number)")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(OctoColor.textMuted)
                     .padding(.leading, 20)
@@ -286,7 +285,7 @@ struct AlbumView: View {
                 let track = list[position]
                 TrackRow(track: track, lead: .number(track.trackNo), subtitle: track.artist == album.artist ? "" : track.artist,
                          context: SongMenuContext(albumId: album.id), ownership: mixed, highlighted: track.id == highlight) {
-                    actions.play(list, from: position)
+                    actions.play(list, from: position, source: album.title)
                 }
             }
         }
@@ -303,6 +302,13 @@ struct AlbumView: View {
         }
         return order.map { ($0, groups[$0] ?? []) }
     }
+}
+
+/// The artists' top songs read for marking albums' main songs, by server, user and artist, for as
+/// long as the app runs.
+@MainActor
+private enum TopSongsKept {
+    static var byKey: [String: [TopSongRef]] = [:]
 }
 
 /// An album the library does not hold, as the server lists it.
@@ -348,9 +354,12 @@ struct ArtistView: View {
     @State private var offersAdd = false
     @State private var biography: String?
     @State private var similar: [(id: String, name: String, coverArt: String?, library: LibraryArtist?)] = []
-    @SceneStorage("artist.allSongs") private var allSongs = false
+    @State private var allSongs = false
     @State private var moreAbout = false
+    @State private var aboutClipped = false
     @State private var read = false
+    /// The order the albums shown are in.
+    @State private var albumsOrder: ListOrder?
 
     private let columns = [GridItem(.adaptive(minimum: 150), spacing: 14)]
 
@@ -366,21 +375,18 @@ struct ArtistView: View {
                 if !similar.isEmpty { similarSection }
                 Color.clear.frame(height: 20)
             }
-            .onChange(of: order) { _, _ in proxy.scrollTo("albums", anchor: .top) }
+            .topOnNewOrder(albumsOrder) { proxy.scrollTo("albums", anchor: .top) }
         }
         .barClearance()
         .inlineTitle(artist?.name ?? name)
         .pageArtwork(.artist(id: id, name: name), artist.flatMap { coverId(of: $0.artwork) })
-        .backStopsPicking()
-        .selectableSongs(state.pickables(songs))
-        .libraryRefreshable {}
-        .task(id: "\(id)|\(library.stamp(.library, .plays))|\(order.by.id)|\(order.descending)|\(AppSettings.shared.player.libraryOnly)") {
-            await readAll()
-        }
+        .libraryRefreshable { await askAgain() }
+        .task(id: "\(id)|\(library.stamp(.library, .plays))|\(order.by.id)|\(order.descending)") { await readAll() }
         .onChange(of: downloads.arrived) { _, _ in
+            // A top song downloaded from here turns into a library song once its check has landed.
             Task {
                 try? await Task.sleep(for: .milliseconds(1_500))
-                await readExtras()
+                if top.contains(where: { $0.isFound && downloads.state($0.asSong.id) == .done }) { await askAgain() }
             }
         }
     }
@@ -390,9 +396,18 @@ struct ArtistView: View {
         artist = found
         if let found {
             songs = await library.artistTracks(found.id)
-            albums = (await library.sortedAlbums(state.order(.artistAlbums), artistId: found.id)).items
+            let sorted = await library.sortedAlbums(state.order(.artistAlbums), artistId: found.id)
+            albums = sorted.items
+            albumsOrder = sorted.order
         }
         read = true
+        await readExtras()
+    }
+
+    /// A pull: what the server said about the artist is forgotten and asked for again.
+    private func askAgain() async {
+        guard let artist else { return }
+        extrasSource.forget(artist.id)
         await readExtras()
     }
 
@@ -401,7 +416,9 @@ struct ArtistView: View {
         guard let artist, var extras = await extrasSource.forArtist(artist) else { return }
         if AppSettings.shared.player.libraryOnly { extras = extras.inLibraryOnly() }
         top = extras.topSongs
-        offersAdd = top.contains(where: \.isFound)
+        // Once offered, kept while the page is open, so lengths do not shift when the last find
+        // turns into a library song.
+        offersAdd = offersAdd || top.contains(where: \.isFound)
         biography = extras.about
         var people: [(id: String, name: String, coverArt: String?, library: LibraryArtist?)] = []
         for other in extras.similar {
@@ -425,7 +442,8 @@ struct ArtistView: View {
             HStack(spacing: 0) {
                 if !songs.isEmpty {
                     QuietAction(icon: .radio, text: "Radio") {
-                        if let artist { Task { await actions.startArtistRadio(artist.id) } }
+                        let seeds = songs
+                        Task { await actions.startRadio(seeds: seeds) }
                     }
                     .padding(.leading, -10)
                 }
@@ -438,7 +456,7 @@ struct ArtistView: View {
             }
             .padding(.top, 8)
             if !songs.isEmpty {
-                PlayShuffle { actions.play(songs) } shuffle: { actions.play(songs, shuffled: true) }
+                PlayShuffle { actions.play(songs, source: artistName) } shuffle: { actions.play(songs, shuffled: true, source: artistName) }
                     .padding(.top, 4)
             }
         }
@@ -457,9 +475,12 @@ struct ArtistView: View {
             }
         }
         ForEach(Array(songs.prefix(allSongs ? songs.count : 10).enumerated()), id: \.element.id) { position, track in
-            TrackRow(track: track, subtitle: track.album) { actions.play(songs, from: position) }
+            TrackRow(track: track, subtitle: track.album) { actions.play(songs, from: position, source: artistName) }
         }
     }
+
+    /// The artist's name as the queue names what it plays from.
+    private var artistName: String { artist?.name ?? name }
 
     @ViewBuilder
     private var topSection: some View {
@@ -468,7 +489,7 @@ struct ArtistView: View {
             TrackRow(track: track,
                      subtitle: rowAlbum(title: track.title, album: track.album, find: track.isFound),
                      context: SongMenuContext(artistId: artist?.id), offersAdd: offersAdd, addSpace: offersAdd) {
-                actions.play(top, from: position)
+                actions.play(top, from: position, source: artistName)
             }
         }
     }
@@ -491,19 +512,35 @@ struct ArtistView: View {
         }
     }
 
+    /// The biography, four lines at first; "More", shown only when it is cut short, shows the rest.
     private func aboutSection(_ text: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 0) {
             SectionTitle("About").padding(.top, 8)
             Text(text)
                 .font(.octoBodySmall)
                 .foregroundStyle(.white.opacity(0.8))
                 .lineLimit(moreAbout ? nil : 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background {
+                    // The whole text, measured where it cannot be seen, against the four lines.
+                    if !moreAbout {
+                        GeometryReader { shown in
+                            Text(text)
+                                .font(.octoBodySmall)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(width: shown.size.width, alignment: .leading)
+                                .hidden()
+                                .onGeometryChange(for: Bool.self) { $0.size.height > shown.size.height + 1 } action: { aboutClipped = $0 }
+                        }
+                    }
+                }
                 .padding(.horizontal, 20)
-            if !moreAbout {
+            if aboutClipped && !moreAbout {
                 Button("More") { moreAbout = true }
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(.white)
                     .buttonStyle(.plain)
+                    .padding(.vertical, 8)
                     .padding(.horizontal, 20)
             }
         }
@@ -515,8 +552,12 @@ struct ArtistView: View {
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: 14) {
                     ForEach(similar, id: \.id) { other in
-                        ArtistCircle(id: other.id, name: other.name, coverArt: other.coverArt, external: other.library == nil,
-                                     library: other.library)
+                        // One the library does not have opens as the server shows it.
+                        if let mine = other.library {
+                            ArtistCircle(id: other.id, name: other.name, coverArt: other.coverArt, library: mine)
+                        } else {
+                            OnlineArtistCircle(id: other.id, name: other.name, coverArt: other.coverArt)
+                        }
                     }
                 }
                 .padding(.horizontal, 20)
@@ -529,13 +570,16 @@ struct ArtistView: View {
 
 // MARK: Playlists
 
-/// Every playlist: ways to make or import one, then the listener's own and the server's in the
-/// chosen order.
+/// Every playlist: ways to make or import one, then the live lists in the order they were made,
+/// then the listener's own playlists and the server's in the chosen order.
 struct PlaylistsView: View {
     @Environment(Library.self) private var library
     @Environment(LibraryState.self) private var state
     @Environment(LibraryActions.self) private var actions
     @Environment(ServerSync.self) private var sync
+    @Environment(Router.self) private var router
+    @Environment(LiveListStore.self) private var liveLists
+    @Environment(LiveLibrary.self) private var liveLibrary
     @State private var playlists: [PlaylistSummary]?
     @State private var importing = false
     @State private var importNote: ImportNote?
@@ -550,30 +594,46 @@ struct PlaylistsView: View {
 
     var body: some View {
         let order = state.order(.playlists)
+        let shown = sortPlaylists(playlists ?? [], order)
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    FirstRowMark().id("top")
                     TitleWithButtons(title: "Playlists") { if playlists != nil { SortButton(list: .playlists) } }
                         .padding(.top, detailTopGap)
                         .bigTitle()
-                    Button { actions.askNewPlaylist(.tracks([])) } label: {
-                        PlaylistLine(name: "New playlist") { LeadTile(icon: .addToLibrary) }
-                    }
-                    .buttonStyle(SqueezeStyle())
-                    if let open = LiveListHook.newLiveList {
-                        Button { open(nil) } label: {
-                            PlaylistLine(name: "New live list", subtitle: "Songs picked by rules, always up to date") {
-                                LeadTile(icon: .filter, tinted: true)
+                    ForEach(playlistsLead(importNote: importNote != nil), id: \.self) { lead in
+                        switch lead {
+                        case .newPlaylist:
+                            Button { actions.askNewPlaylist(.tracks([])) } label: {
+                                PlaylistLine(name: "New playlist") { LeadTile(icon: .addToLibrary) }
                             }
+                            .buttonStyle(SqueezeStyle())
+                        case .newLiveList:
+                            Button { router.go(.liveListEditor(id: nil)) } label: {
+                                PlaylistLine(name: "New live list", subtitle: "Songs picked by rules, always up to date") {
+                                    LiveMarkTile(size: 56, radius: OctoRadius.artS)
+                                }
+                            }
+                            .buttonStyle(SqueezeStyle())
+                        case .importFile:
+                            Button { importing = true } label: {
+                                PlaylistLine(name: "Import a playlist file", subtitle: "M3U or M3U8") { LeadTile(icon: .folder) }
+                            }
+                            .buttonStyle(SqueezeStyle())
+                        case .importNote:
+                            if let importNote { importNoteView(importNote) }
+                        }
+                    }
+                    ForEach(liveLists.lists, id: \.id) { list in
+                        NavigationLink(value: Route.liveList(id: list.id)) {
+                            PlaylistLine(name: list.name, subtitle: liveListCoverLine) { liveCover(list) }
                         }
                         .buttonStyle(SqueezeStyle())
+                        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: OctoRadius.row))
+                        .contextMenu { LiveListOptionsItems(list: list) }
                     }
-                    Button { importing = true } label: {
-                        PlaylistLine(name: "Import a playlist file", subtitle: "M3U or M3U8") { LeadTile(icon: .folder) }
-                    }
-                    .buttonStyle(SqueezeStyle())
-                    if let importNote { importNoteView(importNote) }
-                    ForEach(sortPlaylists(playlists ?? [], order)) { playlist in
+                    ForEach(shown) { playlist in
                         NavigationLink(value: Route.library(.playlist(id: playlist.id))) {
                             PlaylistLine(name: playlist.name, subtitle: songsCount(playlist.songCount), onServer: playlist.onServer) {
                                 PlaylistCover(playlist: playlist, size: 56)
@@ -586,18 +646,34 @@ struct PlaylistsView: View {
                     }
                 }
                 .padding(.bottom, 20)
+                .animation(.easeOut(duration: 0.25), value: shown.map(\.id))
             }
-            .onChange(of: order) { _, _ in
-                if let first = sortPlaylists(playlists ?? [], order).first { proxy.scrollTo(first.id, anchor: .top) }
-            }
+            .topOnNewOrder(playlists == nil ? nil : order) { proxy.scrollTo("top", anchor: .top) }
         }
         .inlineTitle("Playlists")
         .barClearance()
         .libraryRefreshable {}
         .task { sync.syncAgain() }
         .task(id: library.stamp(.playlists, .library)) { playlists = await library.playlists() }
+        .task(id: library.stamp(.library, .likes, .plays)) { await liveLibrary.read() }
+        .task(id: LiveCoversKey(version: liveLibrary.version, queries: liveLists.lists.map(\.query))) {
+            for list in liveLists.lists { await liveLibrary.pick(list.query) }
+        }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.m3uPlaylist, .plainText, .data]) { result in
             if case .success(let url) = result { Task { await importFile(url) } }
+        }
+    }
+
+    /// A live list's picture: designed from its name on the colors of the covers of the first
+    /// albums it holds now, or in the mosaic style its rules mark.
+    @ViewBuilder
+    private func liveCover(_ list: LiveList) -> some View {
+        let songs = liveLibrary.songs(list.query) ?? []
+        let covers = mosaicCovers(songs.map { (album: $0.albumId, art: $0.artwork) })
+        if AppSettings.shared.playlistCovers == .designed {
+            DesignedCover(id: list.id, name: list.name, covers: covers, size: 56, line: liveListCoverLine)
+        } else {
+            LiveMarkTile(size: 56, radius: OctoRadius.artS)
         }
     }
 
@@ -639,41 +715,37 @@ struct PlaylistsView: View {
         let entries = parseM3u(playlistText(data))
         let name = playlistNameOf(url.lastPathComponent)
         let tracks = await library.tracks()
-        let match = matchM3u(entries, library: tracks.map { M3uSong($0.id, $0.title, $0.artist, $0.durationMs) }, paths: [:])
+        // Where each phone song's file sits, by library id, for lines that name a file.
+        let files = actions.state.data.device.files
+        var paths: [String: String] = [:]
+        for copy in (try? await library.store.sourceTracks(deviceSource)) ?? [] where !copy.mergedId.isEmpty {
+            if let native = Int64(copy.nativeId), let path = files[native], paths[copy.mergedId] == nil { paths[copy.mergedId] = path }
+        }
+        let match = matchM3u(entries, library: tracks.map { M3uSong($0.id, $0.title, $0.artist, $0.durationMs) }, paths: paths)
         let found = await library.tracks(ids: match.trackIds)
-        if !entries.isEmpty, !found.isEmpty { actions.createPlaylist(name: name, tracks: found) }
+        // The note under the lead lines says how it went.
+        if !entries.isEmpty, !found.isEmpty { actions.state.data.playlists.create(name, trackIds: found.map(\.id)) }
         importNote = ImportNote(report: ImportReport(name, match.trackIds.count, entries.count, match.missed.map(\.shown)))
     }
 }
 
-/// A square tile for the lead lines: an icon on the quiet tile, or the live mark's tint.
+/// A square tile for the lead lines: an icon at 40% of the tile on the quiet tile, with the rim.
 private struct LeadTile: View {
     let icon: OctoIcon
-    var tinted = false
 
     var body: some View {
         RoundedRectangle(cornerRadius: OctoRadius.artS)
-            .fill(tinted ? OctoColor.accent.opacity(0.16) : OctoColor.backgroundTertiary)
-            .overlay {
-                IconView(icon, size: 24, color: tinted ? OctoColor.accent : .white)
-            }
+            .fill(OctoColor.backgroundTertiary)
+            .overlay { IconView(icon, size: 56 * 0.4, color: .white) }
             .overlay { RoundedRectangle(cornerRadius: OctoRadius.artS).strokeBorder(.white.opacity(0.1), lineWidth: 1) }
             .frame(width: 56, height: 56)
     }
 }
 
-/// Where the live list editor plugs in: set by the app once it has one.
-@MainActor
-enum LiveListHook {
-    /// Opens the live list editor, for a new list or with a page's filters to start from.
-    static var newLiveList: ((LiveListSeed?) -> Void)?
-}
-
-/// What a page's filters give a new live list to start from.
-struct LiveListSeed {
-    var words: String
-    var rules: [String]
-    var order: ListOrder?
+/// The live lists whose songs are worked out for their pictures, against the library as last read.
+private struct LiveCoversKey: Hashable {
+    let version: Int
+    let queries: [LibraryQuery]
 }
 
 // MARK: Playlist
@@ -721,6 +793,7 @@ struct PlaylistPage: View {
         LibraryList {
             if let summary {
                 header(summary)
+                KeepDownloadedLine(tracks: rows.map(\.track), playlistId: summary.id)
                 if summary.onServer, phoneOnly > 0 {
                     Text(phoneOnlyNote(phoneOnly))
                         .font(.octoBodySmall)
@@ -749,7 +822,6 @@ struct PlaylistPage: View {
             guard let summary else { return }
             actions.remove(picked.compactMap { Int64($0.key) }, from: summary)
         }
-        .libraryRefreshable {}
         .task(id: "\(id)|\(library.stamp(.playlists, .library))") { await readPage() }
     }
 
@@ -791,7 +863,7 @@ struct PlaylistPage: View {
             }
             .padding(.top, 14)
             if !rows.isEmpty {
-                PlayShuffle { actions.play(tracks) } shuffle: { actions.play(tracks, shuffled: true) }
+                PlayShuffle { actions.play(tracks, source: playlist.name) } shuffle: { actions.play(tracks, shuffled: true, source: playlist.name) }
                     .padding(.top, 10)
             }
         }
@@ -811,7 +883,7 @@ struct PlaylistPage: View {
                 actions.remove([row.itemId], from: playlist)
             }
         ) {
-            actions.play(rows.map(\.track), from: position)
+            actions.play(rows.map(\.track), from: position, source: playlist.name)
         }
     }
 

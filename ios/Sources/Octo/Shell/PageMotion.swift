@@ -139,6 +139,11 @@ final class PageMotionDelegate: NSObject, UINavigationControllerDelegate, UIGest
 
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         guard let navigation, navigation.transitionCoordinator == nil else { return false }
+        // A page with something to close first (picked songs) closes that instead of leaving.
+        if navigation.viewControllers.count > 1, let handler = BackHandler.current {
+            handler.run()
+            return false
+        }
         return navigation.viewControllers.count > 1 || rootBack != nil
     }
 

@@ -52,6 +52,8 @@ final class Downloads {
     @ObservationIgnored private lazy var tracker = ProgressWatch(host: DownloadsHost(self))
     @ObservationIgnored private let arrivals = Arrivals()
     @ObservationIgnored private var following = false
+    /// Counts the follows started, so a canceled one never touches a newer one's state.
+    @ObservationIgnored private var followRun = 0
     @ObservationIgnored private var checks: Task<Void, Never>?
     @ObservationIgnored private var recheck: Task<Void, Never>?
     @ObservationIgnored private var support: [String: (yes: Bool, at: Int64)] = [:]
@@ -104,10 +106,15 @@ final class Downloads {
 
     /// Library songs that finds became, as last read, so a find's row can turn into its song.
     private(set) var librarySongs: [String: Song] = [:]
+    /// The same songs as library rows.
+    private(set) var libraryTracks: [String: LibraryTrack] = [:]
     @ObservationIgnored private var lookingUp = Set<String>()
 
     /// The library song a find became, as last read; nil until it has been read.
     func librarySong(_ id: String) -> Song? { librarySongs[id] }
+
+    /// The library row a find became, as last read; nil until it has been read.
+    func libraryTrack(_ id: String) -> LibraryTrack? { libraryTracks[id] }
 
     /// The same, for the pages that resolve what the server sent.
     func lastSeenLibrarySong(_ id: String) -> Song? { librarySongs[id] }
@@ -118,7 +125,10 @@ final class Downloads {
         lookingUp.insert(id)
         Task {
             defer { lookingUp.remove(id) }
-            if let track = await library.track(id) { librarySongs[id] = track.asSong }
+            if let track = await library.track(id) {
+                libraryTracks[id] = track
+                librarySongs[id] = track.asSong
+            }
         }
     }
 
@@ -169,7 +179,8 @@ final class Downloads {
         SearchModel.hintAdded()
         onAsk?()
         let coming = finds.filter { state($0.id) != .done }
-        arrivals.askedAlbum(title.isEmpty ? (coming.first?.album ?? "") : title, findIds: coming.map(\.id))
+        let named = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? (coming.first?.album ?? "") : title
+        arrivals.askedAlbum(named, findIds: coming.map(\.id))
         for song in coming { tracker.retry(song.id) }
         follow()
         return true
@@ -191,6 +202,8 @@ final class Downloads {
             lastSource = sourceInUse
             checks?.cancel()
             checks = nil
+            following = false
+            followRun += 1
             refresh()
         }
         guard session.client != nil else { return }
@@ -262,14 +275,19 @@ final class Downloads {
             return
         }
         checks?.cancel()
+        followRun += 1
+        let run = followRun
         checks = Task { [weak self] in
             guard let self else { return }
             if await self.reportsProgress() {
+                guard !Task.isCancelled, run == self.followRun else { return }
                 self.following = true
                 let done = await self.tracker.run()
-                self.following = false
-                if done { return }
+                // A newer run may have started meanwhile; only this run's own flag is cleared.
+                if run == self.followRun { self.following = false }
+                if done || Task.isCancelled { return }
             }
+            guard !Task.isCancelled else { return }
             if let pages = self.adminPages, let base = await pages.locate() {
                 await self.watch(base, pages)
             } else {
@@ -312,23 +330,16 @@ final class Downloads {
     /// or by asking, since it may have been updated since.
     private func reportsProgress() async -> Bool {
         guard let source = sourceInUse, let client = session.client else { return false }
-        if session.profile?.lists(octoAcquisitions) == true {
+        if session.extensions.contains("\(octoAcquisitions):1") {
             lists = true
             return true
         }
         let now = epochNowMs()
         if let known = support[source], known.yes || now - known.at < recheckSupportMs { return known.yes }
-        do {
-            _ = try await client.acquisitions()
-            noteSupport(source, true)
-            return true
-        } catch is OctoError {
-            noteSupport(source, false)
-            return false
-        } catch {
-            // Out of reach: not noted, asked again next time.
-            return false
-        }
+        // Out of reach, busy or refusing the sign-in: not noted, asked again next time.
+        guard let yes = await client.supportsIfKnown(octoAcquisitions, version: 1) else { return false }
+        noteSupport(source, yes)
+        return yes
     }
 
     fileprivate func noteSupport(_ source: String, _ yes: Bool) {

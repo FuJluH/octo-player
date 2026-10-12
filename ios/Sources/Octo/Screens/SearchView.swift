@@ -16,6 +16,8 @@ struct SearchView: View {
     @AppStorage(SearchModel.hintAddedKey) private var hintAdded = false
     @AppStorage(SearchModel.hintShownKey) private var hintShown = 0
     @FocusState private var focused: Bool
+    @Environment(\.shellAwake) private var awake
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         @Bindable var model = model
@@ -42,9 +44,14 @@ struct SearchView: View {
         .onChange(of: session.activeId) { _, _ in model.serverChanged() }
         .onChange(of: session.client == nil) { _, _ in model.serverChanged() }
         .onChange(of: library.stamp(.playlists)) { _, _ in model.playlistsChanged() }
+        .onChange(of: awake) { _, now in if now { model.shownAgain() } }
+        .onChange(of: scenePhase) { _, phase in if phase == .active && awake { model.shownAgain() } }
         #if DEBUG
         .onReceive(NotificationCenter.default.publisher(for: .driveSearch)) { note in
             if let text = note.object as? String { model.text = text }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .driveSearchKind)) { note in
+            if let raw = note.object as? Int, let kind = SearchFilter(rawValue: raw) { model.filter = kind }
         }
         #endif
     }
@@ -241,7 +248,8 @@ struct SearchView: View {
             kindTitle("Artists", more: found.moreArtists, kind: .artists, spaced: firstKind != 0)
             SideScroller {
                 ForEach(found.artists) { artist in
-                    ArtistCircle(id: artist.pageId(discovery.sourceId), name: artist.name, coverArt: coverId(of: artist.artwork))
+                    ArtistCircle(id: artist.pageId(discovery.sourceId), name: artist.name, coverArt: coverId(of: artist.artwork),
+                                 library: artist)
                         .simultaneousGesture(TapGesture().onEnded { model.keepSearch() })
                 }
             }
@@ -271,7 +279,7 @@ struct SearchView: View {
     private func playlistRows(_ found: LibraryResults) -> some View {
         ForEach(found.playlists) { summary in
             if let playlist = summary.asPlaylist(discovery.sourceId) {
-                PlaylistListRow(playlist: playlist, onServer: summary.onServer, summary: summary) { model.keepSearch() }
+                PlaylistListRow(summary: summary, playlist: playlist) { model.keepSearch() }
             }
         }
     }
@@ -294,7 +302,7 @@ struct SearchView: View {
     private func oneKind(_ found: LibraryResults) -> some View {
         ForEach(found.artists) { artist in
             ArtistListRow(id: artist.pageId(discovery.sourceId), name: artist.name, coverArt: coverId(of: artist.artwork),
-                          albumCount: artist.albumCount) { model.keepSearch() }
+                          albumCount: artist.albumCount, library: artist) { model.keepSearch() }
         }
         let width = max(100, (listWidth - 40 - 14) / 2)
         ForEach(Array(stride(from: 0, to: found.albums.count, by: 2)), id: \.self) { start in
@@ -425,5 +433,7 @@ private extension DiscoverState {
 extension Notification.Name {
     /// Sets Search's field, from a launch step.
     static let driveSearch = Notification.Name("octo.drive.search")
+    /// Picks what Search shows, from a launch step.
+    static let driveSearchKind = Notification.Name("octo.drive.search.kind")
 }
 #endif

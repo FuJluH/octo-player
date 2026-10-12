@@ -35,6 +35,18 @@ struct PlayableItems {
                 guard let track = tracksById[id] else { continue }
                 byId[id] = await libraryItem(track, download: downloads[track.id], context: context, source: source)
             }
+            // A song the server lists as found online that has since joined the library plays as
+            // the library song it became.
+            let outside = Set(songs.filter { $0.isExternal && !isFind($0.id) }.map(\.id))
+            if !outside.isEmpty {
+                let joined = await library.finds(outside.map(findId)).filter { !$0.adoptedId.isEmpty }
+                let became = await library.songs(ids: joined.map(\.adoptedId))
+                let keptCopies = await data.offline.playableCopies(became.map(\.id))
+                for find in joined where byId[find.nativeId] == nil {
+                    guard let track = became.first(where: { $0.id == find.adoptedId }) else { continue }
+                    byId[find.nativeId] = await libraryItem(track, download: keptCopies[track.id], context: context, source: source)
+                }
+            }
         }
         let orders = albumOrders(songs)
         return songs.enumerated().map { index, song in
@@ -114,8 +126,7 @@ struct PlayableItems {
     }
 
     private func openedFileItem(_ id: String, source: QueueSource) -> QueueItem? {
-        guard let file = openedFileOf(id), let url = URL(string: file.uri) else { return nil }
-        if url.isFileURL && !FileManager.default.isReadableFile(atPath: url.path) { return nil }
+        guard let file = openedFileOf(id), let url = URL(string: file.uri), OpenedFileAccess.canRead(url) else { return nil }
         return QueueItem(trackId: id, uri: file.uri, title: file.shownTitle, artist: file.artist, source: source)
     }
 

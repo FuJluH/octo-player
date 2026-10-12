@@ -11,9 +11,9 @@ struct ChangePasswordForm: View {
     @State private var draft = PasswordDraft()
     @State private var busy = false
     @State private var problem: String?
-    @FocusState private var onCurrent: Bool
-    @FocusState private var onNew: Bool
-    @FocusState private var onAgain: Bool
+    @State private var onCurrent = false
+    @State private var onNew = false
+    @State private var onAgain = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -51,7 +51,7 @@ struct ChangePasswordForm: View {
         .textContentType(index == 0 ? .password : .newPassword)
     }
 
-    private func focus(at index: Int) -> FocusState<Bool>.Binding {
+    private func focus(at index: Int) -> Binding<Bool> {
         switch index {
         case 0: $onCurrent
         case 1: $onNew

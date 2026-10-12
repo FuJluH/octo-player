@@ -13,7 +13,12 @@ struct LyricsPane: View {
     let ink: Color
     @Environment(LyricsStore.self) private var store
     @Environment(Player.self) private var player
+    @Environment(\.octoReduceMotion) private var calm
+    @Environment(\.scenePhase) private var phase
     @State private var settings = AppSettings.shared
+    /// The pane is on screen, and so whether it counts as watching the lyrics.
+    @State private var visible = false
+    @State private var watching = false
     @State private var timing = LyricsSongTiming.shared
     @State private var refreshHz = 60.0
 
@@ -24,16 +29,29 @@ struct LyricsPane: View {
                 .id(StateKey(state))
                 .transition(.opacity)
         }
-        .animation(.easeInOut(duration: 0.3), value: StateKey(state))
+        .animation(.octoTween(fixed: 300), value: StateKey(state))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             store.attach(player)
-            store.watch()
+            visible = true
+            syncWatch()
         }
-        .onDisappear { store.unwatch() }
+        .onDisappear {
+            visible = false
+            syncWatch()
+        }
+        // A phone locked or the app put away stops watching, as leaving the screen does.
+        .onChange(of: phase) { _, _ in syncWatch() }
         .onChange(of: keepsScreenOn(state), initial: true) { _, on in UIApplication.shared.isIdleTimerDisabled = on }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
         .background(RefreshRateReader(hz: $refreshHz))
+    }
+
+    private func syncWatch() {
+        let wanted = visible && phase != .background
+        guard wanted != watching else { return }
+        watching = wanted
+        if wanted { store.watch() } else { store.unwatch() }
     }
 
     /// The screen stays on while the words are there to read, unless that is switched off.
@@ -50,21 +68,22 @@ struct LyricsPane: View {
             let flowing = lyrics.synced && !lyrics.instrumental && look.style == .flowing
             let songOffset = timing.offset(trackId)
             let outputOffset = LyricsOutput.viewOffset(refreshHz: refreshHz)
+            // Bled first, then faded, so the fade covers the overhang too.
             FadedEdges {
                 Group {
                     if lyrics.instrumental {
                         QuietLyrics(text: "Instrumental")
                     } else if lyrics.synced && flowing {
                         FlowingHost(lyrics: lyrics, songOffsetMs: songOffset, outputOffsetMs: outputOffset, ink: ink,
-                                    calm: settings.motionReduced)
+                                    calm: calm)
                     } else if lyrics.synced {
                         ClassicLyrics(lyrics: lyrics, offsetMs: totalOffset(songMs: songOffset, outputMs: outputOffset))
                     } else {
                         PlainLyrics(lyrics: lyrics)
                     }
                 }
-                .padding(.horizontal, flowing ? -edgeBleed : 0)
             }
+            .padding(.horizontal, flowing ? -edgeBleed : 0)
         case .none:
             QuietLyrics(text: "No lyrics for this song")
         case .failed(let trackId):
@@ -79,7 +98,7 @@ struct LyricsPane: View {
     }
 }
 
-/// What the pane cross-fades on: each state, and each set of lyrics.
+/// What the pane cross-fades on: the whole state, so other lyrics for the same song fade too.
 private struct StateKey: Hashable {
     let key: String
 
@@ -90,12 +109,14 @@ private struct StateKey: Hashable {
         case .loading: key = "loading"
         case .none: key = "none"
         case .failed(let id): key = "failed:\(id)"
-        case .found(let id, let lyrics): key = "found:\(id):\(lyrics.source.rawValue):\(lyrics.lines.count):\(lyrics.lines.first?.text ?? ""):\(lyrics.serverPick ?? "")"
+        case .found(let id, let lyrics):
+            let whole = (try? JSONEncoder().encode(lyrics)).map { $0.hashValue } ?? 0
+            key = "found:\(id):\(whole)"
         }
     }
 }
 
-/// The flowing lyrics for one set of lyrics, made afresh for new lyrics.
+/// The flowing lyrics for one set of lyrics, made afresh for any change to the lyrics.
 private struct FlowingHost: View {
     let lyrics: Lyrics
     let songOffsetMs: Int
@@ -111,11 +132,16 @@ private struct FlowingHost: View {
                 FlowingLyricsView(model: model, songOffsetMs: songOffsetMs, outputOffsetMs: outputOffsetMs, ink: ink, calm: calm) {
                     player.seek(to: $0)
                 }
+                .id(ObjectIdentifier(model))
             } else {
                 Color.clear
             }
         }
         .onAppear { if model == nil { model = FlowingModel(LyricMapper.map(lyrics)) } }
+        .onChange(of: lyrics) { _, new in model = FlowingModel(LyricMapper.map(new)) }
+        // A seek, a new song or the same one again, play or pause, or a new speed: the lyrics
+        // clock takes a fresh reading.
+        .onChange(of: player.timeEvents) { _, _ in model?.anchor() }
     }
 }
 
@@ -195,6 +221,8 @@ private struct RefreshRateReader: UIViewRepresentable {
 /// Lyrics with no timing: text to scroll.
 private struct PlainLyrics: View {
     let lyrics: Lyrics
+    /// 20 points, following the phone's text size.
+    @ScaledMetric(relativeTo: .body) private var size: CGFloat = 20
 
     var body: some View {
         ScrollView {
@@ -204,9 +232,9 @@ private struct PlainLyrics: View {
                         Spacer().frame(height: 18)
                     } else {
                         Text(line.text)
-                            .font(.system(size: 20, weight: .bold))
+                            .font(.system(size: size, weight: .bold))
                             .tracking(-0.2)
-                            .lineSpacing(20 * 1.2 - UIFont.systemFont(ofSize: 20, weight: .bold).lineHeight)
+                            .lineSpacing(max(0, size * 1.2 - UIFont.systemFont(ofSize: size, weight: .bold).lineHeight))
                             .foregroundStyle(.white.opacity(0.85))
                             .padding(.vertical, 4)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -267,11 +295,12 @@ private struct ClassicLyrics: View {
                         .padding(.vertical, box.size.height / 2)
                     }
                     .scrollIndicators(.hidden)
-                    .onScrollPhaseChange { _, phase in
+                    // A drag stops following; it resumes three seconds after the finger lifts.
+                    .onScrollPhaseChange { old, phase in
                         if phase == .interacting {
                             resume?.cancel()
                             following = false
-                        } else if phase == .idle, !following {
+                        } else if old == .interacting, !following {
                             resume?.cancel()
                             resume = Task {
                                 try? await Task.sleep(for: .seconds(3))

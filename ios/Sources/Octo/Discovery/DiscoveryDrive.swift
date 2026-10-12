@@ -6,7 +6,10 @@ import OctoKit
 ///
 /// - `query:TEXT` opens Search and types TEXT into its field
 /// - `charts` opens the Charts page
-/// - `livelist:new` opens the editor for a new live list; `livelist:ID` opens that live list
+/// - `searchkind:all|songs|albums|artists|playlists` picks what Search shows
+/// - `livelist:new` opens the editor for a new live list; `livelist:first` opens the first live
+///   list kept; `livelist:from:TEXT` opens the editor started from the Songs page's words TEXT, as
+///   Save as live list does; `livelist:ID` opens that live list
 /// - `downloads` opens the server downloads sheet on its list
 /// - `log:first` or `log:running` opens the log of the first download the server lists, or the
 ///   first still running
@@ -23,8 +26,23 @@ enum DiscoveryDrive {
             NotificationCenter.default.post(name: .driveSearch, object: value)
         case "charts":
             router.go(.charts)
+        case "searchkind":
+            router.drive = .tab(.search)
+            try? await Task.sleep(for: .milliseconds(300))
+            if let kind = SearchFilter.allCases.first(where: { $0.label.lowercased() == value.lowercased() }) {
+                NotificationCenter.default.post(name: .driveSearchKind, object: kind.rawValue)
+            }
         case "livelist":
-            if value.isEmpty || value == "new" { router.go(.liveListEditor(id: nil)) } else { router.go(.liveList(id: value)) }
+            if value.isEmpty || value == "new" {
+                router.go(.liveListEditor(id: nil))
+            } else if value == "first" {
+                if let list = LiveListStore.current?.lists.first { router.go(.liveList(id: list.id)) }
+            } else if value.hasPrefix("from:") {
+                let start = liveListQueryFrom([], filters: LibraryQuery(text: String(value.dropFirst(5))), order: defaultLiveListSort)
+                router.go(.liveListFrom(query: start.toJSON()))
+            } else {
+                router.go(.liveList(id: value))
+            }
         case "downloads":
             router.serverDownloads = .list(focus: nil)
         case "log":

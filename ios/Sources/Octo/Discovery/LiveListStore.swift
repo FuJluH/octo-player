@@ -16,9 +16,13 @@ final class LiveListStore {
     /// The lists kept while no server is signed in.
     static let phoneAccount = "phone"
 
+    /// The one in use, for steps run from outside the pages.
+    static weak var current: LiveListStore?
+
     init(session: Session) {
         self.session = session
         accountChanged()
+        Self.current = self
     }
 
     /// Whose lists these are: the signed-in account's, or the phone's own when no server is signed in.

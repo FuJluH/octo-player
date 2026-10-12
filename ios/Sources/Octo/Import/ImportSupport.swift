@@ -13,6 +13,8 @@ import UniformTypeIdentifiers
 @Observable
 final class ImportInbox {
     private(set) var waiting: SharedImport?
+    /// Whether the Import page is on top of its stack, so a share does not open a second one.
+    @ObservationIgnored var showing = false
 
     func offer(_ share: SharedImport) { waiting = share }
 

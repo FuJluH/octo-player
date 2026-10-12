@@ -37,7 +37,6 @@ struct SharesScreen: View {
             .padding(.top, 8 + detailTopGap)
         }
         .barClearance()
-        .background { PageBackdrop(page: .shares, route: nil) }
         .task { await load() }
         .opensWhenAsked("delete_link") { if case .ready(let list) = shares { deleting = list.first } }
     }

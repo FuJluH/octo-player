@@ -29,7 +29,8 @@ struct JewelSlider: View {
                     .overlay(Capsule().stroke(Color.black.opacity(0.25), lineWidth: 0.5).offset(y: 0.5).mask(Capsule()))
                     .frame(height: 4)
                 Capsule()
-                    .fill(OctoColor.accent)
+                    .fill(LinearGradient(colors: [OctoColor.accent, OctoColor.accent.mix(with: .black, by: 0.22)],
+                                         startPoint: .top, endPoint: .bottom))
                     .frame(width: max(0, x), height: 4)
                 Circle()
                     .fill(OctoColor.accent.opacity(0.25))

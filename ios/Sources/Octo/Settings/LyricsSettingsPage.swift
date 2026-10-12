@@ -12,7 +12,7 @@ struct LyricsSettingsPage: View {
     var body: some View {
         let look = settings.lyricsLook
         let name = sound.output
-        // Read under the output's key, or a key it had before.
+        // Its own timing, one kept under a name it had before, or its automatic one.
         let timing = outputTimingIn(settings.outputTimings, name)
         SettingsPageFrame(title: SettingsPage.lyrics.title, highlight: highlight) {
             SettingsGroup {
@@ -37,10 +37,8 @@ struct LyricsSettingsPage: View {
                         helper: LyricsOutputTiming.about(name.key, automatic: timing.automatic))
                 TimingButtons(ms: timing.ms, canReset: !timing.automatic) { steps in
                     LyricsOutput.step(steps)
-                    lyrics.moveOutput(steps: steps)
                 } reset: {
                     LyricsOutput.reset()
-                    lyrics.resetOutput()
                 }
                 .padding(.top, 12)
                 .padding(.horizontal, 8)
