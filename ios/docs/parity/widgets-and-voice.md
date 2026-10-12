@@ -76,7 +76,7 @@ Path shorthand used in the citations:
 - [x] Commands: play, pause, next, previous, and quick play with its pick; each travels as text: "play", "pause", "next", "previous", "quick:<Pick>" with the pick's name (Liked, RecentlyAdded, AlbumMix, Resume); anything else is no command (app:widget/WidgetCommand.kt:6-33, appTest:widget/WidgetFacesTest.kt:106-116)
 - [x] Every button is its own request, told apart from the others (app:widget/WidgetCommand.kt:35-43, appTest:widget/WidgetFacesTest.kt:111-112) (iPhone: each its own link and its own intent)
 - [x] A command waits until the saved queue is back from the last session before it acts (app:playback/OctoPlaybackService.kt:253-266)
-- [ ] Play: with nothing queued, shuffles the whole library; else carries on (Media3 `handlePlayButtonAction`: prepares when idle, starts again from the top after the end) (app:widget/WidgetRemote.kt:35, 50-58)
+- [x] Play: with nothing queued, shuffles the whole library; else carries on (Media3 `handlePlayButtonAction`: prepares when idle, starts again from the top after the end) (app:widget/WidgetRemote.kt:35, 50-58)
 - [x] Pause pauses; Next goes to the next song; Previous goes back (Media3 `seekToPrevious`: to the start of the song, or to the song before near its start) (app:widget/WidgetRemote.kt:36-38)
 - [x] A button that ends with nothing playing leaves no notice behind (app:widget/WidgetRemote.kt:46-47, 68-89) (iPhone: iOS has no playback notice to leave)
 
@@ -96,7 +96,7 @@ Path shorthand used in the citations:
 - [x] Else an artist named exactly (by the same-artist rule) among the first 5 artist matches plays all their albums' songs, shuffled (app:playback/CarLibrary.kt:96-100)
 - [x] Else up to 50 songs that match play in order, from the first (app:playback/CarLibrary.kt:101)
 - [x] A shuffled voice request starts at a random song with shuffle on (app:playback/OctoPlaybackService.kt:607-610)
-- [ ] Only the library is searched; nothing matching leaves nothing playing (app:playback/CarLibrary.kt:87-102)
+- [x] Only the library is searched; nothing matching leaves nothing playing (app:playback/CarLibrary.kt:87-102)
 
 ## 10. In the car
 

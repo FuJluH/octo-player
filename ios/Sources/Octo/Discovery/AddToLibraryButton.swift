@@ -11,10 +11,39 @@ struct AddToLibraryButton: View {
     var iconSize: CGFloat = 24
     @Environment(Downloads.self) private var downloads
     @Environment(Router.self) private var router
+    @Environment(Accounts.self) private var accounts
     @Environment(\.octoReduceMotion) private var calm
     @State private var release: (@Sendable () -> Void)?
 
     var body: some View {
+        // A family member whose songs are saved rather than added gets a heart instead.
+        if accounts.family.outside.addLabel != nil {
+            saveHeart
+        } else {
+            addButton
+        }
+    }
+
+    /// Saves the song for this family member, or takes it off Saved.
+    private var saveHeart: some View {
+        let family = accounts.family
+        let id = song.isExternal && !isFind(song.id) ? findId(song.id) : song.id
+        let saved = family.isSaved(id)
+        return Button { family.toggleSaved(id, title: song.title) } label: {
+            Image(systemName: saved ? "heart.fill" : "heart")
+                .font(.system(size: iconSize * 0.84))
+                .foregroundStyle(saved ? Color.white : Color.white.opacity(0.6))
+                .iconGlow(saved)
+                .frame(width: size, height: size)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(NoPress())
+        .accessibilityLabel(FamilyText.save)
+        .accessibilityValue(saved ? "Saved" : "Not saved")
+    }
+
+    @ViewBuilder
+    private var addButton: some View {
         let phase = downloads.phase(song.id)
         let onItsWay = phase.state == .requested
         let follows = onItsWay && downloads.keepsLog
@@ -50,7 +79,9 @@ struct AddToLibraryButton: View {
         .accessibilityAction(named: isFailed(phase) ? "Try again" : follows ? "Follow it" : "Add to your library") {
             if follows { router.showServerDownloads(songId: song.id) } else if enabled { ask() }
         }
-        .accessibilityAction(named: "Why") { explain() }
+        .accessibilityActions {
+            if isFailed(phase) { Button("Why") { explain() } }
+        }
         .onAppear { release = downloads.showing(song.id) }
         .onDisappear {
             release?()

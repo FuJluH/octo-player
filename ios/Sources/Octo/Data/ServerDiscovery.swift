@@ -108,7 +108,7 @@ final class ServerDiscovery {
             return nil
         }
         let sent = try await client.album(native).song
-        return (sent, await resolveInPlace(sent).compactMap { $0 })
+        return (sent, await resolveFromServer(sent))
     }
 
     /// Which of Octo's radio sources suggested a song, for its info sheet.

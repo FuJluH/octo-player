@@ -70,6 +70,7 @@ struct SongMenuItems<Extras: View>: View {
     @Environment(Downloads.self) private var downloads
     @Environment(Player.self) private var player
     @Environment(Accounts.self) private var accounts
+    @Environment(ServerDownloads.self) private var serverDownloads
 
     private var track: LibraryTrack { subject.track }
     private var family: FamilyHub { accounts.family }
@@ -213,10 +214,11 @@ struct SongMenuItems<Extras: View>: View {
             item("Song info", .info) { actions.showInfo(subject) }
         case .findSongs:
             item("Find songs", .search) {
-                if let id = track.serverSongId ?? (track.isFound ? song.id : nil) {
-                    router.serverDownloads = .find(id: id, title: track.title, from: nil)
-                } else {
-                    router.show("This server has no copy of the song to look for")
+                // The song's copy on the signed-in server, the smallest id when it has several.
+                Task {
+                    if !(await serverDownloads.findTrack(track.id, title: track.title, library: actions.state.library)) {
+                        router.show("This server has no copy of the song to look for")
+                    }
                 }
             }
         }

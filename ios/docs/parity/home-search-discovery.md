@@ -25,7 +25,7 @@ Path prefixes used in the citations:
 - [x] The server downloads sheet, the downloads pill, follow-from-button and Find songs need `octoAcquisitions:2`. (app/data/ServerDownloads.kt:162, 166)
 - [x] "Asks first" (Replace anyway) is on only when the server lists both `octoAcquisitions:2` and `octoAcquisitions:3`. (app/data/ServerDownloads.kt:163-165)
 - [x] Higher quality copies (getUpgrades) are read only when the server lists `octoLibraryActions:2`; otherwise the upgrades list is empty. (app/data/ServerDownloads.kt:101-104)
-- [ ] Live download progress (getAcquisitions) is used when the server lists `octoAcquisitions:1`, else after a live check; a "yes" is kept, a "no" is rechecked after 10 minutes. (app/discovery/Downloads.kt:75, 323-337)
+- [x] Live download progress (getAcquisitions) is used when the server lists `octoAcquisitions:1`, else after a live check; a "yes" is kept, a "no" is rechecked after 10 minutes. (app/discovery/Downloads.kt:75, 323-337)
 - [x] The library album "as the server lists it now" (with finds) is only for Octo. (app/discovery/Discovery.kt:185-194)
 - [x] Only Octo marks playlists as Made for you lists (`octoList`), so any other server gives an empty Made for you. (app/discovery/Discovery.kt:60-63)
 
@@ -105,7 +105,7 @@ Path prefixes used in the citations:
 
 ## 8. Home: song shelves (Charts, Most played)
 
-- [ ] Song card: 150dp wide, faded when out of reach offline, artwork fill with the not-in-library mark for a find, title (bodySmall SemiBold, explicit mark), artist (caption, TextMuted) plus the source mark. Tap plays the shelf from that song; long press opens the song menu. (app/ui/common/Items.kt:164-193)
+- [x] Song card: 150dp wide, faded when out of reach offline, artwork fill with the not-in-library mark for a find, title (bodySmall SemiBold, explicit mark), artist (caption, TextMuted) plus the source mark. Tap plays the shelf from that song; long press opens the song menu. (app/ui/common/Items.kt:164-193)
 - [x] Tapping a song plays the shelf's songs as shown, starting at the one tapped. (app/ui/home/HomeScreen.kt:145-164, app/ui/home/HomeViewModel.kt:199)
 - [x] "Most played": play history songs by plays, most first, then latest play, then id; at most 20. (app/ui/home/HomeViewModel.kt:75-77, app/catalog/Plays.kt:33-41)
 - [x] "Charts": the first 10 songs (CHARTS_ROW) of the overall chart (chart id "34") as the Charts page reads it; empty on a server without charts. (app/ui/home/HomeViewModel.kt:114-117, 201-205; core/discovery/TopSongs.kt:68; subsonic/TopSongs.kt:22)
@@ -152,7 +152,7 @@ Path prefixes used in the citations:
 - [x] Text blank AND (recent searches exist OR a chart exists): the recent searches list with the chart under it. (app/ui/search/SearchScreen.kt:150-166)
 - [x] Otherwise, library results null (fewer than 2 characters after folding): the hint "Search your music and discover more" when signed in, else "Search the music on your phone". (app/ui/search/SearchScreen.kt:167)
 - [x] Library results empty AND nothing online (idle, or done with nothing): the hint "No results for "<trimmed text>"". (app/ui/search/SearchScreen.kt:148, 168)
-- [ ] Otherwise the results list, with multi-select over every song shown. (app/ui/search/SearchScreen.kt:170-196)
+- [x] Otherwise the results list, with multi-select over every song shown. (app/ui/search/SearchScreen.kt:170-196)
 - [x] Library results empty and the server failed: a "No results for "<trimmed text>"" hint row inside the list, above the discover section. (app/ui/search/SearchScreen.kt:188-191)
 - [x] Hint style: bodySmall, TextMuted, full width, 20dp sides, 24dp top and bottom. (app/ui/search/SearchScreen.kt:496-504)
 
@@ -228,7 +228,7 @@ Path prefixes used in the citations:
 - [x] Find song rows: add button at the end, and no empty add space for a find that turns into its library song (it ends at its length like the library rows). Tap plays the finds from that one and saves the search. (app/ui/search/SearchScreen.kt:426-430, app/ui/search/SearchViewModel.kt:289-293)
 - [x] Online album card: same as an album card with the not-in-library mark on its cover and the share line when held in part; no long press menu. Tap opens the online album page. (app/ui/common/Items.kt:112-114, app/ui/search/SearchScreen.kt:438-440)
 - [x] Online artist circle: not-in-library mark, no long press; tap opens the online artist page. (app/ui/common/Items.kt:553-554, app/ui/search/SearchScreen.kt:451-453)
-- [ ] Multi-select covers library songs, finds and top songs together, library first, each once by id. (app/ui/search/SearchScreen.kt:506-513)
+- [x] Multi-select covers library songs, finds and top songs together, library first, each once by id. (app/ui/search/SearchScreen.kt:506-513)
 
 ## 19. Search: add hint line
 
@@ -249,7 +249,7 @@ Path prefixes used in the citations:
 - [x] Finds are stored as they come (so a length learned from playing shows next time); the stored row wins over the fresh one. (app/discovery/Discovery.kt:265-267)
 - [x] Lists keep the server's order; repeats are dropped by id, except for lists that keep every entry (playlists by id list) or keep places (rankings, null where a library song is gone). (app/discovery/Discovery.kt:205-226, 237-239)
 - [x] A find as a song: id "find:<server id>", no library album or artist to open, track/disc/year null, addedAt 0, not on the phone; album, artist, cover, mime type (contentType else by suffix: m4a/mp4/aac audio/mp4, mp3 audio/mpeg, flac audio/flac, ogg/oga/opus audio/ogg, wav audio/wav), bitrate when above 0, explicit flag. (app/discovery/LibraryMatching.kt:50-91, core/discovery/Matching.kt:124-132)
-- [ ] Which radio source suggested a song is remembered from the server's `octoSuggestedBy` (trimmed, non-empty), up to 5,000 songs, each believed 12 hours, oldest dropped first, a re-suggestion moving to the newest end; not saved. (app/discovery/Discovery.kt:84-88, 228-233, 317-346; app/discovery/LibraryMatching.kt:18-22)
+- [x] Which radio source suggested a song is remembered from the server's `octoSuggestedBy` (trimmed, non-empty), up to 5,000 songs, each believed 12 hours, oldest dropped first, a re-suggestion moving to the newest end; not saved. (app/discovery/Discovery.kt:84-88, 228-233, 317-346; app/discovery/LibraryMatching.kt:18-22)
 - [x] Radio from a song: the song's server id (a find's own, the library song's server copy, else a search "<artist> <title>" for 40 songs taking the same recording first, else the same song in any version); then getSimilarSongs2 with count 50 and octoMix=client; seed first, then the similar songs, each once. (app/discovery/Discovery.kt:35-36, 137-143, 270-285; subsonic/SubsonicClient.kt:425-432)
 - [ ] Library album as the server lists it now: from the album's songs' copies on this server, the album most of them belong to, fetched by its native id; only songs the server marks external stay finds, numbered as the album numbers them (0 or less means none); unmarked missing songs are dropped (the next copy brings them). (app/discovery/Discovery.kt:185-194, app/discovery/WholeAlbum.kt:13-20)
 - [ ] A whole library album: the server's order, each library song as the library has it, each adopted find as its library song, then library songs the server did not list (a phone-only copy) in their own order; with no finds it is the library's album unchanged. (app/discovery/WholeAlbum.kt:28-39)
@@ -260,7 +260,7 @@ Path prefixes used in the citations:
 - [x] Loading shows a 28dp accent spinner centered; failure shows the message (bodySmall, TextSecondary, centered) and an accent "Try again" button 16dp below; no server shows "Sign in to your server to see this.". (app/ui/common/LoadState.kt:38-64, app/ui/online/LoadOnline.kt:7-11)
 - [x] Error messages: unreachable "Couldn't reach the server. Check the address, and that you're on the right network."; not Subsonic "That address answered, but not like a music server. Check the port." or, when busy, "The server isn't answering right now. It may be restarting, so try again in a moment."; not found "That isn't on the server any more."; server error "The server said: <message>"; else "Something went wrong.". (app/data/UserMessages.kt:6-19)
 - [x] Header: artwork, title, artist (opens the online artist page when the album has an artist id), details "year • N songs • length" (missing parts left out); Play plays from the first song; Shuffle plays shuffled. (app/ui/online/OnlineAlbumScreen.kt:157-171)
-- [ ] Length shows only when every song's length is known: total seconds as "<m> min" or "<h> hr <m> min", rounded to the nearest minute. (app/ui/online/OnlineAlbumScreen.kt:159-161, app/ui/common/Layout.kt:77-80)
+- [x] Length shows only when every song's length is known: total seconds as "<m> min" or "<h> hr <m> min", rounded to the nearest minute. (app/ui/online/OnlineAlbumScreen.kt:159-161, app/ui/common/Layout.kt:77-80)
 - [x] The cover stays clean (no mark). When any song is a find, an action row shows the add-to-library action: label "Add to your library", or "Adding" and disabled while downloading. (app/ui/online/OnlineAlbumScreen.kt:172-185) (iPhone: SF Symbol plus.circle)
 - [x] Beside it, for an album partly in the library, the muted line "<in library> of <songs> in your library" (1 line, 10dp sides), pushed to the end. Not shown when none or all are outside. (app/ui/online/OnlineAlbumScreen.kt:186-195, app/ui/common/NotInLibrary.kt:160-163)
 - [x] "Downloading" is true once the album was asked for here (cleared if the server said no), or when every find on it is already asked for or in. (app/ui/online/OnlineAlbumScreen.kt:77-85)
@@ -300,7 +300,7 @@ Path prefixes used in the citations:
 ## 24. Not-in-library signs on rows and covers
 
 - [x] A song is outside the library when its id starts "find:" and its download has not reached the library. (app/ui/common/NotInLibrary.kt:108-116)
-- [ ] Row sign: a library song has none; in a list that offers add, a find gets the add button (kept after it is added, so the check has its moment); elsewhere a find gets the small mark on its artwork until it is in the library. (app/ui/common/NotInLibrary.kt:121-131)
+- [x] Row sign: a library song has none; in a list that offers add, a find gets the add button (kept after it is added, so the check has its moment); elsewhere a find gets the small mark on its artwork until it is in the library. (app/ui/common/NotInLibrary.kt:121-131)
 - [x] Row end: the add button; else an empty 40dp space when the list gives library songs that space and the row has no trailing item; else the list's trailing item. (app/ui/common/NotInLibrary.kt:138-148, app/ui/common/Items.kt:399-404)
 - [x] Add button in a row: 40dp, plus 22dp. (app/ui/common/Items.kt:225-227)
 - [x] Accessibility for artwork outside the library: "Not in your library", or "<description>, not in your library". (app/ui/common/NotInLibrary.kt:40-41, 150-155)
@@ -314,7 +314,7 @@ Path prefixes used in the citations:
 ## 25. Add to library button
 
 - [x] Used where a heart would be for a song not in the library: a plus that asks the server to download the song (the download arrow is reserved for saving to the phone). Default size 44dp, icon 24dp. (app/ui/common/AddToLibraryButton.kt:112-124) (iPhone: SF Symbol plus)
-- [ ] For a family member whose songs are saved rather than added, it is a heart instead: tap toggles saved for that song; accessibility "Save", state "Saved"/"Not saved"; filled heart white when saved (glowing), outline white 60% when not. (app/ui/common/AddToLibraryButton.kt:87-110, 126-130)
+- [x] For a family member whose songs are saved rather than added, it is a heart instead: tap toggles saved for that song; accessibility "Save", state "Saved"/"Not saved"; filled heart white when saved (glowing), outline white 60% when not. (app/ui/common/AddToLibraryButton.kt:87-110, 126-130) (iPhone: SF Symbol heart)
 - [x] Not asked: plus icon, white 60%, unlit. Tap asks for the download. (app/ui/common/AddToLibraryButton.kt:165-171)
 - [x] Queued, downloading, adding, done: the download ring. Failed: the alert icon. (app/ui/common/AddToLibraryButton.kt:172-173)
 - [x] Enabled only when not asked, failed, or on its way with a server that keeps a downloads log. (app/ui/common/AddToLibraryButton.kt:143, 150)
@@ -343,25 +343,25 @@ Path prefixes used in the citations:
 
 ## 27. Find row turning into the library song (FindSwap)
 
-- [ ] A find's row has three faces: Find, Check, Library. (app/ui/common/FindSwap.kt:21-23)
+- [x] A find's row has three faces: Find, Check, Library. (app/ui/common/FindSwap.kt:21-23)
 - [x] While it is unknown whether the find is in the library, the face stays as it is. (app/ui/common/FindSwap.kt:30-31)
 - [x] A row that opens on a find already in the library shows the library song at once; otherwise it shows the find. (app/ui/common/FindSwap.kt:32)
 - [x] A find that arrives while shown: in a list that offers add, the Check face for 1,200ms (the ring's check draws and holds), then Library; elsewhere straight to Library. (app/ui/common/FindSwap.kt:14-16, 33, 61-66)
 - [x] The library song is looked up from the Check face on, so it is ready when the row turns; the last seen copy is used at once when the row is drawn again. (app/ui/common/FindSwap.kt:67-79, app/discovery/Adoptions.kt:16-28)
 - [x] The turn into the library song cross-fades over 300ms only for a row that showed the find and without reduced motion; otherwise it swaps at once. (app/ui/common/FindSwap.kt:18-19, 40-43; app/ui/common/Items.kt:368-379)
-- [ ] The row keeps the same place and height; the find and its check hold still; after the turn the swipe, the menu and what plays are the library song's. (app/ui/common/Items.kt:250-300, 302-305)
+- [x] The row keeps the same place and height; the find and its check hold still; after the turn the swipe, the menu and what plays are the library song's. (app/ui/common/Items.kt:250-300, 302-305)
 - [x] Adoptions (find id to library song id) are null until first read, so a row can tell "already in" from "arrives while shown". (app/discovery/Downloads.kt:165-170)
 
 ## 28. Song rows used in these lists
 
 - [x] Row: at least 56dp tall (taller for large text), 20dp sides, 4dp vertical, 12dp between parts; artwork 44dp radius 6dp. (app/ui/common/Items.kt:361-363, 407-414)
-- [ ] Tap plays (or picks while multi-select is on); long press opens the song menu with haptic; press squeezes. Accessibility actions "Play next" and "Add to queue". (app/ui/common/Items.kt:333-360)
+- [x] Tap plays (or picks while multi-select is on); long press opens the song menu with haptic; press squeezes. Accessibility actions "Play next" and "Add to queue". (app/ui/common/Items.kt:333-360) (iPhone: system context menu)
 - [x] Swipe right puts the song next (confirm haptic), with "Play next" showing behind; not while picking. (app/ui/common/Items.kt:290-299, 494-517) (iPhone: system swipe actions, with a success haptic)
-- [ ] Now playing: bars over the artwork on a black 50% shade. Picked: a select mark over it. (app/ui/common/Items.kt:412-420, 481-492)
+- [x] Now playing: bars over the artwork on a black 50% shade. Picked: a select mark over it. (app/ui/common/Items.kt:412-420, 481-492)
 - [x] Subtitle default: "<artist> • <album>" with the album left out for a find whose album equals its title. (app/ui/common/Items.kt:216-223)
-- [ ] Length shown is the length learned by playing when the listing was more than a second off, else the listed one, else none. (app/ui/common/Items.kt:475, app/discovery/FindLengths.kt:10-12)
+- [x] Length shown is the length learned by playing when the listing was more than a second off, else the listed one, else none. (app/ui/common/Items.kt:475, app/discovery/FindLengths.kt:10-12)
 - [x] Learned lengths of finds are stored with the find, written once per value; a failed write is forgotten so it is tried again. (app/discovery/FindLengths.kt:14-48)
-- [ ] Out of reach offline: the row draws faint. (app/ui/common/Items.kt:364-365)
+- [x] Out of reach offline: the row draws faint. (app/ui/common/Items.kt:364-365)
 
 ## 29. Downloads engine (asking for finds and following them)
 
@@ -382,7 +382,7 @@ Path prefixes used in the citations:
 - [x] Following ends when nothing is waiting; an unreachable server just waits for the next turn. (app/discovery/DownloadProgress.kt:216-265)
 - [x] Asking again after a failure passes over the failed entry the server still lists and starts progress from nothing. (app/discovery/DownloadProgress.kt:200-212)
 - [x] An older server without getAcquisitions: if the admin pages can be reached, look every 20 s for 30 minutes at what Octo finished and copy the library up to 3 times per finished song; otherwise copy the library at 2 minutes and 8 minutes. (app/discovery/Downloads.kt:55-68, 282-303, 369-397)
-- [ ] Downloads asked before the app last closed carry on being followed at start, on a server that reports progress. A switch to another kept server stops following the last one's and resumes this one's. (app/discovery/Downloads.kt:184-198, 305-318)
+- [x] Downloads asked before the app last closed carry on being followed at start, on a server that reports progress. A switch to another kept server stops following the last one's and resumes this one's. (app/discovery/Downloads.kt:184-198, 305-318)
 - [x] Only finds asked on the server in use, less than 24 hours ago, are followed. (app/discovery/Downloads.kt:312-318)
 - [x] After every library copy: finds not seen for 30 days are let go (on kept servers), and waiting finds whose song now appears in the library (same song, about the same length) are linked to it. Downloading never likes the song. (app/discovery/Downloads.kt:70-71, 259-276, 427-435)
 - [x] A pull on a page wakes progress following, or starts it when finds wait on a server that reports progress. (app/discovery/Downloads.kt:250-257)
@@ -433,7 +433,7 @@ Path prefixes used in the citations:
 ## 33. Server downloads sheet: list
 
 - [x] Glass sheet over everything, titled "Server downloads" (the phone's own songs are "Downloads"). (app/ui/downloads/ServerDownloadsSheet.kt:104-129) (iPhone: system sheet)
-- [ ] Opened from the downloads pill, a song's add button while it is on its way, an album page's action, the song menu's Find songs, and upgrade toasts ("Show"). (app/ui/downloads/ServerDownloadsSheet.kt:111-114; app/ui/menu/SongMenu.kt:284-292; app/data/Upgrades.kt:238)
+- [x] Opened from the downloads pill, a song's add button while it is on its way, an album page's action, the song menu's Find songs, and upgrade toasts ("Show"). (app/ui/downloads/ServerDownloadsSheet.kt:111-114; app/ui/menu/SongMenu.kt:284-292; app/data/Upgrades.kt:238)
 - [x] Head: "Server downloads" (section style, heading) and the summary caption; "Clear finished" quiet button when any row finished. (app/ui/downloads/ServerDownloadsSheet.kt:222-228)
 - [x] Empty: "Asking the server" until the first answer, then "Nothing downloading. Songs you add show here, with every step on the way.". (app/ui/downloads/ServerDownloadsSheet.kt:229-232, core/ui/downloads/Downloads.kt:225)
 - [x] Row: 48dp artwork radius 8dp; title (body, ellipsis) plus kind label; artist when not blank; status caption (orange when failed, max 2 lines); at the end a 22dp progress ring while running, a downloaded mark when done, an orange info mark when failed. Accessibility "<title>, <artist>" with the status as state. (app/ui/downloads/ServerDownloadsSheet.kt:244-273) (iPhone: SF Symbols)
@@ -461,7 +461,7 @@ Path prefixes used in the citations:
 
 ## 35. Find songs
 
-- [ ] Opens for a song by its server id: a find's id without "find:", or the library song's copy on the signed-in server with the smallest native id; when there is none the song menu says "This server has no copy of the song to look for". (app/data/ServerDownloads.kt:225-237, app/ui/menu/SongMenu.kt:287-292)
+- [x] Opens for a song by its server id: a find's id without "find:", or the library song's copy on the signed-in server with the smallest native id; when there is none the song menu says "This server has no copy of the song to look for". (app/data/ServerDownloads.kt:225-237, app/ui/menu/SongMenu.kt:287-292)
 - [x] The search starts with findSongs and is polled with getFoundSongs every 1.5 s while it is searching; a failure stops it. Problems: the error's own message, else "Could not start the search" (start) or "Could not reach the server" (poll). (core/ui/downloads/DownloadWatches.kt:296-322)
 - [x] Bar: back "Back to the log" when opened from a log, else "Back to Server downloads"; "Search again" when not searching (also forgets an unanswered older-server question). (app/ui/downloads/ServerDownloadsSheet.kt:528-536)
 - [x] Head: 64dp artwork radius 10dp (the song's cover, else the id); "FIND SONGS" caption; the song's title (or the title it was opened with); artist. (app/ui/downloads/ServerDownloadsSheet.kt:606-616)
