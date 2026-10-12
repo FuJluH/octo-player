@@ -27,6 +27,7 @@ import UIKit
 /// - `found:TEXT` plays the songs not in the library that a search for TEXT finds
 /// - `search:TEXT` plays the library songs a search for TEXT finds
 /// - `pause`
+/// - `covertime:N` times fetching N random albums' covers from the server, straight from it
 /// - `probe` logs the whole app's frame rate and late frames every two seconds
 /// - discovery steps: see `DiscoveryDrive`
 /// - `toast:TEXT` a plain message; `undo:TEXT` a message with Undo; `done:TEXT` one with a check
@@ -230,4 +231,35 @@ final class HitchProbe: NSObject {
         }
     }
 }
+/// Times how long the server takes to hand over album covers, for a debug build on a device.
+@MainActor
+enum CoverTiming {
+    static func run(session: Session, library: Library, count: Int) async {
+        let log = Logger(subsystem: "app.winters.octo", category: "covers")
+        guard let client = session.client else { return }
+        var asks: [(String, String)] = []
+        for album in await library.albums().shuffled().prefix(count) {
+            guard case .server(_, let coverId, _, _) = ArtworkRef.decode(album.artwork) else { continue }
+            asks.append((coverId, "album \(album.title)"))
+        }
+        for song in (try? await client.randomSongs(count: count)) ?? [] {
+            guard let coverId = song.coverArt else { continue }
+            asks.append((coverId, "song \(coverId) \(song.title)"))
+        }
+        for (coverId, name) in asks {
+            for size in [600, 128] {
+                var request = URLRequest(url: client.coverURL(coverId, size: size))
+                request.cachePolicy = .reloadIgnoringLocalCacheData
+                for (name, value) in client.headers { request.setValue(value, forHTTPHeaderField: name) }
+                let start = Date()
+                let answer = try? await client.session.data(for: request)
+                let ms = Int(Date().timeIntervalSince(start) * 1000)
+                let bytes = answer?.0.count ?? 0
+                let status = (answer?.1 as? HTTPURLResponse)?.statusCode ?? 0
+                log.notice("cover \(size) \(ms) ms \(bytes) bytes status \(status) \(name, privacy: .public)")
+            }
+        }
+    }
+}
+
 #endif
