@@ -27,6 +27,8 @@
         <key>NSAllowsLocalNetworking</key>
         <true/>
     </dict>
+    <key>NSAppleMusicUsageDescription</key>
+    <string>Octo plays the music already on your iPhone, beside your server's.</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>Octo connects to your music server on your home network.</string>
     <key>ITSAppUsesNonExemptEncryption</key>

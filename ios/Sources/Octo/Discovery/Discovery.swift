@@ -214,6 +214,30 @@ final class Discovery {
         return songs.isEmpty ? nil : RankedSongs(artist: list.artist, source: list.source, songs: songs)
     }
 
+    // MARK: Stations
+
+    /// The kept server whose stations Home shows: the one signed in to, while it runs Octo.
+    var stationsFrom: String? { session.client != nil && session.isOcto ? session.activeId : nil }
+
+    /// Only Octo runs stations. Other servers list internet radio here, which is a stream, not
+    /// songs, so nothing is shown for them.
+    func stations() async throws -> [RadioStation] {
+        guard let client = session.client, session.isOcto else { return [] }
+        return try await client.stations()
+    }
+
+    /// The lists Octo made for the listener, from its playlists.
+    func madeForYou() async throws -> [Playlist] {
+        guard let client = session.client, session.isOcto else { return [] }
+        return madeForYouLists(try await client.playlists())
+    }
+
+    /// The songs a station, or a Made for you list, has lined up now.
+    func stationSongs(_ id: String) async throws -> [Song] {
+        guard let client = session.client else { return [] }
+        return await resolve(try await client.playlist(id).entry).map(\.asSong)
+    }
+
     // MARK: Pages
 
     /// An album the server found, with its songs in the server's order.

@@ -6,6 +6,7 @@ import OctoKit
 ///
 /// - `query:TEXT` opens Search and types TEXT into its field
 /// - `charts` opens the Charts page
+/// - `whatsnew` makes the What's new card due again and opens Home
 /// - `downloads` opens the server downloads sheet on its list
 /// - `log:first` or `log:running` opens the log of the first download the server lists, or the
 ///   first still running
@@ -22,6 +23,11 @@ enum DiscoveryDrive {
             NotificationCenter.default.post(name: .driveSearch, object: value)
         case "charts":
             router.go(.charts)
+        case "whatsnew":
+            // Forgets which notes were seen, so Home shows the card when it opens next.
+            UserDefaults.standard.set(0, forKey: "whats_new.last_seen_version")
+            router.drive = .tab(.home)
+            NotificationCenter.default.post(name: .driveWhatsNew, object: nil)
         case "downloads":
             router.serverDownloads = .list(focus: nil)
         case "log":

@@ -9,6 +9,7 @@ struct SearchView: View {
     @Environment(Player.self) private var player
     @Environment(Downloads.self) private var downloads
     @Environment(Discovery.self) private var discovery
+    @Environment(Library.self) private var library
     @State private var model = SearchModel()
     @State private var listWidth: CGFloat = 390
     @AppStorage(libraryOnlyKey) private var libraryOnly = false
@@ -40,6 +41,7 @@ struct SearchView: View {
         .onAppear { model.attach(discovery: discovery, player: player, downloads: downloads) }
         .onChange(of: session.activeId) { _, _ in model.serverChanged() }
         .onChange(of: session.client == nil) { _, _ in model.serverChanged() }
+        .onChange(of: library.stamp(.playlists)) { _, _ in model.playlistsChanged() }
         #if DEBUG
         .onReceive(NotificationCenter.default.publisher(for: .driveSearch)) { note in
             if let text = note.object as? String { model.text = text }
@@ -415,5 +417,7 @@ private extension DiscoverState {
 extension Notification.Name {
     /// Sets Search's field, from a launch step.
     static let driveSearch = Notification.Name("octo.drive.search")
+    /// Shows the What's new card again, from a launch step.
+    static let driveWhatsNew = Notification.Name("octo.drive.whatsnew")
 }
 #endif

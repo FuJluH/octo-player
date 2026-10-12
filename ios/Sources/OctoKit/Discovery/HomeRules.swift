@@ -1,0 +1,76 @@
+import Foundation
+
+/// Whether the app may read the music on the phone.
+public enum PhoneAccess: Sendable, Equatable {
+    case notAsked, granted, denied
+    /// Refused, and the system no longer asks: only Settings can allow it now.
+    case deniedForever
+}
+
+/// What Home shows besides the resume card.
+public struct HomeLayout: Sendable, Equatable {
+    /// The quiet card asking for the music on the phone.
+    public var askAccess: Bool
+    /// The shelves, drawn from the whole library, phone and server together.
+    public var shelves: Bool
+    /// The note for a library with no songs at all.
+    public var empty: Bool
+
+    public init(askAccess: Bool, shelves: Bool, empty: Bool) {
+        self.askAccess = askAccess
+        self.shelves = shelves
+        self.empty = empty
+    }
+}
+
+/// Shelves whenever the library has songs, wherever they came from, so a listener with only a
+/// server still gets a full Home. The phone access card shows only while access is missing and they
+/// have not said "Not now". Nils are values not read yet: nothing shows for them, so nothing
+/// flickers.
+public func homeLayout(_ access: PhoneAccess, accessDismissed: Bool?, librarySongs: Int?) -> HomeLayout {
+    HomeLayout(askAccess: access != .granted && accessDismissed == false,
+               shelves: (librarySongs ?? 0) > 0,
+               empty: librarySongs == 0)
+}
+
+/// The button for phone access, worded for whether the system still asks.
+public func accessButtonLabel(_ access: PhoneAccess) -> String { access == .deniedForever ? "Open settings" : "Allow access" }
+
+/// Stations change once a day, so a list older than this is asked for again when Home comes back.
+public let stationsStaleMs: Int64 = 10 * 60 * 1_000
+
+/// The words for a station the server no longer has: Octo makes its stations anew now and then, and
+/// an old one is taken off Home.
+public func stationGoneLine(_ name: String) -> String { "\(name) isn't on the server any more" }
+
+/// The line under a Made for you list's name.
+public func songCountLine(_ count: Int) -> String { count == 1 ? "1 song" : "\(count) songs" }
+
+/// Whether Home should ask for the stations again: never while a load is running, always after one
+/// failed, otherwise once the list is stale.
+public func stationsDue(now: Int64, loadedAt: Int64?, failed: Bool, loading: Bool) -> Bool {
+    if loading { return false }
+    guard let loadedAt, !failed else { return true }
+    return now - loadedAt >= stationsStaleMs
+}
+
+/// The lists Octo made for the listener, in their kinds' order, from the server's playlists. Only
+/// an Octo server that makes them marks a playlist so; any other has none. An unknown kind goes
+/// last, keeping the server's order among equals.
+public func madeForYouLists(_ playlists: [Playlist]) -> [Playlist] {
+    playlists.filter { $0.octoList != nil }.enumerated().sorted { a, b in
+        let ka = octoListKinds.firstIndex(of: a.element.octoList ?? "") ?? octoListKinds.count
+        let kb = octoListKinds.firstIndex(of: b.element.octoList ?? "") ?? octoListKinds.count
+        return ka != kb ? ka < kb : a.offset < b.offset
+    }.map(\.element)
+}
+
+/// The one line the card on Home shows. Kept short.
+public let whatsNewSummary = "A new equalizer, sorting, favorites, downloads and much more"
+
+/// Whether the card about what is new should show: once after each update, but not on a fresh
+/// install, which has nothing to compare with.
+public func whatsNewDue(lastSeen: Int?, current: Int, freshInstall: Bool) -> Bool {
+    guard let lastSeen else { return !freshInstall }
+    return lastSeen < current
+}

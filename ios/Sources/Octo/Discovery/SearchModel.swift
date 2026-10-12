@@ -70,6 +70,9 @@ final class SearchModel {
         askTopSongs()
     }
 
+    /// The playlists changed: the library is searched again.
+    func playlistsChanged() { if results != nil { searchLibrary(wait: false) } }
+
     /// Another server in use, or signed in or out: the server is asked anew, and its chart.
     func serverChanged() {
         askServer()
