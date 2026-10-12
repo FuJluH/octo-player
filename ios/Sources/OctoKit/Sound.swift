@@ -203,6 +203,8 @@ public final class FilterBank: @unchecked Sendable {
     private var z1: [Double]
     private var z2: [Double]
     public var isEmpty: Bool { b0.isEmpty }
+    /// How many filters run.
+    public var count: Int { b0.count }
 
     public init(channels: Int, coefficients: [Coefficients]) {
         self.channels = channels
@@ -410,23 +412,30 @@ public final class AlbumRun: @unchecked Sendable {
 }
 
 /// Keeps peaks under a ceiling just below full scale. The sound runs a moment late, so the
-/// limiter sees a peak coming and turns the level down in time, then lets it back up slowly.
-/// All channels move together, so the stereo picture stays put. The delay shifts the sound by
-/// 1.5 ms and nothing else.
+/// limiter sees a peak coming and turns the level down in time instead of clipping it, then
+/// lets the level back up slowly so the change is not heard. All channels move together, so
+/// the stereo picture stays put. Each buffer is processed in place: what comes out is the
+/// sound `latency` frames ago.
 public final class Limiter: @unchecked Sendable {
     public let channels: Int
+    /// Frames of delay.
     public let latency: Int
+    /// Off, the level returns to unity and the sound only passes through the delay.
     public var enabled = true
     private let ceiling: Float
     private let release: Float
+    /// The delayed frames, oldest at `head`.
     private var held: [Float]
     private var head = 0
+    /// The level each frame needs, kept as a rising queue so the lowest one in the lookahead
+    /// window is always at the front.
     private var need: [Float]
     private var needAt: [Int]
     private var needFront = 0
     private var needSize = 0
+    /// Frames taken in.
     private var inCount = 0
-    private var outCount = 0
+    /// The level applied now.
     private var gain: Float = 1
 
     public init(channels: Int, sampleRate: Double, ceilingDb: Double = -1, lookaheadMs: Double = 1.5, releaseMs: Double = 100) {
@@ -439,6 +448,8 @@ public final class Limiter: @unchecked Sendable {
         needAt = Array(repeating: 0, count: latency + 2)
     }
 
+    public var ceilingLevel: Float { ceiling }
+
     /// Runs `frames` frames through the delay, in place, one buffer per channel.
     public func process(_ buffers: [UnsafeMutablePointer<Float>], frames: Int) {
         guard buffers.count == channels else { return }
@@ -447,7 +458,10 @@ public final class Limiter: @unchecked Sendable {
             for ch in 0..<channels { peak = max(peak, abs(buffers[ch][i])) }
             pushNeed(enabled && peak > ceiling ? ceiling / peak : 1)
             inCount += 1
-            while needSize > 0 && needAt[needFront] < outCount - 0 && needAt[needFront] + latency < inCount { popFront() }
+            // The frame leaving the delay now came in `latency` frames ago; it is turned down as
+            // far as any frame still in view needs. Down is instant; back up is slow.
+            let leaving = inCount - 1 - latency
+            while needSize > 0 && needAt[needFront] < leaving { popFront() }
             let target = needSize > 0 ? need[needFront] : 1
             gain = target < gain ? target : gain + (target - gain) * release
             let slot = head * channels
@@ -459,21 +473,20 @@ public final class Limiter: @unchecked Sendable {
                 buffers[ch][i] = y
             }
             head = (head + 1) % latency
-            outCount += 1
         }
     }
 
-    /// Forgets the sound in the delay, after a jump to another place.
+    /// Forgets the sound in the delay, after a jump to another place. The level is kept.
     public func clear() {
-        held = Array(repeating: 0, count: latency * channels)
+        for i in held.indices { held[i] = 0 }
         head = 0
         needFront = 0
         needSize = 0
         inCount = 0
-        outCount = 0
-        gain = 1
     }
 
+    /// Anything asking for more level than this one can never be the lowest while this one is
+    /// in view.
     private func pushNeed(_ level: Float) {
         while needSize > 0 && need[(needFront + needSize - 1) % need.count] >= level { needSize -= 1 }
         let slot = (needFront + needSize) % need.count

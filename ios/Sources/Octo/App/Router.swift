@@ -12,6 +12,23 @@ final class Router {
 
     func go(_ route: Route) { self.route = route }
     func routeTaken() { route = nil }
+
+    /// A change of screen asked for from outside the pages.
+    var drive: DriveRequest?
+
+    enum DriveRequest: Equatable {
+        case tab(AppTab)
+        case openPlayer, closePlayer, lyrics
+    }
+
+    /// The full player opens on its lyrics when this is set; it clears it.
+    var lyricsRequested = false
+
+    /// The server downloads sheet, while it is open.
+    var serverDownloads: DownloadsSheetPage?
+
+    /// Opens the server downloads sheet: on a song's newest download log, or on the list.
+    func showServerDownloads(songId: String? = nil) { serverDownloads = .list(focus: songId) }
     private(set) var toast: Toast?
 
     struct Toast: Identifiable, Equatable {
@@ -35,6 +52,16 @@ final class Router {
     }
 
     func dismissToast() { toast = nil }
+}
+
+/// What the server downloads sheet shows: the list (on a song's newest download when `focus`
+/// names one the server lists), one download's log, or Find songs for one song.
+enum DownloadsSheetPage: Hashable {
+    case list(focus: String?)
+    case log(key: String)
+    /// `id` is the song's id on the server; `title` names it until the server answers. `from`
+    /// is the log it was opened from, if any.
+    case find(id: String, title: String, from: String?)
 }
 
 extension SignInModel.Form: Identifiable {

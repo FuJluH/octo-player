@@ -20,6 +20,8 @@ struct NowPlayingView: View {
     @State private var artDrag: CGFloat = 0
     @State private var artCrossed = false
     @State private var showsLyricsMenu = false
+    @State private var likes = 0
+    @Environment(\.accessibilityReduceMotion) private var calm
 
     var body: some View {
         // The safe area is read here, then the player covers the whole screen: the wash runs to
@@ -32,6 +34,11 @@ struct NowPlayingView: View {
                 let shrink = 1 - 0.06 * (travel / cap)
                 ZStack {
                     CoverWash(coverArt: player.current?.coverArt, tone: tone)
+                        .onChange(of: router.lyricsRequested, initial: true) { _, asked in
+                            guard asked else { return }
+                            router.lyricsRequested = false
+                            lyricsOpen = true
+                        }
                     VStack(spacing: 0) {
                         topLine
                         if lyricsOpen {
@@ -169,16 +176,26 @@ struct NowPlayingView: View {
             .transition(.opacity)
             Spacer(minLength: 8)
             if let song = player.current {
-                Button { Task { await toggleHeart(song) } } label: {
-                    Image(systemName: isStarred(song) ? "heart.fill" : "heart")
-                        .font(.system(size: 22))
-                        .shadow(color: isStarred(song) ? tone.ink.opacity(0.6) : .clear, radius: 6)
-                        .symbolEffect(.bounce, value: isStarred(song))
-                        .frame(width: 44, height: 44)
+                if song.isExternal {
+                    AddToLibraryButton(song: song)
+                } else {
+                    Button { Task { await toggleHeart(song) } } label: {
+                        Image(systemName: isStarred(song) ? "heart.fill" : "heart")
+                            .font(.system(size: 24))
+                            .foregroundStyle(isStarred(song) ? tone.ink : tone.ink.opacity(0.6))
+                            .shadow(color: isStarred(song) ? tone.ink.opacity(0.6) : .clear, radius: 6)
+                            .keyframeAnimator(initialValue: 1.0, trigger: likes) { content, scale in
+                                content.scaleEffect(scale)
+                            } keyframes: { _ in
+                                CubicKeyframe(calm ? 1 : 1.2, duration: 0.135)
+                                CubicKeyframe(1, duration: 0.165)
+                            }
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(NoPress())
+                    .accessibilityLabel("Like")
+                    .accessibilityValue(isStarred(song) ? "In Liked songs" : "Not in Liked songs")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Like")
-                .accessibilityValue(isStarred(song) ? "In Liked songs" : "Not in Liked songs")
                 Menu {
                     SongActions(song: song)
                 } label: {
@@ -350,6 +367,7 @@ struct NowPlayingView: View {
         guard let client = session.client else { return }
         let next = !isStarred(song)
         starred[song.id] = next
+        if next { likes += 1 }
         do {
             if next { try await client.star(songId: song.id) } else { try await client.unstar(songId: song.id) }
         } catch {

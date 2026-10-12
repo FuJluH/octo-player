@@ -38,6 +38,8 @@ struct MainShell: View {
     @Environment(Player.self) private var player
     @Environment(Router.self) private var router
     @Environment(Session.self) private var session
+    @Environment(Downloads.self) private var downloads
+    @Environment(\.scenePhase) private var scenePhase
     @SceneStorage("tab") private var tab: AppTab = .home
     @AppStorage("bar.player") private var playerMode = false
     @State private var paths: [AppTab: NavigationPath] = [:]
@@ -93,6 +95,19 @@ struct MainShell: View {
                 playerMode = false
             }
         }
+        .onChange(of: router.drive) { _, request in
+            guard let request else { return }
+            router.drive = nil
+            switch request {
+            case .tab(let item): tab = item
+            case .openPlayer, .lyrics: if player.current != nil { withAnimation(.easeOut(duration: 0.4)) { playerOpen = true } }
+            case .closePlayer: withAnimation(.easeIn(duration: 0.3)) { playerOpen = false }
+            }
+            if request == .lyrics { router.lyricsRequested = true }
+        }
+        .task(id: session.activeId) { await downloads.resume() }
+        .onChange(of: session.client == nil) { _, _ in Task { await downloads.resume() } }
+        .onChange(of: scenePhase, initial: true) { _, phase in downloads.setForeground(phase == .active) }
         .fullScreenCover(item: $router.signIn) { form in
             SignInView(form: form, session: session) { notice in
                 if let notice { router.show(notice, done: true) }

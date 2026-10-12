@@ -12,6 +12,9 @@ public struct ServerProfile: Sendable, Equatable {
     }
 
     public func has(_ name: String) -> Bool { extensions.contains { $0.hasPrefix(name + ":") } }
+
+    /// Whether the server lists an extension at this version.
+    public func lists(_ name: String, version: Int = 1) -> Bool { extensions.contains("\(name):\(version)") }
 }
 
 /// How the app asks for a song's audio.
@@ -105,6 +108,11 @@ extension SubsonicClient {
     }
 
     /// Hearts a song. On Octo, hearting a song found online also brings it into the library.
+    /// One song by its id.
+    public func song(_ id: String) async throws -> Song {
+        try await get("getSong", [("id", id)], key: "song")
+    }
+
     public func star(songId: String) async throws { try await call("star", [("id", songId)]) }
     public func unstar(songId: String) async throws { try await call("unstar", [("id", songId)]) }
     public func star(albumId: String) async throws { try await call("star", [("albumId", albumId)]) }

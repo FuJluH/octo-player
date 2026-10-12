@@ -77,6 +77,10 @@ struct SongRow: View {
     var number: Int?
     /// Words under the title in place of "Artist • Album".
     var subtitle: String?
+    /// Whether this list offers add: a find ends with the add button, and a library song keeps
+    /// the same space empty when `addSpace` so lengths line up.
+    var offersAdd = false
+    var addSpace = false
     @Environment(Player.self) private var player
     @Environment(Router.self) private var router
 
@@ -103,6 +107,11 @@ struct SongRow: View {
                 Text(song.duration > 0 ? Duration.seconds(song.duration).formatted(.time(pattern: .minuteSecond)) : "")
                     .font(.octoCaption.monospacedDigit())
                     .foregroundStyle(OctoColor.textMuted)
+                if offersAdd && song.isExternal {
+                    AddToLibraryButton(song: song, size: 40, iconSize: 22)
+                } else if offersAdd && addSpace {
+                    Color.clear.frame(width: 40, height: 40)
+                }
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 4)
@@ -129,7 +138,7 @@ struct SongRow: View {
     @ViewBuilder
     private var lead: some View {
         if showsCover {
-            BadgedCover(id: song.coverArt, size: 44, radius: OctoRadius.artS, external: song.isExternal)
+            BadgedCover(id: song.coverArt, size: 44, radius: OctoRadius.artS, external: song.isExternal && !offersAdd)
                 .overlay {
                     if isCurrent {
                         RoundedRectangle(cornerRadius: OctoRadius.artS).fill(.black.opacity(0.5))
@@ -184,6 +193,7 @@ struct PressSqueeze: ButtonStyle {
 struct SongActions: View {
     let song: Song
     @Environment(Player.self) private var player
+    @Environment(Downloads.self) private var downloads
     @Environment(Session.self) private var session
     @Environment(Router.self) private var router
 
@@ -195,7 +205,14 @@ struct SongActions: View {
         }
         Section {
             if song.isExternal {
-                Button { Task { await add() } } label: { Label("Add to your library", systemImage: "plus.circle") }
+                switch downloads.phase(song.id).state {
+                case .none:
+                    Button { Task { _ = await downloads.request(song) } } label: { Label("Add to your library", systemImage: "plus.circle") }
+                case .requested:
+                    Button {} label: { Label("Adding to your library", systemImage: "checkmark") }.disabled(true)
+                case .done:
+                    Button {} label: { Label("In your library", systemImage: "checkmark") }.disabled(true)
+                }
             } else {
                 Button { Task { await heart() } } label: {
                     Label(song.isStarred ? "Remove from Liked songs" : "Add to Liked songs", systemImage: song.isStarred ? "heart.slash" : "heart")
@@ -233,16 +250,6 @@ struct SongActions: View {
         }
     }
 
-    /// Hearting a song found online makes Octo download it into the library.
-    private func add() async {
-        guard let client = session.client else { return }
-        do {
-            try await client.star(songId: song.id)
-            router.show("Adding \(song.title) to your library")
-        } catch {
-            router.show(error.localizedDescription)
-        }
-    }
 }
 
 /// An album as a card: square cover, title and artist, 150 wide.
