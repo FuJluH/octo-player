@@ -57,17 +57,18 @@ public func byPlayCount(_ tracks: [PlayedTrack], limit: Int) -> [LibraryTrack] {
 /// come first (of two played as often, the one played last), and the rest follow in the order
 /// given.
 public func artistSongOrder(_ tracks: [LibraryTrack], played: [PlayedTrack]) -> [LibraryTrack] {
+    // A song listed twice counts by its last row.
     var plays: [String: PlayedTrack] = [:]
-    for row in played where plays[row.track.id] == nil { plays[row.track.id] = row }
-    let heard = tracks.filter { plays[$0.id] != nil }
+    for row in played { plays[row.track.id] = row }
+    let heard = tracks.compactMap { track in plays[track.id].map { (track: track, play: $0) } }
     let rest = tracks.filter { plays[$0.id] == nil }
     if heard.isEmpty { return tracks }
     let sorted = heard.enumerated().sorted { a, b in
-        let pa = plays[a.element.id]!, pb = plays[b.element.id]!
+        let pa = a.element.play, pb = b.element.play
         if pa.plays != pb.plays { return pa.plays > pb.plays }
         if pa.lastPlayedAt != pb.lastPlayedAt { return pa.lastPlayedAt > pb.lastPlayedAt }
         return a.offset < b.offset
-    }.map(\.element)
+    }.map(\.element.track)
     return sorted + rest
 }
 
