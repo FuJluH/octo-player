@@ -16,6 +16,8 @@ import app.winters.octo.design.OctoColors
 import app.winters.octo.desktop.lyrics.FlowingLyrics
 import app.winters.octo.desktop.lyrics.lyricEngine
 import app.winters.octo.desktop.lyrics.madeUpLyrics
+import app.winters.octo.desktop.lyrics.madeUpLyricsAnswer
+import app.winters.octo.desktop.a11y.A11yScene
 import app.winters.octo.desktop.player.wash.WashCover
 import app.winters.octo.desktop.player.wash.WashCovers
 import app.winters.octo.desktop.ui.ImmersiveBackdrop
@@ -31,10 +33,13 @@ import org.jetbrains.skia.Rect
 import org.jetbrains.skia.Surface
 import org.jetbrains.skiko.graphicapi.DirectXOffscreenContext
 import org.junit.Assume.assumeTrue
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.lang.management.ManagementFactory
 import java.time.LocalDateTime
+import javax.swing.SwingUtilities
 
 // Times the full player's flowing lyrics while a song plays, off screen,
 // and writes what it found to build/perf/lyrics.txt: the whole frame
@@ -46,8 +51,10 @@ import java.time.LocalDateTime
 // usable graphics card. It only runs when asked:
 // OCTO_PERF=1 ./gradlew :desktop:test --tests '*LyricsPerfTest*'.
 // OCTO_PERF_LABEL names the run in the file; OCTO_PERF_NO_WASH=1 leaves out
-// the runs over the wash.
+// the runs over the wash, and OCTO_PERF_GPU_ONLY=1 those on the processor.
 class LyricsPerfTest {
+    @get:Rule val folder = TemporaryFolder()
+
     private val lines = mutableListOf<String>()
 
     private fun say(line: String) {
@@ -72,14 +79,19 @@ class LyricsPerfTest {
         val cover = WashCovers.prepared("perf", madeUpCover(), WashTuning())
         val gpu = offscreenGpu()
         val label = System.getenv("OCTO_PERF_LABEL")?.let { " ($it)" } ?: ""
+        val gpuOnly = gpu != null && System.getenv("OCTO_PERF_GPU_ONLY") == "1"
         for (size in SIZES) {
             say("")
             say("$size$label")
             for (wash in if (System.getenv("OCTO_PERF_NO_WASH") == "1") listOf(false) else listOf(false, true)) {
                 if (gpu != null) measure(size, wash, lyrics, cover, gpu, GPU_FRAMES, GPU_WARMUP) else if (!wash) say("  Direct3D off screen is not available here.")
-                measure(size, wash, lyrics, cover, null, CPU_FRAMES, CPU_WARMUP)
+                if (!gpuOnly) measure(size, wash, lyrics, cover, null, CPU_FRAMES, CPU_WARMUP)
             }
         }
+        say("")
+        say("The whole window at 1440 x 900 as the app draws it (Shell, signed in to a pretend server), the full player open on these lyrics over the cover's moving wash$label")
+        if (gpu != null) measureWindow(gpu, GPU_FRAMES, GPU_WARMUP)
+        if (!gpuOnly) measureWindow(null, WINDOW_CPU_FRAMES, CPU_WARMUP)
         gpu?.close()
         val out = File("build/perf").apply { mkdirs() }
         File(out, "lyrics.txt").writeText(lines.joinToString("\n", postfix = "\n"))
@@ -156,6 +168,75 @@ class LyricsPerfTest {
         )
     }
 
+    // The whole window with a song playing in the full player, its lyrics
+    // from the pretend server, timed as a window frame is drawn: on the
+    // window's thread, until the graphics card finished.
+    private fun measureWindow(gpu: DirectXOffscreenContext?, frames: Int, warmup: Int) {
+        val cover = madeUpCover().encodeToData(EncodedImageFormat.PNG)!!.bytes
+        A11yScene(folder.newFolder(), cover = cover, extensions = listOf("songLyrics:1", "songLyrics:2")).use { s ->
+            s.server.answer("getLyricsBySongId", madeUpLyricsAnswer())
+            s.onUi {
+                s.app.play(s.app.library!!.index!!.songs, 0)
+                s.app.fullPlayer = true
+            }
+            s.player.seekTo(START_MS)
+            // The cover, the wash and the lyrics arrive and settle.
+            s.settle(4_000).close()
+            val target = gpu?.let { GpuTarget(it, s.width, s.height) }
+            target?.let { swapSurface(s.scene, it.surface) }
+            val times = DoubleArray(frames)
+            val cpu = DoubleArray(frames)
+            var recompositions: Recompositions? = null
+            val start = System.nanoTime()
+            var measuredFrom = start
+            for (i in -warmup until frames) {
+                waitUntil(start + (i + warmup) * FRAME_NANOS)
+                if (i == 0) {
+                    measuredFrom = System.nanoTime()
+                    recompositions = Recompositions()
+                }
+                var took = 0.0
+                var thread = 0.0
+                SwingUtilities.invokeAndWait {
+                    val begin = System.nanoTime()
+                    s.scene.render(begin).close()
+                    val drawn = System.nanoTime()
+                    target?.finish()
+                    took = (System.nanoTime() - begin) / 1e6
+                    thread = (drawn - begin) / 1e6
+                }
+                if (i >= 0) {
+                    times[i] = took
+                    cpu[i] = thread
+                }
+            }
+            val seconds = (System.nanoTime() - measuredFrom) / 1e9
+            val counts = recompositions?.take()
+            recompositions?.close()
+            // A look at the window, to be sure the lyrics were there.
+            if (target == null) {
+                File("build/perf").mkdirs()
+                s.frameAt(System.nanoTime()).use { File("build/perf/lyrics-window.png").writeBytes(it.encodeToData(EncodedImageFormat.PNG)!!.bytes) }
+            }
+            target?.close()
+            times.sort()
+            cpu.sort()
+            say(
+                "  %-3s %-11s frame mean %6.2f median %6.2f p95 %6.2f max %6.2f | cpu mean %5.2f p95 %5.2f | recomposed %5.1f/s".format(
+                    if (gpu != null) "GPU" else "CPU",
+                    "window",
+                    times.average(),
+                    times[times.size / 2],
+                    times[(times.size * 95) / 100],
+                    times.last(),
+                    cpu.average(),
+                    cpu[(cpu.size * 95) / 100],
+                    (counts?.rerun ?: 0L) / seconds,
+                ),
+            )
+        }
+    }
+
     // The full player in miniature: the wash or the page colour behind,
     // the cover's half left empty, the lyrics on the right.
     @Composable
@@ -211,6 +292,7 @@ class LyricsPerfTest {
         const val GPU_FRAMES = 900
         const val CPU_WARMUP = 20
         const val CPU_FRAMES = 90
+        const val WINDOW_CPU_FRAMES = 40
         const val FRAME_NANOS = 16_666_667L
     }
 }

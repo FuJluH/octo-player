@@ -55,6 +55,8 @@ class A11yScene(
     look: (AppSettings) -> AppSettings = { it },
     // How much bigger the words are, as the text size setting makes them.
     textScale: Float = 1f,
+    // The extensions the pretend server lists, like "songLyrics:2".
+    extensions: List<String> = listOf(),
 ) : AutoCloseable {
     val server = FakeServer()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -90,7 +92,7 @@ class A11yScene(
                 DesktopOs.Windows,
                 player,
                 OnlineLyrics(http, server.address.toHttpUrl()),
-                restored = server.connection(listOf()),
+                restored = server.connection(extensions),
                 listeningRoot = File(folder, "listening"),
             )
         }

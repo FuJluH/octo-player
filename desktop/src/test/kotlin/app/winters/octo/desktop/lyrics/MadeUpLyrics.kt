@@ -7,6 +7,12 @@ import app.winters.octo.lyrics.LyricWord
 import app.winters.octo.lyrics.Lyrics
 import app.winters.octo.lyrics.LyricsSource
 import app.winters.octo.lyrics.engine.LyricEngine
+import app.winters.octo.subsonic.Cue
+import app.winters.octo.subsonic.CueLine
+import app.winters.octo.subsonic.LyricsLine
+import app.winters.octo.subsonic.LyricsList
+import app.winters.octo.subsonic.StructuredLyrics
+import kotlinx.serialization.json.Json
 
 private val Words = listOf(
     "Under", "the", "silver", "light", "we", "keep", "on", "running", "through", "the", "night", "again",
@@ -50,4 +56,25 @@ internal fun CompositionData.lyricEngine(): LyricEngine? {
     }
     compositionGroups.forEach { group -> walk(group)?.let { return it } }
     return null
+}
+
+// The same lyrics as a server's word-timed answer (songLyrics version 2),
+// the payload of a getLyricsBySongId reply, without the translations.
+internal fun madeUpLyricsAnswer(): String {
+    val lines = madeUpLyrics().lines
+    val lyrics = StructuredLyrics(
+        lang = "en",
+        synced = true,
+        line = lines.map { LyricsLine(it.startMs, it.text) },
+        cueLine = lines.mapIndexed { index, line ->
+            CueLine(
+                index = index,
+                start = line.startMs,
+                end = line.endMs,
+                value = line.text,
+                cue = line.words.map { Cue(it.startMs, it.endMs, line.text.substring(it.from, it.to), it.from, it.to - 1) },
+            )
+        },
+    )
+    return "\"lyricsList\":" + Json.encodeToString(LyricsList.serializer(), LyricsList(listOf(lyrics)))
 }
