@@ -97,7 +97,7 @@ final class SearchModel {
                 self.setResults(nil)
                 return
             }
-            var found = await discovery.library.search(folded, caps: searchCaps(filter))
+            var found = await discovery.searchLibrary(folded, caps: searchCaps(filter))
             guard !Task.isCancelled else { return }
             found.listedFinds = listedFinds(self.downloads?.adoptions ?? [:], songIds: found.songs.map(\.id))
             self.setResults(found)
@@ -148,7 +148,11 @@ final class SearchModel {
         var named: (NamedArtist, String)?
         if filter == .all, let results, let server = discovery?.server {
             let online: [Artist] = if case .done(let found) = discover { found.artists } else { [] }
-            if let artist = namedArtist(trimmed, library: results.artists, online: online) { named = (artist, server) }
+            if let artist = searchedArtist(trimmed, results.artists, name: \.name) {
+                named = (NamedArtist(name: artist.name, libraryId: artist.id), server)
+            } else if let artist = searchedArtist(trimmed, online, name: \.name) {
+                named = (NamedArtist(name: artist.name, serverId: artist.id), server)
+            }
         }
         if named?.0 == namedFor?.0 && named?.1 == namedFor?.1 { return }
         namedFor = named
@@ -185,10 +189,10 @@ final class SearchModel {
     // MARK: Playing
 
     /// Plays the library songs found from the one tapped.
-    func playSong(_ song: Song) {
-        guard let songs = results?.songs, let player else { return }
+    func playSong(_ track: LibraryTrack) {
+        guard let tracks = results?.songs, let player else { return }
         keepSearch()
-        player.play(songs, from: max(0, songs.firstIndex(of: song) ?? 0))
+        player.play(tracks.map(\.asSong), from: max(0, tracks.firstIndex { $0.id == track.id } ?? 0))
     }
 
     /// Plays a ranked list from the song tapped. The chart names no artist, so it is not kept.

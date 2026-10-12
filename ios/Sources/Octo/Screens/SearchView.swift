@@ -232,7 +232,7 @@ struct SearchView: View {
             kindTitle("Artists", more: found.moreArtists, kind: .artists, spaced: firstKind != 0)
             SideScroller {
                 ForEach(found.artists) { artist in
-                    ArtistCircle(id: artist.id, name: artist.name, coverArt: artist.coverArt)
+                    ArtistCircle(id: artist.pageId(discovery.sourceId), name: artist.name, coverArt: coverId(of: artist.artwork))
                         .simultaneousGesture(TapGesture().onEnded { model.keepSearch() })
                 }
             }
@@ -244,20 +244,34 @@ struct SearchView: View {
             kindTitle("Albums", more: found.moreAlbums, kind: .albums, spaced: firstKind != 1)
             SideScroller {
                 ForEach(found.albums) { album in
-                    AlbumCard(album: album)
+                    AlbumCard(album: album.asAlbum)
                         .simultaneousGesture(TapGesture().onEnded { model.keepSearch() })
                 }
             }
         }
         if !found.playlists.isEmpty {
             kindTitle("Playlists", more: found.morePlaylists, kind: .playlists, spaced: firstKind != 2)
-            ForEach(found.playlists) { PlaylistListRow(playlist: $0) { model.keepSearch() } }
+            playlistRows(found)
         }
         if !found.songs.isEmpty {
             kindTitle("Songs", more: found.moreSongs, kind: .songs, spaced: firstKind != 3)
-            ForEach(Array(found.songs.enumerated()), id: \.element.id) { position, song in
-                SongRow(song: song, list: found.songs, position: position, tap: { model.playSong(song) })
+            songRows(found)
+        }
+    }
+
+    private func playlistRows(_ found: LibraryResults) -> some View {
+        ForEach(found.playlists) { summary in
+            if let playlist = summary.asPlaylist(discovery.sourceId) {
+                PlaylistListRow(playlist: playlist, onServer: summary.onServer) { model.keepSearch() }
             }
+        }
+    }
+
+    /// Library songs: no add button and no empty add space.
+    private func songRows(_ found: LibraryResults) -> some View {
+        let songs = found.songs.map(\.asSong)
+        return ForEach(Array(found.songs.enumerated()), id: \.element.id) { position, track in
+            SongRow(song: songs[position], list: songs, position: position, tap: { model.playSong(track) })
         }
     }
 
@@ -269,12 +283,15 @@ struct SearchView: View {
     /// for albums.
     @ViewBuilder
     private func oneKind(_ found: LibraryResults) -> some View {
-        ForEach(found.artists) { ArtistListRow(artist: $0) { model.keepSearch() } }
+        ForEach(found.artists) { artist in
+            ArtistListRow(id: artist.pageId(discovery.sourceId), name: artist.name, coverArt: coverId(of: artist.artwork),
+                          albumCount: artist.albumCount) { model.keepSearch() }
+        }
         let width = max(100, (listWidth - 40 - 14) / 2)
         ForEach(Array(stride(from: 0, to: found.albums.count, by: 2)), id: \.self) { start in
             HStack(alignment: .top, spacing: 14) {
                 ForEach(found.albums[start..<min(start + 2, found.albums.count)]) { album in
-                    AlbumCard(album: album, width: width)
+                    AlbumCard(album: album.asAlbum, width: width)
                         .simultaneousGesture(TapGesture().onEnded { model.keepSearch() })
                 }
                 if start + 1 >= found.albums.count { Spacer(minLength: 0) }
@@ -282,10 +299,8 @@ struct SearchView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 9)
         }
-        ForEach(found.playlists) { PlaylistListRow(playlist: $0) { model.keepSearch() } }
-        ForEach(Array(found.songs.enumerated()), id: \.element.id) { position, song in
-            SongRow(song: song, list: found.songs, position: position, tap: { model.playSong(song) })
-        }
+        playlistRows(found)
+        songRows(found)
     }
 
     // MARK: Ranked lists

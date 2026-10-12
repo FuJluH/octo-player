@@ -5,10 +5,10 @@ import OctoKit
 /// What a search of the library found, a few of each kind or one kind in full, and whether a
 /// kind has more than shown, for its "See all".
 struct LibraryResults: Sendable {
-    var artists: [Artist] = []
-    var albums: [Album] = []
-    var songs: [Song] = []
-    var playlists: [Playlist] = []
+    var artists: [LibraryArtist] = []
+    var albums: [LibraryAlbum] = []
+    var songs: [LibraryTrack] = []
+    var playlists: [PlaylistSummary] = []
     var moreArtists = false
     var moreAlbums = false
     var moreSongs = false
@@ -21,67 +21,13 @@ struct LibraryResults: Sendable {
     var isEmpty: Bool { artists.isEmpty && albums.isEmpty && songs.isEmpty && playlists.isEmpty }
 }
 
-/// Where search reads the library from. The server's own library today; the phone's catalog,
-/// which holds the phone's music and every server's together, takes its place.
-@MainActor
-protocol SearchLibrary: AnyObject {
-    /// The library's artists, albums, songs and playlists whose search keys hold `folded`, up to
-    /// `caps` of each and one more, to know whether a kind has more.
-    func search(_ folded: String, caps: SearchCaps) async -> LibraryResults
-}
-
-/// The library as the signed-in server holds it: its search, less what it found online, and its
-/// playlists. Nothing while signed out.
-@MainActor
-final class ServerLibrary: SearchLibrary {
-    private let session: Session
-    private var playlists: (server: String, at: Date, lists: [Playlist])?
-
-    init(session: Session) { self.session = session }
-
-    func search(_ folded: String, caps: SearchCaps) async -> LibraryResults {
-        guard let client = session.client else { return LibraryResults() }
-        var results = LibraryResults()
-        if caps.artists > 0 || caps.albums > 0 || caps.songs > 0 {
-            let found = (try? await client.search(
-                folded,
-                artists: caps.artists > 0 ? caps.artists + 1 : 0,
-                albums: caps.albums > 0 ? caps.albums + 1 : 0,
-                songs: caps.songs > 0 ? caps.songs + 1 : 0)) ?? SearchResult()
-            let artists = found.artist.filter { !isOnlineId($0.id) }
-            let albums = found.album.filter { !$0.isExternal }
-            let songs = found.song.filter { !$0.isExternal }
-            results.artists = Array(artists.prefix(caps.artists))
-            results.albums = Array(albums.prefix(caps.albums))
-            results.songs = Array(songs.prefix(caps.songs))
-            results.moreArtists = artists.count > caps.artists
-            results.moreAlbums = albums.count > caps.albums
-            results.moreSongs = songs.count > caps.songs
-        }
-        if caps.playlists > 0 {
-            let named = await ownPlaylists().filter { searchKey($0.name).contains(folded) }
-            results.playlists = Array(named.prefix(caps.playlists))
-            results.morePlaylists = named.count > caps.playlists
-        }
-        return results
-    }
-
-    /// The listener's own playlists, read again after a minute. Made for you lists are Home's.
-    private func ownPlaylists() async -> [Playlist] {
-        guard let client = session.client, let server = session.activeId else { return [] }
-        if let kept = playlists, kept.server == server, Date().timeIntervalSince(kept.at) < 60 { return kept.lists }
-        guard let lists = try? await client.playlists() else { return playlists?.server == server ? playlists?.lists ?? [] : [] }
-        let own = lists.filter { $0.octoList == nil }
-        playlists = (server, Date(), own)
-        return own
-    }
-}
-
 /// How long the chart is kept before the empty search asks for it again.
 private let chartKeptSeconds: TimeInterval = 60 * 60
 /// How long a server's list of charts, and one chart's songs, are kept.
 private let chartChoicesKeptSeconds: TimeInterval = 24 * 60 * 60
 private let chartSongsKeptSeconds: TimeInterval = 60 * 60
+/// How many ids or keys one database lookup takes.
+private let lookupChunk = 900
 
 /// One page from the server of an album the library does not hold whole.
 struct OnlineAlbumPage: Sendable {
@@ -90,14 +36,14 @@ struct OnlineAlbumPage: Sendable {
 }
 
 /// What the signed-in server offers beyond the library: songs, albums and artists found online,
-/// ranked lists, charts and stations. Every call throws when the server cannot answer, and answers
-/// nothing when no server is signed in.
+/// ranked lists, charts and stations, each matched to the library. Every call throws when the
+/// server cannot answer, and answers nothing when no server is signed in.
 @MainActor
 @Observable
 final class Discovery {
     @ObservationIgnored private let session: Session
     @ObservationIgnored private let downloads: Downloads
-    @ObservationIgnored let library: SearchLibrary
+    @ObservationIgnored let library: Library
 
     @ObservationIgnored private var offered: [String: Bool] = [:]
     @ObservationIgnored private var chartsOfferedLive: [String: Bool] = [:]
@@ -106,10 +52,10 @@ final class Discovery {
     @ObservationIgnored private var chartLists: [String: (at: Date, value: ChartList<Song>)] = [:]
     @ObservationIgnored private var albumTops: [String: [TopSongRef]] = [:]
 
-    init(session: Session, downloads: Downloads, library: SearchLibrary? = nil) {
+    init(session: Session, downloads: Downloads, library: Library) {
         self.session = session
         self.downloads = downloads
-        self.library = library ?? ServerLibrary(session: session)
+        self.library = library
     }
 
     /// Whether a server is signed in, so there is anything to discover.
@@ -118,19 +64,72 @@ final class Discovery {
     /// Which kept server what is found comes from; nil with none signed in.
     var server: String? { session.client == nil ? nil : session.activeId }
 
+    /// The source the signed-in server's music is kept under.
+    var sourceId: String? { session.client == nil ? nil : session.active?.sourceId }
+
+    // MARK: The library
+
+    /// The library's artists, albums, songs and playlists whose search keys hold `folded`, up to
+    /// `caps` of each, and whether each kind has more.
+    func searchLibrary(_ folded: String, caps: SearchCaps) async -> LibraryResults {
+        var results = LibraryResults()
+        if caps.artists > 0 || caps.albums > 0 || caps.songs > 0 {
+            let found = await library.search(folded, artists: caps.artists > 0 ? caps.artists + 1 : 0,
+                                             albums: caps.albums > 0 ? caps.albums + 1 : 0, songs: caps.songs > 0 ? caps.songs + 1 : 0)
+            results.artists = Array(found.artists.prefix(caps.artists))
+            results.albums = Array(found.albums.prefix(caps.albums))
+            results.songs = Array(found.tracks.prefix(caps.songs))
+            results.moreArtists = found.artists.count > caps.artists
+            results.moreAlbums = found.albums.count > caps.albums
+            results.moreSongs = found.tracks.count > caps.songs
+        }
+        if caps.playlists > 0 {
+            let named = await library.playlists().filter { searchKey($0.name).contains(folded) }
+            results.playlists = Array(named.prefix(caps.playlists))
+            results.morePlaylists = named.count > caps.playlists
+        }
+        return results
+    }
+
     // MARK: Search
 
     /// Songs, albums and artists the server has beyond the library. Nil with no server.
     func search(_ query: String) async throws -> Discovered? {
-        guard let client = session.client else { return nil }
+        guard let client = session.client, let sourceId else { return nil }
         let found = try await client.search(query.trimmingCharacters(in: .whitespacesAndNewlines), artists: 10, albums: 20,
                                             songs: discoverSongs)
-        let adoptions = downloads.adoptions ?? [:]
-        let libraryAlbums = found.album.filter { !$0.isExternal }
-        let libraryArtists = found.artist.filter { !isOnlineId($0.id) }
-        return discovered(from: found, libraryAlbums: libraryAlbums, libraryArtists: libraryArtists) {
-            $0.isExternal && adoptions[$0.id] == nil
-        }
+        let songs = await resolve(found.song).filter { isFind($0.id) }.map(\.asSong)
+        // Octo counts how many songs of each album the library holds. One it holds every song of
+        // is not a find; one it holds some of goes apart, saying how many.
+        let albums = await notInLibrary(sourceId, found.album).filter { albumShare($0) != .whole }
+        return Discovered(songs: songs, albums: albums.filter { albumShare($0) != .part }.map(counted),
+                          artists: await artistsNotInLibrary(sourceId, found.artist),
+                          partAlbums: albums.filter { albumShare($0) == .part }.map(counted))
+    }
+
+    /// Albums the library has neither from this server nor by the same name and artist from
+    /// anywhere else.
+    private func notInLibrary(_ sourceId: String, _ albums: [Album]) async -> [Album] {
+        if albums.isEmpty { return [] }
+        let ids = albums.map(\.id)
+        let known = Set((try? await library.store.knownAlbums(sourceId, ids)) ?? [])
+        let named = Set(await library.albumsWithKeys(albums.map { searchKey("\($0.name) \($0.artist)") })
+            .map { discoveryNameKey($0.title) + "|" + discoveryNameKey($0.artist) })
+        return albums.filter { !known.contains($0.id) && !named.contains(discoveryNameKey($0.name) + "|" + discoveryNameKey($0.artist)) }
+    }
+
+    private func artistsNotInLibrary(_ sourceId: String, _ artists: [Artist]) async -> [Artist] {
+        if artists.isEmpty { return [] }
+        let known = Set((try? await library.store.knownArtists(artists.map { "\(sourceId):\($0.id)" })) ?? [])
+        let named = Set(await library.artistsWithKeys(artists.map { searchKey($0.name) }).map { discoveryNameKey($0.name) })
+        return artists.filter { !known.contains("\(sourceId):\($0.id)") && !named.contains(discoveryNameKey($0.name)) }
+    }
+
+    /// An online album's owned count is kept only when the server marks the album external.
+    private func counted(_ album: Album) -> Album {
+        var shown = album
+        if !album.isExternal { shown.ownedCount = nil }
+        return shown
     }
 
     // MARK: Ranked lists
@@ -149,13 +148,13 @@ final class Discovery {
 
     /// An artist's top songs. `libraryId` is a library artist's id, which names the server's
     /// artist when it came from this server; `serverId` an artist the server found online.
-    func artistTopSongs(name: String, libraryId: String?, serverId: String?) async -> RankedSongs<Song>? {
+    func artistTopSongs(name: String, libraryId: String?, serverId found: String?) async -> RankedSongs<Song>? {
         guard let client = session.client, let asked = session.activeId else { return nil }
         guard await offersTopSongs() else { return nil }
-        let id = serverId ?? libraryId
+        let id = found ?? libraryId.flatMap { serverId(of: $0, sourceId: sourceId) }
         guard let list = try? await client.artistTopSongs(artist: name, id: id, count: searchTopSongs) else { return nil }
         guard session.activeId == asked else { return nil }
-        return ranked(list)
+        return await ranked(list)
     }
 
     /// The chart of the moment, kept an hour per kept server.
@@ -165,7 +164,7 @@ final class Discovery {
         guard await offersTopSongs() else { return nil }
         guard let list = try? await client.topChart(count: topChartSongs) else { return nil }
         // Another server in use by the time it came: not this one's chart.
-        guard session.activeId == asked, let shown = ranked(list) else { return nil }
+        guard session.activeId == asked, let shown = await ranked(list) else { return nil }
         chart = (asked, Date(), shown)
         return shown
     }
@@ -194,22 +193,24 @@ final class Discovery {
     /// A chart's songs, kept an hour per server and chart. Nil when it could not be read.
     func chart(_ id: String) async -> ChartList<Song>? {
         guard let client = session.client, let asked = session.activeId else { return nil }
-        let key = "(asked)|(id)"
+        let key = "\(asked)|\(id)"
         if let kept = chartLists[key], Date().timeIntervalSince(kept.at) < chartSongsKeptSeconds { return kept.value }
         guard await offersCharts(), let list = try? await client.topChart(count: chartSongs(id), chart: id) else { return nil }
         // Another server in use by the time it came: not this one's chart.
         guard session.activeId == asked else { return nil }
         let entries = list.entry.filter { $0.song != nil }
-        let songs = rankTracks(entries, resolveInPlace(entries.compactMap(\.song)), id: \.id)
+        let tracks = await resolveInPlace(entries.compactMap(\.song)).map { $0?.asSong }
+        let songs = rankTracks(entries, tracks, id: \.id)
         let shown = ChartList(chart: id, name: list.name, source: list.source, country: list.country, songs: songs)
         chartLists[key] = (Date(), shown)
         return shown
     }
 
     /// The server's songs as the app shows them, each in its place.
-    private func ranked(_ list: TopSongs) -> RankedSongs<Song>? {
+    private func ranked(_ list: TopSongs) async -> RankedSongs<Song>? {
         let entries = list.entry.filter { $0.song != nil }
-        let songs = rankTracks(entries, resolveInPlace(entries.compactMap(\.song)), id: \.id)
+        let tracks = await resolveInPlace(entries.compactMap(\.song)).map { $0?.asSong }
+        let songs = rankTracks(entries, tracks, id: \.id)
         return songs.isEmpty ? nil : RankedSongs(artist: list.artist, source: list.source, songs: songs)
     }
 
@@ -219,7 +220,7 @@ final class Discovery {
     func album(_ id: String) async throws -> OnlineAlbumPage? {
         guard let client = session.client else { return nil }
         let album = try await client.album(id)
-        return OnlineAlbumPage(album: album, songs: resolve(album.song))
+        return OnlineAlbumPage(album: album, songs: await resolve(album.song).map(\.asSong))
     }
 
     /// An artist the server found, with the albums it lists.
@@ -232,7 +233,7 @@ final class Discovery {
     /// server and artist; nothing when it cannot be reached (asked again then).
     func artistTopRefs(_ artist: String) async -> [TopSongRef] {
         guard !artist.trimmingCharacters(in: .whitespaces).isEmpty, let client = session.client else { return [] }
-        let key = "(client.credentials.username)@(client.baseURL.absoluteString)|(SongIdentity.key(artist))"
+        let key = "\(client.credentials.username)@\(client.baseURL.absoluteString)|\(SongIdentity.key(artist))"
         if let kept = albumTops[key] { return kept }
         guard let songs = try? await client.topSongs(artist: artist, count: albumHighlightRanked) else { return [] }
         let refs = songs.map { TopSongRef(id: $0.id, title: $0.title, artist: $0.byline) }
@@ -242,20 +243,53 @@ final class Discovery {
 
     // MARK: Resolving
 
-    /// Songs from the server as the app shows them, in the order sent: a library song as it is, a
-    /// find already downloaded as the library song it became when known, anything else as a find.
-    /// Repeats are dropped by id.
-    func resolve(_ songs: [Song]) -> [Song] {
+    /// Songs from the server as the app shows them, in the order sent: a library song as it is in
+    /// the library, anything else as a find. A find already downloaded is the library song it
+    /// became. Repeats are dropped by id.
+    func resolve(_ songs: [Song]) async -> [LibraryTrack] {
         var seen = Set<String>()
-        return resolveInPlace(songs).compactMap { $0 }.filter { seen.insert($0.id).inserted }
+        return await resolveInPlace(songs).compactMap { $0 }.filter { seen.insert($0.id).inserted }
     }
 
-    /// The same, one for each song sent and in its place.
-    func resolveInPlace(_ songs: [Song]) -> [Song?] {
-        let adoptions = downloads.adoptions ?? [:]
-        return songs.map { song in
-            guard song.isExternal, let id = adoptions[song.id], let library = downloads.lastSeenLibrarySong(id) else { return song }
-            return library
+    /// The same, one for each song sent and in its place, nil where a library song is gone.
+    func resolveInPlace(_ songs: [Song]) async -> [LibraryTrack?] {
+        guard let sourceId, !songs.isEmpty else { return [] }
+        let ids = Array(Set(songs.map(\.id)))
+        var links: [String: String] = [:]
+        for link in (try? await library.store.libraryLinks(sourceId, ids)) ?? [] { links[link.serverId] = link.trackId }
+        let unlinked = songs.filter { links[$0.id] == nil }
+        let keys = Array(Set(unlinked.flatMap { titleKeys($0.title) }))
+        var candidates: [LibraryTrack] = []
+        for start in stride(from: 0, to: keys.count, by: lookupChunk) {
+            candidates += await library.tracksWithKeys(Array(keys[start..<min(start + lookupChunk, keys.count)]))
+        }
+        var each = resolveSongs(songs, sourceId: sourceId, links: links, library: candidates, now: msSince1970())
+        // Finds as stored, so a length learned from playing one shows.
+        var foundRows: [OnlineSong] = []
+        var foundSeen = Set<String>()
+        for case .found(let row) in each where foundSeen.insert(row.id).inserted { foundRows.append(row) }
+        if let kept = try? await library.store.keepFinds(foundRows) {
+            let byId = Dictionary(kept.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+            each = each.map { resolved in
+                if case .found(let row) = resolved, let stored = byId[row.id] { return .found(stored) }
+                return resolved
+            }
+        }
+        var wanted: [String] = []
+        for resolved in each {
+            switch resolved {
+            case .inLibrary(let trackId): wanted.append(trackId)
+            case .found(let row): if !row.adoptedId.isEmpty { wanted.append(row.adoptedId) }
+            }
+        }
+        let tracks = await library.tracks(ids: Array(Set(wanted)))
+        let byId = Dictionary(tracks.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let inLibrary = Set(byId.keys)
+        return each.map { resolved in
+            switch asAdopted(resolved, library: inLibrary) {
+            case .inLibrary(let trackId): byId[trackId]
+            case .found(let row): row.asTrack
+            }
         }
     }
 }

@@ -258,16 +258,19 @@ struct OnlineArtistCircle: View {
 
 /// An artist line: round picture, name, album count.
 struct ArtistListRow: View {
-    let artist: Artist
+    let id: String
+    let name: String
+    let coverArt: String?
+    let albumCount: Int
     var opened: () -> Void = {}
 
     var body: some View {
-        NavigationLink(value: Route.artist(id: artist.id, name: artist.name)) {
+        NavigationLink(value: Route.artist(id: id, name: name)) {
             HStack(spacing: 12) {
-                Cover(id: artist.coverArt, size: 48, radius: 24)
+                Cover(id: coverArt, size: 48, radius: 24)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(artist.name).font(.octoBodySmall).foregroundStyle(.white).lineLimit(1)
-                    Text(artist.albumCount == 1 ? "1 album" : "\(artist.albumCount) albums")
+                    Text(name).font(.octoBodySmall).foregroundStyle(.white).lineLimit(1)
+                    Text(albumCount == 1 ? "1 album" : "\(albumCount) albums")
                         .font(.octoCaption)
                         .foregroundStyle(OctoColor.textMuted)
                 }
@@ -286,6 +289,7 @@ struct ArtistListRow: View {
 /// A playlist line: its artwork, name, song count, and the cloud mark for one on the server.
 struct PlaylistListRow: View {
     let playlist: Playlist
+    var onServer = true
     var opened: () -> Void = {}
 
     var body: some View {
@@ -298,10 +302,12 @@ struct PlaylistListRow: View {
                         Text(playlist.songCount == 1 ? "1 song" : "\(playlist.songCount) songs")
                             .font(.octoCaption)
                             .foregroundStyle(OctoColor.textMuted)
-                        Image(systemName: "cloud")
-                            .font(.system(size: 11))
-                            .foregroundStyle(OctoColor.textMuted)
-                            .accessibilityLabel("On your server")
+                        if onServer {
+                            Image(systemName: "cloud")
+                                .font(.system(size: 11))
+                                .foregroundStyle(OctoColor.textMuted)
+                                .accessibilityLabel("On your server")
+                        }
                     }
                 }
                 Spacer(minLength: 0)
