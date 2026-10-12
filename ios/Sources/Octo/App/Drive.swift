@@ -12,6 +12,10 @@ import OctoKit
 /// - `found:TEXT` plays the songs not in the library that a search for TEXT finds
 /// - `search:TEXT` plays the library songs a search for TEXT finds
 /// - `pause`
+/// - `sound`, `sound:graphic`, `sound:parametric`, `sound:preset:NAME`, `sound:editor`,
+///   `sound:save`, `sound:own:NAME`, `sound:delete:NAME`, `sound:card:NAME`, `sound:eq:on|off`,
+///   `sound:each:on|off`
+///   open the Sound page in that state (see `SoundDrive`)
 @MainActor
 enum Drive {
     static func run(session: Session, player: Player, router: Router) async {
@@ -27,6 +31,7 @@ enum Drive {
             case "close": router.drive = .closePlayer
             case "lyrics": router.drive = .lyrics
             case "pause": player.pause()
+            case "sound": SoundDrive.run(value, router: router)
             case "list":
                 guard let client = session.client,
                       let list = try? await client.playlists().first(where: { $0.name.caseInsensitiveCompare(value) == .orderedSame }),
