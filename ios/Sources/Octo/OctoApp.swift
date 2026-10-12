@@ -10,6 +10,8 @@ struct OctoApp: App {
     @State private var downloads: Downloads
     @State private var discovery: Discovery
     @State private var serverDownloads: ServerDownloads
+    @State private var liveLists: LiveListStore
+    @State private var liveLibrary: LiveLibrary
     @State private var library: Library
     @State private var serverSync: ServerSync
 
@@ -31,6 +33,8 @@ struct OctoApp: App {
         let serverDownloads = ServerDownloads(session: session, router: router)
         downloads.onAsk = { serverDownloads.wake() }
         _serverDownloads = State(initialValue: serverDownloads)
+        _liveLists = State(initialValue: LiveListStore(session: session))
+        _liveLibrary = State(initialValue: LiveLibrary(library: library))
         _session = State(initialValue: session)
         _sound = State(initialValue: sound)
         _player = State(initialValue: Player(session: session, sound: sound.processor))
@@ -48,6 +52,8 @@ struct OctoApp: App {
                 .environment(downloads)
                 .environment(discovery)
                 .environment(serverDownloads)
+                .environment(liveLists)
+                .environment(liveLibrary)
                 .environment(library)
                 .environment(serverSync)
                 .tint(OctoColor.accent)

@@ -51,6 +51,9 @@ final class Discovery {
     @ObservationIgnored private var choices: [String: (at: Date, value: ChartChoices)] = [:]
     @ObservationIgnored private var chartLists: [String: (at: Date, value: ChartList<Song>)] = [:]
     @ObservationIgnored private var albumTops: [String: [TopSongRef]] = [:]
+    /// Which of Octo's radio sources suggested a song, as its last radio answer said. Kept while the
+    /// app runs, not saved.
+    @ObservationIgnored private let suggested = RadioSuggestions()
 
     init(session: Session, downloads: Downloads, library: Library) {
         self.session = session
@@ -214,6 +217,32 @@ final class Discovery {
         return songs.isEmpty ? nil : RankedSongs(artist: list.artist, source: list.source, songs: songs)
     }
 
+    /// Which radio source suggested a song, for its info.
+    func suggestedBy(_ trackId: String) -> String? { suggested[trackId] }
+
+    // MARK: Radio
+
+    /// The song first, then songs like it, each once.
+    func radio(seed: LibraryTrack, count: Int = 50) async -> [LibraryTrack] {
+        guard let client = session.client, let seedId = await serverIdOf(seed, client: client),
+              let similar = try? await client.radio(from: seedId, count: count)
+        else { return [] }
+        var seen = Set<String>()
+        return ([seed] + (await resolve(similar))).filter { seen.insert($0.id).inserted }
+    }
+
+    /// The server's id for a song: a find's own, a library song's server copy, or, for a song only
+    /// on the phone, the same song as the server knows it: the same recording when the server has
+    /// it, or else another version.
+    private func serverIdOf(_ track: LibraryTrack, client: SubsonicClient) async -> String? {
+        if isFind(track.id) { return String(track.id.dropFirst(findPrefix.count)) }
+        if let copy = await library.copies(track.id).first(where: { isServerSource($0.sourceId) }) { return copy.nativeId }
+        guard let found = try? await client.search("\(track.artist) \(track.title)", artists: 0, albums: 0, songs: discoverSongs).song
+        else { return nil }
+        return (found.first { sameRecording($0.title, $0.artist ?? "", track.title, track.artist) }
+            ?? found.first { sameSongAnyVersion($0.title, $0.artist ?? "", track.title, track.artist) })?.id
+    }
+
     // MARK: Stations
 
     /// The kept server whose stations Home shows: the one signed in to, while it runs Octo.
@@ -245,6 +274,21 @@ final class Discovery {
         guard let client = session.client else { return nil }
         let album = try await client.album(id)
         return OnlineAlbumPage(album: album, songs: await resolve(album.song).map(\.asSong))
+    }
+
+    /// A library album as the server lists it now, found from its songs: the library's songs and,
+    /// as finds, the ones it lacks, in the server's order. Nil when no Octo server is signed in
+    /// (only Octo lists songs outside the library) or none of the songs came from it.
+    func libraryAlbum(_ trackIds: [String]) async -> [LibraryTrack]? {
+        guard session.isOcto, let client = session.client, let sourceId else { return nil }
+        let copies = ((try? await library.store.copies(of: trackIds)) ?? []).filter { $0.sourceId == sourceId }
+        var counts: [String: Int] = [:]
+        for copy in copies { counts[copy.albumId, default: 0] += 1 }
+        guard let albumRow = counts.max(by: { $0.value < $1.value })?.key,
+              let native = try? await library.store.albumNativeId(albumRow),
+              let sent = try? await client.album(native).song
+        else { return nil }
+        return outsideAlbumSongs(sent, await resolve(sent))
     }
 
     /// An artist the server found, with the albums it lists.
@@ -306,14 +350,16 @@ final class Discovery {
             case .found(let row): if !row.adoptedId.isEmpty { wanted.append(row.adoptedId) }
             }
         }
-        let tracks = await library.tracks(ids: Array(Set(wanted)))
-        let byId = Dictionary(tracks.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let known = await library.tracks(ids: Array(Set(wanted)))
+        let byId = Dictionary(known.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let inLibrary = Set(byId.keys)
-        return each.map { resolved in
+        let tracks: [LibraryTrack?] = each.map { resolved in
             switch asAdopted(resolved, library: inLibrary) {
             case .inLibrary(let trackId): byId[trackId]
             case .found(let row): row.asTrack
             }
         }
+        suggested.putAll(suggestionsOf(tracks.map { $0?.id }, songs))
+        return tracks
     }
 }

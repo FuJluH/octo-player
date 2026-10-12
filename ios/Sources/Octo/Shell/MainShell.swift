@@ -34,6 +34,9 @@ enum Route: Hashable {
     case onlineAlbum(id: String, name: String)
     case onlineArtist(id: String, name: String)
     case charts
+    /// A live list, and its editor (a new one when `id` is nil).
+    case liveList(id: String)
+    case liveListEditor(id: String?)
 }
 
 /// The app's frame: every tab's pages, kept alive while another tab is in front, the floating
@@ -44,6 +47,7 @@ struct MainShell: View {
     @Environment(Session.self) private var session
     @Environment(Downloads.self) private var downloads
     @Environment(ServerDownloads.self) private var serverDownloads
+    @Environment(LiveListStore.self) private var liveLists
     @Environment(\.scenePhase) private var scenePhase
     @SceneStorage("tab") private var tab: AppTab = .home
     @AppStorage("bar.player") private var playerMode = false
@@ -125,6 +129,7 @@ struct MainShell: View {
         }
         .onChange(of: serverDownloadsKey, initial: true) {
             serverDownloads.sessionChanged()
+            liveLists.accountChanged()
         }
         .onChange(of: router.serverDownloads) { _, page in
             guard let page else { return }
@@ -184,6 +189,8 @@ extension View {
                 case .onlineAlbum(let id, let name): OnlineAlbumView(id: id, name: name)
                 case .onlineArtist(let id, let name): OnlineArtistView(id: id, name: name)
                 case .charts: ChartsView()
+                case .liveList(let id): LiveListView(id: id)
+                case .liveListEditor(let id): LiveListEditView(id: id)
                 }
             }
             .detailPage()

@@ -11,7 +11,8 @@ struct AddToLibraryButton: View {
     var iconSize: CGFloat = 24
     @Environment(Downloads.self) private var downloads
     @Environment(Router.self) private var router
-    @Environment(\.accessibilityReduceMotion) private var calm
+    @Environment(\.accessibilityReduceMotion) private var systemCalm
+    @AppStorage(reduceMotionKey) private var appCalm = false
     @State private var release: (@Sendable () -> Void)?
 
     var body: some View {
@@ -35,7 +36,7 @@ struct AddToLibraryButton: View {
                 case .failed:
                     DownloadAlert().frame(width: iconSize, height: iconSize)
                 default:
-                    DownloadRing(phase: phase, calm: calm).frame(width: iconSize, height: iconSize)
+                    DownloadRing(phase: phase, calm: appCalm || systemCalm).frame(width: iconSize, height: iconSize)
                 }
             }
             .frame(width: size, height: size)

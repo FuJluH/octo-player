@@ -142,6 +142,23 @@ final class ServerDownloads {
         view = .find(id: serverId, title: title, from: from)
     }
 
+    /// Find songs for a song in the library or a found one: its copy on the signed-in server (the
+    /// smallest id when it has several), or the found song's own id. False, with nothing opened,
+    /// when the server has no copy of it; the song menu then says "This server has no copy of the
+    /// song to look for".
+    func findTrack(_ trackId: String, title: String, library: Library) async -> Bool {
+        guard let id = await serverId(of: trackId, library: library) else { return false }
+        find(id, title: title)
+        return true
+    }
+
+    /// A song's id on the signed-in server.
+    func serverId(of trackId: String, library: Library) async -> String? {
+        if isFind(trackId) { return String(trackId.dropFirst(findPrefix.count)) }
+        guard session.client != nil, let sourceId = session.active?.sourceId else { return nil }
+        return await library.copies(trackId).filter { $0.sourceId == sourceId }.map(\.nativeId).min()
+    }
+
     func searchAgain() {
         if case .find(let id, _, _) = view { findWatch.search(id) }
     }

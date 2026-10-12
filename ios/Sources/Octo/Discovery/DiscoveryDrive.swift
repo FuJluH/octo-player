@@ -7,6 +7,7 @@ import OctoKit
 /// - `query:TEXT` opens Search and types TEXT into its field
 /// - `charts` opens the Charts page
 /// - `whatsnew` makes the What's new card due again and opens Home
+/// - `livelist:new` opens the editor for a new live list; `livelist:ID` opens that live list
 /// - `downloads` opens the server downloads sheet on its list
 /// - `log:first` or `log:running` opens the log of the first download the server lists, or the
 ///   first still running
@@ -28,6 +29,8 @@ enum DiscoveryDrive {
             UserDefaults.standard.set(0, forKey: "whats_new.last_seen_version")
             router.drive = .tab(.home)
             NotificationCenter.default.post(name: .driveWhatsNew, object: nil)
+        case "livelist":
+            if value.isEmpty || value == "new" { router.go(.liveListEditor(id: nil)) } else { router.go(.liveList(id: value)) }
         case "downloads":
             router.serverDownloads = .list(focus: nil)
         case "log":
