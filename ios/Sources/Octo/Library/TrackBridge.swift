@@ -79,14 +79,7 @@ struct ArtCover: View {
     var size: CGFloat
     var radius: CGFloat = OctoRadius.artS
 
-    var body: some View {
-        switch ArtworkRef.decode(artwork) {
-        case .server(_, let coverId, _, _):
-            Cover(id: coverId, size: size, radius: radius)
-        default:
-            Cover(id: nil, size: size, radius: radius)
-        }
-    }
+    var body: some View { ArtworkView(artwork: artwork, size: size, radius: radius) }
 }
 
 extension Library {

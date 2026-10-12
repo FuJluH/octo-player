@@ -26,6 +26,6 @@ let package = Package(
         .testTarget(name: "OctoKitTests", dependencies: ["OctoKit"]),
     ] + (kitOnly ? [] : [
         // The iPhone app: SwiftUI, AVFoundation and Apple's Liquid Glass.
-        .target(name: "Octo", dependencies: ["OctoKit"]),
+        .target(name: "Octo", dependencies: ["OctoKit"], resources: [.copy("CoverArt")]),
     ])
 )

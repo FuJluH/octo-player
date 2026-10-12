@@ -503,8 +503,23 @@ struct PlaylistCover: View {
     var size: CGFloat
     var radius: CGFloat = OctoRadius.artS
     var notice: String?
+    /// The list itself, for its designed cover; without it the mosaic is drawn.
+    var id: String?
+    var name = ""
+    var footer: String?
+    var line: String? = playlistCoverLine
 
     var body: some View {
+        if AppSettings.shared.playlistCovers == .designed, let id {
+            DesignedCover(id: id, name: name, covers: covers, size: size, radius: radius, line: line, footer: footer,
+                          glyph: playlistGlyph(octoNotice: notice))
+        } else {
+            mosaic
+        }
+    }
+
+    /// The covers of its first albums in a square.
+    private var mosaic: some View {
         ZStack {
             if covers.count >= 4 {
                 VStack(spacing: 0) {
@@ -547,7 +562,8 @@ struct PlaylistCover: View {
 
 extension PlaylistCover {
     init(playlist: PlaylistSummary, size: CGFloat, radius: CGFloat = OctoRadius.artS) {
-        self.init(covers: playlist.covers, size: size, radius: radius, notice: playlist.octoNotice)
+        self.init(covers: playlist.covers, size: size, radius: radius, notice: playlist.octoNotice, id: playlist.id, name: playlist.name,
+                  footer: playlistCoverFooter(playlist.songCount))
     }
 }
 
