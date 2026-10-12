@@ -32,6 +32,13 @@ enum Route: Hashable, Codable {
     case artist(id: String, name: String)
     case playlist(Playlist)
     case artists, albums, playlists, favorites
+    /// An album or artist the server found online, and the Charts page.
+    case onlineAlbum(id: String, name: String)
+    case onlineArtist(id: String, name: String)
+    case charts
+    /// A live list, and its editor (a new one when `id` is nil).
+    case liveList(id: String)
+    case liveListEditor(id: String?)
     /// The Sound page: equalizer, loudness, balance and headphone correction.
     case sound
 }
@@ -48,6 +55,11 @@ extension Route {
         case .playlists: .playlists
         case .favorites: .favorites
         case .sound: .sound
+        case .onlineAlbum: .onlineAlbum
+        case .onlineArtist: .onlineArtist
+        case .charts: .charts
+        case .liveList: .liveList
+        case .liveListEditor: .liveListEdit
         }
     }
 }
@@ -88,6 +100,8 @@ struct MainShell: View {
     @Environment(Router.self) private var router
     @Environment(Session.self) private var session
     @Environment(Downloads.self) private var downloads
+    @Environment(ServerDownloads.self) private var serverDownloads
+    @Environment(LiveListStore.self) private var liveLists
     @Environment(AmbientSettings.self) private var ambience
     @Environment(ArtworkColorStore.self) private var colorStore
     @Environment(Overlays.self) private var overlays
@@ -134,9 +148,7 @@ struct MainShell: View {
                 .ignoresSafeArea(.keyboard)
 
             AboveBarTrailing {
-                // The downloads pill goes here: songs on their way, tapping opens the server
-                // downloads sheet.
-                EmptyView()
+                DownloadsPill()
             }
             .opacity(playerOpen && hasTrack ? 0 : 1)
             .animation(.octoTween(fixed: 300), value: playerOpen && hasTrack)
@@ -165,6 +177,13 @@ struct MainShell: View {
             closePlayer()
             paths[tab, default: NavigationPath()].append(route)
             router.routeTaken()
+        }
+        .onChange(of: router.accountRoute) { _, route in
+            guard let route else { return }
+            closePlayer()
+            if tab != .settings { select(.settings) }
+            paths[.settings, default: NavigationPath()].append(route)
+            router.accountRouteTaken()
         }
         .onChange(of: hasTrack) { _, has in
             if !has {
@@ -196,12 +215,33 @@ struct MainShell: View {
         }
         .task(id: session.activeId) { await downloads.resume() }
         .onChange(of: session.client == nil) { _, _ in Task { await downloads.resume() } }
-        .onChange(of: scenePhase, initial: true) { _, phase in downloads.setForeground(phase == .active) }
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            downloads.setForeground(phase == .active)
+            serverDownloads.setForeground(phase == .active)
+        }
+        .onChange(of: serverDownloadsKey, initial: true) {
+            serverDownloads.sessionChanged()
+            liveLists.accountChanged()
+        }
+        .onChange(of: router.serverDownloads) { _, page in
+            guard let page else { return }
+            router.serverDownloads = nil
+            serverDownloads.show(page)
+        }
+        .glassSheet(isPresented: Binding(get: { serverDownloads.view != nil }, set: { if !$0 { serverDownloads.close() } }), tall: true, scrolls: false) {
+            ServerDownloadsSheet()
+        }
         .fullScreenCover(item: Bindable(router).signIn) { form in
             SignInView(form: form, session: session) { notice in
                 if let notice { router.done(notice) }
             }
         }
+    }
+
+    /// The server in use as the downloads sheet follows it: which, signed in or not, and what it
+    /// lists.
+    private var serverDownloadsKey: String {
+        "\(session.activeId ?? "")|\(session.client != nil)|\(session.profile?.extensions.joined(separator: ",") ?? "-")"
     }
 
     /// Every tab's stack, each keeping its pages while another tab is in front. Changing tab,
@@ -379,6 +419,11 @@ extension View {
                 case .albums: AlbumsView()
                 case .playlists: PlaylistsView()
                 case .favorites: FavoritesView()
+                case .onlineAlbum(let id, let name): OnlineAlbumView(id: id, name: name)
+                case .onlineArtist(let id, let name): OnlineArtistView(id: id, name: name)
+                case .charts: ChartsView()
+                case .liveList(let id): LiveListView(id: id)
+                case .liveListEditor(let id): LiveListEditView(id: id)
                 case .sound: SoundPage()
                 }
             }

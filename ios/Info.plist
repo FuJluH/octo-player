@@ -22,6 +22,54 @@
     <key>UIBackgroundModes</key>
     <array>
         <string>audio</string>
+        <string>fetch</string>
+    </array>
+    <key>BGTaskSchedulerPermittedIdentifiers</key>
+    <array>
+        <string>app.winters.octo.family-notices</string>
+    </array>
+    <key>NSCameraUsageDescription</key>
+    <string>Octo uses the camera to scan a family QR code.</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>app.winters.octo.family</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>octo</string>
+            </array>
+        </dict>
+    </array>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Audio</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.audio</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Song list</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.comma-separated-values-text</string>
+                <string>public.plain-text</string>
+                <string>public.json</string>
+                <string>public.zip-archive</string>
+            </array>
+        </dict>
     </array>
     <key>UISupportedInterfaceOrientations</key>
     <array>
@@ -36,6 +84,8 @@
         <key>NSAllowsLocalNetworking</key>
         <true/>
     </dict>
+    <key>NSAppleMusicUsageDescription</key>
+    <string>Octo plays the music already on your iPhone, beside your server's.</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>Octo connects to your music server on your home network.</string>
     <key>NSAppleMusicUsageDescription</key>

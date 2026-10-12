@@ -96,6 +96,32 @@ final class Downloads {
 
     func phase(_ songId: String) -> DownloadPhase { phases[songId] ?? .none }
 
+    /// Called after a song or an album was asked for, so the server downloads list looks now.
+    @ObservationIgnored var onAsk: (@MainActor () -> Void)?
+
+    /// The finds whose download has arrived in the library.
+    var adopted: Set<String> { Set(phases.filter { $0.value == .done }.keys) }
+
+    /// Library songs that finds became, as last read, so a find's row can turn into its song.
+    private(set) var librarySongs: [String: Song] = [:]
+    @ObservationIgnored private var lookingUp = Set<String>()
+
+    /// The library song a find became, as last read; nil until it has been read.
+    func librarySong(_ id: String) -> Song? { librarySongs[id] }
+
+    /// The same, for the pages that resolve what the server sent.
+    func lastSeenLibrarySong(_ id: String) -> Song? { librarySongs[id] }
+
+    /// Reads a library song a find became, once, so its row can turn into it.
+    func lookUpLibrarySong(_ id: String) {
+        guard librarySongs[id] == nil, !lookingUp.contains(id) else { return }
+        lookingUp.insert(id)
+        Task {
+            defer { lookingUp.remove(id) }
+            if let track = await library.track(id) { librarySongs[id] = track.asSong }
+        }
+    }
+
     func state(_ songId: String) -> DownloadState { phase(songId).state }
 
     /// Whether the server keeps a log of its downloads that the downloads sheet can show.
@@ -121,7 +147,9 @@ final class Downloads {
             return false
         }
         await keep([song], source: source, requestedAt: epochNowMs())
+        SearchModel.hintAdded()
         arrivals.askedSong(song.id, title: song.title)
+        onAsk?()
         tracker.retry(song.id)
         follow()
         return true
@@ -138,6 +166,8 @@ final class Downloads {
         }
         let finds = songs.filter(\.isExternal)
         await keep(finds, source: source, requestedAt: epochNowMs())
+        SearchModel.hintAdded()
+        onAsk?()
         let coming = finds.filter { state($0.id) != .done }
         arrivals.askedAlbum(title.isEmpty ? (coming.first?.album ?? "") : title, findIds: coming.map(\.id))
         for song in coming { tracker.retry(song.id) }

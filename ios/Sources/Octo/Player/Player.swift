@@ -314,8 +314,14 @@ final class Player {
     }
 
     private func enqueue(_ position: Int) {
-        guard let client = session.client else { return }
         let song = queue[position]
+        if let direct = QueueItemStreams.address(of: song) {
+            let item = AVPlayerItem(asset: AVURLAsset(url: direct))
+            itemIndex[ObjectIdentifier(item)] = position
+            engine.insert(item, after: engine.items().last)
+            return
+        }
+        guard let client = session.client else { return }
         let url = client.streamURL(for: song, quality: session.quality)
         let asset: AVURLAsset
         if ServerTrust.shared.isPinned(url.host) || ServerTrust.shared.hasClientCertificate {
@@ -456,7 +462,7 @@ final class Player {
     /// Tells the server what is playing the first time it is really heard, and counts the play
     /// once half of it or four minutes have been heard.
     private func heard(_ step: TimeInterval) {
-        guard let song = current, listen.songId == song.id, let client = session.client else { return }
+        guard let song = current, listen.songId == song.id, let client = session.client, !QueueItemStreams.isOwn(song) else { return }
         listen.played += step
         if !listen.announced {
             listen.announced = true

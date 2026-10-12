@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct OctoApp: App {
+    @UIApplicationDelegateAdaptor(OctoAppDelegate.self) private var appDelegate
     @State private var session: Session
     @State private var player: Player
     @State private var router: Router
@@ -9,6 +10,11 @@ struct OctoApp: App {
     @State private var sound: SoundStore
     @State private var downloads: Downloads
     @State private var data: DataServices
+    @State private var discovery: Discovery
+    @State private var serverDownloads: ServerDownloads
+    @State private var liveLists: LiveListStore
+    @State private var liveLibrary: LiveLibrary
+    @State private var artistExtras: ArtistExtrasSource
     @State private var overlays = Overlays()
     @State private var prompts = Prompts()
     @State private var presses = PressSpots()
@@ -18,6 +24,9 @@ struct OctoApp: App {
     @State private var selectionBar = SelectionBarState()
     @State private var selectionActions = SelectionActions()
     @State private var artworkColors: ArtworkColorStore
+    @State private var accounts: Accounts
+    /// The ways in from outside the app; kept here so they live as long as it does.
+    @State private var entries: SystemEntries
 
     init() {
         let session = Session()
@@ -26,13 +35,30 @@ struct OctoApp: App {
         let data = DataServices(session: session) { words, done in router.show(words, done: done) }
         _data = State(initialValue: data)
         _router = State(initialValue: router)
-        _downloads = State(initialValue: data.downloads)
+        let downloads = data.downloads
+        _downloads = State(initialValue: downloads)
+        let discovery = Discovery(session: session, online: data.discovery, library: data.library)
+        _discovery = State(initialValue: discovery)
+        let serverDownloads = ServerDownloads(session: session, router: router)
+        downloads.onAsk = { serverDownloads.wake() }
+        _serverDownloads = State(initialValue: serverDownloads)
+        _liveLists = State(initialValue: LiveListStore(session: session))
+        _liveLibrary = State(initialValue: LiveLibrary(library: data.library))
+        _artistExtras = State(initialValue: ArtistExtrasSource(session: session, library: data.library, discovery: discovery))
         _session = State(initialValue: session)
         _sound = State(initialValue: sound)
-        _player = State(initialValue: Player(session: session, sound: sound.processor))
+        let player = Player(session: session, sound: sound.processor)
+        _player = State(initialValue: player)
         _lyrics = State(initialValue: LyricsStore(session: session))
         _artworkColors = State(initialValue: ArtworkColorStore(session: session))
         data.start()
+        let accounts = Accounts(session: session, router: router)
+        _accounts = State(initialValue: accounts)
+        let entries = SystemEntries(session: session, player: player, router: router, accounts: accounts)
+        _entries = State(initialValue: entries)
+        SystemEntries.shared = entries
+        FamilyNotices.session = session
+        AccountHooks.install(data, session: session)
         #if DEBUG
         DataDrive.install(data) { router.show($0) }
         #endif
@@ -48,6 +74,11 @@ struct OctoApp: App {
                 .environment(sound)
                 .environment(downloads)
                 .dataEnvironment(data)
+                .environment(discovery)
+                .environment(serverDownloads)
+                .environment(liveLists)
+                .environment(liveLibrary)
+                .environment(artistExtras)
                 .environment(overlays)
                 .environment(prompts)
                 .environment(presses)
@@ -57,6 +88,8 @@ struct OctoApp: App {
                 .environment(artworkColors)
                 .environment(selectionBar)
                 .environment(selectionActions)
+                .environment(accounts)
+                .task { accounts.start() }
                 .motionScaled(motion)
                 .recordsPresses(presses)
                 .onAppear { prompts.spots = presses }
@@ -67,6 +100,10 @@ struct OctoApp: App {
                                          overlays: overlays, ambience: ambience, selectionBar: selectionBar) }
                 #endif
         }
+        .backgroundTask(.appRefresh(FamilyNotices.taskId)) {
+            await FamilyNotices.check()
+            await FamilyNotices.scheduleNext()
+        }
     }
 }
 
@@ -74,5 +111,6 @@ struct OctoApp: App {
 struct RootView: View {
     var body: some View {
         MainShell()
+            .systemEntries()
     }
 }
