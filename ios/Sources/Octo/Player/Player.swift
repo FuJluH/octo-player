@@ -452,7 +452,7 @@ final class Player {
     func playNext(_ songs: [Song]) {
         Task {
             let items = await playable.items(songs, source: .you).compactMap { $0 }
-            whenRestored { [weak self] in self?.engine.addNext(items) }
+            whenRestored { self.engine.addNext(items) }
         }
     }
 
@@ -461,7 +461,7 @@ final class Player {
     func append(_ songs: [Song]) {
         Task {
             let items = await playable.items(songs, source: .you).compactMap { $0 }
-            whenRestored { [weak self] in self?.engine.add(items) }
+            whenRestored { self.engine.add(items) }
         }
     }
 
