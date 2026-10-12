@@ -40,6 +40,7 @@ struct QueueSheet: View {
     @State private var showsMenu = false
     @State private var saving = false
     @State private var ticks = 0
+    @State private var presses = 0
 
     var body: some View {
         let entries = QueueEntry.of(player.queue).filter { !removed.contains($0.id) }
@@ -97,6 +98,7 @@ struct QueueSheet: View {
             }
         }
         .sensoryFeedback(.selection, trigger: ticks)
+        .sensoryFeedback(.impact(weight: .medium), trigger: presses)
         .onChange(of: player.queue) { _, _ in removed = [] }
         .glassPopup(isPresented: $showsMenu, title: "Song in the queue") {
             if let menuEntry { QueueRowMenu(entry: menuEntry, dismiss: { showsMenu = false }, remove: remove) }
@@ -247,6 +249,7 @@ struct QueueSheet: View {
     // MARK: Edits
 
     private func openMenu(_ entry: QueueEntry) {
+        presses += 1
         menuEntry = entry
         showsMenu = true
     }
