@@ -32,6 +32,8 @@ enum Route: Hashable, Codable {
     case artist(id: String, name: String)
     case playlist(Playlist)
     case artists, albums, playlists, favorites
+    /// The Sound page: equalizer, loudness, balance and headphone correction.
+    case sound
 }
 
 extension Route {
@@ -45,6 +47,7 @@ extension Route {
         case .albums: .albums
         case .playlists: .playlists
         case .favorites: .favorites
+        case .sound: .sound
         }
     }
 }
@@ -94,7 +97,9 @@ struct MainShell: View {
     /// The bar's small player, kept through a relaunch of the scene.
     @SceneStorage("bar.player") private var barPlayer = false
     @SceneStorage("player.open") private var playerOpen = false
-    @State private var paths: [AppTab: [Route]] = [:]
+    /// Every tab's stack. A stack can hold any page value, so the other parts of the app can
+    /// open pages of their own kinds.
+    @State private var paths: [AppTab: NavigationPath] = [:]
     /// Every tab's stack, kept with the scene.
     @SceneStorage("paths") private var savedPaths: Data?
     /// The tab that was in front before the last change, still drawn full size while it fades.
@@ -157,7 +162,7 @@ struct MainShell: View {
         .onChange(of: router.route) { _, route in
             guard let route else { return }
             closePlayer()
-            paths[tab, default: []].append(route)
+            paths[tab, default: NavigationPath()].append(route)
             router.routeTaken()
         }
         .onChange(of: hasTrack) { _, has in
@@ -182,7 +187,10 @@ struct MainShell: View {
         }
         .onAppear(perform: restorePaths)
         .onChange(of: paths) { _, now in
-            let byName = Dictionary(uniqueKeysWithValues: now.map { ($0.key.rawValue, $0.value) })
+            // A stack holding a page that cannot be kept starts afresh next time.
+            let byName = Dictionary(uniqueKeysWithValues: now.compactMap { entry in
+                entry.value.codable.map { (entry.key.rawValue, $0) }
+            })
             savedPaths = try? JSONEncoder().encode(byName)
         }
         .task(id: session.activeId) { await downloads.resume() }
@@ -225,10 +233,11 @@ struct MainShell: View {
     /// Brings every tab's stack back as it was when the scene was last kept.
     private func restorePaths() {
         guard paths.isEmpty, let savedPaths,
-              let byName = try? JSONDecoder().decode([String: [Route]].self, from: savedPaths) else { return }
-        var restored: [AppTab: [Route]] = [:]
+              let byName = try? JSONDecoder().decode([String: NavigationPath.CodableRepresentation].self, from: savedPaths)
+        else { return }
+        var restored: [AppTab: NavigationPath] = [:]
         for (name, stack) in byName {
-            if let item = AppTab(rawValue: name) { restored[item] = stack }
+            if let item = AppTab(rawValue: name) { restored[item] = NavigationPath(stack) }
         }
         paths = restored
     }
@@ -243,8 +252,8 @@ struct MainShell: View {
         }
     }
 
-    private func path(_ item: AppTab) -> Binding<[Route]> {
-        Binding(get: { paths[item] ?? [] }, set: { paths[item] = $0 })
+    private func path(_ item: AppTab) -> Binding<NavigationPath> {
+        Binding(get: { paths[item] ?? NavigationPath() }, set: { paths[item] = $0 })
     }
 
     /// A tab tapped. The tab in use goes back to its first page, or, already there, scrolls it
@@ -254,7 +263,7 @@ struct MainShell: View {
         barPlayer = false
         if item == tab {
             if paths[item]?.isEmpty == false {
-                paths[item] = []
+                paths[item] = NavigationPath()
             } else {
                 reselects[item, default: 0] += 1
             }
@@ -369,6 +378,7 @@ extension View {
                 case .albums: AlbumsView()
                 case .playlists: PlaylistsView()
                 case .favorites: FavoritesView()
+                case .sound: SoundPage()
                 }
             }
             .background { PageBackdrop(page: route.ambientPage, route: route) }

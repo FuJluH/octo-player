@@ -332,17 +332,21 @@ final class Player {
         }
         let item = AVPlayerItem(asset: asset)
         item.audioTimePitchAlgorithm = keepsPitch ? .timeDomain : .varispeed
-        attachSound(to: item, asset: asset)
+        attachSound(to: item, asset: asset, song: song)
         itemIndex[ObjectIdentifier(item)] = position
         engine.insert(item, after: engine.items().last)
     }
 
     /// Every song plays through the sound processor (equalizer, ReplayGain, balance, limiter),
-    /// put on its audio track as soon as the track is known.
-    private func attachSound(to item: AVPlayerItem, asset: AVURLAsset) {
+    /// put on its audio track as soon as the track is known. The song's loudness is judged as it
+    /// is queued, in play order.
+    private func attachSound(to item: AVPlayerItem, asset: AVURLAsset, song: Song) {
         let processor = sound
+        let setUp = processor.songSetUp(song)
         Task {
-            guard let track = try? await asset.loadTracks(withMediaType: .audio).first, let tap = processor.makeTap() else { return }
+            guard let track = try? await asset.loadTracks(withMediaType: .audio).first,
+                  let tap = await processor.makeTap(for: setUp, asset: asset)
+            else { return }
             let input = AVMutableAudioMixInputParameters(track: track)
             input.audioTapProcessor = tap
             let mix = AVMutableAudioMix()

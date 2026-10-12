@@ -1,37 +1,10 @@
 import Foundation
 
-/// How strongly the artwork's colors show behind the pages.
-public enum AmbientStrength: String, Codable, CaseIterable, Sendable {
-    case off = "Off"
-    case subtle = "Subtle"
-    case rich = "Rich"
-
-    /// An unknown strength, as from a newer backup, reads as the default.
-    public init(from decoder: Decoder) throws {
-        let text = try decoder.singleValueContainer().decode(String.self)
-        self = AmbientStrength(rawValue: text) ?? .subtle
-    }
-}
-
-/// The parts of the app that can wear the artwork's colors.
-public enum AmbientArea: CaseIterable, Sendable {
-    case home, library, search, settings
-}
-
-/// Where the ambient color shows, and how strongly. Subtle everywhere by default.
-public struct AmbientPrefs: Codable, Equatable, Sendable {
-    public var strength: AmbientStrength = .subtle
-    public var home = true
-    public var library = true
-    public var search = true
-    public var settings = true
-    /// A faint tint in the floating bar's glass.
-    public var bar = true
-    /// Album and artist pages glow with their own artwork, not the song on now.
-    public var pageArtwork = true
-
+extension AmbientPrefs {
+    /// Prefs with each part given, the rest at their defaults.
     public init(strength: AmbientStrength = .subtle, home: Bool = true, library: Bool = true, search: Bool = true,
                 settings: Bool = true, bar: Bool = true, pageArtwork: Bool = true) {
+        self.init()
         self.strength = strength
         self.home = home
         self.library = library
@@ -40,51 +13,13 @@ public struct AmbientPrefs: Codable, Equatable, Sendable {
         self.bar = bar
         self.pageArtwork = pageArtwork
     }
-
-    enum CodingKeys: String, CodingKey { case strength, home, library, search, settings, bar, pageArtwork }
-
-    /// Fields a backup leaves out keep their defaults.
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        strength = (try? c.decodeIfPresent(AmbientStrength.self, forKey: .strength)) ?? .subtle
-        home = (try? c.decodeIfPresent(Bool.self, forKey: .home)) ?? true
-        library = (try? c.decodeIfPresent(Bool.self, forKey: .library)) ?? true
-        search = (try? c.decodeIfPresent(Bool.self, forKey: .search)) ?? true
-        settings = (try? c.decodeIfPresent(Bool.self, forKey: .settings)) ?? true
-        bar = (try? c.decodeIfPresent(Bool.self, forKey: .bar)) ?? true
-        pageArtwork = (try? c.decodeIfPresent(Bool.self, forKey: .pageArtwork)) ?? true
-    }
-
-    public func shows(_ area: AmbientArea) -> Bool {
-        guard strength != .off else { return false }
-        switch area {
-        case .home: return home
-        case .library: return library
-        case .search: return search
-        case .settings: return settings
-        }
-    }
-
-    public var tintsBar: Bool { strength != .off && bar }
 }
 
 /// How much of the color shows over the app's near-black background.
-public func ambientAlpha(_ strength: AmbientStrength) -> Double {
-    switch strength {
-    case .off: 0
-    case .subtle: 0.14
-    case .rich: 0.24
-    }
-}
+public func ambientAlpha(_ strength: AmbientStrength) -> Double { strength.glowAlpha }
 
 /// How much of the color tints the bar's glass: about half the page's, so the glass stays glass.
-public func barTintAlpha(_ strength: AmbientStrength) -> Double {
-    switch strength {
-    case .off: 0
-    case .subtle: 0.06
-    case .rich: 0.10
-    }
-}
+public func barTintAlpha(_ strength: AmbientStrength) -> Double { strength.barTintAlpha }
 
 /// Artwork colors are held to this lightness and saturation before they glow.
 public let ambientMaxLightness = 0.5

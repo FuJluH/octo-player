@@ -658,7 +658,7 @@ struct PromptsHost: View {
                         title: (prompts.choice ?? lastChoice)?.title, anchor: (prompts.choice ?? lastChoice)?.anchor,
                         usesPressSpot: false, revision: prompts.choice?.id) {
                 if let request = prompts.choice ?? lastChoice {
-                    ChoiceList(request: request) { prompts.closeChoice() }
+                    PromptChoiceList(request: request) { prompts.closeChoice() }
                 }
             }
             .glassPopup(isPresented: Binding(get: { prompts.question != nil }, set: { if !$0 { prompts.closeQuestion() } }),
@@ -684,7 +684,7 @@ struct PromptsHost: View {
 
 /// The answers under the question, 220 to 320 points wide, as wide as the widest line, the
 /// current one in the darker pill. Picking one runs it and closes the list.
-private struct ChoiceList: View {
+private struct PromptChoiceList: View {
     let request: Prompts.ChoiceRequest
     let close: () -> Void
 

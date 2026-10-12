@@ -18,11 +18,17 @@ import SwiftUI
 /// - `pause`
 /// - `toast:TEXT` a plain message; `undo:TEXT` a message with Undo; `done:TEXT` one with a check
 /// - `dialog` a question with Delete and Cancel; `choice` a choice list; `sheet` a glass sheet;
-///   `popup` a glass menu with a second page; `menu:page` opens it on its second page
+///   `menu` a glass menu with a second page; `menu:page` opens it on its second page
 /// - `reducemotion:on`, `reducemotion:off` sets Octo's own Reduce motion
 /// - `glow:off`, `glow:subtle`, `glow:rich` sets the artwork's glow
 /// - `select:N` picks N songs of the queue (or of a sample list), showing the selection bar;
 ///   `unselect` ends the picking
+/// - `sound`, `sound:graphic`, `sound:parametric`, `sound:preset:NAME`, `sound:editor`,
+///   `sound:save`, `sound:own:NAME`, `sound:delete:NAME`, `sound:card:NAME`, `sound:eq:on|off`,
+///   `sound:each:on|off`
+///   open the Sound page in that state (see `SoundDrive`)
+/// - `settings:PAGE`, `settings:PAGE@ROW`, `settings-search:TEXT`, `popup:ROW`, `whatsnew`,
+///   `settings-state:NAME`: see `SettingsNavigator.drive`
 @MainActor
 enum Drive {
     static func run(session: Session, player: Player, router: Router, prompts: Prompts, motion: MotionSettings,
@@ -57,7 +63,7 @@ enum Drive {
                                selected: 0) { router.show("Sorted by \(["Name", "Artist", "Recently added", "Year"][$0])") }
             case "sheet":
                 if let overlays { DriveSamples.sheet(overlays, router: router) }
-            case "popup", "menu":
+            case "menu":
                 if let overlays { DriveSamples.menu(overlays, router: router, deeper: value == "page") }
             case "reducemotion": motion.reduceMotion = value != "off"
             case "select":
@@ -78,7 +84,9 @@ enum Drive {
                 }
                 DriveSamples.selections = []
             case "glow":
-                if let strength = AmbientStrength(rawValue: value.capitalized) { ambience?.prefs.strength = strength }
+                if let strength = AmbientStrength(rawValue: value.capitalized) { ambience?.setStrength(strength) }
+            case "sound": SoundDrive.run(value, router: router)
+            case "settings", "settings-search", "popup", "whatsnew", "settings-state": await SettingsNavigator.shared.drive(name, value, router: router)
             case "list":
                 guard let client = session.client,
                       let list = try? await client.playlists().first(where: { $0.name.caseInsensitiveCompare(value) == .orderedSame }),

@@ -220,15 +220,8 @@ public struct PageTrail<T: Equatable>: Equatable {
     public func restart(_ first: T) -> PageTrail { PageTrail(trusted: [first], deeper: true, opening: opening + 1) }
 }
 
-/// How one option in a glass menu is drawn: whether it is the chosen one, and whether a line
-/// parts it from the option above. No line touches the chosen option's pill.
-public struct MenuRowLook: Sendable, Equatable {
-    public let selected: Bool
-    public let lineAbove: Bool
-}
-
+/// How each option of a glass menu is drawn: the chosen one in the pill, a line above every
+/// other one except where it would touch the pill.
 public func menuRowLooks(count: Int, selected: Int) -> [MenuRowLook] {
-    (0..<max(0, count)).map { index in
-        MenuRowLook(selected: index == selected, lineAbove: index > 0 && index != selected && index - 1 != selected)
-    }
+    MenuRowLook.rows(count: count, selected: selected)
 }

@@ -101,18 +101,6 @@ extension View {
         }
     }
 
-    /// A raised panel, as Settings groups sit on: the solid raised surface with a faint border.
-    func raisedPanel(radius: CGFloat = OctoRadius.row) -> some View {
-        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
-        return background {
-            shape.fill(OctoColor.surfaceRaised)
-                .overlay { shape.strokeBorder(Color.white.opacity(0.06), lineWidth: 1) }
-                .overlay(alignment: .top) { Color.white.opacity(0.06).frame(height: 1).padding(.horizontal, radius / 2) }
-                .overlay { shape.stroke(Color.black.opacity(0.4), lineWidth: 0.5) }
-                .elevation1(shape)
-        }
-    }
-
     /// Elevation 1: a close shadow and a soft one.
     func elevation1<S: Shape>(_ shape: S) -> some View {
         shadow(color: .black.opacity(0.20), radius: shadowRadius(2), y: 1)

@@ -16,19 +16,18 @@ enum Easing {
     }
 }
 
-/// Octo's own Reduce motion, beside the phone's. Off by default; Settings, Appearance, Motion
-/// turns it on. Kept on the phone.
+/// Octo's own Reduce motion, beside the phone's: off by default, kept with the other settings
+/// (Settings, Appearance, Motion).
 @MainActor
 @Observable
 final class MotionSettings {
-    static let key = "appearance.reduceMotion"
+    private let store: AppSettings
+
+    init(store: AppSettings = .shared) { self.store = store }
 
     var reduceMotion: Bool {
-        didSet { UserDefaults.standard.set(reduceMotion, forKey: Self.key) }
-    }
-
-    init() {
-        reduceMotion = UserDefaults.standard.bool(forKey: Self.key)
+        get { store.player.reduceMotion }
+        set { store.setReduceMotion(newValue) }
     }
 }
 

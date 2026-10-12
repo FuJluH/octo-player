@@ -110,24 +110,3 @@ struct PauseGlyph: View {
         .accessibilityHidden(true)
     }
 }
-
-/// ListenBrainz's mark, in its own navy and orange, never tinted.
-struct ListenBrainzMark: View {
-    var size: CGFloat = 24
-
-    var body: some View {
-        Canvas { context, canvas in
-            let unit = canvas.width / 30
-            var left = Path()
-            left.addLines([CGPoint(x: 14.5, y: 1), CGPoint(x: 2.5, y: 8), CGPoint(x: 2.5, y: 22), CGPoint(x: 14.5, y: 29)].map { CGPoint(x: $0.x * unit, y: $0.y * unit) })
-            left.closeSubpath()
-            var right = Path()
-            right.addLines([CGPoint(x: 15.5, y: 1), CGPoint(x: 27.5, y: 8), CGPoint(x: 27.5, y: 22), CGPoint(x: 15.5, y: 29)].map { CGPoint(x: $0.x * unit, y: $0.y * unit) })
-            right.closeSubpath()
-            context.fill(left, with: .color(Color(hex: 0x353070)))
-            context.fill(right, with: .color(Color(hex: 0xEB743B)))
-        }
-        .frame(width: size, height: size)
-        .accessibilityHidden(true)
-    }
-}

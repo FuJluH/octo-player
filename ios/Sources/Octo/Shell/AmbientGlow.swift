@@ -4,26 +4,17 @@ import OctoKit
 import SwiftUI
 import UIKit
 
-/// Where the artwork's glow shows and how strongly, kept on the phone. Settings, Appearance
-/// changes it.
+/// Where the artwork's glow shows and how strongly, as Settings, Appearance keeps it.
 @MainActor
 @Observable
 final class AmbientSettings {
-    static let key = "appearance.ambient"
+    private let store: AppSettings
 
-    var prefs: AmbientPrefs {
-        didSet {
-            if let data = try? JSONEncoder().encode(prefs) { UserDefaults.standard.set(data, forKey: Self.key) }
-        }
-    }
+    init(store: AppSettings = .shared) { self.store = store }
 
-    init() {
-        if let data = UserDefaults.standard.data(forKey: Self.key), let read = try? JSONDecoder().decode(AmbientPrefs.self, from: data) {
-            prefs = read
-        } else {
-            prefs = AmbientPrefs()
-        }
-    }
+    var prefs: AmbientPrefs { store.player.ambient }
+
+    func setStrength(_ strength: AmbientStrength) { store.setAmbientStrength(strength) }
 
     /// The Settings summary: "No glow", "Subtle glow" or "Rich glow".
     var summary: String {

@@ -1,177 +1,288 @@
 import OctoKit
 import SwiftUI
 
+/// Settings' front page: the account, a search across every setting, and the categories, each
+/// with a line on how it is set now.
 struct SettingsView: View {
     @Environment(Session.self) private var session
-    @Environment(Player.self) private var player
     @Environment(Router.self) private var router
-    @State private var removing: StoredServer?
-    @State private var switching: String?
+    @Environment(SoundStore.self) private var sound
+    @SceneStorage("settings.query") private var query = ""
+    @State private var navigator = SettingsNavigator.shared
+    @State private var settings = AppSettings.shared
+    @State private var phone = PhoneMusic.shared
+    @State private var feeds = SettingsFeeds.shared
+    @State private var updates = AppUpdates.shared
+    @State private var listenBrainz = ListenBrainzSync.shared
+    @State private var driven: SettingsRoute?
+    @FocusState private var searching: Bool
 
     var body: some View {
-        @Bindable var session = session
-        List {
-            Section {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
                 ScreenTitle("Settings")
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-            }
-            Section {
                 accountCard
-                    .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-            }
-            if !session.servers.isEmpty {
-                Section {
-                    ForEach(session.servers) { server in serverRow(server) }
-                    Button {
-                        router.signIn = .add
-                    } label: {
-                        Label("Add a server", systemImage: "plus")
-                    }
-                } header: {
-                    Text("Your servers")
-                }
-            }
-            Section {
-                Picker("Quality", selection: $session.quality) {
-                    ForEach(StreamQuality.choices, id: \.self) { quality in
-                        Text(name(of: quality)).tag(quality)
-                    }
-                }
-            } header: {
-                Text("Streaming")
-            } footer: {
-                Text("Original plays each file as it is. Formats the iPhone can't open are turned into MP3 by the server.")
-            }
-            Section("About") {
-                LabeledContent("Version", value: Session.appVersion)
-            }
-        }
-        .scrollContentBackground(.hidden)
-        .background(OctoColor.background)
-        .barClearance()
-        .confirmationDialog(removing.map { "Remove \($0.name)?" } ?? "", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }), titleVisibility: .visible) {
-            Button("Remove", role: .destructive) {
-                if let removing {
-                    if removing.id == session.activeId { player.stop() }
-                    session.remove(removing.id)
-                }
-                removing = nil
-            }
-        }
-    }
-
-    /// The card at the top: the server in use, or a way to connect one.
-    @ViewBuilder
-    private var accountCard: some View {
-        Button {
-            if session.servers.isEmpty { router.signIn = .signIn }
-        } label: {
-            HStack(spacing: 14) {
-                Image(systemName: session.active == nil ? "server.rack" : "checkmark.circle.fill")
-                    .font(.system(size: 22))
-                    .foregroundStyle(OctoColor.accent)
-                    .frame(width: 32)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(cardTitle).font(.octoBody).foregroundStyle(.white)
-                    Text(cardDetail).font(.octoCaption).foregroundStyle(OctoColor.textMuted)
-                }
-                Spacer()
-                if session.servers.isEmpty {
-                    Image(systemName: "chevron.right").foregroundStyle(OctoColor.textMuted)
-                }
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .glassEffect(.regular, in: .rect(cornerRadius: 20))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var cardTitle: String {
-        if let active = session.active, session.client != nil { return active.name }
-        return session.servers.isEmpty ? "Connect a music server" : "Your servers"
-    }
-
-    private var cardDetail: String {
-        if let active = session.active, session.client != nil {
-            let place = active.homeAddress == nil ? "" : (session.atHome ? " · Connected at home" : " · Connected away")
-            return active.account + place
-        }
-        return session.servers.isEmpty ? "Add the music on your own server" : "Signed out. Sign in to one, or add another."
-    }
-
-    private func serverRow(_ server: StoredServer) -> some View {
-        let inUse = server.id == session.activeId && session.client != nil
-        return HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(server.name).font(.octoBody)
-                    if inUse {
-                        Text("In use")
-                            .font(.system(size: 11, weight: .semibold))
-                            .padding(.horizontal, 7).padding(.vertical, 2)
-                            .background(OctoColor.accent.opacity(0.2), in: Capsule())
-                    }
-                }
-                Text(server.account).font(.octoCaption).foregroundStyle(OctoColor.textMuted)
-                Text(status(server, inUse: inUse)).font(.octoCaption).foregroundStyle(OctoColor.textMuted)
-            }
-            Spacer()
-            if !inUse {
-                Button(server.signedOut ? "Sign in" : "Switch") { Task { await use(server) } }
-                    .buttonStyle(.glass)
-                    .disabled(switching != nil)
-            }
-            Menu {
-                Button("Edit") { router.signIn = .edit(server) }
-                if server.signedOut {
-                    Button("Sign in") { router.signIn = .again(server) }
+                searchField
+                if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    results(searchSettings(query))
                 } else {
-                    Button("Sign out") {
-                        if inUse { player.stop() }
-                        session.signOut(server.id)
-                    }
+                    categories
                 }
-                Button("Remove", role: .destructive) { removing = server }
-            } label: {
-                Image(systemName: "ellipsis").frame(width: 32, height: 32)
+            }
+            .padding(.top, 8)
+        }
+        .scrollIndicators(.hidden)
+        .scrollDismissesKeyboard(.immediately)
+        .barClearance()
+        .settingsRoutes()
+        .navigationDestination(item: $driven) { SettingsDestination(route: $0) }
+        .task {
+            AccountQualityModel.shared.attach(session)
+            #if DEBUG
+            SettingsNavigator.session = session
+            #endif
+            settings.attach(session: session) { AccountQualityModel.shared.appPicks }
+            phone.start()
+            listenBrainz.start()
+            updates.start()
+        }
+        // The account's quality is read at start and whenever the account in use changes.
+        .task(id: "\(session.activeId ?? "")|\(session.client != nil)|\(session.profile?.extensions.count ?? -1)") {
+            await AccountQualityModel.shared.load()
+        }
+        .onChange(of: navigator.request) { _, request in
+            guard let request else { return }
+            navigator.request = nil
+            switch request {
+            case .page(let route): driven = route
+            case .search(let text): query = text
             }
         }
     }
 
-    private func status(_ server: StoredServer, inUse: Bool) -> String {
-        if switching == server.id { return "Switching to it now" }
-        if server.signedOut { return "Signed out. Sign in again to use it." }
-        return server.kind.isEmpty ? "Subsonic" : server.kind
-    }
+    // MARK: Account card
 
-    private func use(_ server: StoredServer) async {
-        if server.signedOut {
-            router.signIn = .again(server)
-            return
-        }
-        switching = server.id
-        defer { switching = nil }
-        do {
-            let previous = session.active?.name
-            try await session.switchTo(server.id)
-            router.show(previous.map { _ in "Now on \(server.name)." } ?? "Now on \(server.name).", done: true)
-        } catch SignInFailure.needsPassword(_, let words) {
-            router.show(words)
-            router.signIn = .again(server)
-        } catch {
-            router.show(error.localizedDescription)
+    /// The server signed in to and how it is doing, and the music on the phone.
+    private var accountCard: some View {
+        SettingsGroup(inset: iconRowInset) {
+            serverRow
+            AccountRow(icon: SettingsIcon.phone, title: SettingsSummaries.phoneLine(phone.access, songs: phone.songCount), lines: []) { label in
+                NavigationLink(value: SettingsRoute(.library)) { label }
+            }
         }
     }
 
-    private func name(of quality: StreamQuality) -> String {
-        switch quality {
-        case .original: "Original"
-        case .mp3(let kbps): "\(kbps) kbps"
+    @ViewBuilder
+    private var serverRow: some View {
+        if let active = session.active, session.client != nil {
+            let problem = feeds.syncProblem
+            let status = problem ?? SettingsSummaries.serverStatus(
+                syncing: feeds.syncing,
+                place: active.homeAddress == nil ? nil : (session.atHome ? .home : .away),
+                syncedAt: syncedAt(active.id),
+                now: now
+            )
+            AccountRow(icon: SettingsIcon.cloud, title: active.name, lines: [
+                (active.username.isEmpty ? "Signed in with a key" : active.username, OctoColor.textSecondary),
+                (status, problem != nil ? OctoColor.error : OctoColor.textMuted),
+            ]) { label in NavigationLink(value: SettingsRoute(.server)) { label } }
+        } else if session.servers.isEmpty {
+            AccountRow(icon: SettingsIcon.cloud, title: "Connect a music server",
+                       lines: [("Add the music on your own server", OctoColor.textMuted)]) { label in
+                Button { router.signIn = .signIn } label: { label }
+            }
+        } else {
+            // Servers are kept, none in use: the list is where to go.
+            AccountRow(icon: SettingsIcon.cloud, title: "Your servers",
+                       lines: [("Signed out. Sign in to one, or add another.", OctoColor.textMuted)]) { label in
+                NavigationLink(value: SettingsRoute(.server)) { label }
+            }
         }
+    }
+
+    // MARK: Search
+
+    private var searchField: some View {
+        SettingsSearchField(placeholder: "Search settings", text: $query, focused: $searching)
+            .submitLabel(.search)
+            .onSubmit { searching = false }
+            .padding(.horizontal, 16)
+    }
+
+    /// What a search found: each setting, with the page it is on.
+    private func results(_ found: [SettingEntry]) -> some View {
+        SettingsGroup {
+            if found.isEmpty { NoteRow("No settings match.") }
+            ForEach(found) { entry in
+                if entry.page == .sound {
+                    LinkRow(nil, title: entry.title, helper: entry.place, to: Route.sound)
+                } else {
+                    LinkRow(nil, title: entry.title, helper: entry.place, to: SettingsRoute(entry.page, highlight: entry.id))
+                }
+            }
+        }
+    }
+
+    // MARK: Categories
+
+    private var categories: some View {
+        let player = settings.player
+        let serverLine: String = {
+            guard let active = session.active, session.client != nil else { return "Not connected" }
+            return SettingsSummaries.serverStatus(syncing: feeds.syncing, place: nil, syncedAt: syncedAt(active.id), now: now)
+        }()
+        return VStack(spacing: 20) {
+            SettingsGroup(title: "Listening", inset: iconRowInset) {
+                CategoryRow(icon: SettingsIcon.playback, title: SettingsPage.playback.title,
+                            summary: SettingsSummaries.playback(player), to: SettingsRoute(.playback))
+                CategoryRow(icon: SettingsIcon.sound, title: SettingsPage.sound.title,
+                            summary: SoundEdits.soundSummary(sound.current), to: Route.sound)
+                CategoryRow(icon: SettingsIcon.appearance, title: SettingsPage.appearance.title,
+                            summary: SettingsSummaries.appearance(player.ambient, liveBackground: player.liveBackground),
+                            to: SettingsRoute(.appearance))
+            }
+            SettingsGroup(title: "Your music", inset: iconRowInset) {
+                CategoryRow(icon: SettingsIcon.library, title: SettingsPage.library.title,
+                            summary: SettingsSummaries.library(phone.access, songs: phone.songCount, folders: libraryFolders),
+                            to: SettingsRoute(.library))
+                CategoryRow(icon: SettingsIcon.cloud, title: SettingsPage.server.title, summary: serverLine, to: SettingsRoute(.server))
+                CategoryRow(icon: SettingsIcon.download, title: SettingsPage.streaming.title,
+                            summary: SettingsSummaries.streaming(settings.stream, settings.offline), to: SettingsRoute(.streaming))
+                CategoryRow(icon: SettingsIcon.audioQuality, title: SettingsPage.audioQuality.title,
+                            summary: SettingsSummaries.audioQuality, to: SettingsRoute(.audioQuality))
+            }
+            SettingsGroup(title: "Lyrics and history", inset: iconRowInset) {
+                CategoryRow(icon: SettingsIcon.lyrics, title: SettingsPage.lyrics.title,
+                            summary: SettingsSummaries.lyrics(online: player.lyricsOnline, keepScreenOn: settings.keepScreenOn),
+                            to: SettingsRoute(.lyrics))
+                CategoryRow(icon: SettingsIcon.scrobbling, title: SettingsPage.scrobbling.title,
+                            summary: SettingsSummaries.scrobbling(settings.listenBrainz), to: SettingsRoute(.scrobbling))
+            }
+            SettingsGroup(title: "This app", inset: iconRowInset) {
+                CategoryRow(icon: SettingsIcon.backup, title: SettingsPage.backup.title, summary: SettingsSummaries.backup,
+                            to: SettingsRoute(.backup))
+                // A ready update shows here, quietly, in place of the version.
+                CategoryRow(icon: SettingsIcon.info, title: SettingsPage.about.title,
+                            summary: SettingsSummaries.about(version: Session.appVersion, updateReady: updates.state.ready?.version),
+                            to: SettingsRoute(.about))
+            }
+        }
+    }
+
+    /// The phone's folders with whether each counts.
+    private var libraryFolders: [MusicFolder] {
+        phone.folders.map { MusicFolder($0.name, songs: $0.songs, included: !settings.excludedFolders.contains($0.name)) }
+    }
+
+    /// The last copy's time, only when it belongs to this server.
+    private func syncedAt(_ serverId: String) -> Int64? {
+        guard let last = feeds.lastSync, last.serverId == serverId else { return nil }
+        return Int64(last.at.timeIntervalSince1970 * 1000)
+    }
+
+    /// Now, read again every half minute while the page shows, for "Synced 5 min ago".
+    private var now: Int64 {
+        Int64(SettingsClock.shared.now.timeIntervalSince1970 * 1000)
+    }
+}
+
+/// The time, moving on every half minute, for lines like "Synced 5 min ago".
+@MainActor
+@Observable
+final class SettingsClock {
+    static let shared = SettingsClock()
+    private(set) var now = Date()
+
+    private init() {
+        Task { @MainActor in
+            while true {
+                try? await Task.sleep(for: .seconds(30))
+                SettingsClock.shared.now = Date()
+            }
+        }
+    }
+}
+
+/// One row of the account card: an icon tile, a title and lines under it in their own colors,
+/// and a chevron. `wrap` makes the row a button or a link.
+private struct AccountRow<Wrapped: View>: View {
+    let icon: String
+    let title: String
+    let lines: [(String, Color)]
+    let wrap: (AnyView) -> Wrapped
+
+    init(icon: String, title: String, lines: [(String, Color)], @ViewBuilder wrap: @escaping (AnyView) -> Wrapped) {
+        self.icon = icon
+        self.title = title
+        self.lines = lines
+        self.wrap = wrap
+    }
+
+    var body: some View {
+        wrap(AnyView(label)).buttonStyle(SettingsRowPress())
+    }
+
+    private var label: some View {
+        HStack(spacing: 16) {
+            IconTile(icon: icon)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title).font(.octoBody).foregroundStyle(OctoColor.textPrimary).lineLimit(1)
+                ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                    Text(line.0).font(.octoCaption).foregroundStyle(line.1).lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Image(systemName: SettingsIcon.chevron)
+                .font(.system(size: 14, weight: .semibold))
+                .frame(width: 20, height: 20)
+                .foregroundStyle(OctoColor.textMuted)
+                .accessibilityHidden(true)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+}
+
+/// A one-line glass field: a faint accent fill that deepens with a ring while typing, a muted
+/// search mark at its end while empty, and a clear button once something is typed.
+struct SettingsSearchField: View {
+    let placeholder: String
+    @Binding var text: String
+    var focused: FocusState<Bool>.Binding
+
+    var body: some View {
+        let on = focused.wrappedValue
+        HStack(spacing: 8) {
+            TextField(placeholder, text: $text)
+                .font(.octoBody)
+                .foregroundStyle(OctoColor.textPrimary)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .focused(focused)
+            if text.isEmpty {
+                Image(systemName: SettingsIcon.search)
+                    .font(.system(size: 17))
+                    .frame(width: 20, height: 20)
+                    .foregroundStyle(OctoColor.textMuted)
+                    .accessibilityHidden(true)
+            } else {
+                Button { text = "" } label: {
+                    Image(systemName: SettingsIcon.close)
+                        .font(.system(size: 15, weight: .semibold))
+                        .frame(width: 20, height: 20)
+                        .foregroundStyle(OctoColor.textMuted)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 48)
+        .background(OctoColor.accent.opacity(on ? 0.15 : 0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(OctoColor.accent.opacity(on ? 0.6 : 0.1), lineWidth: on ? 1.5 : 1))
+        .glassEffect(.regular, in: .rect(cornerRadius: 12))
+        .animation(.easeOut(duration: 0.2), value: on)
     }
 }
