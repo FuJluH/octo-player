@@ -49,7 +49,8 @@ enum MenuSubject {
     /// What a screen reader calls the pop-up.
     var paneTitle: String {
         switch self {
-        case .song, .album, .artist, .playlist: "Menu"
+        case .song: "Song menu"
+        case .album, .artist, .playlist: "Menu"
         case .playlistOptions, .addToPlaylist, .newPlaylist: "Playlist"
         case .share: "Share"
         case .songInfo: "Song info"

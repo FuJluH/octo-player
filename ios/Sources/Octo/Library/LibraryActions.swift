@@ -51,6 +51,7 @@ final class LibraryActions {
         self.spots = spots
         self.selectionBar = selectionBar
         Self.current = self
+        state.files.router = router
         let backups = LibraryBackups(actions: self)
         self.backups = backups
         Backups.shared.library = backups
@@ -420,41 +421,22 @@ final class LibraryActions {
     }
 
     /// Asks before songs leave the server's disk.
-    func askDeleteFromDisk(_ tracks: [LibraryTrack], then: (@MainActor () -> Void)? = nil) {
+    func askDeleteFromDisk(_ tracks: [LibraryTrack]) {
         let songs = tracks.filter { !$0.isFound }
         guard !songs.isEmpty else { return }
         let words = deleteFromDiskQuestion(songs)
+        let asked = state.files.server()
         prompts.confirm(words.title, detail: words.body, confirm: "Delete") { [weak self] in
-            self?.deleteFromDisk(songs, then: then)
+            self?.deleteFromDisk(songs, on: asked)
         }
     }
 
-    /// Deletes songs from the server's disk; the answer goes to the server in use when it was
-    /// asked, and switching server drops it.
-    func deleteFromDisk(_ tracks: [LibraryTrack], then: (@MainActor () -> Void)? = nil) {
+    /// Deletes songs from the server's disk, then says so with an Undo; the answer goes to the
+    /// server in use when it was asked, and switching server drops it.
+    func deleteFromDisk(_ tracks: [LibraryTrack], on: String? = nil) {
         let songs = tracks.filter { !$0.isFound }
-        guard !songs.isEmpty, let asked = session.activeId, let client = session.client else { return }
-        Task {
-            guard self.session.activeId == asked else { return }
-            var done = 0
-            var problem: String?
-            for track in songs {
-                guard let id = await self.state.serverId(track) else { continue }
-                do {
-                    let result = try await client.fileAction(id, action: "remove")
-                    if result.state == "applied" { done += 1 } else if problem == nil { problem = result.detail }
-                } catch {
-                    if problem == nil { problem = userMessage(error) }
-                }
-            }
-            if done > 0 {
-                self.router.show(deletedLine(done, title: songs.count == 1 ? songs[0].title : nil))
-                self.state.sync.syncAgain()
-            } else if let problem {
-                self.router.show(problem)
-            }
-            then?()
-        }
+        guard !songs.isEmpty else { return }
+        state.files.deleteFromDisk(songs.map(\.id), title: songs.count == 1 ? songs[0].title : nil, on: on ?? state.files.server())
     }
 
     // MARK: Better copies

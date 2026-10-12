@@ -12,8 +12,6 @@ final class LibraryState {
     private(set) var orders: [SortList: ListOrder] = [:]
     /// The playlists added to lately, newest first.
     private(set) var recentPlaylists: [String] = []
-    /// What the server lets this user do to the library's files; nil when it offers nothing.
-    private(set) var fileActions: FileActions?
     /// Ratings set here, shown at once until the library has them.
     private(set) var ratings: [String: Int] = [:]
     /// The playlists to add to, as the library last listed them.
@@ -23,6 +21,8 @@ final class LibraryState {
 
     @ObservationIgnored let data: DataServices
     @ObservationIgnored let session: Session
+    /// Fixes and deletes on the server's files.
+    @ObservationIgnored let files: LibraryFiles
     /// Library songs by the id their plain song has, for the selection bar.
     @ObservationIgnored private var bySongId: [String: LibraryTrack] = [:]
     @ObservationIgnored private var server: String?
@@ -30,6 +30,7 @@ final class LibraryState {
     init(data: DataServices, session: Session) {
         self.data = data
         self.session = session
+        files = LibraryFiles(session: session, library: data.library, sync: data.serverSync)
         for list in SortList.allCases { orders[list] = list.decode(UserDefaults.standard.string(forKey: Self.orderKey(list))) }
     }
 
@@ -53,7 +54,6 @@ final class LibraryState {
         server = session.activeId
         ratings = [:]
         recentPlaylists = UserDefaults.standard.stringArray(forKey: recentKey) ?? []
-        await readFileActions()
     }
 
     private var recentKey: String { "playlists.recent.\(session.activeId ?? "phone")" }
@@ -61,14 +61,8 @@ final class LibraryState {
     /// Whether the server in use can make shared links.
     var canShare: Bool { data.controls.sharing }
 
-    /// Reads again what the server lets this user do to its files, as an admin may have changed it.
-    func readFileActions() async {
-        guard let client = session.client, session.profile?.has(fileActionsExtension) == true else {
-            fileActions = nil
-            return
-        }
-        fileActions = try? await client.fileActions()
-    }
+    /// What the server lets this user do to the library's files; nil when it offers nothing.
+    var fileActions: FileActions? { files.actions }
 
     // MARK: Orders
 
