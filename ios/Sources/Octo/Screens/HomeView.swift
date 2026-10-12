@@ -21,7 +21,7 @@ struct HomeView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ScreenTitle("Home")
                 if layout.askAccess { accessCard }
-                ResumeCard(source: nil)
+                ResumeCard()
                 if model.whatsNewDue { whatsNewCard }
                 if layout.empty {
                     emptyCard(offerAccess: !layout.askAccess)

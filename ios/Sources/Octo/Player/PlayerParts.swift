@@ -273,13 +273,12 @@ struct QualityBadge: View {
     let song: Song
     let ink: Color
     @Environment(Player.self) private var player
-    @State private var quality: PlayerRule.Quality?
     @State private var open = false
     @State private var closing: Task<Void, Never>?
 
     var body: some View {
         Group {
-            if let quality {
+            if let quality = player.quality {
                 Button(action: toggle) {
                     HStack(spacing: 5) {
                         if quality.lossless { IconView(.lossless, size: 13, color: ink) }
@@ -302,8 +301,6 @@ struct QualityBadge: View {
         .task(id: song.id) {
             open = false
             closing?.cancel()
-            quality = nil
-            quality = await PlayerRule.readQuality(player.currentAsset, song: song)
         }
     }
 

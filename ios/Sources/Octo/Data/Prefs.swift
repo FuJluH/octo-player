@@ -10,9 +10,7 @@ struct Prefs: @unchecked Sendable {
 
     init(_ store: String) { self.store = store }
 
-    func key(_ name: String, _ account: String? = nil) -> String {
-        "\(store).\(account.map { accountKey(name, $0) } ?? name)"
-    }
+    func key(_ name: String, _ account: String? = nil) -> String { storeKey(store, name, account: account) }
 
     func string(_ name: String, _ account: String? = nil) -> String? { defaults.string(forKey: key(name, account)) }
     func int(_ name: String, _ account: String? = nil) -> Int? { defaults.object(forKey: key(name, account)) as? Int }

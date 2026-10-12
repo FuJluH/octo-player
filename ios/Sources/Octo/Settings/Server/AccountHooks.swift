@@ -1,5 +1,6 @@
 import Foundation
 import OctoKit
+import ShareInbox
 import SwiftUI
 
 /// Where the account parts join the data parts: what "forget here" also forgets, and Octo's
@@ -50,6 +51,8 @@ enum AccountHooks {
 /// - `account:shortcut:NAME` runs a Home Screen quick action (`shuffle_all`, `liked`,
 ///   `recently_added`, `resume`)
 /// - `account:open:URL` opens the app with an address, as another app would
+/// - `account:shared:TEXT` leaves TEXT in the share inbox, as "Share to Octo" does, and takes it
+///   into Import
 @MainActor
 enum AccountDrive {
     static func run(_ value: String, session: Session) async {
@@ -90,6 +93,10 @@ enum AccountDrive {
             router.signIn = .signIn
         case "shortcut": if let shortcut = LauncherShortcut(rawValue: rest) { await entries.run(shortcut) }
         case "open": if let url = URL(string: rest) { entries.open(url) }
+        case "shared":
+            let text = rest.isEmpty ? "Massive Attack - Angel\nMGMT - Kids" : rest
+            try? OctoAppGroup.inbox()?.put(.text(text, subject: "Shared list"))
+            entries.takeShared()
         default: break
         }
     }
