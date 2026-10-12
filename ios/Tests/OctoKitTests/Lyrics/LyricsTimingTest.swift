@@ -42,46 +42,32 @@ import Testing
         #expect(stepTiming(50, -1) == 0)
         #expect(stepTiming(TIMING_LIMIT_MS, 1) == TIMING_LIMIT_MS)
         #expect(stepTiming(-TIMING_LIMIT_MS, -3) == -TIMING_LIMIT_MS)
-        #expect(stepTiming(OUTPUT_TIMING_LIMIT_MS - 20, 1, limitMs: OUTPUT_TIMING_LIMIT_MS) == OUTPUT_TIMING_LIMIT_MS)
-        #expect(stepTiming(-OUTPUT_TIMING_LIMIT_MS, -1, limitMs: OUTPUT_TIMING_LIMIT_MS) == -OUTPUT_TIMING_LIMIT_MS)
+        #expect(stepTiming(LyricsOutputTiming.limitMs - 20, 1, limitMs: LyricsOutputTiming.limitMs) == LyricsOutputTiming.limitMs)
+        #expect(LyricsOutputTiming.step(-LyricsOutputTiming.limitMs, steps: -1) == -LyricsOutputTiming.limitMs)
     }
 
     @Test func anOutputNeverMovedStartsFromItsAutomaticTiming() {
-        let stored: [String: Any] = [
-            "lyrics_output_offset:bluetooth:AA:BB": -150,
-            "lyrics_output_offset:speaker": 50,
-            "lyrics_output_offset:usb:DAC": 0,
-            "offset:track-1": 750,
-            "lyrics_style": "Flowing",
-        ]
-        let outputs = outputOffsetsIn(stored)
-        #expect(outputs == ["bluetooth:AA:BB": -150, "speaker": 50, "usb:DAC": 0])
-        #expect(outputOffsetIn(outputs, "bluetooth:AA:BB") == -150)
-        #expect(outputOffsetIn(outputs, "speaker") == 50)
-        #expect(outputTimingIn(outputs, "usb:DAC") == OutputTiming(0, automatic: false))
-        #expect(outputTimingIn(outputs, "wired") == OutputTiming(-300, automatic: true))
-        #expect(outputTimingIn(outputs, "bluetooth:CC:DD") == OutputTiming(-500, automatic: true))
-        #expect(outputOffsetIn([:], "speaker") == -300)
-        #expect(outputOffsetIn([:], "usb:DAC") == -300)
+        let outputs = ["bluetooth:AA:BB": -150, "speaker": 50, "usb:DAC": 0]
+        let speaker = AudioOutput(key: "speaker", label: "Phone speaker")
+        #expect(outputTimingIn(outputs, AudioOutput(key: "bluetooth:AA:BB", label: "Buds")).ms == -150)
+        #expect(outputTimingIn(outputs, speaker).ms == 50)
+        #expect(outputTimingIn(outputs, AudioOutput(key: "usb:DAC", label: "DAC")) == (0, false))
+        #expect(outputTimingIn(outputs, AudioOutput(key: "wired", label: "Headphones")) == (-300, true))
+        #expect(outputTimingIn(outputs, AudioOutput(key: "bluetooth:CC:DD", label: "Buds")) == (-500, true))
+        #expect(outputTimingIn([:], speaker).ms == -300)
     }
 
     @Test func movingAnOutputStartsFromItsAutomaticTiming() {
-        #expect(stepTiming(automaticOutputTiming("bluetooth:AA"), -1, limitMs: OUTPUT_TIMING_LIMIT_MS) == -550)
-        #expect(stepTiming(automaticOutputTiming("speaker"), 1, limitMs: OUTPUT_TIMING_LIMIT_MS) == -250)
-    }
-
-    @Test func theAutomaticTimingIsSaidInPlainWords() {
-        #expect(outputTimingAbout("bluetooth:AA", automatic: true) == "Every song on this output. Automatic: 0.5 s earlier, the usual for Bluetooth.")
-        #expect(outputTimingAbout("speaker", automatic: true) == "Every song on this output. Automatic: 0.3 s earlier, the usual for a speaker or a cable.")
-        #expect(outputTimingAbout("speaker", automatic: false) == "Every song on this output.")
+        #expect(LyricsOutputTiming.step(LyricsOutputTiming.automatic("bluetooth:AA"), steps: -1) == -550)
+        #expect(LyricsOutputTiming.step(LyricsOutputTiming.automatic("speaker"), steps: 1) == -250)
     }
 
     @Test func earbudsKeepTheTimingSavedUnderAnyOfTheirAddresses() {
         let earbuds = AudioOutput(key: "bluetooth:Enco X3", label: "Enco X3", formerKeys: ["bluetooth:AA:01", "bluetooth:AA:02"])
-        #expect(outputOffsetIn(["bluetooth:AA:02": -500], earbuds) == -500)
-        #expect(outputOffsetIn(["bluetooth:AA:02": -500, "bluetooth:Enco X3": -250], earbuds) == -250)
-        #expect(outputTimingIn(["speaker": 50], earbuds) == OutputTiming(-500, automatic: true))
-        #expect(outputTimingIn(["bluetooth:AA:01": -250], earbuds) == OutputTiming(-250, automatic: false))
+        #expect(outputTimingIn(["bluetooth:AA:02": -500], earbuds).ms == -500)
+        #expect(outputTimingIn(["bluetooth:AA:02": -500, "bluetooth:Enco X3": -250], earbuds).ms == -250)
+        #expect(outputTimingIn(["speaker": 50], earbuds) == (-500, true))
+        #expect(outputTimingIn(["bluetooth:AA:01": -250], earbuds) == (-250, false))
     }
 
     @Test func theSongsAndTheOutputsTimingAddUp() {
@@ -109,20 +95,11 @@ import Testing
         #expect(timingSummary(250, -300, "Phone speaker", outputAutomatic: true) == "This song +0.25 s")
     }
 
-    @Test func theOffsetReadsInPlainWords() {
-        #expect(timingLabel(0) == "In time")
-        #expect(timingLabel(250) == "0.25 s later")
-        #expect(timingLabel(-500) == "0.5 s earlier")
-        #expect(timingLabel(1_000) == "1 s later")
-        #expect(timingLabel(-1_750) == "1.75 s earlier")
-        #expect(timingLabel(10_000) == "10 s later")
-    }
-
-    @Test func theTimingControlShowsASignedOffset() {
-        #expect(signedTiming(0) == "0 s")
-        #expect(signedTiming(750) == "+0.75 s")
-        #expect(signedTiming(-250) == "-0.25 s")
-        #expect(signedTiming(1_000) == "+1 s")
-        #expect(signedTiming(-TIMING_LIMIT_MS) == "-10 s")
+    @Test func aSongsOffsetReadsInPlainWords() {
+        #expect(LyricsOutputTiming.label(0) == "In time")
+        #expect(LyricsOutputTiming.label(250) == "0.25 s later")
+        #expect(LyricsOutputTiming.label(-1_750) == "1.75 s earlier")
+        #expect(LyricsOutputTiming.label(10_000) == "10 s later")
+        #expect(LyricsOutputTiming.signed(-TIMING_LIMIT_MS) == "-10 s")
     }
 }

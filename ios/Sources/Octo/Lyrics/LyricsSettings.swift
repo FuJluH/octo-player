@@ -57,21 +57,27 @@ final class LyricsSongTiming {
     }
 }
 
-/// The lyrics timing of the output playing now, from the app's settings: its own, or else its
-/// automatic one.
+/// The lyrics timing of the output playing now, from the app's settings: its own, one it was
+/// kept under before (earbuds once named by their address), or else its automatic one.
 @MainActor
 enum LyricsOutput {
     /// The output the sound goes to now.
     static var current: AudioOutput { SoundStore.live?.output ?? .phoneSpeaker }
 
-    static var timing: OutputTiming {
-        let kept = AppSettings.shared.outputTiming(current.key)
-        return OutputTiming(kept.ms, automatic: kept.automatic)
+    static var timing: (ms: Int, automatic: Bool) { outputTimingIn(AppSettings.shared.outputTimings, current) }
+
+    /// Moves the output's timing some steps from where it is now, kept under its key alone.
+    static func step(_ steps: Int) {
+        let output = current
+        AppSettings.shared.setOutputTiming(output.key, LyricsOutputTiming.step(timing.ms, steps: steps))
+        for key in output.formerKeys { AppSettings.shared.resetOutputTiming(key) }
     }
 
-    static func step(_ steps: Int) { AppSettings.shared.stepOutputTiming(current.key, steps: steps) }
-
-    static func reset() { AppSettings.shared.resetOutputTiming(current.key) }
+    /// Back to the automatic timing, under every key the output has had.
+    static func reset() {
+        let output = current
+        for key in [output.key] + output.formerKeys { AppSettings.shared.resetOutputTiming(key) }
+    }
 
     /// The output's timing for the views: the kept one plus the screen's own lead, which starts
     /// every output a couple of frames early so the words are on the glass when the song gets

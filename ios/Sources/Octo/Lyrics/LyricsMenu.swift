@@ -90,7 +90,6 @@ struct LyricsMenuContent: View {
 struct TimingControl: View {
     let trackId: String
     @State private var songs = LyricsSongTiming.shared
-    @State private var settings = AppSettings.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -107,9 +106,9 @@ struct TimingControl: View {
             OctoColor.hairline.frame(height: 1).padding(.horizontal, 14).padding(.vertical, 6)
             Spacer().frame(height: 8)
             let output = LyricsOutput.current
-            let timing = settings.outputTiming(output.key)
-            TimingAdjuster(title: output.label, about: outputTimingAbout(output.key, automatic: timing.automatic),
-                           offsetMs: timing.ms, limitMs: OUTPUT_TIMING_LIMIT_MS, step: { LyricsOutput.step($0) },
+            let timing = LyricsOutput.timing
+            TimingAdjuster(title: output.label, about: LyricsOutputTiming.about(output.key, automatic: timing.automatic),
+                           offsetMs: timing.ms, limitMs: LyricsOutputTiming.limitMs, step: { LyricsOutput.step($0) },
                            reset: { LyricsOutput.reset() }, canReset: !timing.automatic, resetLabel: "Use automatic")
         }
     }
@@ -134,11 +133,11 @@ struct TimingAdjuster: View {
             HStack(spacing: 0) {
                 Text(title).font(.octoLabel).foregroundStyle(.white).lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Text(signedTiming(offsetMs))
+                Text(LyricsOutputTiming.signed(offsetMs))
                     .font(.octoSection.monospacedDigit())
                     .foregroundStyle(.white)
                     .padding(.leading, 12)
-                    .accessibilityLabel("\(title): \(timingLabel(offsetMs))")
+                    .accessibilityLabel("\(title): \(LyricsOutputTiming.label(offsetMs))")
             }
             .padding(.horizontal, 14)
             Text(about)
@@ -168,7 +167,7 @@ struct TimingAdjuster: View {
             .frame(maxWidth: .infinity, minHeight: 44)
         }
         .onChange(of: offsetMs) { _, now in
-            AccessibilityNotification.Announcement("\(title): \(timingLabel(now))").post()
+            AccessibilityNotification.Announcement("\(title): \(LyricsOutputTiming.label(now))").post()
         }
     }
 }
