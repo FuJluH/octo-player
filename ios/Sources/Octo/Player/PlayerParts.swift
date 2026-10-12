@@ -8,46 +8,6 @@ import UIKit
 
 // MARK: Top line
 
-/// The close chevron on clear glass that frosts the background behind it.
-struct PlayerCloseButton: View {
-    let ink: Color
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            IconView(.collapse, size: 20, color: ink)
-                .frame(width: 44, height: 44)
-                .contentShape(Circle())
-        }
-        .buttonStyle(NoPress())
-        .octoGlass(Circle(), film: .clear)
-        .accessibilityLabel("Close player")
-    }
-}
-
-/// Where the music plays: the cast mark, lit while it plays on another device. A tap opens the
-/// phone's own list of AirPlay speakers, TVs and headphones.
-struct PlayerCastButton: View {
-    let ink: Color
-    @State private var route = AudioRoute()
-
-    var body: some View {
-        let away = route.elsewhere != nil
-        ZStack {
-            IconView(away ? .castConnected : .cast, size: 22, color: away ? ink : ink.opacity(0.45))
-                .iconGlow(away, color: ink)
-            // The system picker takes the tap; its own icon is kept clear.
-            RoutePicker(tint: .clear)
-                .frame(width: 44, height: 44)
-        }
-        .frame(width: 44, height: 44)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Cast")
-        .accessibilityValue(route.elsewhere.map { "Playing on \($0)" } ?? "Playing on this phone")
-        .accessibilityAddTraits(.isButton)
-    }
-}
-
 /// The device the phone's sound goes to when it is not the phone itself or something worn.
 @MainActor
 @Observable

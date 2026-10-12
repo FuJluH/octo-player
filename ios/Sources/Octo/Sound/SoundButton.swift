@@ -1,27 +1,6 @@
 import OctoKit
 import SwiftUI
 
-/// Opens the Sound page from the player, across from the close button. It glows while the
-/// equalizer is on.
-struct PlayerSoundButton: View {
-    let ink: Color
-    let action: () -> Void
-    @Environment(SoundStore.self) private var sound
-
-    var body: some View {
-        let on = sound.current.eqEnabled
-        Button(action: action) {
-            SoundGlowIcon(systemName: "slider.horizontal.3", tint: on ? ink : ink.opacity(0.45), lit: on)
-                .frame(width: 22, height: 22)
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(SoundStillStyle())
-        .accessibilityLabel("Sound")
-        .accessibilityValue(on ? "Equalizer on" : "Equalizer off")
-    }
-}
-
 /// An icon that can light up with a soft glow: a wide faint halo and a tighter bright one behind
 /// the sharp icon. The glow fades in and out as `lit` changes.
 struct SoundGlowIcon: View {
