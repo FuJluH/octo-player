@@ -64,12 +64,14 @@ private val ScrubEdge = 22.dp
 // the artwork, the song, back, play and next, the lyrics switch, lit (a tap
 // leaves lyrics), and the lyrics menu. A thin line along the bottom edge
 // shows how far the song has played; a drag along that edge moves through
-// it. A tap on the song leaves lyrics too.
+// it. A tap on the song leaves lyrics too, and a screen reader finds Close
+// player on it.
 @Composable
 fun LyricsBar(
     now: NowPlaying,
     model: PlayerViewModel,
     onChooseLyrics: () -> Unit,
+    onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val ink = LocalContentColor.current
@@ -126,6 +128,7 @@ fun LyricsBar(
                         onClickLabel = "Leave lyrics",
                         onClick = model::toggleLyrics,
                     )
+                    .closesPlayer(onClose)
                     .padding(horizontal = 10.dp, vertical = 8.dp),
             ) {
                 Text(now.title.orEmpty(), style = OctoType.label, color = ink, maxLines = 1, overflow = TextOverflow.Ellipsis)

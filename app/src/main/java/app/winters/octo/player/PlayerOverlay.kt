@@ -85,9 +85,11 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
@@ -154,8 +156,9 @@ import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 // The full player. It opens over everything, with the artwork flying in
-// from the bar, and closes on back, on the chevron, or by pulling it down
-// from the top. Turned sideways, the artwork sits beside the controls.
+// from the bar, and closes on back or by pulling it down. A screen reader
+// finds Close player as an action on the song's name, wherever it shows,
+// and on the album's. Turned sideways, the artwork sits beside the controls.
 // `backdrop` is what its glass frosts, given from outside so the menus that
 // open over it can frost it too.
 @Composable
@@ -324,9 +327,9 @@ private fun AnimatedVisibilityScope.PlayerContent(
     val player = this
     val header: @Composable () -> Unit = { TopLine(now, model, onClose, onOpenAlbum, onOpenSound) }
     val controls: @Composable (Boolean) -> Unit = { roomy ->
-        with(player) { Controls(now, model, lyricsOpen, onOpenArtist, onOpenQueue, onOpenSleep, onOpenSpeed, roomy) }
+        with(player) { Controls(now, model, lyricsOpen, onClose, onOpenArtist, onOpenQueue, onOpenSleep, onOpenSpeed, roomy) }
     }
-    val lyricsBar: @Composable () -> Unit = { LyricsBar(now, model, onChooseLyrics, Modifier.bleed(LyricsBarBleed)) }
+    val lyricsBar: @Composable () -> Unit = { LyricsBar(now, model, onChooseLyrics, onClose, Modifier.bleed(LyricsBarBleed)) }
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
@@ -456,8 +459,8 @@ private fun LyricsLayer(now: NowPlaying, model: PlayerViewModel, open: Boolean, 
     }
 }
 
-// The line across the top: close, the album's name, Cast and Sound. The
-// album opens like the artist does, closing the player on the way.
+// The line across the top: the album's name, Cast and Sound. The album
+// opens like the artist does, closing the player on the way.
 @Composable
 private fun TopLine(
     now: NowPlaying,
@@ -470,7 +473,6 @@ private fun TopLine(
         Modifier.fillMaxWidth().height(56.dp),
         contentAlignment = Alignment.Center,
     ) {
-        CloseButton(onClose, Modifier.align(Alignment.CenterStart))
         val album by model.albumLabel.collectAsStateWithLifecycle()
         album?.let {
             // The name shows only for an album in the library, so there is
@@ -492,6 +494,7 @@ private fun TopLine(
                         role = Role.Button,
                         onClickLabel = "Open album",
                     ) { albumId?.let(onOpenAlbum) }
+                    .closesPlayer(onClose)
                     .padding(vertical = 8.dp),
             )
         }
@@ -597,6 +600,7 @@ private fun AnimatedVisibilityScope.Controls(
     now: NowPlaying,
     model: PlayerViewModel,
     lyricsOpen: Boolean,
+    onClose: () -> Unit,
     onOpenArtist: (String) -> Unit,
     onOpenQueue: () -> Unit,
     onOpenSleep: () -> Unit,
@@ -614,7 +618,7 @@ private fun AnimatedVisibilityScope.Controls(
         ),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f)) { TitleBlock(now, onOpenArtist) }
+            Box(Modifier.weight(1f)) { TitleBlock(now, onOpenArtist, onClose) }
             SongButtons(now, model)
         }
         // The song's rating, only once it has one.
@@ -700,8 +704,10 @@ private fun AnimatedVisibilityScope.PlayerArt(ref: String?, side: Dp, playing: B
     }
 }
 
+// The song's name and artist. The name also carries Close player for a
+// screen reader.
 @Composable
-private fun TitleBlock(now: NowPlaying, onOpenArtist: (String) -> Unit) {
+private fun TitleBlock(now: NowPlaying, onOpenArtist: (String) -> Unit, onClose: () -> Unit) {
     AnimatedContent(
         targetState = now,
         contentKey = { it.trackId },
@@ -716,7 +722,7 @@ private fun TitleBlock(now: NowPlaying, onOpenArtist: (String) -> Unit) {
                 style = OctoType.title.copy(fontWeight = FontWeight.Bold),
                 color = LocalContentColor.current,
                 markColor = accentInk,
-                titleModifier = Modifier.basicMarquee(),
+                titleModifier = Modifier.basicMarquee().closesPlayer(onClose),
                 overflow = TextOverflow.Clip,
             )
             Text(
@@ -990,20 +996,20 @@ private fun TransportButton(
     }
 }
 
-// Closes the player: a small glaze that frosts the background, like the bar.
-@Composable
-private fun CloseButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Glaze(
-        modifier
-            .size(44.dp)
-            .clickable(interactionSource = null, indication = null, role = Role.Button, onClick = onClick)
-            .semantics { contentDescription = "Close player" },
-        backdrop = LocalHaze.current,
-        film = GlazeClearFilm,
-    ) {
-        Icon(painterResource(OctoIcons.Collapse), contentDescription = null, tint = LocalContentColor.current, modifier = Modifier.size(20.dp))
-    }
-}
+// What a screen reader offers to close the player with. There is no close
+// button: the player closes on back and by pulling it down, and this action
+// sits on the song's name, the album's and the small player's song.
+internal const val CLOSE_PLAYER = "Close player"
+
+internal fun closePlayerActions(onClose: () -> Unit): List<CustomAccessibilityAction> =
+    listOf(
+        CustomAccessibilityAction(CLOSE_PLAYER) {
+            onClose()
+            true
+        },
+    )
+
+internal fun Modifier.closesPlayer(onClose: () -> Unit): Modifier = semantics { customActions = closePlayerActions(onClose) }
 
 // One of the buttons under the controls: a plain icon, bright white and
 // glowing while its setting is on and dimmed while off, the way the
