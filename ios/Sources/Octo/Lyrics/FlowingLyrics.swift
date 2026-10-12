@@ -98,6 +98,10 @@ final class FlowingModel {
 
     fileprivate func tick(_ link: CADisplayLink) {
         guard let layout else { return }
+        #if DEBUG
+        FrameProbe.shared.tick(link.timestamp, reported: position(), shown: engine.lyricTime)
+        defer { FrameProbe.shared.spent(CACurrentMediaTime() - link.timestamp) }
+        #endif
         engine.look = AppSettings.shared.lyricsLook
         engine.reduceMotion = calm
         let nanos = Int(link.timestamp * 1e9)
@@ -579,3 +583,60 @@ private struct LyricPainter {
         }
     }
 }
+
+#if DEBUG
+import os
+
+/// Counts the lyrics loop's frames and logs, every two seconds, how even they came and how long
+/// each frame's own work took, for checking smoothness on a device.
+@MainActor
+final class FrameProbe {
+    static let shared = FrameProbe()
+    private let log = Logger(subsystem: "app.winters.octo", category: "lyrics")
+    private var last: CFTimeInterval?
+    private var since: CFTimeInterval = 0
+    private var count = 0
+    private var longest: CFTimeInterval = 0
+    private var late = 0
+    private var work: CFTimeInterval = 0
+
+    private var lastReported = -1.0
+    private var changes = 0
+    private var biggestStep = 0.0
+    private var lastShown = -1.0
+    private var backSteps = 0
+
+    func tick(_ time: CFTimeInterval, reported: Double, shown: Double) {
+        if reported != lastReported {
+            if lastReported >= 0 { biggestStep = max(biggestStep, reported - lastReported) }
+            changes += 1
+            lastReported = reported
+        }
+        if lastShown >= 0 && shown < lastShown - 0.001 { backSteps += 1 }
+        lastShown = shown
+        if let last {
+            let gap = time - last
+            longest = max(longest, gap)
+            if gap > 1.0 / 50 { late += 1 }
+        } else {
+            since = time
+        }
+        last = time
+        count += 1
+        if time - since >= 2 {
+            let fps = Double(count) / (time - since)
+            log.notice("frames \(fps, format: .fixed(precision: 1)) fps, longest \(self.longest * 1000, format: .fixed(precision: 1)) ms, late \(self.late), position changes \(self.changes), biggest step \(self.biggestStep * 1000, format: .fixed(precision: 0)) ms, shown went back \(self.backSteps), work \(self.work / Double(max(self.count, 1)) * 1000, format: .fixed(precision: 2)) ms")
+            since = time
+            count = 0
+            longest = 0
+            late = 0
+            work = 0
+            changes = 0
+            biggestStep = 0
+            backSteps = 0
+        }
+    }
+
+    func spent(_ seconds: CFTimeInterval) { work += seconds }
+}
+#endif

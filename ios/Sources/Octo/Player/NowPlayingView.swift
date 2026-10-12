@@ -48,6 +48,7 @@ struct NowPlayingView: View {
     @State private var showsQueue = false
     @State private var showsTime = false
     @State private var timePages = PopupPages(TimePage.sleep)
+    @State private var airPlay = AirPlayTrigger()
     @State private var showsLyricsMenu = false
     @State private var lyricsPages = PopupPages(LyricsMenuPage.options)
     @State private var showsChooser = false
@@ -130,6 +131,7 @@ struct NowPlayingView: View {
             take(request)
         }
         .onAppear(perform: arrive)
+        .accessibilityAction(.escape) { close() }
         .glassPopup(isPresented: $showsTime, title: "Sleep timer and speed", maxWidth: 340, onBack: { timePages.back() }) {
             TimeCard(pages: timePages) { showsTime = false }
         }
@@ -227,19 +229,18 @@ struct NowPlayingView: View {
 
     // MARK: Top line
 
+    /// The album the song is from, alone at the top: the player closes with a pull down, and
+    /// AirPlay and Sound are in the More menu.
     private var topLine: some View {
         ZStack {
             if let song = player.current, let name = albumLabel(song.album, song.title, facts.albumSongs) {
                 albumName(name, song: song)
             }
-            HStack(spacing: 0) {
-                PlayerCloseButton(ink: ink) { close() }
-                Spacer(minLength: 0)
-                PlayerCastButton(ink: ink)
-                PlayerSoundButton(ink: ink) { close { router.go(.sound) } }
-            }
+            HiddenRoutePicker(trigger: airPlay)
+                .frame(width: 1, height: 1)
+                .accessibilityHidden(true)
         }
-        .frame(height: 56)
+        .frame(height: 40)
     }
 
     @ViewBuilder
@@ -255,9 +256,9 @@ struct NowPlayingView: View {
             } label: { words }
                 .buttonStyle(NoPress())
                 .accessibilityHint("Open album")
-                .padding(.horizontal, 104)
+                .padding(.horizontal, 24)
         } else {
-            words.padding(.horizontal, 104)
+            words.padding(.horizontal, 24)
         }
     }
 
@@ -345,13 +346,17 @@ struct NowPlayingView: View {
     /// The song menu for the song playing, the same one every song row opens.
     private var moreButton: some View {
         Menu {
-            if let menuSubject { SongMenuItems(subject: menuSubject) }
+            if let menuSubject {
+                SongMenuItems(subject: menuSubject) {
+                    PlayerMenuExtras(airPlay: airPlay) { route in close { router.go(route) } }
+                }
+            }
         } label: {
             IconView(.more, size: 24, color: ink.opacity(0.6))
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(NoPress())
+        .menuOrder(.fixed)
         .disabled(menuSubject == nil)
         .accessibilityLabel("More")
     }

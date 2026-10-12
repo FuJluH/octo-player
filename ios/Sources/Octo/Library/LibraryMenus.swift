@@ -60,9 +60,11 @@ private func item(_ title: String, _ icon: OctoIcon, role: ButtonRole? = nil, ac
 // MARK: Song menu
 
 /// A song's menu, in its groups: playing it (a row of quick actions), keeping it, going to its
-/// album or artist, sharing and looking into it, and last, what takes it away.
-struct SongMenuItems: View {
+/// album or artist, sharing and looking into it, then `extras` (what the place it opens from
+/// adds), and last, what takes it away.
+struct SongMenuItems<Extras: View>: View {
     let subject: SongSubject
+    let extras: Extras
     @Environment(LibraryActions.self) private var actions
     @Environment(Router.self) private var router
     @Environment(Downloads.self) private var downloads
@@ -74,9 +76,18 @@ struct SongMenuItems: View {
     private var queued: Song { track.isFound ? song : track.queueSong }
     private var state: LibraryState { actions.state }
 
+    /// The rows that take the song away, the last group.
+    private static var takesAway: Set<SongAction> { [.removeFromPlaylist, .deleteFromPhone, .removeFromMyLibrary, .deleteFromDisk] }
+
+    init(subject: SongSubject, @ViewBuilder extras: () -> Extras) {
+        self.subject = subject
+        self.extras = extras()
+    }
+
     var body: some View {
         let groups = songMenuGroups(offered)
-        ForEach(Array(groups.enumerated()), id: \.offset) { index, group in
+        let last = groups.last.map { Self.takesAway.contains($0[0]) } == true ? groups.count - 1 : groups.count
+        ForEach(Array(groups.prefix(last).enumerated()), id: \.offset) { index, group in
             if index == 0, group.first == .playNext {
                 ControlGroup {
                     ForEach(group, id: \.self) { row($0) }
@@ -85,6 +96,12 @@ struct SongMenuItems: View {
                 Section {
                     ForEach(group, id: \.self) { row($0) }
                 }
+            }
+        }
+        Section { extras }
+        if last < groups.count {
+            Section {
+                ForEach(groups[last], id: \.self) { row($0) }
             }
         }
     }
@@ -195,6 +212,10 @@ struct SongMenuItems: View {
         case nil, .failed: .download
         }
     }
+}
+
+extension SongMenuItems where Extras == EmptyView {
+    init(subject: SongSubject) { self.init(subject: subject) { EmptyView() } }
 }
 
 /// The song's rating as a sub-menu: its stars ticked, picking another sets it, "No rating" takes
