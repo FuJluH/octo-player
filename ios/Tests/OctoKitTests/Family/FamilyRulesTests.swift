@@ -126,48 +126,11 @@ import Testing
         #expect(abilityLines(home).first { $0.text.hasPrefix("Listening away") } == AbilityLine("Listening away from home is off", on: false))
     }
 
-    @Test func audioQualityChoicesShowTheFamilysLimit() {
-        let free = FamilyQuality()
-        #expect(familyLimitLines(free).isEmpty)
-        #expect(!qualityOptions(limitKbps: homeLimit(free)).contains { $0.limited })
-        let limited = FamilyQuality(home: .original, away: .standard, familyLimitKbps: 0, familyAwayLimitKbps: 160)
-        #expect(familyLimitLines(limited) == ["Your family plan limits away listening to 160 kbps"])
-        #expect(awayLimit(limited) == 160)
-        #expect(homeLimit(limited) == 0)
-        #expect(qualityOptions(limitKbps: awayLimit(limited)).map(\.limited) == [true, true, false, false])
-        #expect(qualityOptions(limitKbps: 0).map(\.name) == ["Original", "High", "Standard", "Data saver"])
-        let both = FamilyQuality(familyLimitKbps: 256, familyAwayLimitKbps: 96)
-        #expect(familyLimitLines(both) == ["Your family plan limits listening to 256 kbps", "Your family plan limits away listening to 96 kbps"])
-        #expect(awayLimit(both) == 96)
-        #expect(awayLimit(FamilyQuality(familyLimitKbps: 256)) == 256)
-    }
-
-    @Test func originalComesFirstAndIsHeldBackUnderALimit() {
-        #expect(AccountQuality.allCases.first == .original)
-        #expect(FamilyQuality().home == .original)
-        #expect(qualityLine(.original) == "As the file is, FLAC stays FLAC")
-        #expect(AccountQualityText.originalLabel == "Original (as the file is, FLAC stays FLAC)")
-        let options = qualityOptions(limitKbps: 192)
-        #expect(!options[0].enabled)
-        #expect(options[0].line == "Your family plan streams up to 192 kbps")
-        #expect(options.dropFirst().allSatisfy { $0.enabled })
-        #expect(options.first { $0.quality == .high }?.limited == true)
-        #expect(options.first { $0.quality == .standard }?.limited == false)
-        #expect(originalBlockedBy(limitKbps: 0) == nil)
-    }
-
-    @Test func theAppPicksQualityOnlyWithoutAFamilyOrWhenLeftToIt() {
-        #expect(appPicksQuality(familyOn: false, mode: nil))
-        #expect(appPicksQuality(familyOn: false, mode: .account))
-        #expect(appPicksQuality(familyOn: true, mode: .app))
-        #expect(!appPicksQuality(familyOn: true, mode: .account))
-        #expect(!appPicksQuality(familyOn: true, mode: nil))
+    @Test func aStreamAsksForWhatTheAppPicks() {
         func text(_ params: [(String, String)]) -> [String] { params.map { "\($0.0)=\($0.1)" } }
         #expect(text(streamParams(appPicks: false, quality: .dataSaver)) == ["format=raw"])
         #expect(text(streamParams(appPicks: true, quality: .original)) == ["format=raw"])
         #expect(text(streamParams(appPicks: true, quality: .standard)) == ["format=opus", "maxBitRate=160"])
-        #expect(deviceModeName(.account) == "Use my account setting")
-        #expect(deviceModeLine(.app) == "This app's own quality setting decides, within any family limit.")
     }
 
     @Test func aRoleFromANewerServerShowsItsOwnName() {

@@ -343,93 +343,9 @@ public func requestAnswerLine(_ request: FamilyRequest) -> String {
 
 // MARK: Audio quality
 
-public enum AccountQualityText {
-    public static let audioQuality = "Audio quality"
-    public static let atHome = "At home"
-    public static let away = "Away from home"
-    public static let onThisDevice = "Quality on this device"
-    /// Original, as the pickers say it: the file as it is stored.
-    public static let originalLine = "As the file is, FLAC stays FLAC"
-    public static let originalLabel = "Original (as the file is, FLAC stays FLAC)"
-}
-
-public func qualityName(_ quality: AccountQuality) -> String {
-    switch quality {
-    case .original: "Original"
-    case .high: "High"
-    case .standard: "Standard"
-    case .dataSaver: "Data saver"
-    }
-}
-
-public func qualityLine(_ quality: AccountQuality) -> String {
-    switch quality {
-    case .original: AccountQualityText.originalLine
-    case .high: "256 kbps"
-    case .standard: "160 kbps"
-    case .dataSaver: "96 kbps, for slow or metered connections"
-    }
-}
-
-/// Why Original cannot be picked under a family limit, or nil when it can.
-public func originalBlockedBy(limitKbps: Int) -> String? {
-    limitKbps > 0 ? "Your family plan streams up to \(limitKbps) kbps" : nil
-}
-
-/// One choice of quality, and whether the family's limit holds it lower than it says.
-public struct QualityOption: Sendable, Equatable {
-    public var quality: AccountQuality
-    public var limited: Bool
-    public var blocked: String?
-    public var name: String { qualityName(quality) }
-    public var line: String { blocked ?? qualityLine(quality) }
-    public var enabled: Bool { blocked == nil }
-}
-
-/// Every quality, Original first, under a family limit (0 for none).
-public func qualityOptions(limitKbps: Int) -> [QualityOption] {
-    AccountQuality.allCases.map { quality in
-        let original = quality.kbps == 0
-        return QualityOption(quality: quality, limited: limitKbps > 0 && (original || quality.kbps > limitKbps),
-                             blocked: original ? originalBlockedBy(limitKbps: limitKbps) : nil)
-    }
-}
-
-public func homeLimit(_ quality: FamilyQuality) -> Int { quality.familyLimitKbps }
-
-/// Away is the home limit unless the family set a lower one for away.
-public func awayLimit(_ quality: FamilyQuality) -> Int {
-    if quality.familyAwayLimitKbps <= 0 { return quality.familyLimitKbps }
-    if quality.familyLimitKbps <= 0 { return quality.familyAwayLimitKbps }
-    return min(quality.familyLimitKbps, quality.familyAwayLimitKbps)
-}
-
-/// The family's limits, in plain words, or nothing when there are none.
-public func familyLimitLines(_ quality: FamilyQuality) -> [String] {
-    var lines: [String] = []
-    let home = quality.familyLimitKbps
-    let away = quality.familyAwayLimitKbps
-    if home > 0 { lines.append("Your family plan limits listening to \(home) kbps") }
-    if away > 0 && (home <= 0 || away < home) { lines.append("Your family plan limits away listening to \(away) kbps") }
-    return lines
-}
-
-public func deviceModeName(_ mode: DeviceQualityMode) -> String {
-    mode == .account ? "Use my account setting" : "Let this app decide"
-}
-
-public func deviceModeLine(_ mode: DeviceQualityMode) -> String {
-    mode == .account ? "The server sends what you chose above, at home and away."
-        : "This app's own quality setting decides, within any family limit."
-}
-
-/// Whether this app's own stream quality setting applies: always without a family, and with one
-/// only when the device is left to the app.
-public func appPicksQuality(familyOn: Bool, mode: DeviceQualityMode?) -> Bool { !familyOn || mode == .app }
-
 /// What a stream asks the server for: the file as it is, unless this app picks the quality and
 /// wants less, then Opus at that bitrate.
-public func streamParams(appPicks: Bool, quality: AccountQuality) -> [(String, String)] {
+public func streamParams(appPicks: Bool, quality: AccountStreamQuality) -> [(String, String)] {
     if !appPicks || quality == .original { return [("format", "raw")] }
     return [("format", "opus"), ("maxBitRate", "\(quality.kbps)")]
 }

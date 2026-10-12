@@ -62,54 +62,10 @@ public enum FamilyPlatform: String, Sendable {
     public var wire: String { rawValue }
 }
 
-/// How a stream is sent: the file as it is, or Opus at a lower bitrate.
-public enum AccountQuality: String, CaseIterable, Sendable {
-    case original = "Original", high = "High", standard = "Standard", dataSaver = "DataSaver"
-
-    public var kbps: Int {
-        switch self {
-        case .original: 0
-        case .high: 256
-        case .standard: 160
-        case .dataSaver: 96
-        }
-    }
-}
-
-/// Who picks a device's audio quality: the account's own setting, or the app on the device.
-public enum DeviceQualityMode: String, Sendable {
-    case account = "Account", app = "App"
-}
-
 extension KeyedDecodingContainer {
     /// A value of a string-backed enum, or `fallback` when missing or unknown.
     func choice<T: RawRepresentable>(_ key: Key, _ fallback: T) -> T where T.RawValue == String {
         string(key).flatMap(T.init(rawValue:)) ?? fallback
-    }
-}
-
-/// The account's own audio quality at home and away, and the family's limits on it (0 for none).
-public struct FamilyQuality: Decodable, Sendable, Equatable {
-    public var home: AccountQuality
-    public var away: AccountQuality
-    public var familyLimitKbps: Int
-    public var familyAwayLimitKbps: Int
-
-    enum CodingKeys: String, CodingKey { case home, away, familyLimitKbps, familyAwayLimitKbps }
-
-    public init(home: AccountQuality = .original, away: AccountQuality = .original, familyLimitKbps: Int = 0, familyAwayLimitKbps: Int = 0) {
-        self.home = home
-        self.away = away
-        self.familyLimitKbps = familyLimitKbps
-        self.familyAwayLimitKbps = familyAwayLimitKbps
-    }
-
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        home = c.choice(.home, .original)
-        away = c.choice(.away, .original)
-        familyLimitKbps = c.int(.familyLimitKbps) ?? 0
-        familyAwayLimitKbps = c.int(.familyAwayLimitKbps) ?? 0
     }
 }
 
@@ -178,7 +134,7 @@ public struct FamilyMe: Decodable, Sendable, Equatable {
     public var place: FamilyPlace = .home
     /// Nil for the owner and for unmanaged accounts.
     public var deviceId: String?
-    public var quality = FamilyQuality()
+    public var quality = AccountQuality()
 
     public init() {}
 
@@ -200,7 +156,7 @@ public struct FamilyMe: Decodable, Sendable, Equatable {
         storageUsedBytes = c.long(.storageUsedBytes) ?? 0
         place = c.choice(.place, .home)
         deviceId = c.string(.deviceId)
-        quality = c.object(.quality) ?? FamilyQuality()
+        quality = c.object(.quality) ?? AccountQuality()
     }
 }
 
@@ -410,10 +366,10 @@ public struct FamilyDevice: Decodable, Sendable, Equatable, Identifiable {
     /// The device asking.
     public var current = false
     /// Who picks its audio quality.
-    public var quality: DeviceQualityMode = .account
+    public var quality: QualityFollows = .account
 
     public init(id: String = "", name: String = "", app: String = "", place: FamilyPlace = .home, playing: FamilyDevicePlaying? = nil,
-                current: Bool = false, quality: DeviceQualityMode = .account) {
+                current: Bool = false, quality: QualityFollows = .account) {
         self.id = id
         self.name = name
         self.app = app
@@ -610,21 +566,6 @@ extension SubsonicClient {
     /// The signed-in member's login, for the Your login card.
     public func familyLogin() async throws -> FamilyLogin {
         try await answer("getFamilyLogin", key: "familyLogin")
-    }
-
-    /// Sets the account's own audio quality at home, away, or both; left out keeps what it is.
-    public func setFamilyQuality(home: AccountQuality? = nil, away: AccountQuality? = nil) async throws -> FamilyQuality {
-        var params: [(String, String)] = []
-        if let home { params.append(("home", home.rawValue)) }
-        if let away { params.append(("away", away.rawValue)) }
-        return try await answer("setFamilyQuality", params, key: "quality",
-                                fallback: FamilyQuality(home: home ?? .original, away: away ?? .original))
-    }
-
-    /// Sets who picks one of the account's devices' audio quality.
-    public func setFamilyDeviceQuality(_ id: String, mode: DeviceQualityMode) async throws -> FamilyDevice {
-        try await answer("setFamilyDeviceQuality", [("id", id), ("mode", mode.rawValue)], key: "device",
-                         fallback: FamilyDevice(id: id, quality: mode))
     }
 
     /// Takes a song out of the signed-in member's own library. The server refuses songs of the shared library.

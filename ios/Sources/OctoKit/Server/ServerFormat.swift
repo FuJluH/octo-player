@@ -6,16 +6,8 @@ import Foundation
 private let hourMs: Int64 = 60 * 60 * 1_000
 private let dayMs: Int64 = 24 * hourMs
 
-/// How far a library scan has come.
-public enum ScanState: Sendable, Equatable {
-    case idle
-    case scanning(Int64)
-    case finished
-    case failed(String)
-}
-
 /// The words for a library scan in the Server card.
-public func scanLabel(_ state: ScanState, locale: Locale = .current) -> String {
+public func scanLabel(_ state: ServerScanState, locale: Locale = .current) -> String {
     switch state {
     case .idle: "Scan library now"
     case .scanning(let count): count > 0 ? "Scanning, \(groupedCount(count, locale: locale)) songs" : "Scanning"
@@ -24,21 +16,15 @@ public func scanLabel(_ state: ScanState, locale: Locale = .current) -> String {
     }
 }
 
-/// What a scan failure says.
-public func scanFailedWords(_ error: Error) -> String {
-    if case .server(50, _) = SubsonicError(error) { return "Only an admin can scan this server." }
-    return "The scan could not start just now."
-}
-
 /// What a link shares: its description, or its first song.
-public func shareTitle(_ share: Share) -> String {
+public func shareTitle(_ share: ServerShare) -> String {
     if let description = share.description, !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return description }
     if let title = share.entry.first?.title, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return title }
     return "Shared link"
 }
 
 /// How much it holds, when it expires and how often it was opened, on one line.
-public func shareDetails(_ share: Share, nowMs: Int64, locale: Locale = .current) -> String {
+public func shareDetails(_ share: ServerShare, nowMs: Int64, locale: Locale = .current) -> String {
     let songs: String? = switch share.entry.count {
     case 0: nil
     case 1: "1 song"
@@ -75,90 +61,14 @@ public func minutesAgo(_ minutes: Int) -> String {
     return "\(minutes / 60) hours ago"
 }
 
-/// How long a shared link lasts.
-public enum ShareExpiry: CaseIterable, Sendable {
-    case never, day, week, month
-
-    public var label: String {
-        switch self {
-        case .never: "Never"
-        case .day: "1 day"
-        case .week: "1 week"
-        case .month: "1 month"
-        }
-    }
-
-    public var lengthMs: Int64? {
-        switch self {
-        case .never: nil
-        case .day: dayMs
-        case .week: 7 * dayMs
-        case .month: 30 * dayMs
-        }
-    }
-}
-
-/// When a link made now stops working, in milliseconds since 1970, or nil for never.
-public func shareExpiresAt(_ expiry: ShareExpiry, nowMs: Int64) -> Int64? {
-    expiry.lengthMs.map { nowMs + $0 }
-}
-
-/// Whether a failure means the server does not share at all: sharing is switched off (error 50
-/// or 70), or the call is not there (HTTP 501).
-public func sharingUnavailable(_ error: Error) -> Bool {
-    switch SubsonicError(error) {
-    case .notFound: true
-    case .server(let code, _): code == 50 || code == 70
-    case .notSubsonic(_, let status): status == 501
-    default: false
-    }
-}
-
-/// A server album id from a library song's album, when the song came from that server's album
-/// list: "<source>:<album id>". Albums made up from loose songs ("album:...") are not on the server.
-public func serverAlbumIdOf(sourceId: String, albumId: String) -> String? {
-    let prefix = sourceId + ":"
-    guard albumId.hasPrefix(prefix) else { return nil }
-    let rest = String(albumId.dropFirst(prefix.count))
-    return rest.isEmpty || rest.hasPrefix("album:") ? nil : rest
-}
-
-/// The client name this app gives the server, which its player names start with.
-public let ourClientName = "Octo"
-
-/// Who is listening now, as shown: other people, and this account on other players. The
-/// phone's own entry is left out.
-public func othersListening(_ entries: [NowPlayingEntry], username: String, ourClient: String = ourClientName) -> [NowPlayingEntry] {
-    entries.filter { entry in
-        !(entry.username.caseInsensitiveCompare(username) == .orderedSame
-            && (entry.playerName ?? "").lowercased().hasPrefix(ourClient.lowercased()))
-    }
-}
-
 /// A listener's row: the song, then who, on which player, and when it started.
-public func listenerTitle(_ entry: NowPlayingEntry) -> String {
+public func listenerTitle(_ entry: ServerNowPlaying) -> String {
     [entry.title, entry.artist ?? ""].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: " · ")
 }
 
-public func listenerLine(_ entry: NowPlayingEntry) -> String {
+public func listenerLine(_ entry: ServerNowPlaying) -> String {
     [entry.username, entry.playerName ?? "", minutesAgo(entry.minutesAgo)]
         .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: " · ")
-}
-
-/// Whether a radio station belongs to Octo itself: a station Octo makes from your listening
-/// carries its own id as its cover.
-public func looksGenerated(_ station: RadioStationDetails, isOcto: Bool) -> Bool {
-    isOcto && station.coverArt == station.id
-}
-
-/// Whether a station refusal means the server keeps the station as it is: not found (Octo's
-/// answer for its own) or not allowed.
-public func refusesStationChange(_ error: Error) -> Bool {
-    switch SubsonicError(error) {
-    case .notFound: true
-    case .server(50, _): true
-    default: false
-    }
 }
 
 /// An http or https address with a host, the only kind a station can stream from.
@@ -193,7 +103,7 @@ public struct StationDraft: Sendable, Equatable {
 }
 
 /// A station's second line: whose it is, or where it streams from.
-public func stationLine(_ station: RadioStationDetails, readOnly: Bool) -> String {
+public func stationLine(_ station: ServerStationDetails, readOnly: Bool) -> String {
     if readOnly { return "Made by the server" }
     if isStreamAddress(station.streamUrl), let host = URLComponents(string: station.streamUrl.trimmingCharacters(in: .whitespacesAndNewlines))?.host {
         return host

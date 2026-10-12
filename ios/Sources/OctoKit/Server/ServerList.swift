@@ -123,7 +123,7 @@ public func answerWords(_ ms: Int64) -> String {
 
 /// Whether the server is reading its folders now and how far it is, or when it last did. Nil
 /// when it says neither.
-public func scanWords(_ status: ScanStatus?, nowMs: Int64, zone: TimeZone = .current) -> String? {
+public func scanWords(_ status: ServerScanStatus?, nowMs: Int64, zone: TimeZone = .current) -> String? {
     guard let status else { return nil }
     if status.scanning {
         return status.count > 0 ? "Reading its folders now, \(groupedCount(status.count, locale: serverWordsLocale)) files so far." : "Reading its folders now."
@@ -178,11 +178,6 @@ public func lastSyncedWords(atMs: Int64, nowMs: Int64) -> String {
     if gone < day { return "\(gone / hour) hr ago" }
     if gone < 2 * day { return "Yesterday" }
     return "\(gone / day) days ago"
-}
-
-/// Which of the server's addresses is in use.
-public enum ServerPlace: Sendable, Equatable {
-    case home, away
 }
 
 /// Home only when a home address is set, the device is on a local network (Wi-Fi or a cable),

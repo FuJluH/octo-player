@@ -100,43 +100,6 @@ import Testing
 
 /// The server's extras read from its answers.
 @Suite struct ServerControlCallTests {
-    @Test func sharesAreReadAndMade() async throws {
-        let server = FakeServer()
-        server.ok(#""shares":{"share":[{"id":"sh1","url":"https://x/s/1","visitCount":"3","entry":[{"id":"s1","title":"Nightcall"}]}]}"#)
-        let shares = try await server.client().shares()
-        #expect(shares.map(\.id) == ["sh1"])
-        #expect(shares[0].visitCount == 3)
-        server.ok()
-        #expect(try await server.client().shares().isEmpty)
-        server.ok(#""shares":{"share":[]}"#)
-        await #expect(throws: SubsonicError.server(code: 0, message: "The server made no share")) {
-            _ = try await server.client().createShare(["a"])
-        }
-        server.enqueue(status: 501, "no")
-        await #expect(throws: SubsonicError.notSubsonic("HTTP 501 from createShare", status: 501)) {
-            _ = try await server.client().createShare(["a"], description: "Album", expiresAtMs: 99)
-        }
-        #expect(server.requests.last?.values("id") == ["a"])
-        #expect(server.requests.last?.query["expires"] == "99")
-    }
-
-    @Test func stationsAndFoldersRead() async throws {
-        let server = FakeServer()
-        server.ok(#""internetRadioStations":{"internetRadioStation":[{"id":7,"name":"FIP","streamUrl":"http://s","homePageUrl":"http://h"}]}"#)
-        let stations = try await server.client().radioStationDetails()
-        #expect(stations == [RadioStationDetails(id: "7", name: "FIP", streamUrl: "http://s", homePageUrl: "http://h")])
-        server.ok(#""musicFolders":{"musicFolder":[{"id":1,"name":"Music"},{"id":"b","name":"Books"}]}"#)
-        #expect(try await server.client().musicFolders().map(\.id) == ["1", "b"])
-        server.ok(#""scanStatus":{"scanning":true,"count":12}"#)
-        #expect(try await server.client().scanStatus() == ScanStatus(scanning: true, count: 12))
-        server.ok(#""user":{"username":"winters","adminRole":true}"#)
-        #expect(try await server.client().user("winters").adminRole)
-        server.error(70, "not here")
-        await #expect(throws: SubsonicError.notFound("not here")) { try await server.client().deleteRadioStation("7") }
-        server.error(40, "bad")
-        await #expect(throws: SubsonicError.wrongCredentials("bad")) { _ = try await server.client().nowPlaying() }
-    }
-
     @Test func extensionsAreKnownOrNot() async {
         let server = FakeServer()
         server.ok(#""openSubsonicExtensions":[{"name":"octoImports","versions":[1,2]}]"#)

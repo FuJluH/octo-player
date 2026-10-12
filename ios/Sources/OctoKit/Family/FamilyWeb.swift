@@ -118,12 +118,16 @@ public final class FamilyWeb: @unchecked Sendable {
     }
 
     private func call<T: Decodable>(_ method: String, _ path: String, body: [String: Any]?) async throws -> T {
-        var parts = URLComponents(url: server, resolvingAgainstBaseURL: false)!
+        guard var parts = URLComponents(url: server, resolvingAgainstBaseURL: false) else {
+            throw SubsonicError.unreachable(server.absoluteString, certificate: false)
+        }
         let basePath = parts.percentEncodedPath.hasSuffix("/") ? String(parts.percentEncodedPath.dropLast()) : parts.percentEncodedPath
         parts.percentEncodedPath = basePath + "/api/family/" + path
-        let plain = parts.url!
+        guard let plain = parts.url else { throw SubsonicError.unreachable(server.absoluteString, certificate: false) }
         var request = URLRequest(url: sign?(plain) ?? plain, timeoutInterval: 20)
         request.httpMethod = method
+        // The page's cookies live only in this object, never in the phone's cookie store.
+        request.httpShouldHandleCookies = false
         for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
         request.setValue("1", forHTTPHeaderField: "X-Octo-Family")
         request.setValue("application/json", forHTTPHeaderField: "Accept")

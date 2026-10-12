@@ -134,6 +134,13 @@ final class ServerControls {
         return !looksGenerated(station, isOcto: server.isOcto) && !(readOnly[server.account] ?? []).contains(station.id)
     }
 
+    /// The same, for a station read with all its details.
+    func canEdit(stationId: String, coverArt: String?) -> Bool {
+        guard let server = session.inUse else { return false }
+        return !looksGenerated(stationId: stationId, coverArt: coverArt, isOcto: server.isOcto)
+            && !(readOnly[server.account] ?? []).contains(stationId)
+    }
+
     func stations() async throws -> [ServerStationDetails] {
         try await session.inUse?.client.serverStationDetails() ?? []
     }

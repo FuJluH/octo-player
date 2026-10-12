@@ -96,7 +96,7 @@ public final class FamilyModel {
     /// This device, as the server lists it, once read.
     public var thisDevice: FamilyDevice? { devices.first { $0.current } }
     /// Who picks this device's audio quality; nil until read.
-    public var deviceMode: DeviceQualityMode? { thisDevice?.quality }
+    public var deviceMode: QualityFollows? { thisDevice?.quality }
 
     /// The sections this account sees, for platforms that show the shared order.
     public func sections() -> [FamilySection] {
@@ -155,20 +155,20 @@ public final class FamilyModel {
     }
 
     /// The account's own quality at home or away, kept on the server for every app it uses.
-    public func setQuality(home: AccountQuality? = nil, away: AccountQuality? = nil) {
+    public func setQuality(home: AccountStreamQuality? = nil, away: AccountStreamQuality? = nil) {
         act { client in
-            let now = try await client.setFamilyQuality(home: home, away: away)
+            let now = try await client.setAccountQuality(home: home, away: away)
             self.info?.me.quality = now
             return nil
         }
     }
 
     /// Whether this device follows the account's choice or its own app's.
-    public func setDeviceMode(_ mode: DeviceQualityMode) {
+    public func setDeviceMode(_ mode: QualityFollows) {
         guard let device = thisDevice else { return }
         devices = devices.map { var copy = $0; if copy.id == device.id { copy.quality = mode }; return copy }
         act { client in
-            _ = try await client.setFamilyDeviceQuality(device.id, mode: mode)
+            try await client.setQualityFollows(deviceId: device.id, mode)
             return nil
         }
     }

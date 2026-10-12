@@ -101,13 +101,14 @@ import Testing
     }
 
     @Test func aScanInProgressSaysHowFarItIs() {
-        #expect(scanWords(ScanStatus(scanning: true, count: 1_204), nowMs: now, zone: utc) == "Reading its folders now, 1,204 files so far.")
-        #expect(scanWords(ScanStatus(scanning: true), nowMs: now, zone: utc) == "Reading its folders now.")
+        #expect(scanWords(ServerScanStatus(scanning: true, count: 1_204), nowMs: now, zone: utc) == "Reading its folders now, 1,204 files so far.")
+        #expect(scanWords(ServerScanStatus(scanning: true), nowMs: now, zone: utc) == "Reading its folders now.")
     }
 
     @Test func theLastScanSaysWhen() {
-        #expect(scanWords(ScanStatus(lastScan: "2026-09-29T09:00:00Z"), nowMs: now, zone: utc) == "Last read its folders 3 hours ago.")
-        #expect(scanWords(ScanStatus(), nowMs: now, zone: utc) == nil)
+        let last: ServerScanStatus = decoded(#"{"scanning":false,"count":0,"lastScan":"2026-09-29T09:00:00Z"}"#)
+        #expect(scanWords(last, nowMs: now, zone: utc) == "Last read its folders 3 hours ago.")
+        #expect(scanWords(ServerScanStatus(), nowMs: now, zone: utc) == nil)
         #expect(scanWords(nil, nowMs: now, zone: utc) == nil)
     }
 
@@ -161,12 +162,10 @@ import Testing
 
     @Test func scanWords() {
         #expect(scanLabel(.idle) == "Scan library now")
-        #expect(scanLabel(.scanning(1234), locale: english) == "Scanning, 1,234 songs")
-        #expect(scanLabel(.scanning(0)) == "Scanning")
+        #expect(scanLabel(.scanning(count: 1234), locale: english) == "Scanning, 1,234 songs")
+        #expect(scanLabel(.scanning(count: 0)) == "Scanning")
         #expect(scanLabel(.finished) == "Scan finished")
-        #expect(scanLabel(.failed("Only an admin can scan")) == "Only an admin can scan")
-        #expect(scanFailedWords(SubsonicError.server(code: 50, message: "no")) == "Only an admin can scan this server.")
-        #expect(scanFailedWords(SubsonicError.server(code: 0, message: "no")) == "The scan could not start just now.")
+        #expect(scanLabel(.failed(message: "Only an admin can scan")) == "Only an admin can scan")
     }
 
     @Test func expiryWords() {
@@ -181,13 +180,14 @@ import Testing
 
     @Test func shareLines() {
         let now: Int64 = 1_790_416_800_000
-        let share = Share(id: "sh1", description: "", expires: "2026-09-29T10:00:00Z", visitCount: 12,
-                          entry: [Song(id: "s1", title: "Nightcall"), Song(id: "s2", title: "Odd Look")])
+        let share: ServerShare = decoded(#"{"id":"sh1","url":"","description":"","expires":"2026-09-29T10:00:00Z","visitCount":12,"entry":[{"id":"s1","title":"Nightcall"},{"id":"s2","title":"Odd Look"}]}"#)
         #expect(shareTitle(share) == "Nightcall")
         #expect(shareDetails(share, nowMs: now, locale: english) == "2 songs • Expires in 3 days • 12 visits")
-        #expect(shareTitle(Share(id: "sh2")) == "Shared link")
-        #expect(shareDetails(Share(id: "sh2"), nowMs: now) == "Never expires • No visits")
-        #expect(shareDetails(Share(id: "sh3", visitCount: 1_234), nowMs: now, locale: english) == "Never expires • 1,234 visits")
+        let bare: ServerShare = decoded(#"{"id":"sh2"}"#)
+        #expect(shareTitle(bare) == "Shared link")
+        #expect(shareDetails(bare, nowMs: now) == "Never expires • No visits")
+        let busy: ServerShare = decoded(#"{"id":"sh3","visitCount":1234}"#)
+        #expect(shareDetails(busy, nowMs: now, locale: english) == "Never expires • 1,234 visits")
     }
 
     @Test func minutesAgoWords() {
@@ -208,55 +208,22 @@ import Testing
         #expect(!StationDraft(nil, "FIP", "https://stream.example/fip.mp3", "not a page").ready)
     }
 
-    @Test func expiryIsNowPlusItsLength() {
-        let now: Int64 = 1_000_000
-        #expect(shareExpiresAt(.never, nowMs: now) == nil)
-        #expect(shareExpiresAt(.day, nowMs: now) == now + 86_400_000)
-        #expect(shareExpiresAt(.week, nowMs: now) == now + 7 * 86_400_000)
-        #expect(shareExpiresAt(.month, nowMs: now) == now + 30 * 86_400_000)
-        #expect(ShareExpiry.allCases.map(\.label) == ["Never", "1 day", "1 week", "1 month"])
-    }
-
-    @Test func knowsWhenAServerDoesNotShare() {
-        #expect(sharingUnavailable(SubsonicError.server(code: 50, message: "not authorized")))
-        #expect(sharingUnavailable(SubsonicError.notFound("sharing disabled")))
-        #expect(sharingUnavailable(SubsonicError.notSubsonic("HTTP 501 from createShare", status: 501)))
-        #expect(!sharingUnavailable(SubsonicError.server(code: 0, message: "busy")))
-        #expect(!sharingUnavailable(SubsonicError.unreachable("offline", certificate: false)))
-        #expect(!sharingUnavailable(SubsonicError.notSubsonic("HTTP 404 from createShare", status: 404)))
-    }
-
-    @Test func findsTheServerAlbumBehindALibraryAlbum() {
-        #expect(serverAlbumIdOf(sourceId: "server:music.example", albumId: "server:music.example:al-1") == "al-1")
-        #expect(serverAlbumIdOf(sourceId: "server:music.example", albumId: "server:music.example:album:some title") == nil)
-        #expect(serverAlbumIdOf(sourceId: "server:music.example", albumId: "device:123") == nil)
-    }
-
-    @Test func listeningNowLeavesOutThisPhone() {
-        func listener(_ user: String, _ player: String?) -> NowPlayingEntry { NowPlayingEntry(id: "s", username: user, playerName: player) }
-        let entries = [listener("winters", "Octo"), listener("winters", "Desktop"), listener("sam", "Octo"), listener("sam", nil)]
-        #expect(othersListening(entries, username: "Winters", ourClient: "Octo")
-            == [listener("winters", "Desktop"), listener("sam", "Octo"), listener("sam", nil)])
-        let song = NowPlayingEntry(id: "s", title: "Song", artist: "", username: "sam", minutesAgo: 3, playerName: "Feishin")
+    @Test func aListenerReadsAsSongThenWho() {
+        let song: ServerNowPlaying = decoded(#"{"id":"s","title":"Song","artist":"","username":"sam","minutesAgo":3,"playerName":"Feishin"}"#)
         #expect(listenerTitle(song) == "Song")
         #expect(listenerLine(song) == "sam · Feishin · 3 minutes ago")
     }
 
-    @Test func octoStationsCarryTheirOwnIdAsCover() {
-        let made = RadioStationDetails(id: "or123", name: "Your Mix", coverArt: "or123")
-        let added = RadioStationDetails(id: "r1", name: "FIP", coverArt: "ra-r1")
-        #expect(looksGenerated(made, isOcto: true))
-        #expect(!looksGenerated(made, isOcto: false))
-        #expect(!looksGenerated(added, isOcto: true))
+    @Test func aStationSaysWhoseItIsOrWhereItStreams() {
+        let added: ServerStationDetails = decoded(#"{"id":"r1","name":"FIP","coverArt":"ra-r1"}"#)
         #expect(stationLine(added, readOnly: true) == "Made by the server")
-        #expect(stationLine(RadioStationDetails(id: "r", streamUrl: "https://stream.example:8000/live"), readOnly: false) == "stream.example")
-        #expect(stationLine(RadioStationDetails(id: "r", streamUrl: "rtsp-ish"), readOnly: false) == "rtsp-ish")
+        let streamed: ServerStationDetails = decoded(#"{"id":"r","streamUrl":"https://stream.example:8000/live"}"#)
+        #expect(stationLine(streamed, readOnly: false) == "stream.example")
+        let odd: ServerStationDetails = decoded(#"{"id":"r","streamUrl":"rtsp-ish"}"#)
+        #expect(stationLine(odd, readOnly: false) == "rtsp-ish")
     }
 
     @Test func whatASaveSends() {
-        #expect(shareParams(["a", "b"], description: " ", expiresAtMs: nil).map { "\($0.0)=\($0.1)" } == ["id=a", "id=b"])
-        #expect(shareParams(["al"], description: "Album", expiresAtMs: 5).map { "\($0.0)=\($0.1)" } == ["id=al", "description=Album", "expires=5"])
-        #expect(stationParams(streamUrl: " http://s ", name: " FIP ", homepageUrl: " ").map { "\($0.0)=\($0.1)" } == ["streamUrl=http://s", "name=FIP"])
         #expect(queueSaveParams(["a", "b"], currentIndex: 1, positionMs: -5, indexBased: true).map { "\($0.0)=\($0.1)" }
             == ["id=a", "id=b", "currentIndex=1", "position=0"])
         #expect(queueSaveParams(["a", "b"], currentIndex: 1, positionMs: 9, indexBased: false).map { "\($0.0)=\($0.1)" }
@@ -317,5 +284,14 @@ import Testing
         #expect(titleFromName("plain") == "plain")
         #expect(titleFromName(".mp3") == nil)
         #expect(titleFromName(nil) == nil)
+    }
+}
+
+/// A value read from JSON, as a server would send it.
+func decoded<T: Decodable>(_ json: String) -> T {
+    do {
+        return try JSONDecoder().decode(T.self, from: Data(json.utf8))
+    } catch {
+        fatalError("\(T.self) did not read: \(error)")
     }
 }

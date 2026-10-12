@@ -165,6 +165,13 @@ struct MainShell: View {
             paths[tab, default: NavigationPath()].append(route)
             router.routeTaken()
         }
+        .onChange(of: router.accountRoute) { _, route in
+            guard let route else { return }
+            closePlayer()
+            if tab != .settings { select(.settings) }
+            paths[.settings, default: NavigationPath()].append(route)
+            router.accountRouteTaken()
+        }
         .onChange(of: hasTrack) { _, has in
             if !has {
                 barPlayer = false

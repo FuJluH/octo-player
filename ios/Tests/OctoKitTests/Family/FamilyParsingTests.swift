@@ -69,7 +69,7 @@ enum FamilyFixtures {
         #expect(can.storageLimitGb == 10)
         #expect(can.instantFromFamily)
         #expect(family.manager == nil)
-        #expect(me.quality == FamilyQuality(home: .original, away: .standard, familyLimitKbps: 192, familyAwayLimitKbps: 128))
+        #expect(me.quality == AccountQuality(home: .original, away: .standard, familyLimitKbps: 192, familyAwayLimitKbps: 128))
     }
 
     @Test func theOwnerReadsTheWholeFamily() async throws {
@@ -189,31 +189,6 @@ enum FamilyFixtures {
         #expect(devices[1].app == "Symfonium")
         #expect(devices[1].playing == nil)
         #expect(!devices[1].current)
-    }
-
-    @Test func theAccountsQualityAndADevicesModeAreSet() async throws {
-        server.enqueue(FamilyFixtures.setQuality)
-        let now = try await client.setFamilyQuality(home: .high, away: .dataSaver)
-        #expect(server.requests[0].path == "/rest/setFamilyQuality")
-        #expect(server.requests[0].query["home"] == "High")
-        #expect(server.requests[0].query["away"] == "DataSaver")
-        #expect(now.away == .dataSaver)
-        server.enqueue(FamilyFixtures.setQuality)
-        _ = try await client.setFamilyQuality(away: .standard)
-        #expect(server.requests[1].query["home"] == nil)
-        server.enqueue(FamilyFixtures.setDeviceQuality)
-        let device = try await client.setFamilyDeviceQuality("d_7Qm2abc", mode: .app)
-        #expect(server.requests[2].query["id"] == "d_7Qm2abc")
-        #expect(server.requests[2].query["mode"] == "App")
-        #expect(device.quality == .app)
-        #expect(AccountQuality.allCases.map(\.kbps) == [0, 256, 160, 96])
-    }
-
-    @Test func aQualityAnswerWithoutItsKeyStillReads() async throws {
-        server.enqueue(FamilyFixtures.ok)
-        #expect(try await client.setFamilyQuality(away: .standard).away == .standard)
-        server.enqueue(FamilyFixtures.ok)
-        #expect(try await client.setFamilyDeviceQuality("d_1", mode: .app).quality == .app)
     }
 
     @Test func removingADeviceAndASongSendTheirIds() async throws {

@@ -13,6 +13,13 @@ final class Router {
     func go(_ route: Route) { self.route = route }
     func routeTaken() { route = nil }
 
+    /// An account page to open on the Settings tab, asked for from outside it (a family notice,
+    /// a family link, a list shared in).
+    private(set) var accountRoute: AccountRoute?
+
+    func openInSettings(_ route: AccountRoute) { accountRoute = route }
+    func accountRouteTaken() { accountRoute = nil }
+
     /// A change of screen asked for from outside the pages.
     var drive: DriveRequest?
 
@@ -87,15 +94,4 @@ enum DownloadsSheetPage: Hashable {
     /// `id` is the song's id on the server; `title` names it until the server answers. `from`
     /// is the log it was opened from, if any.
     case find(id: String, title: String, from: String?)
-}
-
-extension SignInModel.Form: Identifiable {
-    var id: String {
-        switch self {
-        case .signIn: "signIn"
-        case .add: "add"
-        case .edit(let server): "edit." + server.id
-        case .again(let server): "again." + server.id
-        }
-    }
 }
