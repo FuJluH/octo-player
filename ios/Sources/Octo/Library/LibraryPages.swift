@@ -147,26 +147,7 @@ struct SongFilters: Equatable {
     /// Lossless by the file's type or its format.
     private func losslessTrack(_ track: LibraryTrack) -> Bool {
         guard let mime = track.mimeType else { return false }
-        if isLosslessMime(mime) { return true }
-        let format = formatOf(mime)
-        return ["flac", "alac", "wav", "wave", "aiff", "aif", "aifc", "pcm", "ape", "wv", "dsf", "dff", "tta"].contains(format)
-    }
-}
-
-/// The format from a MIME type: the part after the slash, lower case, without parameters or an
-/// "x-" prefix, with the usual other names folded together.
-func formatOf(_ mime: String) -> String {
-    var part = mime.split(separator: "/").last.map(String.init) ?? mime
-    part = part.split(separator: ";").first.map(String.init)?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
-    if part.hasPrefix("x-") { part = String(part.dropFirst(2)) }
-    switch part {
-    case "mpeg", "mp3", "mpeg3": return "mp3"
-    case "mp4", "m4a": return "m4a"
-    case "aac-adts": return "aac"
-    case "wave", "vnd.wave": return "wav"
-    case "aif": return "aiff"
-    case "wavpack": return "wv"
-    default: return part
+        return isLosslessMime(mime) || isLosslessKind(formatOf(mime))
     }
 }
 

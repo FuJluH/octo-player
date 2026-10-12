@@ -129,6 +129,39 @@ public let serverSongHealth = HealthFields<ServerSong>(
         return one.map { [$0] } ?? []
     })
 
+/// What a server's album list says about one album's release.
+public struct HealthAlbumFacts: Decodable, Sendable, Hashable {
+    public var id: String
+    public var musicBrainzId: String?
+    public var labels: [String]
+
+    enum CodingKeys: String, CodingKey { case id, musicBrainzId, recordLabels }
+    private struct Label: Decodable { var name: String? }
+
+    public init(id: String, musicBrainzId: String? = nil, labels: [String] = []) {
+        self.id = id
+        self.musicBrainzId = musicBrainzId
+        self.labels = labels
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = c.string(.id) ?? ""
+        musicBrainzId = c.string(.musicBrainzId)
+        labels = ((try? c.decodeIfPresent([Label].self, forKey: .recordLabels)) ?? []).compactMap(\.name)
+    }
+}
+
+/// A server's songs, with each album's release and record labels from the server's album list.
+public func serverAlbumHealth(_ albums: [HealthAlbumFacts]) -> HealthFields<ServerSong> {
+    var byId: [String: HealthAlbumFacts] = [:]
+    for album in albums where byId[album.id] == nil { byId[album.id] = album }
+    var fields = serverSongHealth
+    fields.releaseId = { song in song.albumId.flatMap { byId[$0]?.musicBrainzId }.flatMap { blank($0) ? nil : $0 } }
+    fields.labels = { song in song.albumId.flatMap { byId[$0]?.labels } ?? [] }
+    return fields
+}
+
 /// Why copies were taken for one recording.
 public enum DuplicateBasis: Sendable {
     /// Their tags name the same recording: an ISRC or a MusicBrainz id.

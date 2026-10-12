@@ -111,6 +111,13 @@ public struct FileActionResult: Decodable, Sendable {
 
     enum CodingKeys: String, CodingKey { case id, action, state, detail }
 
+    public init(id: String, action: String, state: String, detail: String? = nil) {
+        self.id = id
+        self.action = action
+        self.state = state
+        self.detail = detail
+    }
+
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = c.string(.id) ?? ""

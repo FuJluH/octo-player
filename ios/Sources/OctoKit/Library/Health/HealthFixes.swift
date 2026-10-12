@@ -105,6 +105,12 @@ public struct DuplicateFix<T> {
 
 private let fillOrder = [SongTag.album, SongTag.albumArtist, SongTag.track, SongTag.disc, SongTag.year, SongTag.genre, SongTag.isrc]
 
+/// Tags to write, in the order they are filled in, any others after them by name.
+public func tagsInOrder(_ tags: [String: String]) -> [(String, String)] {
+    func rank(_ tag: String) -> Int { fillOrder.firstIndex(of: tag) ?? fillOrder.count }
+    return tags.sorted { a, b in rank(a.key) != rank(b.key) ? rank(a.key) < rank(b.key) : a.key < b.key }.map { ($0.key, $0.value) }
+}
+
 /// Tags that belong to an album: taken only from a copy on the same album, or with the album
 /// itself when the kept copy has none.
 private let albumTags: Set<String> = [SongTag.album, SongTag.albumArtist, SongTag.track, SongTag.disc, SongTag.year]
@@ -319,12 +325,31 @@ public struct TrashedSong: Decodable, Sendable, Hashable, Identifiable {
     public var title: String
     public var artist: String
     public var album: String
+    public var removedBy: String?
+    public var removedAt: String?
+    /// When the server deletes it for good; nil keeps it until someone clears the trash.
     public var goneAt: String?
+    /// "removed" (also when left out) or "replaced": a file another copy took the place of, with
+    /// the file in the trash (`was`) and the one in the library now (`now`).
     public var kind: String?
     public var was: String?
     public var now: String?
 
-    enum CodingKeys: String, CodingKey { case id, title, artist, album, goneAt, kind, was, now }
+    enum CodingKeys: String, CodingKey { case id, title, artist, album, removedBy, removedAt, goneAt, kind, was, now }
+
+    public init(id: String = "", title: String = "", artist: String = "", album: String = "", removedBy: String? = nil,
+                removedAt: String? = nil, goneAt: String? = nil, kind: String? = nil, was: String? = nil, now: String? = nil) {
+        self.id = id
+        self.title = title
+        self.artist = artist
+        self.album = album
+        self.removedBy = removedBy
+        self.removedAt = removedAt
+        self.goneAt = goneAt
+        self.kind = kind
+        self.was = was
+        self.now = now
+    }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -332,6 +357,8 @@ public struct TrashedSong: Decodable, Sendable, Hashable, Identifiable {
         title = c.string(.title) ?? ""
         artist = c.string(.artist) ?? ""
         album = c.string(.album) ?? ""
+        removedBy = c.string(.removedBy)
+        removedAt = c.string(.removedAt)
         goneAt = c.string(.goneAt)
         kind = c.string(.kind)
         was = c.string(.was)
@@ -410,7 +437,7 @@ public enum FixStep: Hashable, Sendable {
 
     public var with: [(String, String)] {
         switch self {
-        case .retag(_, _, let tags): tags.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
+        case .retag(_, _, let tags): tagsInOrder(tags)
         case .joinAlbum(_, _, let like): [("like", like)]
         case .remove(_, _, let copy): copy ? [("copy", "true")] : []
         default: []
