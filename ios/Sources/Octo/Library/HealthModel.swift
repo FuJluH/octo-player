@@ -180,6 +180,6 @@ final class HealthModel {
     func play(_ songs: [LibraryTrack], from track: LibraryTrack) {
         var seen = Set<String>()
         let once = songs.filter { seen.insert($0.id).inserted }
-        actions?.play(once, from: once.firstIndex { $0.id == track.id } ?? 0)
+        actions?.play(once, from: once.firstIndex { $0.id == track.id } ?? 0, source: "Library health")
     }
 }

@@ -41,6 +41,8 @@ enum Route: Hashable, Codable {
     /// A live list, and its editor (a new one when `id` is nil).
     case liveList(id: String)
     case liveListEditor(id: String?)
+    /// A new live list's editor, started from a page's filters (a saved query).
+    case liveListFrom(query: String)
     /// The Sound page: equalizer, loudness, balance and headphone correction.
     case sound
 }
@@ -62,7 +64,7 @@ extension Route {
         case .onlineArtist: .onlineArtist
         case .charts: .charts
         case .liveList: .liveList
-        case .liveListEditor: .liveListEdit
+        case .liveListEditor, .liveListFrom: .liveListEdit
         }
     }
 }
@@ -431,6 +433,7 @@ extension View {
                 case .charts: ChartsView()
                 case .liveList(let id): LiveListView(id: id)
                 case .liveListEditor(let id): LiveListEditView(id: id)
+                case .liveListFrom(let query): LiveListEditView(id: nil, start: LibraryQuery.fromJSON(query))
                 case .sound: SoundPage()
                 }
             }

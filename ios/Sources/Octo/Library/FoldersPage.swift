@@ -7,6 +7,7 @@ struct FoldersPage: View {
     @Environment(LibraryState.self) private var state
     @Environment(LibraryActions.self) private var actions
     @Environment(Session.self) private var session
+    @Environment(DeviceLibrary.self) private var device
     @Environment(\.dismiss) private var dismiss
     @State private var phone: Collapsed<LibraryTrack>?
     @State private var phoneRead = false
@@ -44,24 +45,31 @@ struct FoldersPage: View {
     }
 
     var body: some View {
-        LibraryList {
-            if !phoneRead {
-                LibrarySpinner().padding(.top, detailTopGap)
-            } else if !hasPhone && !hasServer {
-                ScreenTitle("Folders").padding(.top, detailTopGap).bigTitle()
-                EmptyLibraryNote(text: "Folders show here once there is music on this phone or a server is signed in.")
-            } else {
-                folderHeader
-                content
+        ScrollViewReader { proxy in
+            LibraryList {
+                // Until the phone's first scan and the library are read, nothing is known yet.
+                if !phoneRead || !device.scannedOnce {
+                    LibrarySpinner().padding(.top, detailTopGap)
+                } else if !hasPhone && !hasServer {
+                    ScreenTitle("Folders").padding(.top, detailTopGap).bigTitle()
+                    EmptyLibraryNote(text: "Folders show here once there is music on this phone or a server is signed in.")
+                } else {
+                    folderHeader
+                    content
+                }
+                Color.clear.frame(height: 20)
             }
-            Color.clear.frame(height: 20)
+            // A fresh list for each folder, so each one opens at its top.
+            .id(path)
+            .animation(.easeOut(duration: 0.25), value: state.order(.folderSongs))
+            .topOnNewOrder(state.order(.folderSongs)) { proxy.scrollTo("songs", anchor: .top) }
         }
         .barClearance()
         .inlineTitle(shownNames.last ?? "Folders")
         .backAction(trail.isEmpty ? nil : { goUp() })
         .backStopsPicking()
         .selectableSongs(state.pickables(shownSongs))
-        .libraryRefreshable {}
+        .libraryRefreshable { await rereadServer() }
         .task(id: library.stamp(.library)) {
             await readPhone()
             await rereadServer()
@@ -259,8 +267,9 @@ struct FoldersPage: View {
     private func folderSongs(_ songs: [LibraryTrack]) -> some View {
         if !songs.isEmpty {
             let list = shownSongs
-            SortBar(name: "Songs", list: .folderSongs).padding(.top, 12)
-            ForEach(Array(list.enumerated()), id: \.offset) { position, track in
+            FirstRowMark()
+            SortBar(name: "Songs", list: .folderSongs).padding(.top, 12).id("songs")
+            ForEach(Array(list.enumerated()), id: \.element.id) { position, track in
                 TrackRow(track: track) { actions.play(list, from: position) }
             }
         }

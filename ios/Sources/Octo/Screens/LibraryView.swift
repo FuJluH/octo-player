@@ -24,7 +24,7 @@ private let librarySections = [
 /// The library's front page: a menu of ways in, then the newest albums, two covers to a row.
 struct LibraryView: View {
     @Environment(Library.self) private var library
-    @Environment(Downloads.self) private var downloads
+    @Environment(ServerDownloads.self) private var serverDownloads
     @Environment(Router.self) private var router
     @State private var recent: [LibraryAlbum] = []
 
@@ -39,11 +39,12 @@ struct LibraryView: View {
                     }
                     .buttonStyle(SqueezeStyle())
                 }
-                if downloads.keepsLog {
+                // What the server is downloading, on a server that keeps a log of it.
+                if serverDownloads.supported {
+                    let running = runningCount(serverDownloads.watch.rows)
                     LibraryHairline()
                     Button { router.showServerDownloads() } label: {
-                        SectionRow(icon: .cloud, label: "Server downloads",
-                                   detail: downloads.asked.isEmpty ? nil : "\(downloads.asked.count) on the way")
+                        SectionRow(icon: .cloud, label: "Server downloads", detail: running > 0 ? "\(running) on the way" : nil)
                     }
                     .buttonStyle(SqueezeStyle())
                 }
@@ -225,6 +226,7 @@ struct AlbumsView: View {
                                     if let album = sorted.items.randomElement() { router.go(.album(album.asAlbum)) }
                                 }
                             }
+                            FirstRowMark().id("first")
                             LazyVGrid(columns: columns, alignment: .leading, spacing: 18) {
                                 ForEach(sorted.items) { album in GridAlbumCard(album: album).id(album.id) }
                             }
@@ -244,7 +246,7 @@ struct AlbumsView: View {
                     if runs.indices.contains(index) { proxy.scrollTo(items[runs[index].start].id, anchor: .top) }
                 }
             }
-            .onChange(of: order) { _, _ in if let first = sorted?.items.first { proxy.scrollTo(first.id, anchor: .top) } }
+            .topOnNewOrder(sorted?.order) { proxy.scrollTo("first", anchor: .top) }
         }
         .barClearance()
         .inlineTitle("Albums")
@@ -290,6 +292,7 @@ struct ArtistsView: View {
                             } shuffle: {
                                 Task { actions.play(await library.tracks(), shuffled: true) }
                             }
+                            FirstRowMark().id("first")
                             LetterRuns(items: sorted.items, headings: sorted.headings, id: \.id) { _, artist in
                                 ArtistRow(artist: artist)
                             }
@@ -299,11 +302,12 @@ struct ArtistsView: View {
                         LibrarySpinner()
                     }
                 }
+                .animation(.easeOut(duration: 0.25), value: sorted?.order)
             }
             .letterRail(sorted?.headings, count: sorted?.items.count ?? 0, byName: order.by.byName) { index in
                 proxy.scrollTo("run-\(index)", anchor: .top)
             }
-            .onChange(of: order) { _, _ in if let first = sorted?.items.first { proxy.scrollTo(first.id, anchor: .top) } }
+            .topOnNewOrder(sorted?.order) { proxy.scrollTo("first", anchor: .top) }
         }
         .barClearance()
         .inlineTitle("Artists")
@@ -336,6 +340,9 @@ struct FavoritesView: View {
     @State private var songs: [LibraryTrack]?
     @State private var albums: [LikedAlbum]?
     @State private var artists: [LikedArtist]?
+    /// The orders the lists shown are in.
+    @State private var songsOrder: ListOrder?
+    @State private var favoritesOrder: ListOrder?
 
     private let columns = [GridItem(.adaptive(minimum: 150), spacing: 14)]
 
@@ -349,6 +356,8 @@ struct FavoritesView: View {
                         songsSegment
                         Color.clear.frame(height: 20)
                     }
+                    .animation(.easeOut(duration: 0.25), value: songs?.map(\.id))
+                    .topOnNewOrder(songsOrder) { proxy.scrollTo("liked-top", anchor: .top) }
                 } else {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 0) {
@@ -359,10 +368,11 @@ struct FavoritesView: View {
                             case .songs, nil: LibrarySpinner()
                             }
                         }
+                        .animation(.easeOut(duration: 0.25), value: favoritesShown)
                     }
+                    .topOnNewOrder(favoritesOrder) { proxy.scrollTo("favorites-top", anchor: .top) }
                 }
             }
-            .onChange(of: state.order(.liked)) { _, _ in proxy.scrollTo("liked-top", anchor: .top) }
         }
         .barClearance()
         .inlineTitle("Favorites")
@@ -402,30 +412,42 @@ struct FavoritesView: View {
         } else {
             songs = liked
         }
+        songsOrder = order
         let favorites = state.order(.favorites)
         albums = sortFavorites(await library.likedAlbums(), order: favorites, likedAt: \.likedAt, name: { $0.album.sortKey }, id: { $0.album.id })
         artists = sortFavorites(await library.likedArtists(), order: favorites, likedAt: \.likedAt, name: { $0.artist.sortKey }, id: { $0.artist.id })
+        favoritesOrder = favorites
+        // Picked once all three are read, then kept, so the page never jumps while it is open.
         if segment == nil {
             segment = opening ?? firstSegment(songs: songs?.count ?? 0, albums: albums?.count ?? 0, artists: artists?.count ?? 0)
         }
     }
 
+    /// The favorite albums and artists as shown, for their move into a new order.
+    private var favoritesShown: [String] { (albums ?? []).map(\.album.id) + (artists ?? []).map(\.artist.id) }
+
+    /// Play and Shuffle, the keep-downloaded switch, then the liked songs in their order. A swipe
+    /// left unlikes a song, with an Undo.
     @ViewBuilder
     private var songsSegment: some View {
         if let songs {
+            if !songs.isEmpty {
+                PlayRow(details: songsCount(songs.count)) {
+                    actions.play(songs, source: "Favorites")
+                } shuffle: {
+                    actions.play(songs, shuffled: true, source: "Favorites")
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 12)
+            }
+            KeepDownloadedLine(tracks: songs)
             if songs.isEmpty {
                 MutedNote("No liked songs yet. Tap the heart in the player to add the song that is playing, or long press any song and choose Add to Liked songs.")
             } else {
-                ListPlayLine(count: countText(songs.count, "song", "songs")) {
-                    actions.play(songs)
-                } shuffle: {
-                    actions.play(songs, shuffled: true)
-                }
-                .padding(.bottom, 6)
-                Color.clear.frame(height: 0).id("liked-top")
+                FirstRowMark().id("liked-top")
                 ForEach(Array(songs.enumerated()), id: \.element.id) { position, track in
                     TrackRow(track: track, swipe: .remove { unlike(track) }) {
-                        actions.play(songs, from: position)
+                        actions.play(songs, from: position, source: "Favorites")
                     }
                 }
             }
@@ -446,6 +468,7 @@ struct FavoritesView: View {
             if albums.isEmpty {
                 MutedNote("Heart an album from its page or its menu to keep it here.")
             } else {
+                FirstRowMark().id("favorites-top")
                 LazyVGrid(columns: columns, alignment: .leading, spacing: 18) {
                     ForEach(albums, id: \.album.id) { liked in GridAlbumCard(album: liked.album) }
                 }
@@ -464,7 +487,9 @@ struct FavoritesView: View {
             if artists.isEmpty {
                 MutedNote("Heart an artist from their page or their menu to keep them here.")
             } else {
+                FirstRowMark().id("favorites-top")
                 ForEach(artists, id: \.artist.id) { liked in ArtistRow(artist: liked.artist) }
+                Color.clear.frame(height: 140)
             }
         } else {
             LibrarySpinner()
