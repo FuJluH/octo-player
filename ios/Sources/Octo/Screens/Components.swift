@@ -92,7 +92,7 @@ enum SongLead: Equatable {
 /// is picking); a long press opens its menu; a swipe right puts it next in the queue on lists
 /// where a swipe does nothing else.
 struct TrackRow: View {
-    let track: LibraryTrack
+    var track: LibraryTrack
     var lead: SongLead = .artwork
     /// Words under the title in place of "Artist • Album"; empty leaves the line out.
     var subtitle: String?
@@ -109,6 +109,9 @@ struct TrackRow: View {
     /// An album's main song, starred.
     var highlighted = false
     var trailing: AnyView?
+    /// A song found online turns into the library song it became, in the same place; the turned
+    /// row draws as that song and does not turn again.
+    var turns = true
     let onTap: () -> Void
 
     /// What a swipe does on this row.
@@ -128,6 +131,26 @@ struct TrackRow: View {
     private var isNow: Bool { player.current.map { $0.id == song.id && $0.isExternal == song.isExternal } ?? false }
 
     var body: some View {
+        if turns && track.isFound {
+            // The check has its moment first where the row offers the add button; once turned,
+            // the row's menu, swipe and what plays are the library song's.
+            FindSwap(find: song, offersAdd: offersAdd || ownership) { shown in
+                turned(shown)
+            }
+        } else {
+            row
+        }
+    }
+
+    /// This row as it draws `shown`: the find itself, or the library song it became.
+    private func turned(_ shown: Song) -> TrackRow {
+        var copy = self
+        copy.turns = false
+        if !shown.isExternal { copy.track = actions.state.provisional(shown) }
+        return copy
+    }
+
+    private var row: some View {
         Button {
             if selecting { selection?.toggle(key) } else { onTap() }
         } label: {
@@ -232,7 +255,7 @@ struct TrackRow: View {
         case .number(let number):
             ZStack(alignment: .trailing) {
                 if picked {
-                    IconView(.check, size: 18, color: .white)
+                    IconView(.select, size: 22, color: .white)
                 } else if isNow {
                     NowPlayingBars(playing: player.isPlaying, size: 14)
                 } else {
@@ -254,7 +277,7 @@ struct TrackRow: View {
                 if picked || isNow {
                     RoundedRectangle(cornerRadius: OctoRadius.artS).fill(.black.opacity(0.5))
                     if picked {
-                        IconView(.check, size: 20, color: .white)
+                        IconView(.select, size: 22, color: .white)
                     } else {
                         NowPlayingBars(playing: player.isPlaying)
                     }
@@ -269,7 +292,7 @@ struct TrackRow: View {
             if track.isFound {
                 AddToLibraryButton(song: song, size: 32, iconSize: 20)
             } else {
-                IconView(.check, size: 18, color: OctoColor.accent)
+                IconView(.check, size: 20, color: OctoColor.accent)
                     .accessibilityLabel("In your library")
             }
         }
@@ -289,11 +312,18 @@ struct TrackRow: View {
         }
     }
 
+    /// A song's length; for a find, the length the player learned for it when known, else its
+    /// listed one.
+    private var lengthMs: Int64 {
+        guard track.isFound else { return track.durationMs }
+        return shownLengthMs(track.durationMs, learnedMs: Int64(player.lengths.lengthMs(track.id, listedMs: Int(max(track.durationMs, 0)))))
+    }
+
     /// The length in a column at least as wide as "00:00", so lengths line up.
     private var lengthSlot: some View {
         ZStack(alignment: .trailing) {
             Text(lengthSlotSample).hidden()
-            Text(rowLength(track.durationMs) ?? "")
+            Text(rowLength(lengthMs) ?? "")
         }
         .font(.octoCaption.monospacedDigit())
         .foregroundStyle(OctoColor.textMuted)
@@ -517,9 +547,16 @@ struct SongCard: View {
                     }
                     HStack(spacing: 4) {
                         Text(song.byline).font(.octoCaption).foregroundStyle(OctoColor.textMuted).lineLimit(1)
-                        if !song.isExternal {
-                            IconView(.cloud, size: 12, color: OctoColor.textMuted)
-                                .accessibilityLabel("Streams from your server")
+                        // Downloaded to the phone, or streamed from the server; nothing for a phone
+                        // file or a song found online.
+                        if !song.isExternal && !track.onPhone {
+                            if actions.state.kept(track.id)?.status == .done {
+                                IconView(.downloaded, size: 14, color: OctoColor.textMuted)
+                                    .accessibilityLabel("Downloaded")
+                            } else {
+                                IconView(.cloud, size: 14, color: OctoColor.textMuted)
+                                    .accessibilityLabel("Streams from your server")
+                            }
                         }
                     }
                 }
@@ -559,7 +596,7 @@ struct StationCard: View {
 }
 
 /// An artist as a circle with the name under it. A library artist opens its menu on a long
-/// press; one only on the server carries the not-in-library mark.
+/// press; one only on the server carries the not-in-library mark and opens as the server has it.
 struct ArtistCircle: View {
     let id: String
     let name: String
@@ -570,7 +607,7 @@ struct ArtistCircle: View {
     @Environment(LibraryActions.self) private var actions
 
     var body: some View {
-        NavigationLink(value: Route.artist(id: id, name: name)) {
+        NavigationLink(value: external ? Route.onlineArtist(id: id, name: name) : Route.artist(id: id, name: name)) {
             VStack(spacing: 8) {
                 BadgedCover(id: coverArt, size: size, radius: size / 2, external: external)
                 Text(name).font(.octoCaption).foregroundStyle(.white).lineLimit(1).frame(width: size)
