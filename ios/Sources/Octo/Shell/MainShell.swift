@@ -30,6 +30,10 @@ enum Route: Hashable {
     case artist(id: String, name: String)
     case playlist(Playlist)
     case artists, albums, playlists, favorites
+    /// An album or artist the server found online, and the Charts page.
+    case onlineAlbum(id: String, name: String)
+    case onlineArtist(id: String, name: String)
+    case charts
 }
 
 /// The app's frame: every tab's pages, kept alive while another tab is in front, the floating
@@ -149,6 +153,9 @@ extension View {
                 case .albums: AlbumsView()
                 case .playlists: PlaylistsView()
                 case .favorites: FavoritesView()
+                case .onlineAlbum(let id, let name): OnlineAlbumView(id: id, name: name)
+                case .onlineArtist(let id, let name): OnlineArtistView(id: id, name: name)
+                case .charts: ChartsView()
                 }
             }
             .detailPage()

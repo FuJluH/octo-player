@@ -12,6 +12,7 @@ import OctoKit
 /// - `found:TEXT` plays the songs not in the library that a search for TEXT finds
 /// - `search:TEXT` plays the library songs a search for TEXT finds
 /// - `pause`
+/// - discovery steps: see `DiscoveryDrive`
 @MainActor
 enum Drive {
     static func run(session: Session, player: Player, router: Router) async {
@@ -37,7 +38,8 @@ enum Drive {
                 guard let client = session.client, let found = try? await client.search(value) else { continue }
                 let songs = found.song.filter { name == "found" ? $0.isExternal : !$0.isExternal }
                 if !songs.isEmpty { player.play(songs, from: 0) }
-            default: break
+            default:
+                await DiscoveryDrive.step(name, value, session: session, router: router)
             }
             try? await Task.sleep(for: .milliseconds(400))
         }

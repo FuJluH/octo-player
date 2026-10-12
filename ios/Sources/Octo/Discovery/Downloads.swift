@@ -68,6 +68,29 @@ final class Downloads {
 
     func phase(_ songId: String) -> DownloadPhase { phases[songId] ?? .none }
 
+    /// The finds whose download has arrived in the library.
+    var adopted: Set<String> { Set(phases.filter { $0.value == .done }.keys) }
+
+    /// Library songs that finds became, as last read, so a find's row can turn into its song.
+    private(set) var librarySongs: [String: Song] = [:]
+    @ObservationIgnored private var lookingUp = Set<String>()
+
+    /// The library song a find became, as last read; nil until it has been read.
+    func librarySong(_ id: String) -> Song? { librarySongs[id] }
+
+    /// The same, for the pages that resolve what the server sent.
+    func lastSeenLibrarySong(_ id: String) -> Song? { librarySongs[id] }
+
+    /// Reads a library song a find became, once, so its row can turn into it.
+    func lookUpLibrarySong(_ id: String) {
+        guard librarySongs[id] == nil, !lookingUp.contains(id), let client = session.client else { return }
+        lookingUp.insert(id)
+        Task {
+            defer { lookingUp.remove(id) }
+            if let song = try? await client.song(id), !song.isExternal { librarySongs[id] = song }
+        }
+    }
+
     func state(_ songId: String) -> DownloadState { phase(songId).state }
 
     /// Whether the server keeps a log of its downloads that the downloads sheet can show.
@@ -93,6 +116,7 @@ final class Downloads {
             return false
         }
         keep(song, source: source, requestedAt: nowMs())
+        SearchModel.hintAdded()
         arrivals.askedSong(song.id, title: song.title)
         tracker.retry(song.id)
         follow()
@@ -111,6 +135,7 @@ final class Downloads {
         let now = nowMs()
         let finds = songs.filter(\.isExternal)
         for song in finds { keep(song, source: source, requestedAt: now) }
+        SearchModel.hintAdded()
         let coming = finds.filter { state($0.id) != .done }
         arrivals.askedAlbum(title.isEmpty ? (coming.first?.album ?? "") : title, findIds: coming.map(\.id))
         for song in coming { tracker.retry(song.id) }
