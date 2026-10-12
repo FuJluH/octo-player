@@ -211,6 +211,17 @@ struct SearchView: View {
             .scrollDismissesKeyboard(.immediately)
             .onChange(of: model.filter) { _, _ in proxy.scrollTo("top", anchor: .top) }
         }
+        // Songs from the library and from the server can be picked together.
+        .selectableSongs(pickable(found, online))
+    }
+
+    /// Every song shown, library ones first, then the finds and the top songs, each once.
+    private func pickable(_ found: LibraryResults, _ online: DiscoverState) -> [Pickable] {
+        let finds: [Song] = if case .done(let discovered) = online { discovered.songs } else { [] }
+        var seen = Set<String>()
+        return (found.songs.map(\.asSong) + finds + (top?.songs.map(\.track) ?? []))
+            .filter { seen.insert($0.id).inserted }
+            .map { Pickable($0) }
     }
 
     /// The server could not be asked, so say the library has none; then what it found online.

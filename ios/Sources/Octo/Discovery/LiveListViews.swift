@@ -118,6 +118,7 @@ struct LiveListView: View {
             }
         }
         .barClearance()
+        .selectableSongs(playable.map { Pickable($0) })
         .task(id: library.stamp(.library, .likes, .plays)) { await liveLibrary.read() }
         // Leaves the page once the list is deleted.
         .onChange(of: list == nil) { _, gone in if gone { dismiss() } }
