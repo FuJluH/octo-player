@@ -198,12 +198,14 @@ struct OnlineArtistCircle: View {
     }
 }
 
-/// An artist line: round picture, name, album count.
+/// An artist line: round picture, name, album count. A library artist opens its menu on a long
+/// press.
 struct ArtistListRow: View {
     let id: String
     let name: String
     let coverArt: String?
     let albumCount: Int
+    var library: LibraryArtist?
     var opened: () -> Void = {}
     @Environment(Router.self) private var router
 
@@ -229,13 +231,16 @@ struct ArtistListRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(SqueezeStyle())
+        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: OctoRadius.row))
+        .contextMenu { if let library { CollectionMenuItems(subject: .artist(library)) } }
     }
 }
 
-/// A playlist line: its artwork, name, song count, and the cloud mark for one on the server.
+/// A playlist line: its picture (the designed cover or the mosaic, with the phone's footer and an
+/// Octo list's glyph), name, song count, and the cloud mark for one on the server.
 struct PlaylistListRow: View {
+    let summary: PlaylistSummary
     let playlist: Playlist
-    var onServer = true
     var opened: () -> Void = {}
     @Environment(Router.self) private var router
 
@@ -246,14 +251,14 @@ struct PlaylistListRow: View {
             router.go(.playlist(playlist))
         } label: {
             HStack(spacing: 12) {
-                Cover(id: playlist.coverArt ?? playlist.id, size: 56, radius: OctoRadius.artS)
+                PlaylistCover(playlist: summary, size: 56)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(playlist.name).font(.octoBodySmall).foregroundStyle(.white).lineLimit(1)
+                    Text(summary.name).font(.octoBodySmall).foregroundStyle(.white).lineLimit(1)
                     HStack(spacing: 4) {
-                        Text(playlist.songCount == 1 ? "1 song" : "\(playlist.songCount) songs")
+                        Text(summary.songCount == 1 ? "1 song" : "\(summary.songCount) songs")
                             .font(.octoCaption)
                             .foregroundStyle(OctoColor.textMuted)
-                        if onServer {
+                        if summary.onServer {
                             Image(systemName: "cloud")
                                 .font(.system(size: 11))
                                 .foregroundStyle(OctoColor.textMuted)

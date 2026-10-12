@@ -210,10 +210,20 @@ struct EmptyLibraryNote: View {
 struct LibrarySourceActions: View {
     @Environment(Session.self) private var session
     @Environment(Router.self) private var router
+    @Environment(DeviceLibrary.self) private var device
 
     var body: some View {
-        if session.servers.isEmpty || session.client == nil && session.active == nil {
-            GlazeButton("Sign in to a server", size: .medium) { router.signIn = .signIn }
+        let askAccess = device.access != .granted
+        let signIn = session.servers.isEmpty || session.client == nil && session.active == nil
+        if askAccess || signIn {
+            FlowRow(spacing: 12) {
+                if askAccess {
+                    GlazeButton(accessButtonLabel(deniedForever: device.access == .deniedForever), size: .medium) {
+                        if device.access == .deniedForever { device.openSettings() } else { device.requestAccess() }
+                    }
+                }
+                if signIn { GlazeButton("Sign in to a server", size: .medium) { router.signIn = .signIn } }
+            }
         }
     }
 }
