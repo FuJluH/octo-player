@@ -267,8 +267,8 @@ import Testing
         #expect(prefs.wifi == .original)
         #expect(prefs.mobile == .original)
         #expect(StreamQuality.choices.first == .original)
-        #expect(StreamQuality(storedName: "Kbps256") == .mp3(kbps: 256))
-        #expect(StreamQuality(storedName: "Huge") == nil)
+        #expect(StreamQuality.stored("Kbps256", or: .original) == .mp3(kbps: 256))
+        #expect(StreamQuality.stored("Huge", or: .original) == .original)
         #expect(StreamQuality.choices.map(\.storedName) == ["Original", "Kbps320", "Kbps256", "Kbps192", "Kbps128"])
     }
 

@@ -100,7 +100,7 @@ public func radioMix(_ input: RadioInput, count: Int, random: inout OctoRandom) 
     let rarity = genreRarity(everything)
     var seedFeatures: [String: Double] = [:]
     for seed in input.seeds { features(seed, rarity, &seedFeatures) }
-    let seedNorm = seedFeatures.values.reduce(0) { $0 + $1 * $1 }.squareRoot()
+    let seedNorm = seedFeatures.keys.sorted().reduce(0.0) { $0 + seedFeatures[$1]! * seedFeatures[$1]! }.squareRoot()
     let seedGenres = Set(input.seeds.flatMap(\.genreKeys))
     let seedArtists = Set(input.seeds.flatMap(\.artistKeys))
     let disliked = Set(everything.filter { $0.rating == 1 }.flatMap(\.artistKeys))
@@ -336,7 +336,8 @@ private func features(_ song: RadioSong, _ rarity: [String: Double], _ into: ino
 /// no genre.
 private func likeness(_ song: [String: Double], _ seeds: [String: Double], _ seedNorm: Double) -> Double {
     var core = 0.0, extra = 0.0, norm = 0.0
-    for (key, weight) in song {
+    for key in song.keys.sorted() {
+        let weight = song[key]!
         norm += weight * weight
         guard let other = seeds[key] else { continue }
         if key.hasPrefix("g") || key.hasPrefix("e") { core += weight * other } else { extra += weight * other }

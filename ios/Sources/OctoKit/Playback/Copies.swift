@@ -51,12 +51,6 @@ public struct SongCopy: Sendable, Equatable, Hashable {
     }
 }
 
-/// Which copy plays when a song is both on the phone and on a server.
-public enum CopyPreference: String, Sendable, CaseIterable {
-    case phoneFirst = "PhoneFirst"
-    case bestQuality = "BestQuality"
-}
-
 /// The copy of a song to play. The setting decides between copies that can play right now: a
 /// server's when one can be reached, the phone's while its file is still there. When none can,
 /// one is still handed over, so it fails and is skipped like any song that cannot play. A tie
@@ -207,48 +201,6 @@ public func tagBpm(_ stored: Int?) -> Double? {
 /// How long a song is: what the player measured of its sound (nil while it has not), else
 /// `listedMs`.
 public func songLengthMs(listedMs: Int, playerMs: Int?) -> Int { playingLengthMs(listedMs: listedMs, playerMs: playerMs) }
-
-extension StreamQuality {
-    /// The cap in kilobits a second, or nil for the file as it is.
-    public var kbps: Int? {
-        switch self {
-        case .original: nil
-        case .mp3(let kbps): kbps
-        }
-    }
-
-    /// The name a setting is stored under: "Original", "Kbps320" and so on.
-    public var storedName: String {
-        switch self {
-        case .original: "Original"
-        case .mp3(let kbps): "Kbps\(kbps)"
-        }
-    }
-
-    /// The quality a stored name stands for, or nil for an unknown one.
-    public init?(storedName: String) {
-        guard let found = StreamQuality.choices.first(where: { $0.storedName == storedName }) else { return nil }
-        self = found
-    }
-}
-
-/// Where songs play from when a server is connected, and how big a stream is on Wi-Fi and on
-/// mobile data: Original (the file as it is) by default on both, a smaller MP3 when chosen.
-public struct StreamPrefs: Sendable, Equatable {
-    public var copies: CopyPreference = .phoneFirst
-    public var wifi: StreamQuality = .original
-    public var mobile: StreamQuality = .original
-    /// How much of a stream is ready before a song starts.
-    public var startAfter: StartAfter = .short
-
-    public init(copies: CopyPreference = .phoneFirst, wifi: StreamQuality = .original, mobile: StreamQuality = .original,
-                startAfter: StartAfter = .short) {
-        self.copies = copies
-        self.wifi = wifi
-        self.mobile = mobile
-        self.startAfter = startAfter
-    }
-}
 
 /// The quality a stream asks for: this app's, for the connection the phone is on, when it picks;
 /// otherwise the file as it is, and the server applies the account's choice.

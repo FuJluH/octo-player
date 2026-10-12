@@ -9,7 +9,7 @@ import Testing
     }
 
     @Test func theWordsHaveNoDashes() {
-        for words in StartAfter.allCases.map(\.label) + [startAfterSetting, startAfterHelp] {
+        for words in StartAfter.allCases.map(\.label) + [StartAfter.settingName, StartAfter.help] {
             #expect(!words.unicodeScalars.contains { $0.value == 0x2014 || $0.value == 0x2013 })
         }
     }
@@ -163,73 +163,6 @@ import Testing
         #expect(abs(fadeInVolume(1) - 1) < 0.0001)
         #expect(abs(fadeInVolume(3) - 1) < 0.0001)
         #expect(abs(fadeOutVolume(-1) - 1) < 0.0001)
-    }
-}
-
-@Suite struct PaceTest {
-    @Test func speedsNearADetentSettleOnIt() {
-        #expect(snapSpeed(0.97) == 1)
-        #expect(snapSpeed(1.03) == 1)
-        #expect(snapSpeed(0.72) == 0.75)
-        #expect(snapSpeed(1.28) == 1.25)
-        #expect(snapSpeed(1.46) == 1.5)
-    }
-
-    @Test func betweenDetentsTheSpeedMovesInSmallSteps() {
-        #expect(snapSpeed(1.09) == 1.1)
-        #expect(snapSpeed(1.16) == 1.15)
-        #expect(snapSpeed(1.86) == 1.85)
-        #expect(snapSpeed(0.61) == 0.6)
-    }
-
-    @Test func speedStaysInsideItsRange() {
-        #expect(snapSpeed(0.1) == 0.5)
-        #expect(snapSpeed(3) == 2)
-        #expect(speedAt(-1) == 0.5)
-        #expect(speedAt(2) == 2)
-    }
-
-    @Test func theSliderEndsAreTheSlowestAndFastest() {
-        #expect(speedAt(0) == 0.5)
-        #expect(speedAt(1) == 2)
-        #expect(speedAt(speedFraction(1)) == 1)
-        #expect(abs(speedFraction(1) - 1.0 / 3.0) < 0.0001)
-        for detent in speedDetents { #expect(speedAt(speedFraction(detent)) == detent) }
-    }
-
-    @Test func keepingPitchLeavesItWhereItWas() {
-        #expect(paceOf(speed: 1.5, keepPitch: true, semitones: 0) == Pace(speed: 1.5, pitch: 1))
-    }
-
-    @Test func withoutKeepPitchItFollowsTheSpeed() {
-        #expect(paceOf(speed: 1.25, keepPitch: false, semitones: 0) == Pace(speed: 1.25, pitch: 1.25))
-    }
-
-    @Test func semitonesShiftThePitchEitherWay() {
-        #expect(abs(paceOf(speed: 1, keepPitch: true, semitones: 6).pitch - 1.4142) < 0.001)
-        #expect(abs(paceOf(speed: 1, keepPitch: true, semitones: -6).pitch - 0.7071) < 0.001)
-        #expect(paceOf(speed: 1, keepPitch: true, semitones: 6) == paceOf(speed: 1, keepPitch: true, semitones: 9))
-        #expect(abs(paceOf(speed: 1.5, keepPitch: false, semitones: 6).pitch - 1.5 * 1.4142) < 0.001)
-    }
-
-    @Test func semitoneSliderSnapsToWholeSteps() {
-        #expect(semitonesAt(0) == -6)
-        #expect(semitonesAt(0.5) == 0)
-        #expect(semitonesAt(1) == 6)
-        #expect(semitonesAt(semitonesFraction(2)) == 2)
-        #expect(semitonesAt(0.55) == 1)
-    }
-
-    @Test func labelsDropTrailingZeros() {
-        #expect(speedLabel(1) == "1x")
-        #expect(speedLabel(2) == "2x")
-        #expect(speedLabel(1.5) == "1.5x")
-        #expect(speedLabel(1.25) == "1.25x")
-        #expect(speedLabel(0.75) == "0.75x")
-        #expect(speedLabel(1.05) == "1.05x")
-        #expect(semitonesLabel(2) == "+2 st")
-        #expect(semitonesLabel(-3) == "-3 st")
-        #expect(semitonesLabel(0) == "0 st")
     }
 }
 
