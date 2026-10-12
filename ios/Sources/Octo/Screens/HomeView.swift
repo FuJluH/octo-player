@@ -29,13 +29,13 @@ struct HomeView: View {
                     songShelf("Charts", model.charts, destination: .charts)
                 } else if layout.shelves {
                     pinnedShelf
-                    albumShelf("Recently played", model.recentlyPlayed)
+                    albumShelf("Recently played", model.recentlyPlayed, destination: .library(.history(mostPlayed: false)))
                     stationShelf("Made for you", model.madeForYou.map { ($0.id, $0.name, coverId(of: $0.artwork) ?? $0.id, $0.songCount) })
                     stationShelf("Stations", model.stations.map { ($0.id, $0.name, coverId(of: $0.artwork) ?? $0.id, nil) })
                     songShelf("Charts", model.charts, destination: .charts)
                     albumShelf("Recently added", model.recentlyAdded)
-                    albumShelf("Favorite albums", model.favoriteAlbums, destination: .favorites)
-                    songShelf("Most played", model.mostPlayed.map(\.asSong))
+                    albumShelf("Favorite albums", model.favoriteAlbums, destination: .library(.favorites(.albums)))
+                    songShelf("Most played", model.mostPlayed.map(\.asSong), destination: .library(.history(mostPlayed: true)))
                     albumShelf("Something different", model.surprise)
                     albumShelf("Not played in 6 months", model.revisit.notPlayedLately)
                     albumShelf("Albums you never finished", model.revisit.neverFinished)
@@ -54,7 +54,7 @@ struct HomeView: View {
             .animation(.easeInOut(duration: 0.25), value: layout)
         }
         .barClearance()
-        .refreshable { await model.refresh() }
+        .libraryRefreshable { await model.refresh() }
         .onAppear {
             model.attach(library: library, discovery: discovery, player: player, router: router)
             model.shown()
@@ -75,7 +75,7 @@ struct HomeView: View {
         if !albums.isEmpty {
             HomeShelfTitle(title: title, destination: destination)
             SideScroller {
-                ForEach(albums) { AlbumCard(album: $0.asAlbum) }
+                ForEach(albums) { AlbumCard(album: $0.asAlbum, library: $0) }
             }
         }
     }
@@ -120,17 +120,19 @@ struct HomeView: View {
                 ForEach(model.pins) { pin in
                     switch pin {
                     case .album(let album):
-                        AlbumCard(album: album.asAlbum)
+                        AlbumCard(album: album.asAlbum, library: album)
                     case .artist(let artist):
                         PinnedCard(title: artist.name, subtitle: "Artist",
                                    route: .artist(id: artist.pageId(discovery.sourceId), name: artist.name)) {
                             Cover(id: coverId(of: artist.artwork), size: 150, radius: 75)
                         }
+                        .contextMenu { CollectionMenuItems(subject: .artist(artist)) }
                     case .playlist(let summary):
                         if let playlist = summary.asPlaylist(discovery.sourceId) {
                             PinnedCard(title: summary.name, subtitle: "Playlist", route: .playlist(playlist)) {
                                 Cover(id: coverId(of: summary.covers.first) ?? playlist.id, size: 150)
                             }
+                            .contextMenu { CollectionMenuItems(subject: .playlist(summary)) }
                         }
                     }
                 }
