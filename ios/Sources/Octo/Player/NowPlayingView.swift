@@ -537,7 +537,8 @@ struct NowPlayingView: View {
 
     private var lookAsk: LookAsk {
         let coverId = player.current?.coverArt
-        return LookAsk(coverId: coverId, prefs: settings.player.background, live: settings.player.liveBackground,
+        // The classic mesh counts as moving only on a phone that can draw it.
+        return LookAsk(coverId: coverId, prefs: settings.player.background, live: settings.player.liveBackground && WashGPU.shared != nil,
                        artwork: colorStore.colors(for: coverId))
     }
 
