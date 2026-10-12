@@ -14,7 +14,7 @@ import OctoKit
 /// - `history` shows how many plays the history holds and the first day heading
 /// - `phone` shows the phone's music as the settings see it: access, songs, folders, protected songs
 /// - `download:TEXT` downloads the first library song a search for TEXT finds
-/// - `downloads` shows how many downloads there are in each state
+/// - `offline` shows how many downloads kept on the phone there are in each state
 /// - `refresh` runs a pull to refresh and shows how it went
 @MainActor
 enum DataDrive {
@@ -61,7 +61,7 @@ enum DataDrive {
             guard let song = await library.search(value).tracks.first else { show("No song for \(value)"); return true }
             data.offline.download([song.id])
             show("Download asked: \(song.title)")
-        case "downloads":
+        case "offline":
             let rows = data.offline.rows
             let states = Dictionary(grouping: rows, by: { "\($0.state)" }).map { "\($0.value.count) \($0.key)" }.sorted()
             show(rows.isEmpty ? "No downloads" : states.joined(separator: ", "))
