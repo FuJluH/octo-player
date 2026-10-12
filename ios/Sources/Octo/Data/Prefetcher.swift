@@ -2,12 +2,11 @@ import Foundation
 import Observation
 import OctoKit
 
-/// One queue entry as fetching ahead sees it: the song, where it streams from (nil for anything
-/// that is not a server song), and the key it is saved under.
+/// One queue entry as fetching ahead sees it: the song and its queue address (a server song's
+/// `octo-stream` address, or anything else, which is never fetched).
 struct PrefetchEntry: Equatable {
     var trackId: String
-    var url: URL?
-    var key: String?
+    var uri: String
 }
 
 /// The queue as fetching ahead sees it. The player hands it over whenever what comes next changes:
@@ -29,7 +28,9 @@ struct PrefetchQueue: Equatable {
 /// so they start at once and still play if the connection drops: 5 s after a song starts, one
 /// after another. How many depends on the connection (Wi-Fi and mobile data have their own
 /// counts). Any change to what comes next, or to the settings, starts it over; pausing stops it.
-/// Songs found online are never fetched ahead, only saved as they play.
+/// Songs found online are never fetched ahead, only saved as they play. Each song is pinned to
+/// the request it will play with and signed as its fetch goes out, through the same chain a deck
+/// opens it with.
 @MainActor
 final class Prefetcher {
     private let settings: AppSettings
@@ -40,8 +41,8 @@ final class Prefetcher {
     private var ahead: [PrefetchEntry] = []
     private var job: Task<Void, Never>?
     private var watch: Watch<OfflinePrefs>?
-    /// The headers the server needs on every request, and the trusted session.
-    var headers: @MainActor () -> [String: String] = { [:] }
+    /// The server in use and the stream size, as a deck would open a song now.
+    var context: @MainActor () -> StreamContext? = { nil }
 
     init(settings: AppSettings = .shared, connectivity: Connectivity, cache: StreamCache = .shared) {
         self.settings = settings
@@ -53,6 +54,7 @@ final class Prefetcher {
 
     /// What comes next changed.
     func update(_ queue: PrefetchQueue) {
+        guard queue != self.queue else { return }
         self.queue = queue
         refresh()
     }
@@ -65,12 +67,15 @@ final class Prefetcher {
             stop()
             ahead = next
             guard !next.isEmpty else { return }
-            let headers = headers()
             job = Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(prefetchStartAfterMs))
                 for entry in next {
                     if Task.isCancelled { return }
-                    guard let self, await self.fetch(entry, headers: headers) else { return }
+                    guard let self, let context = self.context() else { return }
+                    guard await Self.fetch(entry.uri, context: context) else {
+                        playbackLog.info("fetch ahead stopped")
+                        return
+                    }
                 }
             }
         }
@@ -90,18 +95,43 @@ final class Prefetcher {
         let entries = queue.entries
         let places = prefetchAhead(playOrder: queue.playOrder, current: queue.current, repeatMode: queue.repeatMode,
                                    playing: queue.playing, count: count) { place in
-            place < entries.count && prefetchFetchable(trackId: entries[place].trackId, isServerStream: entries[place].url != nil)
+            place < entries.count
+                && prefetchFetchable(trackId: entries[place].trackId, isServerStream: parseStreamUri(entries[place].uri) != nil)
         }
         return places.map { entries[$0] }
     }
 
+    /// How pinning and signing went: nothing to fetch (not a server song, not kept, or saved
+    /// whole already), a song to fetch under its saved name, or a refusal (no connection, no
+    /// server) that stops the run.
+    private enum Preparing: Sendable {
+        case skip
+        case fetch(key: String, request: URLRequest)
+        case stop
+    }
+
     /// Saves one song whole unless it already is. False when fetching should stop, such as when
-    /// the connection is gone.
-    private func fetch(_ entry: PrefetchEntry, headers: [String: String]) async -> Bool {
-        guard let url = entry.url, let key = entry.key else { return true }
-        if await cache.isFullySaved(key) { return true }
-        var request = URLRequest(url: url)
-        for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
+    /// the connection is gone or the server refused.
+    nonisolated private static func fetch(_ uri: String, context: StreamContext) async -> Bool {
+        // Pinning and signing wait on other threads, so they run away from the main thread.
+        let preparing: Preparing = await withCheckedContinuation { done in
+            DispatchQueue.global(qos: .utility).async {
+                guard let ref = parseStreamUri(uri) else { return done.resume(returning: .skip) }
+                let pinned = context.pinned(ref)
+                guard let key = context.savedKey(pinned) else { return done.resume(returning: .skip) }
+                if (try? blocking({ await StreamCache.shared.isFullySaved(key) })) == true {
+                    return done.resume(returning: .skip)
+                }
+                guard let request = try? context.sign(pinned) else { return done.resume(returning: .stop) }
+                done.resume(returning: .fetch(key: key, request: request))
+            }
+        }
+        let key: String, request: URLRequest
+        switch preparing {
+        case .skip: return true
+        case .stop: return false
+        case .fetch(let savedKey, let signed): (key, request) = (savedKey, signed)
+        }
         do {
             let (file, response) = try await ServerTrust.shared.session.download(for: request)
             defer { try? FileManager.default.removeItem(at: file) }
@@ -109,6 +139,7 @@ final class Prefetcher {
                   let handle = try? FileHandle(forReadingFrom: file)
             else { return false }
             defer { try? handle.close() }
+            let cache = StreamCache.shared
             var offset: Int64 = 0
             while let chunk = try handle.read(upToCount: 1 << 20), !chunk.isEmpty {
                 if Task.isCancelled { return false }

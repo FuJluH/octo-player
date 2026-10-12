@@ -54,7 +54,7 @@ final class DataServices {
         offline = OfflineDownloads(session: session, library: library, connectivity: connectivity, sync: serverSync) { words in announce(words, false) }
         marks = OfflineMarkings(downloads: offline, connectivity: connectivity)
         prefetcher = Prefetcher(connectivity: connectivity)
-        prefetcher.headers = { [weak session] in session?.client?.headers ?? [:] }
+        prefetcher.context = { [weak session] in session.map { StreamContext.now($0) } }
         controls = ServerControls(session: session, library: library, sync: serverSync)
         refresh = LibraryRefresh(device: device, sync: serverSync, downloads: downloads, session: session)
         serverSwitch = ServerSwitch(session: session, library: library, sync: serverSync, listening: listening,

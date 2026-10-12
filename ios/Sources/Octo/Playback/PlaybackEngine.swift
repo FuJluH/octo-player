@@ -515,9 +515,14 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
             lastState = now
             onStateChange?(now)
         }
-        if let item = queue.currentItem, lengthTold != item.entryId, let measured = measuredMs, measured > 0 {
-            lengthTold = item.entryId
-            onLengthFound?(item, measured)
+        // The length is taught each time the deck has a new measure of the song (a reopened
+        // source measures again); a live station's measure is never believed.
+        if let item = queue.currentItem, !item.isRadioStation, let measured = measuredMs, measured > 0 {
+            let told = "\(item.entryId ?? "")|\(measured)"
+            if lengthTold != told {
+                lengthTold = told
+                onLengthFound?(item, measured)
+            }
         }
         loadFollowingWhenNear()
         if (!playWhenReady || ended) && !playing && crossfader.outgoing == nil {

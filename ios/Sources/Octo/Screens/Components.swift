@@ -293,7 +293,7 @@ struct TrackRow: View {
     private var lengthSlot: some View {
         ZStack(alignment: .trailing) {
             Text(lengthSlotSample).hidden()
-            Text(rowLength(track.durationMs) ?? "")
+            Text(rowLength(shownLengthMs(track.durationMs, learnedMs: player.learnedLengths[track.id].map(Int64.init))) ?? "")
         }
         .font(.octoCaption.monospacedDigit())
         .foregroundStyle(OctoColor.textMuted)

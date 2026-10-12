@@ -42,6 +42,9 @@ final class Player {
     private(set) var playedSlots: [QueueSlot] = []
     /// True until the queue kept from last time is back.
     private(set) var restoring = true
+    /// The real lengths of songs whose listing was wrong, learned by playing them, by song id, so
+    /// rows show the length of the sound.
+    private(set) var learnedLengths: [String: Int] = [:]
 
     typealias RepeatMode = OctoKit.RepeatMode
 
@@ -160,6 +163,15 @@ final class Player {
         }
         engine.songSetUp = { [sound] item in sound.songSetUp(soundSong(item)) }
         wireEngine()
+        // A corrected length shows at once in the queue, the time line and the rows.
+        lengths.onChange = { [weak self] corrected in
+            Task { @MainActor in
+                guard let self else { return }
+                self.learnedLengths = corrected
+                self.publishQueue()
+                self.publishPosition()
+            }
+        }
         engine.output.onRouteChange = { [weak self] reason, now, before in self?.headset.routeChanged(reason, now: now, before: before) }
         followSettings()
         listenForApp()
@@ -615,7 +627,8 @@ final class Player {
             } else {
                 _ = self.lengths.learn(item.trackId, listedMs: item.durationMs, playerMs: measured)
             }
-            self.tracker.lengthFound(item.trackId, length: playingLengthMs(listedMs: item.durationMs, playerMs: measured))
+            self.tracker.lengthFound(item.trackId, length: playingLengthMs(listedMs: self.lengths.lengthMs(item.trackId, listedMs: item.durationMs),
+                                                                           playerMs: measured))
             self.publishPosition()
             self.publishQuality()
         }
@@ -632,6 +645,7 @@ final class Player {
         serverQueue.changed(queueSnapshot(), items: engine.queue.items)
         autoplay?.check()
         nowPlaying.publish()
+        updatePrefetch()
         ensureTicking()
     }
 
@@ -642,7 +656,22 @@ final class Player {
         publishPosition()
         nowPlaying.publish()
         autoplay?.check()
+        updatePrefetch()
         ensureTicking()
+    }
+
+    /// Hands fetching ahead what comes next: the queue in play order, repeat, and whether music plays.
+    private func updatePrefetch() {
+        guard let prefetcher = data?.prefetcher else { return }
+        let state = engine.queue
+        let repeatMode: PrefetchRepeat = switch state.repeatMode {
+        case .off: .off
+        case .one: .one
+        case .all: .all
+        }
+        prefetcher.update(PrefetchQueue(entries: state.items.map { PrefetchEntry(trackId: $0.trackId, uri: $0.uri) },
+                                        playOrder: state.playOrder(), current: state.current, repeatMode: repeatMode,
+                                        playing: engine.isPlaying))
     }
 
     private func queueChanged() {
@@ -657,6 +686,7 @@ final class Player {
         serverQueue.changed(queueSnapshot(), items: engine.queue.items)
         autoplay?.check()
         nowPlaying.publish()
+        updatePrefetch()
     }
 
     /// A song that fails while music should play is skipped with one line; once as many songs
@@ -735,7 +765,8 @@ final class Player {
     private func publishQueue() {
         let queueState = engine.queue
         items = queueState.items
-        queue = queueState.items.map(songOf)
+        // Each song shows the length of its sound once playing found its listing wrong.
+        queue = queueState.items.map { lengths.applyTo(songOf($0)) }
         index = queueState.current
         repeatMode = queueState.repeatMode
         shuffled = queueState.shuffle
