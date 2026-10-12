@@ -77,22 +77,3 @@ import Testing
     }
 }
 
-@Suite struct WhatsNewTests {
-    @Test func aFreshInstallHasNoNews() {
-        #expect(!whatsNewDue(lastSeen: nil, current: 3, freshInstall: true))
-    }
-
-    @Test func theFirstUpdateSinceTheCardExistedShowsIt() {
-        #expect(whatsNewDue(lastSeen: nil, current: 3, freshInstall: false))
-    }
-
-    @Test func itShowsOncePerVersion() {
-        #expect(whatsNewDue(lastSeen: 2, current: 3, freshInstall: false))
-        #expect(!whatsNewDue(lastSeen: 3, current: 3, freshInstall: false))
-    }
-
-    @Test func theHomeCardLineIsShortAndPlain() {
-        #expect(whatsNewSummary.count <= 70)
-        #expect(!whatsNewSummary.unicodeScalars.contains { $0.value == 0x2014 || $0.value == 0x2013 })
-    }
-}

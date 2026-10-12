@@ -12,12 +12,6 @@ enum DiscoveryStyle {
     static let red = Color(hex: 0xFF3B30)
 }
 
-/// Whether Octo's own Reduce motion is on; the phone's setting counts too.
-let reduceMotionKey = "motion.reduce"
-
-/// The app-wide "Library songs only" switch.
-let libraryOnlyKey = "library.only"
-
 /// A small text button for a lesser action beside a title, like "See all" or "Clear all": no
 /// border and no fill.
 struct QuietAction: View {

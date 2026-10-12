@@ -10,7 +10,7 @@ struct FindSwap<Content: View>: View {
     @ViewBuilder let content: (Song) -> Content
     @Environment(Downloads.self) private var downloads
     @Environment(\.accessibilityReduceMotion) private var systemCalm
-    @AppStorage(reduceMotionKey) private var appCalm = false
+    private var appCalm: Bool { AppSettings.shared.player.reduceMotion }
     @State private var face: FindFace?
     @State private var sawFind = false
 

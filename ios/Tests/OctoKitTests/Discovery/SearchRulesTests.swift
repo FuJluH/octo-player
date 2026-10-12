@@ -185,7 +185,7 @@ private func artist(_ id: String, _ name: String) -> Artist {
     }
 
     @Test func theWordsHaveNoDashes() {
-        for words in [libraryOnlySetting, libraryOnlyHelp, onlyMySongs] {
+        for words in [LibraryOnlyWords.setting, LibraryOnlyWords.help, LibraryOnlyWords.onlyMySongs] {
             #expect(!words.unicodeScalars.contains { $0.value == 0x2014 || $0.value == 0x2013 })
         }
     }

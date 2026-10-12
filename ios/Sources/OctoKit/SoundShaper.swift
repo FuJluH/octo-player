@@ -3,6 +3,17 @@ import Foundation
 /// How long a change of level, balance or curve takes, so it never clicks.
 public let glideMs = 30.0
 
+/// Moves the first `written` frames of each buffer to the end of its `frames`, with silence
+/// before them.
+func shiftToEnd(_ buffers: [UnsafeMutablePointer<Float>], frames: Int, written: Int) {
+    guard written < frames else { return }
+    let gap = frames - written
+    for buffer in buffers {
+        if written > 0 { memmove(buffer + gap, buffer, written * MemoryLayout<Float>.stride) }
+        buffer.update(repeating: 0, count: gap)
+    }
+}
+
 extension SoundSettings {
     /// Whether these settings ask for any shaping at all.
     public var shapesSound: Bool {
@@ -84,8 +95,7 @@ public final class SoundShaper: @unchecked Sendable {
         started = true
         let frames = now ? 0 : glideFrames
 
-        let bands = settings.activeFilters().filter { $0.frequency < sampleRate * highestBandShare }
-            .map { coefficients($0, sampleRate: sampleRate) }
+        let bands = bandCoefficients(settings.activeFilters(), sampleRate: sampleRate)
         if bands != bankCoefficients {
             let next = FilterBank(channels: channels, coefficients: bands)
             next.continueFrom(bank)
@@ -112,15 +122,28 @@ public final class SoundShaper: @unchecked Sendable {
         limiter.enabled = settings.limiter && !untouched
     }
 
-    /// Shapes `frames` frames in place, one buffer per channel. The sound comes out the
-    /// limiter's latency late.
+    /// Shapes `frames` frames of `input` (changed on the way) and writes what comes out of the
+    /// limiter to `output`, which may be the same buffers. Returns the frames written: fewer
+    /// than went in only while the limiter's delay fills at the start of a stream.
+    public func process(_ input: [UnsafeMutablePointer<Float>], frames: Int, output: [UnsafeMutablePointer<Float>]) -> Int {
+        guard input.count == channels, output.count == channels, frames > 0 else { return 0 }
+        applyGain(input, frames)
+        applyFilters(input, frames)
+        applyMix(input, frames)
+        return limiter.process(input, frames: frames, output: output)
+    }
+
+    /// Shapes `frames` frames in place, one buffer per channel, the same number out as in. The
+    /// sound comes out the limiter's latency late, after silence at the start of a stream.
     public func process(_ buffers: [UnsafeMutablePointer<Float>], frames: Int) {
         guard buffers.count == channels, frames > 0 else { return }
-        applyGain(buffers, frames)
-        applyFilters(buffers, frames)
-        applyMix(buffers, frames)
-        limiter.process(buffers, frames: frames)
+        let written = process(buffers, frames: frames, output: buffers)
+        shiftToEnd(buffers, frames: frames, written: written)
     }
+
+    /// Hands out the sound still held back, at the end of a stream. `output` needs room for
+    /// `latency` frames.
+    public func drain(_ output: [UnsafeMutablePointer<Float>]) -> Int { limiter.drain(output) }
 
     /// Forgets the sound held back, after a jump to another place.
     public func clearHeld() { limiter.clear() }

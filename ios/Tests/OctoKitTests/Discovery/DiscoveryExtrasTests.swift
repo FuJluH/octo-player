@@ -117,7 +117,7 @@ private func sent(_ id: String, _ number: Int?, outside: Bool, disc: Int? = 1) -
     }
 }
 
-private final class Clock: @unchecked Sendable {
+private final class SuggestionClock: @unchecked Sendable {
     private let lock = NSLock()
     private var value: Int64 = 0
     var now: Int64 {
@@ -128,7 +128,7 @@ private final class Clock: @unchecked Sendable {
 
 @Suite struct RadioSuggestionsTests {
     @Test func theOldestAnswersGoPastTheCap() {
-        let clock = Clock()
+        let clock = SuggestionClock()
         let kept = RadioSuggestions(kept: 2, lifetimeMs: 1_000, now: { clock.now })
         kept.putAll(["a": "Deezer"])
         kept.putAll(["b": "Last.fm"])
@@ -139,7 +139,7 @@ private final class Clock: @unchecked Sendable {
     }
 
     @Test func aSongSuggestedAgainMovesToTheNewestEnd() {
-        let clock = Clock()
+        let clock = SuggestionClock()
         let kept = RadioSuggestions(kept: 2, lifetimeMs: 1_000, now: { clock.now })
         kept.putAll(["a": "Deezer"])
         kept.putAll(["b": "Last.fm"])
@@ -150,7 +150,7 @@ private final class Clock: @unchecked Sendable {
     }
 
     @Test func anOldAnswerIsForgotten() {
-        let clock = Clock()
+        let clock = SuggestionClock()
         let kept = RadioSuggestions(kept: 10, lifetimeMs: 1_000, now: { clock.now })
         kept.putAll(["a": "Deezer"])
         clock.now = 1_000

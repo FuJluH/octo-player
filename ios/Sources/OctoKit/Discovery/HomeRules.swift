@@ -1,12 +1,5 @@
 import Foundation
 
-/// Whether the app may read the music on the phone.
-public enum PhoneAccess: Sendable, Equatable {
-    case notAsked, granted, denied
-    /// Refused, and the system no longer asks: only Settings can allow it now.
-    case deniedForever
-}
-
 /// What Home shows besides the resume card.
 public struct HomeLayout: Sendable, Equatable {
     /// The quiet card asking for the music on the phone.
@@ -63,14 +56,4 @@ public func madeForYouLists(_ playlists: [Playlist]) -> [Playlist] {
         let kb = octoListKinds.firstIndex(of: b.element.octoList ?? "") ?? octoListKinds.count
         return ka != kb ? ka < kb : a.offset < b.offset
     }.map(\.element)
-}
-
-/// The one line the card on Home shows. Kept short.
-public let whatsNewSummary = "A new equalizer, sorting, favorites, downloads and much more"
-
-/// Whether the card about what is new should show: once after each update, but not on a fresh
-/// install, which has nothing to compare with.
-public func whatsNewDue(lastSeen: Int?, current: Int, freshInstall: Bool) -> Bool {
-    guard let lastSeen else { return !freshInstall }
-    return lastSeen < current
 }

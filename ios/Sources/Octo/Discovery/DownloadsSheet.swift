@@ -303,7 +303,7 @@ private struct StepsStrip: View {
     let row: DownloadRow
     let at: Int
     @Environment(\.accessibilityReduceMotion) private var systemCalm
-    @AppStorage(reduceMotionKey) private var appCalm = false
+    private var appCalm: Bool { AppSettings.shared.player.reduceMotion }
 
     var body: some View {
         let failed = row.phase == .failed

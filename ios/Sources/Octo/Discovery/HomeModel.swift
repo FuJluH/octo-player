@@ -146,7 +146,6 @@ final class HomeModel {
     private(set) var access: PhoneAccess = HomeModel.phoneAccess()
     /// Whether "Not now" put the access card away; nil until read.
     private(set) var accessDismissed: Bool?
-    private(set) var whatsNewDue = false
 
     @ObservationIgnored private var library: HomeLibrary?
     @ObservationIgnored private var discovery: Discovery?
@@ -159,15 +158,16 @@ final class HomeModel {
     @ObservationIgnored private var stationsFrom: String??
     @ObservationIgnored private var rolledFor: String?
 
-    private static let accessDismissedKey = "home.phone_access_dismissed"
-    private static let whatsNewKey = "whats_new.last_seen_version"
+    /// What Home remembers between runs, in its own store ("home").
+    private static let prefs = UserDefaults(suiteName: "home") ?? .standard
+    private static let accessDismissedKey = "phone_access_dismissed"
 
     func attach(library: HomeLibrary, discovery: Discovery, player: Player, router: Router) {
         self.library = library
         self.discovery = discovery
         self.player = player
         self.router = router
-        accessDismissed = UserDefaults.standard.bool(forKey: Self.accessDismissedKey)
+        accessDismissed = Self.prefs.bool(forKey: Self.accessDismissedKey)
         settleWhatsNew()
     }
 
@@ -319,28 +319,16 @@ final class HomeModel {
 
     /// "Not now" on the phone access card, kept for next time.
     func dismissAccess() {
-        UserDefaults.standard.set(true, forKey: Self.accessDismissedKey)
+        Self.prefs.set(true, forKey: Self.accessDismissedKey)
         accessDismissed = true
     }
 
-    static var versionCode: Int {
-        Int(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0
-    }
+    /// Whether the What's new card shows: once after each update, not on a fresh install.
+    var whatsNewDue: Bool { WhatsNewStore.shared.due }
 
     /// A fresh install starts having seen this version, so later updates know where they stand.
-    func settleWhatsNew() {
-        let defaults = UserDefaults.standard
-        let seen = defaults.object(forKey: Self.whatsNewKey) as? Int
-        // Installed and never used before this run: no server was ever kept.
-        let fresh = defaults.object(forKey: "servers") == nil
-        if seen == nil && fresh { defaults.set(Self.versionCode, forKey: Self.whatsNewKey) }
-        whatsNewDue = OctoKit.whatsNewDue(lastSeen: defaults.object(forKey: Self.whatsNewKey) as? Int, current: Self.versionCode,
-                                          freshInstall: fresh)
-    }
+    func settleWhatsNew() { WhatsNewStore.shared.settle() }
 
     /// Reading the notes or closing the card puts it away until the next update.
-    func dismissWhatsNew() {
-        UserDefaults.standard.set(Self.versionCode, forKey: Self.whatsNewKey)
-        whatsNewDue = false
-    }
+    func dismissWhatsNew() { WhatsNewStore.shared.markSeen() }
 }

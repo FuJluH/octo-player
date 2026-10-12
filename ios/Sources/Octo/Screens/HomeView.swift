@@ -65,10 +65,7 @@ struct HomeView: View {
         }
         .onChange(of: discovery.stationsFrom, initial: true) { _, _ in model.stationsSourceChanged() }
         .onChange(of: scenePhase) { _, phase in if phase == .active { model.shown() } }
-        .sheet(isPresented: $reading, onDismiss: model.dismissWhatsNew) { WhatsNewPanel() }
-        #if DEBUG
-        .onReceive(NotificationCenter.default.publisher(for: .driveWhatsNew)) { _ in model.settleWhatsNew() }
-        #endif
+        .whatsNewPanel(isPresented: $reading) { model.dismissWhatsNew() }
     }
 
     // MARK: Shelves
@@ -172,7 +169,7 @@ struct HomeView: View {
     private var whatsNewCard: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("New in Octo").font(.octoCaption).foregroundStyle(OctoColor.textMuted)
-            Text(whatsNewSummary).font(.octoBody).foregroundStyle(.white).lineLimit(2)
+            Text(WhatsNew.summary).font(.octoBody).foregroundStyle(.white).lineLimit(2)
             HStack(spacing: 12) {
                 Button("See what's new") { reading = true }.buttonStyle(.glass)
                 Button("Dismiss") { model.dismissWhatsNew() }.buttonStyle(.glass)

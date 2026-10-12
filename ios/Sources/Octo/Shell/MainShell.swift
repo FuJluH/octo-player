@@ -37,6 +37,8 @@ enum Route: Hashable {
     /// A live list, and its editor (a new one when `id` is nil).
     case liveList(id: String)
     case liveListEditor(id: String?)
+    /// The Sound page: equalizer, loudness, balance and headphone correction.
+    case sound
 }
 
 /// The app's frame: every tab's pages, kept alive while another tab is in front, the floating
@@ -191,6 +193,7 @@ extension View {
                 case .charts: ChartsView()
                 case .liveList(let id): LiveListView(id: id)
                 case .liveListEditor(let id): LiveListEditView(id: id)
+                case .sound: SoundPage()
                 }
             }
             .detailPage()

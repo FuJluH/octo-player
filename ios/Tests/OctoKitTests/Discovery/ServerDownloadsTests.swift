@@ -438,7 +438,7 @@ private let instant: Sleeper = { _ in await Task.yield() }
     }
 
     @Test func theWatchSaysWhenItsNewestListWasAskedFor() async {
-        let clock = Clock()
+        let clock = WatchClock()
         clock.now = now
         let source = FakeDownloads()
         source.list = [download("s:a", "downloading")]
@@ -668,7 +668,7 @@ private let instant: Sleeper = { _ in await Task.yield() }
     }
 }
 
-private final class Clock: @unchecked Sendable {
+private final class WatchClock: @unchecked Sendable {
     private let lock = NSLock()
     private var _now: Int64 = 0
     var now: Int64 {

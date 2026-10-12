@@ -12,7 +12,7 @@ struct SearchView: View {
     @Environment(Library.self) private var library
     @State private var model = SearchModel()
     @State private var listWidth: CGFloat = 390
-    @AppStorage(libraryOnlyKey) private var libraryOnly = false
+    private var libraryOnly: Bool { AppSettings.shared.player.libraryOnly }
     @AppStorage(SearchModel.hintAddedKey) private var hintAdded = false
     @AppStorage(SearchModel.hintShownKey) private var hintShown = 0
     @FocusState private var focused: Bool
@@ -29,7 +29,7 @@ struct SearchView: View {
             .padding(.horizontal, 20)
             .padding(.top, 12)
             if model.signedIn {
-                OnOffChip(text: libraryOnlySetting, on: libraryOnly) { libraryOnly.toggle() }
+                OnOffChip(text: LibraryOnlyWords.setting, on: libraryOnly) { AppSettings.shared.setLibraryOnly(!libraryOnly) }
                     .padding(.leading, 20)
                     .padding(.top, 10)
             }
@@ -417,7 +417,5 @@ private extension DiscoverState {
 extension Notification.Name {
     /// Sets Search's field, from a launch step.
     static let driveSearch = Notification.Name("octo.drive.search")
-    /// Shows the What's new card again, from a launch step.
-    static let driveWhatsNew = Notification.Name("octo.drive.whatsnew")
 }
 #endif

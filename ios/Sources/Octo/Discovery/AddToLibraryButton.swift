@@ -12,7 +12,7 @@ struct AddToLibraryButton: View {
     @Environment(Downloads.self) private var downloads
     @Environment(Router.self) private var router
     @Environment(\.accessibilityReduceMotion) private var systemCalm
-    @AppStorage(reduceMotionKey) private var appCalm = false
+    private var appCalm: Bool { AppSettings.shared.player.reduceMotion }
     @State private var release: (@Sendable () -> Void)?
 
     var body: some View {

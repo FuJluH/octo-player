@@ -9,7 +9,7 @@ struct DownloadsPill: View {
     @Environment(ServerDownloads.self) private var serverDownloads
     @Environment(Downloads.self) private var downloads
     @Environment(\.accessibilityReduceMotion) private var systemCalm
-    @AppStorage(reduceMotionKey) private var appCalm = false
+    private var appCalm: Bool { AppSettings.shared.player.reduceMotion }
     /// Moves on when the oldest ask counted runs out, so the count is worked out again.
     @State private var tick = 0
 
