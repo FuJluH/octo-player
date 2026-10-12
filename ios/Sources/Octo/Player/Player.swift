@@ -19,17 +19,40 @@ final class Player {
     private(set) var duration: TimeInterval = 0
     /// The song radio was started from, while the queue is a radio.
     private(set) var radioSeed: Song?
+    private(set) var repeatMode: RepeatMode = .off
+    private(set) var shuffled = false
+    /// Playback speed, 0.5 to 2.
+    private(set) var speed: Float = 1
+    /// Whether voices keep their pitch at other speeds.
+    private(set) var keepsPitch = true
+    private(set) var sleep: SleepTimer?
+
+    enum RepeatMode { case off, all, one }
+
+    /// When the music stops on its own.
+    enum SleepTimer: Equatable {
+        case at(Date)
+        /// After this many more songs end, counting the one playing.
+        case afterSongs(Int)
+    }
 
     var current: Song? { queue.indices.contains(index) ? queue[index] : nil }
+    /// How far through the song, from 0 to 1.
+    var progress: Double { duration > 0 ? min(elapsed / duration, 1) : 0 }
     var upNext: ArraySlice<Song> { queue.indices.contains(index + 1) ? queue[(index + 1)...] : [] }
 
     @ObservationIgnored private let engine = AVQueuePlayer()
     @ObservationIgnored private var itemIndex: [ObjectIdentifier: Int] = [:]
+    /// The loaders behind trusted-stream assets, kept as long as their asset is queued.
+    @ObservationIgnored private var streams: [ObjectIdentifier: TrustedStream] = [:]
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
     @ObservationIgnored private var timeObserver: Any?
     @ObservationIgnored private var listen = Listen()
     @ObservationIgnored private var refilling = false
     @ObservationIgnored private let session: Session
+    /// The queue as it was before shuffling, to go back to.
+    @ObservationIgnored private var unshuffled: [Song]?
+    @ObservationIgnored private weak var lastItem: AVPlayerItem?
 
     init(session: Session) {
         self.session = session
@@ -72,6 +95,12 @@ final class Player {
         play(songs.shuffled())
     }
 
+    /// With nothing loaded, the play button shuffles the whole library.
+    func shuffleLibrary() async {
+        guard let client = session.client, let songs = try? await client.randomSongs(count: 100), !songs.isEmpty else { return }
+        play(songs)
+    }
+
     /// Radio from a song: it plays at once and the server's mix follows it.
     func startRadio(from song: Song) async {
         guard let client = session.client else { return }
@@ -83,6 +112,88 @@ final class Player {
 
     func toggle() {
         if isPlaying { pause() } else { resume() }
+    }
+
+    /// The position that plays after `position`, given repeat.
+    private func position(after position: Int) -> Int? {
+        if repeatMode == .one { return position }
+        if position + 1 < queue.count { return position + 1 }
+        return repeatMode == .all && !queue.isEmpty ? 0 : nil
+    }
+
+    func cycleRepeat() {
+        repeatMode = switch repeatMode {
+        case .off: .all
+        case .all: .one
+        case .one: .off
+        }
+        reloadUpcoming()
+    }
+
+    /// Shuffling keeps the song playing first and mixes the rest; turning it off puts the queue
+    /// back the way it was, at the same song.
+    func toggleShuffle() {
+        guard let song = current else { shuffled.toggle(); return }
+        if shuffled, let original = unshuffled {
+            queue = original
+            index = original.firstIndex(of: song) ?? 0
+            unshuffled = nil
+            shuffled = false
+        } else {
+            unshuffled = queue
+            var rest = queue
+            rest.remove(at: index)
+            queue = [song] + rest.shuffled()
+            index = 0
+            shuffled = true
+        }
+        reloadUpcoming()
+        publishNowPlaying()
+    }
+
+    func setSpeed(_ value: Float) {
+        speed = min(max(value, 0.5), 2)
+        engine.defaultRate = speed
+        if engine.timeControlStatus != .paused { engine.rate = speed }
+        publishNowPlaying()
+    }
+
+    func setKeepsPitch(_ on: Bool) {
+        keepsPitch = on
+        for item in engine.items() { item.audioTimePitchAlgorithm = on ? .timeDomain : .varispeed }
+    }
+
+    func setSleep(_ timer: SleepTimer?) {
+        sleep = timer
+        engine.volume = 1
+    }
+
+    /// Songs not yet played go; the one playing stays.
+    func clearUpcoming() {
+        guard current != nil else { return }
+        queue.removeSubrange((index + 1)...)
+        unshuffled = nil
+        reloadUpcoming()
+    }
+
+    func removePlayed() {
+        guard index > 0 else { return }
+        queue.removeSubrange(0..<index)
+        index = 0
+        unshuffled = nil
+        publishNowPlaying()
+    }
+
+    /// The queue as it is, to put back with Undo.
+    var snapshot: QueueSnapshot { QueueSnapshot(songs: queue, index: index) }
+
+    struct QueueSnapshot { let songs: [Song]; let index: Int }
+
+    func restore(_ snapshot: QueueSnapshot) {
+        let playingId = current?.id
+        queue = snapshot.songs
+        index = snapshot.songs.firstIndex { $0.id == playingId } ?? min(snapshot.index, max(snapshot.songs.count - 1, 0))
+        reloadUpcoming()
     }
 
     func resume() {
@@ -110,14 +221,19 @@ final class Player {
         publishNowPlaying()
     }
 
+    /// Next always moves on, even when repeating one song.
     func next() {
-        guard index + 1 < queue.count else { return }
-        if engine.items().count > 1 {
+        guard current != nil else { return }
+        let following = index + 1 < queue.count ? index + 1 : (repeatMode == .off ? nil : 0)
+        guard let following else { return }
+        if engine.items().count > 1, following == position(after: index) {
             engine.advanceToNextItem()
         } else {
-            load(at: index + 1, playing: true)
+            load(at: following, playing: true)
         }
     }
+
+    var hasNext: Bool { current != nil && (index + 1 < queue.count || repeatMode != .off) }
 
     /// Back to the start of the song, or to the one before when the song has barely begun.
     func previous() {
@@ -176,7 +292,7 @@ final class Player {
         elapsed = 0
         duration = TimeInterval(queue[position].duration)
         enqueue(position)
-        if position + 1 < queue.count { enqueue(position + 1) }
+        if let following = self.position(after: position) { enqueue(following) }
         songBegan()
         if playing {
             activateAudioSession()
@@ -190,17 +306,28 @@ final class Player {
             engine.remove(item)
             itemIndex[ObjectIdentifier(item)] = nil
         }
-        if index + 1 < queue.count { enqueue(index + 1) }
+        if current != nil, let following = position(after: index) { enqueue(following) }
     }
 
     private func enqueue(_ position: Int) {
         guard let client = session.client else { return }
         let song = queue[position]
-        let asset = AVURLAsset(url: client.streamURL(for: song, quality: session.quality), options: [
-            "AVURLAssetHTTPHeaderFieldsKey": client.device.headers,
-            AVURLAssetHTTPUserAgentKey: client.userAgent,
-        ])
+        let url = client.streamURL(for: song, quality: session.quality)
+        let asset: AVURLAsset
+        if ServerTrust.shared.isPinned(url.host) || ServerTrust.shared.hasClientCertificate {
+            // Apple's player cannot be told about a pinned certificate or a client certificate,
+            // so these servers stream through the app's own session.
+            let stream = TrustedStream(headers: client.headers)
+            asset = stream.asset(for: url)
+            streams[ObjectIdentifier(asset)] = stream
+        } else {
+            asset = AVURLAsset(url: url, options: [
+                "AVURLAssetHTTPHeaderFieldsKey": client.customHeaders.merging(client.device.headers) { $1 },
+                AVURLAssetHTTPUserAgentKey: client.userAgent,
+            ])
+        }
         let item = AVPlayerItem(asset: asset)
+        item.audioTimePitchAlgorithm = keepsPitch ? .timeDomain : .varispeed
         itemIndex[ObjectIdentifier(item)] = position
         engine.insert(item, after: engine.items().last)
     }
@@ -212,7 +339,12 @@ final class Player {
             return
         }
         guard let position = itemIndex[ObjectIdentifier(item)] else { return }
-        if position != index {
+        let fresh = item !== lastItem
+        lastItem = item
+        if fresh, position != index || repeatMode == .one, listen.songId != nil {
+            songEnded()
+        }
+        if position != index || (fresh && repeatMode == .one && listen.played > 0) {
             index = position
             elapsed = 0
             duration = TimeInterval(queue[position].duration)
@@ -220,7 +352,9 @@ final class Player {
         }
         let loaded = Set(engine.items().map(ObjectIdentifier.init))
         itemIndex = itemIndex.filter { loaded.contains($0.key) }
-        if engine.items().count < 2, index + 1 < queue.count { enqueue(index + 1) }
+        let assets = Set(engine.items().map { ObjectIdentifier($0.asset) })
+        streams = streams.filter { assets.contains($0.key) }
+        if engine.items().count < 2, let following = self.position(after: index) { enqueue(following) }
     }
 
     private func statusChanged() {
@@ -240,6 +374,31 @@ final class Player {
             heard(step)
         }
         refillRadioIfNeeded()
+        applySleep()
+    }
+
+    /// A timer fades the music out over its last 30 seconds, then pauses.
+    private func applySleep() {
+        guard case .at(let date) = sleep else { return }
+        let left = date.timeIntervalSinceNow
+        if left <= 0 {
+            pause()
+            sleep = nil
+            engine.volume = 1
+        } else if left < 30 {
+            engine.volume = Float(left / 30)
+        }
+    }
+
+    /// A song ended: counts down a stop-after-songs timer.
+    private func songEnded() {
+        guard case .afterSongs(let count) = sleep else { return }
+        if count <= 1 {
+            sleep = nil
+            pause()
+        } else {
+            sleep = .afterSongs(count - 1)
+        }
     }
 
     // MARK: Plays and now playing
@@ -303,7 +462,8 @@ final class Player {
             MPMediaItemPropertyAlbumTitle: song.album ?? "",
             MPMediaItemPropertyPlaybackDuration: duration,
             MPNowPlayingInfoPropertyElapsedPlaybackTime: elapsed,
-            MPNowPlayingInfoPropertyPlaybackRate: engine.timeControlStatus == .playing ? 1.0 : 0.0,
+            MPNowPlayingInfoPropertyPlaybackRate: engine.timeControlStatus == .playing ? Double(speed) : 0.0,
+            MPNowPlayingInfoPropertyDefaultPlaybackRate: Double(speed),
             MPNowPlayingInfoPropertyPlaybackQueueIndex: index,
             MPNowPlayingInfoPropertyPlaybackQueueCount: queue.count,
             MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,

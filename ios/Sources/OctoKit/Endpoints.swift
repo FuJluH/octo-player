@@ -41,6 +41,12 @@ extension SubsonicClient {
         )
     }
 
+    /// Who an API key belongs to.
+    public func tokenInfo() async throws -> String {
+        let body: TokenInfo = try await get("tokenInfo", key: "tokenInfo")
+        return body.username
+    }
+
     public func albumList(_ type: AlbumListType, size: Int = 30, offset: Int = 0) async throws -> [Album] {
         let list: AlbumListBody = try await get(
             "getAlbumList2", [("type", type.rawValue), ("size", "\(size)"), ("offset", "\(offset)")], key: "albumList2")
@@ -174,5 +180,175 @@ struct PlaylistsBody: Decodable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: AnyKey.self)
         playlist = (try? c.decodeIfPresent([Playlist].self, forKey: AnyKey("playlist"))) ?? []
+    }
+}
+
+struct TokenInfo: Decodable {
+    let username: String
+}
+
+/// One ranked song in a chart or an artist's top songs. A song the library has comes as the
+/// library's song; any other is one found online, marked isExternal.
+public struct TopSong: Decodable, Sendable, Identifiable {
+    public var rank: Int
+    public var plays: Int?
+    public var inLibrary: Bool
+    public var song: Song?
+    public var id: String { song?.id ?? "rank-\(rank)" }
+
+    enum CodingKeys: String, CodingKey { case rank, plays, inLibrary, song }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        rank = c.int(.rank) ?? 0
+        plays = c.int(.plays)
+        inLibrary = c.bool(.inLibrary) ?? false
+        song = try? c.decodeIfPresent(Song.self, forKey: .song)
+    }
+}
+
+/// A ranked list: an artist's, or a chart with its name and country.
+public struct TopSongs: Decodable, Sendable {
+    public var artist: String?
+    public var source: String
+    public var chart: String?
+    public var name: String?
+    public var country: String?
+    public var entry: [TopSong]
+
+    enum CodingKeys: String, CodingKey { case artist, source, chart, name, country, entry }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        artist = c.string(.artist)
+        source = c.string(.source) ?? ""
+        chart = c.string(.chart)
+        name = c.string(.name)
+        country = c.string(.country)
+        entry = (try? c.decodeIfPresent([TopSong].self, forKey: .entry)) ?? []
+    }
+
+    public var songs: [Song] { entry.compactMap(\.song) }
+}
+
+/// An internet radio station. On Octo each station is also a read-only playlist of its songs.
+public struct RadioStation: Decodable, Sendable, Identifiable, Hashable {
+    public var id: String
+    public var name: String
+    public var streamUrl: String?
+    public var coverArt: String?
+
+    enum CodingKeys: String, CodingKey { case id, name, streamUrl, coverArt }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.id(.id)
+        name = c.string(.name) ?? ""
+        streamUrl = c.string(.streamUrl)
+        coverArt = c.string(.coverArt)
+    }
+}
+
+struct StationsBody: Decodable {
+    let internetRadioStation: [RadioStation]
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        internetRadioStation = (try? c.decodeIfPresent([RadioStation].self, forKey: AnyKey("internetRadioStation"))) ?? []
+    }
+}
+
+/// The chart ids getTopChart takes: the overall chart, Best New Songs, Trending; any other is
+/// an Apple genre's number.
+public enum Charts {
+    public static let overall = "34"
+    public static let newSongs = "new"
+    public static let trending = "trending"
+}
+
+extension SubsonicClient {
+    /// A chart from Octo (octoTopSongs; version 2 takes a chart id).
+    public func topChart(count: Int = 20, chart: String? = nil) async throws -> TopSongs {
+        var params = [("count", "\(count)")]
+        if let chart { params.append(("chart", chart)) }
+        return try await get("getTopChart", params, key: "topSongs")
+    }
+
+    /// The most played songs of an artist, ranked by the server's source.
+    public func artistTopSongs(artist: String, id: String?, count: Int = 20) async throws -> TopSongs {
+        var params = [("artist", artist), ("count", "\(count)")]
+        if let id { params.append(("id", id)) }
+        return try await get("getArtistTopSongs", params, key: "topSongs")
+    }
+
+    /// Octo builds its stations the first time they are asked for after it starts, so this may
+    /// take minutes.
+    public func stations() async throws -> [RadioStation] {
+        let body: StationsBody = try await get("getInternetRadioStations", key: "internetRadioStations", timeout: 180)
+        return body.internetRadioStation
+    }
+}
+
+/// One line of lyrics; `start` is in milliseconds when the lyrics are synced.
+public struct LyricsLine: Decodable, Sendable, Equatable {
+    public var start: Int?
+    public var value: String
+
+    enum CodingKeys: String, CodingKey { case start, value }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        start = c.int(.start)
+        value = c.string(.value) ?? ""
+    }
+
+    public init(start: Int?, value: String) {
+        self.start = start
+        self.value = value
+    }
+}
+
+/// A song's lyrics as an OpenSubsonic server sends them.
+public struct StructuredLyrics: Decodable, Sendable, Equatable {
+    public var lang: String?
+    public var synced: Bool
+    /// Milliseconds to add to every line's start.
+    public var offset: Int
+    public var line: [LyricsLine]
+
+    enum CodingKeys: String, CodingKey { case lang, synced, offset, line }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        lang = c.string(.lang)
+        synced = c.bool(.synced) ?? false
+        offset = c.int(.offset) ?? 0
+        line = (try? c.decodeIfPresent([LyricsLine].self, forKey: .line)) ?? []
+    }
+
+    /// The line sung at `seconds`, for synced lyrics.
+    public func lineIndex(at seconds: Double) -> Int? {
+        guard synced else { return nil }
+        let ms = Int(seconds * 1000) - offset
+        return line.lastIndex { ($0.start ?? .max) <= ms }
+    }
+}
+
+struct LyricsListBody: Decodable {
+    let structuredLyrics: [StructuredLyrics]
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        structuredLyrics = (try? c.decodeIfPresent([StructuredLyrics].self, forKey: AnyKey("structuredLyrics"))) ?? []
+    }
+}
+
+extension SubsonicClient {
+    /// A song's lyrics, synced ones first.
+    public func lyrics(songId: String) async throws -> StructuredLyrics? {
+        let body: LyricsListBody = try await get("getLyricsBySongId", [("id", songId)], key: "lyricsList")
+        return body.structuredLyrics.first(where: \.synced) ?? body.structuredLyrics.first
+    }
+
+    public func createPlaylist(name: String, songIds: [String]) async throws {
+        try await call("createPlaylist", [("name", name)] + songIds.map { ("songId", $0) })
     }
 }

@@ -1,207 +1,335 @@
-import AVKit
 import OctoKit
 import SwiftUI
 import UIKit
 
-/// The mini player, in the tab bar's glass accessory.
-struct MiniPlayer: View {
-    let open: () -> Void
-    @Environment(Player.self) private var player
-    @Environment(\.tabViewBottomAccessoryPlacement) private var placement
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Cover(id: player.current?.coverArt, size: 34, radius: 6)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(player.current?.title ?? "")
-                    .font(.octoBodySmall.weight(.semibold))
-                    .lineLimit(1)
-                if placement != .inline {
-                    Text(player.current?.byline ?? "")
-                        .font(.octoCaption)
-                        .foregroundStyle(OctoColor.textSecondary)
-                        .lineLimit(1)
-                }
-            }
-            Spacer(minLength: 4)
-            Button(action: player.toggle) {
-                Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 18, weight: .semibold))
-                    .frame(width: 36, height: 36)
-                    .contentTransition(.symbolEffect(.replace))
-            }
-            .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
-            if placement != .inline {
-                Button(action: player.next) {
-                    Image(systemName: "forward.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .frame(width: 36, height: 36)
-                }
-                .accessibilityLabel("Next")
-                .disabled(player.upNext.isEmpty)
-            }
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 12)
-        .contentShape(Rectangle())
-        .onTapGesture(perform: open)
-    }
-}
-
-/// The full player. The art sits on a wash of its own colours; every control is on glass.
+/// The full player. Every control sits on the cover's own drifting wash; the words take
+/// whichever colour reads on it. Pull down anywhere to close.
 struct NowPlayingView: View {
+    let dismiss: () -> Void
     @Environment(Player.self) private var player
     @Environment(Session.self) private var session
-    @Environment(\.dismiss) private var dismiss
+    @Environment(Router.self) private var router
+    @State private var tone = CoverTone()
     @State private var scrubbing: Double?
+    @State private var pull: CGFloat = 0
+    @State private var lyricsOpen = false
     @State private var showsQueue = false
+    @State private var showsTime = false
     @State private var starred: [String: Bool] = [:]
+    @State private var appeared = false
+    @State private var artDrag: CGFloat = 0
+    @State private var artCrossed = false
 
     var body: some View {
-        GeometryReader { frame in
-            let art = min(frame.size.width - 48, frame.size.height * 0.45)
+        GeometryReader { screen in
+            let cap = screen.size.height * 0.45
+            let travel = min(cap, max(0, pull))
+            let shrink = 1 - 0.06 * (travel / cap)
             ZStack {
-                wash
-                VStack(spacing: 22) {
-                    Capsule()
-                        .fill(.white.opacity(0.35))
-                        .frame(width: 40, height: 5)
-                        .padding(.top, 8)
-                        .onTapGesture { dismiss() }
-                    Spacer(minLength: 0)
-                    BadgedCover(id: player.current?.coverArt, size: art, radius: OctoRadius.artL,
-                                external: player.current?.isExternal ?? false)
-                        .shadow(color: .black.opacity(0.45), radius: 30, y: 16)
-                        .scaleEffect(player.isPlaying ? 1 : 0.88)
-                        .animation(.spring(duration: 0.45, bounce: 0.25), value: player.isPlaying)
-                    Spacer(minLength: 0)
-                    titleRow
-                    progress
-                    controls
-                    bottomRow
-                        .padding(.bottom, 12)
+                CoverWash(coverArt: player.current?.coverArt, tone: tone)
+                VStack(spacing: 0) {
+                    topLine
+                    if lyricsOpen {
+                        LyricsView(ink: tone.ink, muted: tone.muted)
+                            .transition(.opacity)
+                        LyricsBar(ink: tone.ink, close: { withAnimation(.easeInOut(duration: 0.36)) { lyricsOpen = false } })
+                            .padding(.top, 12)
+                            .padding(.bottom, 16)
+                    } else {
+                        art(in: screen.size)
+                        controls
+                            .offset(y: appeared ? 0 : 28)
+                            .opacity(appeared ? 1 : 0)
+                    }
                 }
                 .padding(.horizontal, 24)
+                .foregroundStyle(tone.ink)
             }
+            .clipShape(RoundedRectangle(cornerRadius: min(28, travel / cap * 5 * 28), style: .continuous))
+            .scaleEffect(shrink)
+            .offset(y: travel)
+            .gesture(pullToClose(cap: cap))
         }
-        .gesture(DragGesture().onEnded { if $0.translation.height > 120 { dismiss() } })
-        .sheet(isPresented: $showsQueue) { QueueView() }
+        .ignoresSafeArea(edges: .horizontal)
+        .preferredColorScheme(tone.isLight ? .light : .dark)
+        .sheet(isPresented: $showsQueue) { QueueSheet() }
+        .task(id: player.current?.coverArt) { await readTone() }
+        .onAppear {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.68).delay(0.08)) { appeared = true }
+        }
+        .statusBarHidden(false)
     }
 
-    private var wash: some View {
+    // MARK: Parts
+
+    private var topLine: some View {
         ZStack {
-            OctoColor.background
-            Cover(id: player.current?.coverArt, size: 600, radius: 0)
-                .blur(radius: 80)
-                .scaleEffect(1.6)
-                .opacity(0.65)
-            LinearGradient(colors: [.black.opacity(0.1), .black.opacity(0.6)], startPoint: .top, endPoint: .bottom)
+            if let album = player.current?.album, showsAlbum {
+                Button {
+                    guard let song = player.current, let albumId = song.albumId, !song.isExternal else { return }
+                    router.go(.album(Album(id: albumId, name: album, artist: song.artist ?? "", coverArt: song.coverArt)))
+                    dismiss()
+                } label: {
+                    Text(album).font(.octoCaption).foregroundStyle(tone.muted).lineLimit(1)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 104)
+                .accessibilityLabel("Open album")
+            }
+            HStack {
+                Button(action: dismiss) {
+                    Image(systemName: "chevron.down").font(.system(size: 18, weight: .semibold)).frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(.clear.interactive(), in: .circle)
+                .accessibilityLabel("Close player")
+                Spacer()
+                RoutePicker(tint: UIColor(tone.ink))
+                    .frame(width: 44, height: 44)
+                    .accessibilityLabel("Play on")
+            }
         }
-        .ignoresSafeArea()
+        .frame(height: 56)
     }
 
-    private var titleRow: some View {
-        HStack(alignment: .center, spacing: 12) {
+    /// Singles and songs found online show no album name.
+    private var showsAlbum: Bool {
+        guard let song = player.current, let album = song.album, !album.isEmpty else { return false }
+        return !album.hasSuffix("- Single") && album.caseInsensitiveCompare(song.title) != .orderedSame
+    }
+
+    private func art(in size: CGSize) -> some View {
+        GeometryReader { stage in
+            let side = min(312, stage.size.width, stage.size.height - 16)
+            BadgedCover(id: player.current?.coverArt, size: side, radius: side * 0.03, external: player.current?.isExternal ?? false)
+                .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
+                .shadow(color: .black.opacity(0.2), radius: 16, y: 8)
+                .shadow(color: .black.opacity(0.15), radius: 32, y: 16)
+                .scaleEffect(player.isPlaying ? 1 : 0.84)
+                .animation(.spring(response: 0.36, dampingFraction: 0.6), value: player.isPlaying)
+                .offset(x: artDrag * 0.55)
+                .opacity(1 - min(0.5, abs(artDrag) / max(1, size.width)))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .gesture(skipGesture(width: size.width))
+                .sensoryFeedback(.impact(weight: .light), trigger: artCrossed) { _, now in now }
+                .id(player.current?.id)
+                .transition(.asymmetric(insertion: .opacity.combined(with: .offset(x: 40)), removal: .opacity))
+        }
+    }
+
+    private var controls: some View {
+        VStack(spacing: 0) {
+            songRow
+            Spacer().frame(height: 12)
+            progress
+            Spacer().frame(height: 12)
+            transport
+            Spacer().frame(height: 8)
+            VolumeRow(ink: tone.ink)
+            Spacer().frame(height: 12)
+            actions
+            Spacer().frame(height: 28)
+        }
+    }
+
+    private var songRow: some View {
+        HStack(spacing: 4) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(player.current?.title ?? "")
-                    .font(.octoHeadline)
-                    .lineLimit(1)
-                Text(player.current?.byline ?? "")
-                    .font(.octoBody)
-                    .foregroundStyle(.white.opacity(0.7))
-                    .lineLimit(1)
-                if let source = player.current?.octoSuggestedBy {
-                    Text("From \(source)")
-                        .font(.octoCaption)
-                        .foregroundStyle(.white.opacity(0.5))
+                HStack(spacing: 6) {
+                    Marquee(text: player.current?.title ?? "", font: .system(size: 24, weight: .bold), color: tone.ink)
+                        .frame(height: 30)
+                    if player.current?.explicitStatus == "explicit" { ExplicitMark(size: 16) }
                 }
+                Button {
+                    guard let song = player.current, let artistId = song.artistId, !song.isExternal else { return }
+                    router.go(.artist(id: artistId, name: song.artist ?? ""))
+                    dismiss()
+                } label: {
+                    Text(player.current?.byline ?? "")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(tone.artist)
+                        .lineLimit(1)
+                }
+                .buttonStyle(.plain)
             }
-            Spacer()
+            .id(player.current?.id)
+            .transition(.opacity)
+            Spacer(minLength: 8)
             if let song = player.current {
                 Button { Task { await toggleHeart(song) } } label: {
                     Image(systemName: isStarred(song) ? "heart.fill" : "heart")
-                        .font(.system(size: 20, weight: .semibold))
+                        .font(.system(size: 22))
+                        .shadow(color: isStarred(song) ? tone.ink.opacity(0.6) : .clear, radius: 6)
+                        .symbolEffect(.bounce, value: isStarred(song))
                         .frame(width: 44, height: 44)
                 }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
-                .accessibilityLabel(isStarred(song) ? "Remove heart" : "Heart")
+                .buttonStyle(.plain)
+                .accessibilityLabel("Like")
+                .accessibilityValue(isStarred(song) ? "In Liked songs" : "Not in Liked songs")
+                Menu {
+                    SongActions(song: song)
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(tone.ink.opacity(0.6))
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("More")
             }
         }
     }
 
     private var progress: some View {
-        VStack(spacing: 6) {
-            Slider(
-                value: Binding(
-                    get: { scrubbing ?? player.elapsed },
-                    set: { scrubbing = $0 }),
-                in: 0...max(player.duration, 1)
-            ) { editing in
-                if !editing, let target = scrubbing {
-                    player.seek(to: target)
-                    scrubbing = nil
+        VStack(spacing: 0) {
+            LineSlider(value: player.elapsed, range: 0...max(player.duration, 1), ink: tone.ink,
+                       onCommit: { player.seek(to: $0) }, dragging: $scrubbing)
+            ZStack {
+                HStack {
+                    Text(time(scrubbing ?? player.elapsed))
+                    Spacer()
+                    Text("-" + time(max(player.duration - (scrubbing ?? player.elapsed), 0)))
+                }
+                .font(.system(size: 12).monospacedDigit())
+                .foregroundStyle(tone.muted)
+                HStack(spacing: 8) {
+                    if let song = player.current { QualityBadge(song: song, ink: tone.ink) }
+                    if player.speed != 1 {
+                        Button { showsTime = true } label: {
+                            Text(speedWords(player.speed)).font(.system(size: 11, weight: .semibold))
+                                .padding(.horizontal, 10).frame(height: 24)
+                                .glassEffect(.clear, in: .capsule)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Playback speed \(speedWords(player.speed))")
+                    }
                 }
             }
-            .tint(.white)
-            HStack {
-                Text(time(scrubbing ?? player.elapsed))
-                Spacer()
-                Text("-" + time(max(player.duration - (scrubbing ?? player.elapsed), 0)))
-            }
-            .font(.octoCaption.monospacedDigit())
-            .foregroundStyle(.white.opacity(0.6))
+            .offset(y: -8)
         }
     }
 
-    private var controls: some View {
-        GlassEffectContainer(spacing: 24) {
-            HStack(spacing: 28) {
-                Button(action: player.previous) {
-                    Image(systemName: "backward.fill").font(.system(size: 26)).frame(width: 64, height: 64)
-                }
-                .accessibilityLabel("Previous")
-                Button(action: player.toggle) {
-                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 34))
-                        .frame(width: 84, height: 84)
-                        .contentTransition(.symbolEffect(.replace))
-                }
-                .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
-                Button(action: player.next) {
-                    Image(systemName: "forward.fill").font(.system(size: 26)).frame(width: 64, height: 64)
-                }
-                .accessibilityLabel("Next")
-                .disabled(player.upNext.isEmpty)
-            }
-            .buttonStyle(.glass)
-            .buttonBorderShape(.circle)
-            .foregroundStyle(.white)
-        }
-    }
-
-    private var bottomRow: some View {
+    private var transport: some View {
         HStack {
-            RoutePicker()
-                .frame(width: 44, height: 44)
-            Spacer()
-            if player.radioSeed != nil {
-                Label("Radio", systemImage: "dot.radiowaves.left.and.right")
-                    .font(.octoCaption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.7))
+            Button(action: player.previous) {
+                Image(systemName: "backward.fill").font(.system(size: 34)).frame(width: 72, height: 72)
             }
+            .buttonStyle(TransportButtonStyle(nudge: -8))
+            .accessibilityLabel("Previous")
             Spacer()
-            Button { showsQueue = true } label: {
-                Image(systemName: "list.bullet").font(.system(size: 18, weight: .semibold)).frame(width: 44, height: 44)
+            Button(action: player.toggle) {
+                Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 46))
+                    .frame(width: 72, height: 72)
+                    .contentTransition(.symbolEffect(.replace))
             }
-            .buttonStyle(.glass)
-            .buttonBorderShape(.circle)
-            .accessibilityLabel("Queue")
+            .buttonStyle(TransportButtonStyle())
+            .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
+            Spacer()
+            Button(action: player.next) {
+                Image(systemName: "forward.fill").font(.system(size: 34)).frame(width: 72, height: 72)
+            }
+            .buttonStyle(TransportButtonStyle(nudge: 8))
+            .accessibilityLabel("Next")
+            .disabled(!player.hasNext)
         }
+        .padding(.horizontal, 8)
+    }
+
+    private var actions: some View {
+        HStack(spacing: 20) {
+            PlayerChromeButton(icon: "quote.bubble", label: "Lyrics", ink: tone.ink, lit: lyricsOpen) {
+                withAnimation(.easeInOut(duration: 0.36)) { lyricsOpen.toggle() }
+            }
+            .accessibilityValue(lyricsOpen ? "Showing" : "Hidden")
+            PlayerChromeButton(icon: "list.bullet", label: "Up next", ink: tone.ink) { showsQueue = true }
+            PlayerChromeButton(icon: "moon", label: "Sleep timer", ink: tone.ink, lit: player.sleep != nil) { showsTime = true }
+                .overlay(alignment: .topTrailing) { sleepPill }
+                .popover(isPresented: $showsTime) {
+                    TimeCard().presentationCompactAdaptation(.popover)
+                }
+            PlayerChromeButton(icon: "shuffle", label: "Shuffle", ink: tone.ink, lit: player.shuffled) { player.toggleShuffle() }
+                .accessibilityValue(player.shuffled ? "On" : "Off")
+            PlayerChromeButton(icon: player.repeatMode == .one ? "repeat.1" : "repeat", label: "Repeat", ink: tone.ink,
+                               lit: player.repeatMode != .off) { player.cycleRepeat() }
+                .accessibilityValue(player.repeatMode == .off ? "Off" : (player.repeatMode == .all ? "All songs" : "This song"))
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private var sleepPill: some View {
+        if case .at(let date) = player.sleep {
+            TimelineView(.periodic(from: .now, by: 30)) { _ in
+                Text("\(max(1, Int(date.timeIntervalSinceNow / 60) + 1))")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 5)
+                    .frame(height: 18)
+                    .background(OctoColor.accent, in: Capsule())
+            }
+            .offset(x: 6, y: -4)
+        }
+    }
+
+    // MARK: Gestures
+
+    /// The player follows the finger down, shrinks a little and rounds its corners; a quick
+    /// flick or more than half the way closes it.
+    private func pullToClose(cap: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 20)
+            .onChanged { drag in
+                guard drag.translation.height > abs(drag.translation.width) || pull > 0 else { return }
+                pull = max(0, drag.translation.height * 0.82)
+            }
+            .onEnded { drag in
+                let velocity = (drag.predictedEndTranslation.height - drag.translation.height) * 4
+                if velocity > 1200 || (pull > cap / 2 && velocity > -150) {
+                    dismiss()
+                } else {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { pull = 0 }
+                }
+            }
+    }
+
+    /// Sideways on the cover skips: past 88 points or a quick flick.
+    private func skipGesture(width: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 10)
+            .onChanged { drag in
+                guard abs(drag.translation.width) > abs(drag.translation.height) else { return }
+                artDrag = drag.translation.width
+                artCrossed = abs(drag.translation.width) > 88
+            }
+            .onEnded { drag in
+                let fling = (drag.predictedEndTranslation.width - drag.translation.width) * 4
+                if drag.translation.width < -88 || fling < -900 {
+                    withAnimation(.easeOut(duration: 0.12)) { artDrag = -width / 2 }
+                    player.next()
+                } else if drag.translation.width > 88 || fling > 900 {
+                    withAnimation(.easeOut(duration: 0.12)) { artDrag = width / 2 }
+                    player.previous()
+                }
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { artDrag = 0 }
+                artCrossed = false
+            }
+    }
+
+    // MARK: Helpers
+
+    private func readTone() async {
+        guard let coverId = player.current?.coverArt, let client = session.client,
+              let image = await Covers.shared.image(coverId, size: 300, client: client)
+        else { return }
+        let found = CoverTone.of(image)
+        withAnimation(.easeInOut(duration: 0.5)) { tone = found }
     }
 
     private func time(_ seconds: TimeInterval) -> String {
         Duration.seconds(seconds.isFinite ? seconds : 0).formatted(.time(pattern: .minuteSecond))
+    }
+
+    private func speedWords(_ speed: Float) -> String {
+        String(format: speed == speed.rounded() ? "%.0fx" : (speed * 10 == (speed * 10).rounded() ? "%.1fx" : "%.2fx"), speed)
     }
 
     private func isStarred(_ song: Song) -> Bool { starred[song.id] ?? song.isStarred }
@@ -214,67 +342,7 @@ struct NowPlayingView: View {
             if next { try await client.star(songId: song.id) } else { try await client.unstar(songId: song.id) }
         } catch {
             starred[song.id] = !next
+            router.show(error.localizedDescription)
         }
     }
-}
-
-/// What plays next: drag to reorder, swipe to remove, tap to jump.
-struct QueueView: View {
-    @Environment(Player.self) private var player
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            List {
-                if let current = player.current {
-                    Section("Now Playing") {
-                        HStack(spacing: 12) {
-                            Cover(id: current.coverArt, size: 46, radius: OctoRadius.artS)
-                            VStack(alignment: .leading) {
-                                Text(current.title).font(.octoBody).lineLimit(1)
-                                Text(current.byline).font(.octoBodySmall).foregroundStyle(OctoColor.textSecondary).lineLimit(1)
-                            }
-                        }
-                    }
-                }
-                Section(player.radioSeed == nil ? "Up Next" : "Up Next on Radio") {
-                    ForEach(Array(player.upNext.enumerated()), id: \.offset) { offset, song in
-                        Button { player.jump(to: player.index + 1 + offset) } label: {
-                            HStack(spacing: 12) {
-                                BadgedCover(id: song.coverArt, size: 46, radius: OctoRadius.artS, external: song.isExternal)
-                                VStack(alignment: .leading) {
-                                    Text(song.title).font(.octoBody).lineLimit(1)
-                                    Text(song.byline).font(.octoBodySmall).foregroundStyle(OctoColor.textSecondary).lineLimit(1)
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .onMove { player.move(from: $0, to: $1) }
-                    .onDelete { player.remove(at: $0) }
-                }
-            }
-            .listStyle(.plain)
-            .navigationTitle("Queue")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) { EditButton() }
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
-            }
-        }
-        .presentationDetents([.medium, .large])
-    }
-}
-
-/// The system's AirPlay and Bluetooth picker.
-struct RoutePicker: UIViewRepresentable {
-    func makeUIView(context: Context) -> AVRoutePickerView {
-        let view = AVRoutePickerView()
-        view.tintColor = .white
-        view.activeTintColor = UIColor(OctoColor.accentHover)
-        view.prioritizesVideoDevices = false
-        return view
-    }
-
-    func updateUIView(_ view: AVRoutePickerView, context: Context) {}
 }

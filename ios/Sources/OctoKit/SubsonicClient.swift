@@ -9,9 +9,14 @@ public enum AuthMode: String, Codable, Sendable {
     case token
     /// The password itself, hex encoded, for servers that check passwords against a directory.
     case legacyPassword
+    /// A key made on the server, sent in place of a username and password. Only servers that
+    /// list the apiKeyAuthentication extension take it.
+    case apiKey
 }
 
-/// Who is signing in and the secret that proves it. The secret is never printed.
+/// Who is signing in and the secret that proves it: the password, or for an API key the key.
+/// With a key the username is only for showing, and may be empty until the server names it.
+/// The secret is never printed.
 public struct Credentials: Sendable, Equatable, CustomStringConvertible {
     public var username: String
     var secret: String
@@ -28,7 +33,13 @@ public struct Credentials: Sendable, Equatable, CustomStringConvertible {
         switch mode {
         case .token: [("u", username), ("t", MD5.hex(secret + salt)), ("s", salt)]
         case .legacyPassword: [("u", username), ("p", "enc:" + secret.utf8.map { String(format: "%02x", $0) }.joined())]
+        case .apiKey: [("apiKey", secret)]
         }
+    }
+
+    /// The same sign-in under the name the server gave it.
+    public func named(_ name: String) -> Credentials {
+        Credentials(username: name, password: secret, mode: mode)
     }
 
     static func newSalt() -> String {
@@ -90,15 +101,22 @@ public final class SubsonicClient: Sendable {
     public let credentials: Credentials
     public let device: DeviceIdentity
     public let appVersion: String
-    let session: URLSession
+    /// Headers the server needs on every request, such as an access token for a proxy in front
+    /// of it. They go only to this server.
+    public let customHeaders: [String: String]
+    public let session: URLSession
+    /// How long a call may take, when shorter than each call's own limit.
+    let timeout: TimeInterval?
 
     public init(baseURL: URL, credentials: Credentials, device: DeviceIdentity, appVersion: String,
-                session: URLSession = .shared) {
+                customHeaders: [String: String] = [:], session: URLSession = .shared, timeout: TimeInterval? = nil) {
         self.baseURL = baseURL
         self.credentials = credentials
         self.device = device
         self.appVersion = appVersion
+        self.customHeaders = customHeaders
         self.session = session
+        self.timeout = timeout
     }
 
     public var userAgent: String { "Octo/\(appVersion) (iOS)" }
@@ -106,7 +124,13 @@ public final class SubsonicClient: Sendable {
     /// The same server with other credentials.
     public func with(_ credentials: Credentials) -> SubsonicClient {
         SubsonicClient(baseURL: baseURL, credentials: credentials, device: device, appVersion: appVersion,
-                       session: session)
+                       customHeaders: customHeaders, session: session, timeout: timeout)
+    }
+
+    /// The same server reached at another address, like its home network address.
+    public func at(_ address: URL) -> SubsonicClient {
+        SubsonicClient(baseURL: address, credentials: credentials, device: device, appVersion: appVersion,
+                       customHeaders: customHeaders, session: session, timeout: timeout)
     }
 
     /// A signed address for an endpoint. Every call gets a fresh salt, so never use one as a
@@ -123,16 +147,26 @@ public final class SubsonicClient: Sendable {
         return parts.url!
     }
 
+    /// Signs an address outside /rest, such as Octo's admin pages, the same way. A fresh salt each time.
+    public func signed(_ address: URL) -> URL {
+        var parts = URLComponents(url: address, resolvingAgainstBaseURL: false)!
+        let query = credentials.authParams() + [("v", Self.apiVersion), ("c", Self.clientName)]
+        parts.percentEncodedQueryItems = (parts.percentEncodedQueryItems ?? []) + query.map {
+            URLQueryItem(name: $0.0, value: $0.1.addingPercentEncoding(withAllowedCharacters: Self.queryValue))
+        }
+        return parts.url!
+    }
+
     /// Query values with `+`, `&` and `=` escaped too, so a password or a search survives.
     static let queryValue: CharacterSet = .urlQueryAllowed.subtracting(.init(charactersIn: "+&=?/"))
 
     /// The headers every request to this server carries.
     public var headers: [String: String] {
-        device.headers.merging(["User-Agent": userAgent]) { $1 }
+        customHeaders.merging(device.headers) { $1 }.merging(["User-Agent": userAgent]) { $1 }
     }
 
     func request(_ url: URL, timeout: TimeInterval = 30) -> URLRequest {
-        var request = URLRequest(url: url, timeoutInterval: timeout)
+        var request = URLRequest(url: url, timeoutInterval: min(timeout, self.timeout ?? timeout))
         for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
         return request
     }

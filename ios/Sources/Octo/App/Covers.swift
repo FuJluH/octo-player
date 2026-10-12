@@ -26,7 +26,7 @@ actor Covers {
             if let data = try? Data(contentsOf: file), let image = UIImage(data: data) { return image }
             var request = URLRequest(url: client.coverURL(coverId, size: size))
             for (name, value) in client.headers { request.setValue(value, forHTTPHeaderField: name) }
-            guard let (data, response) = try? await URLSession.shared.data(for: request),
+            guard let (data, response) = try? await client.session.data(for: request),
                   (response as? HTTPURLResponse)?.statusCode == 200,
                   let image = UIImage(data: data)
             else { return nil }

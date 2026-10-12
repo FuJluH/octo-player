@@ -67,6 +67,8 @@ public struct Song: Codable, Sendable, Hashable, Identifiable {
     public var suffix: String?
     public var contentType: String?
     public var bitRate: Int?
+    public var samplingRate: Int?
+    public var bitDepth: Int?
     public var starred: String?
     public var genre: String?
     public var replayGain: ReplayGain?
@@ -78,7 +80,7 @@ public struct Song: Codable, Sendable, Hashable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, title, album, albumId, artist, artistId, displayArtist, track, discNumber, year, duration
-        case coverArt, suffix, contentType, bitRate, starred, genre, replayGain, explicitStatus
+        case coverArt, suffix, contentType, bitRate, samplingRate, bitDepth, starred, genre, replayGain, explicitStatus
         case isExternal, octoSuggestedBy
     }
 
@@ -99,6 +101,8 @@ public struct Song: Codable, Sendable, Hashable, Identifiable {
         suffix = c.string(.suffix)
         contentType = c.string(.contentType)
         bitRate = c.int(.bitRate)
+        samplingRate = c.int(.samplingRate)
+        bitDepth = c.int(.bitDepth)
         starred = c.string(.starred)
         genre = c.string(.genre)
         replayGain = try? c.decodeIfPresent(ReplayGain.self, forKey: .replayGain)
@@ -123,6 +127,33 @@ public struct Song: Codable, Sendable, Hashable, Identifiable {
     /// Who the song is by, as the server would show it.
     public var byline: String { displayArtist ?? artist ?? "" }
     public var isStarred: Bool { starred != nil }
+
+    static let lossless: Set<String> = ["flac", "alac", "wav", "aif", "aiff", "ape", "wv", "dsf", "dff"]
+
+    public var isLossless: Bool { Self.lossless.contains(suffix?.lowercased() ?? "") }
+
+    /// The player's quality badge: "HI-RES" for lossless above 48 kHz, "LOSSLESS", or the codec.
+    public var qualityLabel: String? {
+        guard let suffix = suffix?.lowercased(), !suffix.isEmpty else { return nil }
+        if isLossless { return (samplingRate ?? 0) > 48_000 ? "HI-RES" : "LOSSLESS" }
+        return suffix.uppercased()
+    }
+
+    /// The badge's full words: "FLAC · 24-bit · 96 kHz" or "MP3 · 320 kbps".
+    public var qualityDetail: String? {
+        guard let suffix = suffix?.uppercased(), !suffix.isEmpty else { return nil }
+        var parts = [suffix]
+        if isLossless {
+            if let bitDepth { parts.append("\(bitDepth)-bit") }
+            if let samplingRate {
+                let khz = Double(samplingRate) / 1000
+                parts.append(khz == khz.rounded() ? "\(Int(khz)) kHz" : String(format: "%.1f kHz", khz))
+            }
+        } else if let bitRate {
+            parts.append("\(bitRate) kbps")
+        }
+        return parts.joined(separator: " · ")
+    }
 }
 
 public struct Album: Codable, Sendable, Hashable, Identifiable {

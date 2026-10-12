@@ -4,6 +4,7 @@ import SwiftUI
 struct OctoApp: App {
     @State private var session: Session
     @State private var player: Player
+    @State private var router = Router()
 
     init() {
         let session = Session()
@@ -16,20 +17,16 @@ struct OctoApp: App {
             RootView()
                 .environment(session)
                 .environment(player)
+                .environment(router)
                 .tint(OctoColor.accent)
                 .preferredColorScheme(.dark)
         }
     }
 }
 
+/// Octo opens on its library whether or not a server is signed in; a server is an add-on.
 struct RootView: View {
-    @Environment(Session.self) private var session
-
     var body: some View {
-        if session.client == nil {
-            SignInView()
-        } else {
-            MainTabs()
-        }
+        MainShell()
     }
 }
