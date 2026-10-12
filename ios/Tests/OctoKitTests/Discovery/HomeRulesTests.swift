@@ -66,14 +66,5 @@ import Testing
     @Test func aStationTheServerNoLongerHasSaysSo() {
         #expect(stationGoneLine("Chill mix") == "Chill mix isn't on the server any more")
     }
-
-    @Test func madeForYouListsComeInTheirKindsOrder() throws {
-        let lists = try JSONDecoder().decode([Playlist].self, from: Data("""
-        [{"id":"1","name":"Mine"},{"id":"2","name":"Deep","octoList":"deepCuts"},{"id":"3","name":"Odd","octoList":"weekly"},
-         {"id":"4","name":"New","octoList":"newReleases"},{"id":"5","name":"Liked","octoList":"liked"},
-         {"id":"6","name":"Other","octoList":"monthly"}]
-        """.utf8))
-        #expect(madeForYouLists(lists).map(\.id) == ["5", "4", "2", "3", "6"])
-    }
 }
 

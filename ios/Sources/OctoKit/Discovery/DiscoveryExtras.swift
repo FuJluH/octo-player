@@ -112,65 +112,6 @@ public func ownSongs(_ songs: [Song], artist: String) -> [Song] {
     songs.filter { sameArtist($0.artist ?? "", artist) }
 }
 
-// MARK: Lengths
-
-/// A song's length as a row shows it: the real one once playing it found its listing wrong, else
-/// the listed one. Zero when neither is known.
-public func shownLengthMs(_ listedMs: Int64, learnedMs: Int64?) -> Int64 { learnedMs ?? max(0, listedMs) }
-
-// MARK: Which radio source suggested a song
-
-/// Radio answers remembered before the oldest are dropped, and how long one is believed: a later
-/// radio may suggest the song again from another source, and an old answer would name the wrong
-/// one.
-public let suggestionsKept = 5_000
-public let suggestionLifetimeMs: Int64 = 12 * 60 * 60 * 1_000
-
-/// Which source suggested each song, newest last: past the cap the oldest answers go, and one older
-/// than its lifetime is forgotten. Safe across threads.
-public final class RadioSuggestions: @unchecked Sendable {
-    private let kept: Int
-    private let lifetimeMs: Int64
-    private let now: @Sendable () -> Int64
-    private let lock = NSLock()
-    private var order: [String] = []
-    private var entries: [String: (by: String, at: Int64)] = [:]
-
-    public init(kept: Int = suggestionsKept, lifetimeMs: Int64 = suggestionLifetimeMs,
-                now: @escaping @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1_000) }) {
-        self.kept = kept
-        self.lifetimeMs = lifetimeMs
-        self.now = now
-    }
-
-    public func putAll(_ sources: [String: String]) {
-        let at = now()
-        lock.withLock {
-            for (id, by) in sources {
-                // Taken out first, so a song suggested again moves to the newest end.
-                if entries[id] != nil { order.removeAll { $0 == id } }
-                entries[id] = (by, at)
-                order.append(id)
-            }
-            let over = order.count - kept
-            if over > 0 {
-                for id in order.prefix(over) { entries[id] = nil }
-                order.removeFirst(over)
-            }
-        }
-    }
-
-    public subscript(_ id: String) -> String? {
-        lock.withLock {
-            guard let entry = entries[id] else { return nil }
-            if now() - entry.at <= lifetimeMs { return entry.by }
-            entries[id] = nil
-            order.removeAll { $0 == id }
-            return nil
-        }
-    }
-}
-
 // MARK: What the server knows of an artist
 
 /// An artist's biography and the artists like them, as getArtistInfo2 answers.

@@ -281,8 +281,10 @@ public func bpmOf(_ text: String) -> Int? {
           let range = Range(found.range, in: text),
           let value = Double(text[range].replacingOccurrences(of: ",", with: "."))
     else { return nil }
-    let rounded = Int((value + 0.5).rounded(.down))
-    return (1...999).contains(rounded) ? rounded : nil
+    // Rounded half up. A number too large for a tempo is left out before it becomes a whole number.
+    let rounded = (value + 0.5).rounded(.down)
+    guard rounded >= 1, rounded <= 999 else { return nil }
+    return Int(rounded)
 }
 
 /// The explicit mark: iTunes writes 1 or 4 for explicit and 2 for clean; others write the word.
@@ -369,7 +371,7 @@ private func splitGenres(_ value: String) -> [String] {
     }
 }
 
-/// Splits text on every match of a pattern, keeping empty pieces, as Kotlin's split does.
+/// Splits text on every match of a pattern, keeping empty pieces, including those at either end.
 func splitOn(_ pattern: NSRegularExpression, _ text: String) -> [String] {
     var pieces: [String] = []
     var last = text.startIndex
@@ -408,7 +410,7 @@ public func id3Genre(_ value: String) -> String {
     }.joined(separator: ";")
 }
 
-/// A whole number written plainly, with an optional sign, as Kotlin's toIntOrNull reads one.
+/// A whole number written plainly in ASCII digits, with an optional sign; nil for anything else.
 func kotlinInt(_ text: String) -> Int? {
     guard !text.isEmpty else { return nil }
     var digits = Substring(text)

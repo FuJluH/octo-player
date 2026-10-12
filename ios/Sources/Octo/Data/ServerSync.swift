@@ -4,6 +4,8 @@ import OctoKit
 
 /// When a server's library was last copied, and how much came.
 struct LastSync: Equatable {
+    /// The kept server the copy was made for.
+    var accountId: String
     var sourceId: String
     var at: Int64
     var songs: Int
@@ -244,6 +246,6 @@ final class ServerSync {
             last = nil
             return
         }
-        last = LastSync(sourceId: sourceId, at: at, songs: prefs.int("songs", account.id) ?? 0, albums: prefs.int("albums", account.id) ?? 0)
+        last = LastSync(accountId: account.id, sourceId: sourceId, at: at, songs: prefs.int("songs", account.id) ?? 0, albums: prefs.int("albums", account.id) ?? 0)
     }
 }

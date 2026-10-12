@@ -46,14 +46,3 @@ public func stationsDue(now: Int64, loadedAt: Int64?, failed: Bool, loading: Boo
     guard let loadedAt, !failed else { return true }
     return now - loadedAt >= stationsStaleMs
 }
-
-/// The lists Octo made for the listener, in their kinds' order, from the server's playlists. Only
-/// an Octo server that makes them marks a playlist so; any other has none. An unknown kind goes
-/// last, keeping the server's order among equals.
-public func madeForYouLists(_ playlists: [Playlist]) -> [Playlist] {
-    playlists.filter { $0.octoList != nil }.enumerated().sorted { a, b in
-        let ka = octoListKinds.firstIndex(of: a.element.octoList ?? "") ?? octoListKinds.count
-        let kb = octoListKinds.firstIndex(of: b.element.octoList ?? "") ?? octoListKinds.count
-        return ka != kb ? ka < kb : a.offset < b.offset
-    }.map(\.element)
-}

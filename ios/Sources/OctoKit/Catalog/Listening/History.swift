@@ -51,6 +51,11 @@ public func historyDays(_ plays: [HistoryPlay], now: Int64, zone: TimeZone, loca
     byPlayDay(plays, at: \.at, now: now, zone: zone, locale: locale).map { HistoryDay(label: $0.heading, plays: $0.items) }
 }
 
+/// The heading for one day of the history.
+public func dayLabel(_ day: DateComponents, today: DateComponents, zone: TimeZone = .current, locale: Locale = .current) -> String {
+    playDayHeading(day, today: today, zone: zone, locale: locale)
+}
+
 /// How far back "most played" looks.
 public enum HistoryRange: String, Sendable, CaseIterable {
     case fourWeeks, sixMonths, allTime

@@ -4,13 +4,6 @@ import Observation
 import OctoKit
 import UIKit
 
-/// Albums worth going back to: not played in six months, never finished, never played.
-struct RevisitShelves: Sendable {
-    var notPlayedLately: [LibraryAlbum] = []
-    var neverFinished: [LibraryAlbum] = []
-    var neverPlayed: [LibraryAlbum] = []
-}
-
 /// Something pinned to the front of Home.
 enum HomePin: Identifiable {
     case album(LibraryAlbum)
@@ -37,7 +30,8 @@ protocol HomeLibrary: AnyObject {
     func homeFavoriteAlbums() async -> [LibraryAlbum]
     func homeRandomAlbums(_ count: Int) async -> [LibraryAlbum]
     func homeRandomArtists(_ count: Int) async -> [LibraryArtist]
-    func homeRevisit() async -> RevisitShelves
+    /// Albums worth going back to: not played in six months, never finished, never played.
+    func homeRevisit() async -> Rediscovery<LibraryAlbum>
     func homePins() async -> [HomePin]
 }
 
@@ -57,12 +51,7 @@ extension Library: HomeLibrary {
     func homeRandomAlbums(_ count: Int) async -> [LibraryAlbum] { Array(await albums().shuffled().prefix(count)) }
     func homeRandomArtists(_ count: Int) async -> [LibraryArtist] { Array(await artists().shuffled().prefix(count)) }
 
-    func homeRevisit() async -> RevisitShelves {
-        let albums = await albums()
-        let played = await playedTracks()
-        // Worked out from the whole library, so away from the main thread.
-        return await Task.detached(priority: .userInitiated) { revisitShelves(albums, played, nowMs: msSince1970()) }.value
-    }
+    func homeRevisit() async -> Rediscovery<LibraryAlbum> { await rediscovery() }
 
     func homePins() async -> [HomePin] {
         let shown = await shownPins()
@@ -81,48 +70,6 @@ extension Library: HomeLibrary {
     }
 }
 
-/// The shelves from the library's own plays. An album shows on one shelf only: not played lately
-/// first, then never finished; never played is apart.
-nonisolated func revisitShelves(_ albums: [LibraryAlbum], _ played: [PlayedTrack], nowMs: Int64) -> RevisitShelves {
-    struct Listening {
-        var songs: Int
-        var playedSongs: Int
-        var plays: Int64
-        var lastPlayed: Int64?
-        var added: Int64?
-        var played: Bool { playedSongs > 0 || plays > 0 || lastPlayed != nil }
-    }
-    var byAlbum: [String: [PlayedTrack]] = [:]
-    for play in played { byAlbum[play.track.albumId, default: []].append(play) }
-    var listening: [String: Listening] = [:]
-    for album in albums {
-        var seen = Set<String>()
-        let songs = (byAlbum[album.id] ?? []).filter { seen.insert($0.track.id).inserted }
-        let last = songs.map(\.lastPlayedAt).max()
-        listening[album.id] = Listening(songs: album.songCount, playedSongs: songs.filter { $0.plays > 0 }.count,
-                                        plays: songs.reduce(0) { $0 + Int64($1.plays) }, lastPlayed: last.flatMap { $0 > 0 ? $0 : nil },
-                                        added: album.addedAt > 0 ? album.addedAt : nil)
-    }
-    let before = nowMs - 180 * 24 * 60 * 60 * 1_000
-    func of(_ album: LibraryAlbum) -> Listening { listening[album.id] ?? Listening(songs: 0, playedSongs: 0, plays: 0) }
-    let quiet = albums.filter { of($0).lastPlayed.map { $0 < before } ?? false }.sorted { a, b in
-        let la = of(a), lb = of(b)
-        if la.plays != lb.plays { return la.plays > lb.plays }
-        if la.lastPlayed != lb.lastPlayed { return (la.lastPlayed ?? 0) < (lb.lastPlayed ?? 0) }
-        return a.id < b.id
-    }.prefix(shelfSize)
-    let shown = Set(quiet.map(\.id))
-    let unfinished = albums.filter { !shown.contains($0.id) && of($0).playedSongs > 0 && of($0).playedSongs < of($0).songs }.sorted { a, b in
-        let la = of(a).lastPlayed ?? .min, lb = of(b).lastPlayed ?? .min
-        return la != lb ? la > lb : a.id < b.id
-    }.prefix(shelfSize)
-    let unplayed = albums.filter { !of($0).played }.sorted { a, b in
-        let la = of(a).added ?? .min, lb = of(b).added ?? .min
-        return la != lb ? la > lb : a.id < b.id
-    }.prefix(shelfSize)
-    return RevisitShelves(notPlayedLately: Array(quiet), neverFinished: Array(unfinished), neverPlayed: Array(unplayed))
-}
-
 /// Home's state: what the library holds, the server's stations, Made for you lists and charts, and
 /// the cards at the top.
 @MainActor
@@ -133,15 +80,15 @@ final class HomeModel {
     private(set) var mostPlayed: [LibraryTrack] = []
     private(set) var recentlyAdded: [LibraryAlbum] = []
     private(set) var favoriteAlbums: [LibraryAlbum] = []
-    private(set) var revisit = RevisitShelves()
+    private(set) var revisit = Rediscovery<LibraryAlbum>()
     private(set) var pins: [HomePin] = []
     /// Picked once, then again on a pull, when the library changes size, or after a server copy.
     private(set) var surprise: [LibraryAlbum] = []
     private(set) var artists: [LibraryArtist] = []
     /// The signed-in server's stations, kept through a failed load.
-    private(set) var stations: [RadioStation] = []
+    private(set) var stations: [Station] = []
     /// The lists Octo made for the listener, kept through a failed load.
-    private(set) var madeForYou: [Playlist] = []
+    private(set) var madeForYou: [Station] = []
     /// The first songs of the server's chart of the moment; empty on a server without charts.
     private(set) var charts: [Song] = []
     /// The station, or Made for you list, whose songs are on the way.
@@ -315,8 +262,9 @@ final class HomeModel {
             if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
             return
         }
-        MPMediaLibrary.requestAuthorization { _ in
-            Task { @MainActor [weak self] in self?.access = Self.phoneAccess() }
+        Task {
+            _ = await withCheckedContinuation { asked in MPMediaLibrary.requestAuthorization { asked.resume(returning: $0) } }
+            access = Self.phoneAccess()
         }
     }
 

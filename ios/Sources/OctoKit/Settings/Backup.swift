@@ -564,7 +564,10 @@ public final class NameFinder {
     static func nameKey(_ name: String, _ artist: String) -> String { "\(libraryMatchKey(name))|\(libraryMatchKey(artist))" }
 }
 
-extension PinKind {
+/// What can be pinned to Home.
+public enum PinKind: String, Sendable, Equatable {
+    case album, artist, playlist
+
     public static func of(_ name: String) -> PinKind? { PinKind(rawValue: name) }
 }
 

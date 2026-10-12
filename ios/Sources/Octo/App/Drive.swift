@@ -99,11 +99,19 @@ enum Drive {
                 let songs = found.song.filter { name == "found" ? $0.isExternal : !$0.isExternal }
                 if !songs.isEmpty { player.play(songs, from: 0) }
             default:
-                await DiscoveryDrive.step(name, value, session: session, router: router)
+                var taken = false
+                for handle in steps where await handle(name, value) {
+                    taken = true
+                    break
+                }
+                if !taken { await DiscoveryDrive.step(name, value, session: session, router: router) }
             }
             try? await Task.sleep(for: .milliseconds(400))
         }
     }
+
+    /// More steps, added by parts of the app: each answers whether it took the step.
+    static var steps: [@MainActor (_ name: String, _ value: String) async -> Bool] = []
 
     private static func split(_ step: String) -> (String, String) {
         guard let colon = step.firstIndex(of: ":") else { return (step, "") }

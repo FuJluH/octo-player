@@ -45,38 +45,16 @@ public func searchCaps(_ filter: SearchFilter) -> SearchCaps {
 public let librarySearchAfterMs = 150
 public let discoverAfterMs = 400
 
-/// Octo holds back songs found online when a search asks for 12 songs or fewer, so always ask for
-/// more than that.
-public let discoverSongs = 40
-
-/// The finds whose library song is among the songs a search listed.
+/// The finds whose library song is among the songs a search listed, by their find ids.
+/// `adoptions` holds each find now in the library, by its id on the server, and the library song
+/// it became.
 public func listedFinds(_ adoptions: [String: String], songIds: [String]) -> Set<String> {
     if adoptions.isEmpty { return [] }
     let ids = Set(songIds)
-    return Set(adoptions.filter { ids.contains($0.value) }.keys)
+    return Set(adoptions.filter { ids.contains($0.value) }.keys.map(findId))
 }
 
-/// What a search found beyond the library. `partAlbums` are albums the library holds some of the
-/// songs of, kept apart from those it holds none of, so the "Not in your library" title is never
-/// over one that partly is.
-public struct Discovered: Sendable {
-    public var songs: [Song]
-    public var albums: [Album]
-    public var artists: [Artist]
-    public var partAlbums: [Album]
-
-    public init(songs: [Song] = [], albums: [Album] = [], artists: [Artist] = [], partAlbums: [Album] = []) {
-        self.songs = songs
-        self.albums = albums
-        self.artists = artists
-        self.partAlbums = partAlbums
-    }
-
-    public var isEmpty: Bool { notInLibraryEmpty && partAlbums.isEmpty }
-
-    /// Nothing to list under "Not in your library".
-    public var notInLibraryEmpty: Bool { songs.isEmpty && albums.isEmpty && artists.isEmpty }
-
+extension Discovered {
     /// The songs found online a search shows: all but those already listed as library songs.
     public func without(_ listed: Set<String>) -> Discovered {
         if listed.isEmpty || !songs.contains(where: { listed.contains($0.id) }) { return self }
@@ -91,9 +69,9 @@ public struct Discovered: Sendable {
         switch filter {
         case .playlists: return nil
         case .all: return self
-        case .songs: return Discovered(songs: songs)
-        case .albums: return Discovered(albums: albums, partAlbums: partAlbums)
-        case .artists: return Discovered(artists: artists)
+        case .songs: return Discovered(songs: songs, albums: [], artists: [])
+        case .albums: return Discovered(songs: [], albums: albums, artists: [], partAlbums: partAlbums)
+        case .artists: return Discovered(songs: [], albums: [], artists: artists)
         }
     }
 }
@@ -126,33 +104,8 @@ public enum DiscoverState: Sendable {
     }
 }
 
-/// A name as albums and artists are matched by: brackets left out, then folded.
-public func discoveryNameKey(_ name: String) -> String {
-    let range = NSRange(name.startIndex..., in: name)
-    return SongIdentity.key(bracketed.stringByReplacingMatches(in: name, range: range, withTemplate: " "))
-}
-
-private let bracketed = try! NSRegularExpression(pattern: #"\s*[(\[][^)\]]*[)\]]"#)
-
 /// Octo's id for something it found online rather than a file in the library.
 public func isOnlineId(_ id: String) -> Bool { id.hasPrefix("ext-") }
-
-/// Sorts what one search3 answer holds beyond the library: songs found online, albums the library
-/// has neither by id nor by the same name and artist (those it holds whole are dropped, those it
-/// holds in part go apart), and artists it has neither by id nor by name.
-public func discovered(from found: SearchResult, libraryAlbums: [Album], libraryArtists: [Artist],
-                       isFind: (Song) -> Bool) -> Discovered {
-    let songs = found.song.filter(isFind)
-    let namedAlbums = Set(libraryAlbums.map { discoveryNameKey($0.name) + "|" + discoveryNameKey($0.artist) })
-    let albums = found.album.filter { album in
-        album.isExternal && !namedAlbums.contains(discoveryNameKey(album.name) + "|" + discoveryNameKey(album.artist))
-            && albumShare(album) != .whole
-    }
-    let namedArtists = Set(libraryArtists.map { discoveryNameKey($0.name) })
-    let artists = found.artist.filter { isOnlineId($0.id) && !namedArtists.contains(discoveryNameKey($0.name)) }
-    return Discovered(songs: songs, albums: albums.filter { albumShare($0) != .part }, artists: artists,
-                      partAlbums: albums.filter { albumShare($0) == .part })
-}
 
 /// The artist a search names: a library artist, or one the server found.
 public struct NamedArtist: Sendable, Equatable {
@@ -169,7 +122,7 @@ public struct NamedArtist: Sendable, Equatable {
 
 /// The artist `query` names whole, the library's first, then the server's finds; none when it
 /// names nobody.
-public func namedArtist(_ query: String, library: [Artist], online: [Artist]) -> NamedArtist? {
+public func namedArtist(_ query: String, library: [LibraryArtist], online: [OnlineArtist]) -> NamedArtist? {
     if let artist = searchedArtist(query, library, name: \.name) { return NamedArtist(name: artist.name, libraryId: artist.id) }
     if let artist = searchedArtist(query, online, name: \.name) { return NamedArtist(name: artist.name, serverId: artist.id) }
     return nil

@@ -108,54 +108,5 @@ private func sent(_ id: String, _ number: Int?, outside: Bool, disc: Int? = 1) -
         ]
         #expect(ownSongs(songs, artist: "Kavinsky").map(\.id) == ["1", "2"])
     }
-
-    @Test func aRowShowsTheRealLengthFirst() {
-        #expect(shownLengthMs(200_000, learnedMs: 215_000) == 215_000)
-        #expect(shownLengthMs(0, learnedMs: 215_000) == 215_000)
-        #expect(shownLengthMs(200_000, learnedMs: nil) == 200_000)
-        #expect(shownLengthMs(0, learnedMs: nil) == 0)
-    }
 }
 
-private final class SuggestionClock: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value: Int64 = 0
-    var now: Int64 {
-        get { lock.withLock { value } }
-        set { lock.withLock { value = newValue } }
-    }
-}
-
-@Suite struct RadioSuggestionsTests {
-    @Test func theOldestAnswersGoPastTheCap() {
-        let clock = SuggestionClock()
-        let kept = RadioSuggestions(kept: 2, lifetimeMs: 1_000, now: { clock.now })
-        kept.putAll(["a": "Deezer"])
-        kept.putAll(["b": "Last.fm"])
-        kept.putAll(["c": "Library"])
-        #expect(kept["a"] == nil)
-        #expect(kept["b"] == "Last.fm")
-        #expect(kept["c"] == "Library")
-    }
-
-    @Test func aSongSuggestedAgainMovesToTheNewestEnd() {
-        let clock = SuggestionClock()
-        let kept = RadioSuggestions(kept: 2, lifetimeMs: 1_000, now: { clock.now })
-        kept.putAll(["a": "Deezer"])
-        kept.putAll(["b": "Last.fm"])
-        kept.putAll(["a": "Library"])
-        kept.putAll(["c": "Deezer"])
-        #expect(kept["a"] == "Library")
-        #expect(kept["b"] == nil)
-    }
-
-    @Test func anOldAnswerIsForgotten() {
-        let clock = SuggestionClock()
-        let kept = RadioSuggestions(kept: 10, lifetimeMs: 1_000, now: { clock.now })
-        kept.putAll(["a": "Deezer"])
-        clock.now = 1_000
-        #expect(kept["a"] == "Deezer")
-        clock.now = 1_001
-        #expect(kept["a"] == nil)
-    }
-}

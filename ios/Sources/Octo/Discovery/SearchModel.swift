@@ -150,12 +150,8 @@ final class SearchModel {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         var named: (NamedArtist, String)?
         if filter == .all, let results, let server = discovery?.server {
-            let online: [Artist] = if case .done(let found) = discover { found.artists } else { [] }
-            if let artist = searchedArtist(trimmed, results.artists, name: \.name) {
-                named = (NamedArtist(name: artist.name, libraryId: artist.id), server)
-            } else if let artist = searchedArtist(trimmed, online, name: \.name) {
-                named = (NamedArtist(name: artist.name, serverId: artist.id), server)
-            }
+            let online: [OnlineArtist] = if case .done(let found) = discover { found.artists } else { [] }
+            named = namedArtist(trimmed, library: results.artists, online: online).map { ($0, server) }
         }
         if named?.0 == namedFor?.0 && named?.1 == namedFor?.1 { return }
         namedFor = named
@@ -208,7 +204,8 @@ final class SearchModel {
     func playFound(_ song: Song) {
         guard case .done(let found) = discover, let player else { return }
         keepSearch()
-        player.play(found.songs, from: max(0, found.songs.firstIndex(where: { $0.id == song.id }) ?? 0))
+        let songs = found.songs.map(\.asSong)
+        player.play(songs, from: max(0, songs.firstIndex(where: { $0.id == song.id }) ?? 0))
     }
 
     // MARK: The add hint

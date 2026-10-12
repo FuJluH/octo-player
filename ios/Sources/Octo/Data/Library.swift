@@ -218,6 +218,24 @@ final class Library {
         }
     }
 
+    /// Home's rediscovery shelves: albums not played lately, never finished, never played, at
+    /// most 20 each, from the phone's plays and the server's together.
+    func rediscovery() async -> Rediscovery<LibraryAlbum> {
+        let albums = await albums()
+        let played = await playedTracks()
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        return await Task.detached(priority: .utility) { homeRediscovery(albums, played: played, now: now) }.value
+    }
+
+    /// Albums by how often their songs were played, never-played ones left out.
+    func mostPlayedAlbums(limit: Int = rediscoveryShelf) async -> [LibraryAlbum] {
+        let albums = await albums()
+        let played = await playedTracks()
+        return await Task.detached(priority: .utility) {
+            OctoKit.mostPlayedAlbums(albums, of: albumListening(albums, played: played), limit: limit)
+        }.value
+    }
+
     // MARK: Playlists
 
     /// The playlists shown now: the phone's own and the server-in-use's, the one changed last first.

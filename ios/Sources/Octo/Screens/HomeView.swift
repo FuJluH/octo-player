@@ -30,8 +30,8 @@ struct HomeView: View {
                 } else if layout.shelves {
                     pinnedShelf
                     albumShelf("Recently played", model.recentlyPlayed)
-                    stationShelf("Made for you", model.madeForYou.map { ($0.id, $0.name, $0.coverArt ?? $0.id, $0.songCount as Int?) })
-                    stationShelf("Stations", model.stations.map { ($0.id, $0.name, $0.coverArt ?? $0.id, nil) })
+                    stationShelf("Made for you", model.madeForYou.map { ($0.id, $0.name, coverId(of: $0.artwork) ?? $0.id, $0.songCount) })
+                    stationShelf("Stations", model.stations.map { ($0.id, $0.name, coverId(of: $0.artwork) ?? $0.id, nil) })
                     songShelf("Charts", model.charts, destination: .charts)
                     albumShelf("Recently added", model.recentlyAdded)
                     albumShelf("Favorite albums", model.favoriteAlbums, destination: .favorites)

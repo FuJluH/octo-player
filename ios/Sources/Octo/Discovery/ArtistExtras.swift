@@ -88,10 +88,10 @@ final class ArtistExtrasSource {
         if others.isEmpty { return [] }
         let keys = Array(Set(others.map { searchKey($0.name) }))
         var known: [String: LibraryArtist] = [:]
-        for row in await library.artistsWithKeys(keys) where known[discoveryNameKey(row.name)] == nil { known[discoveryNameKey(row.name)] = row }
+        for row in await library.artistsWithKeys(keys) where known[matchKey(row.name)] == nil { known[matchKey(row.name)] = row }
         var seen = Set<String>()
         return others.compactMap { other in
-            let mine = known[discoveryNameKey(other.name)]
+            let mine = known[matchKey(other.name)]
             let similar = SimilarArtist(name: mine?.name ?? other.name,
                                         artwork: mine?.artwork ?? onlineArtwork(sourceId, other.coverArt),
                                         libraryId: mine?.id, serverId: other.id)

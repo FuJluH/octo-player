@@ -9,16 +9,8 @@ private func topEntry(_ rank: Int, plays: Int? = nil) -> TopSong {
     return try! JSONDecoder().decode(TopSong.self, from: Data(json.utf8))
 }
 
-private func album(_ name: String, songs: Int, owned: Int?, external: Bool = true) -> Album {
-    var album = Album(id: name, name: name, artist: "Drake")
-    album.songCount = songs
-    album.isExternal = external
-    album.ownedCount = owned
-    return album
-}
-
-private func artist(_ id: String, _ name: String) -> Artist {
-    try! JSONDecoder().decode(Artist.self, from: Data("{\"id\":\"\(id)\",\"name\":\"\(name)\"}".utf8))
+private func libraryArtist(_ id: String, _ name: String) -> LibraryArtist {
+    LibraryArtist(id: id, sourceId: "server:x", name: name, searchKey: name.lowercased(), sortKey: name.lowercased(), albumCount: 2, songCount: 20)
 }
 
 @Suite struct RecentSearchesTests {
@@ -114,9 +106,10 @@ private func artist(_ id: String, _ name: String) -> Artist {
     }
 
     @Test func theLibrarysArtistComesFirstThenTheServersFind() {
-        let library = [artist("ar1", "Daft Punk Tribute"), artist("ar2", "Daft Punk")]
-        let online = [artist("ext7", "Daft Punk"), artist("ext8", "Justice")]
-        #expect(namedArtist("daft punk", library: library, online: online) == NamedArtist(name: "Daft Punk", libraryId: "ar2"))
+        let library = [libraryArtist("server:x:ar1", "Daft Punk Tribute"), libraryArtist("server:x:ar2", "Daft Punk")]
+        let online = [OnlineArtist(id: "ext7", name: "Daft Punk", albumCount: 40, artwork: nil),
+                      OnlineArtist(id: "ext8", name: "Justice", albumCount: 9, artwork: nil)]
+        #expect(namedArtist("daft punk", library: library, online: online) == NamedArtist(name: "Daft Punk", libraryId: "server:x:ar2"))
         #expect(namedArtist("justice", library: library, online: online) == NamedArtist(name: "Justice", serverId: "ext8"))
         #expect(namedArtist("daft", library: library, online: online) == nil)
     }
@@ -143,56 +136,15 @@ private func artist(_ id: String, _ name: String) -> Artist {
     }
 }
 
-@Suite struct AlbumShareTests {
-    @Test func anAlbumHeldInPartSaysHowMuch() {
-        let wattba = album("What A Time To Be Alive", songs: 11, owned: 2)
-        #expect(albumShare(wattba) == .part)
-        #expect(albumShareLine(wattba) == "2 of 11 in your library")
-    }
-
-    @Test func thePhonesOwnAlbumsSayItFromTheCounts() {
-        #expect(albumShareLine(owned: 20, songs: 21) == "20 of 21 in your library")
-        #expect(albumShareLine(owned: 0, songs: 14) == nil)
-        #expect(albumShareLine(owned: 11, songs: 11) == nil)
-        #expect(albumShareLine(owned: nil, songs: 11) == nil)
-    }
-
-    @Test func noneAndWholeHaveNoLine() {
-        #expect(albumShare(album("MAID OF HONOUR", songs: 14, owned: 0)) == AlbumShare.none)
-        #expect(albumShareLine(album("MAID OF HONOUR", songs: 14, owned: 0)) == nil)
-        #expect(albumShare(album("HABIBTI", songs: 11, owned: 11)) == .whole)
-        #expect(albumShareLine(album("HABIBTI", songs: 11, owned: 11)) == nil)
-    }
-
-    @Test func uncountedAndLibraryAlbumsHaveNoShare() {
-        #expect(albumShare(album("$ome $exy $ongs 4 U", songs: 21, owned: nil)) == nil)
-        #expect(albumShare(album("HABIBTI (FOMO)", songs: 15, owned: 15, external: false)) == nil)
-    }
-
-    @Test func theServersFieldsAreReadAndAnOlderServerLeavesThemOut() throws {
-        let counted = try JSONDecoder().decode(Album.self, from: Data(
-            #"{"id":"x","name":"What A Time To Be Alive","songCount":11,"isExternal":true,"ownedCount":2}"#.utf8))
-        #expect(albumShareLine(counted) == "2 of 11 in your library")
-        let older = try JSONDecoder().decode(Album.self, from: Data(
-            #"{"id":"x","name":"What A Time To Be Alive","songCount":11,"isExternal":true}"#.utf8))
-        #expect(albumShare(older) == nil)
-    }
-
-    @Test func onlyLibrarySongsStayInTheirOrder() {
-        let songs = ["a", "find:b", "c", "find:d"]
-        #expect(librarySongsOnly(songs, hide: true) { $0.hasPrefix("find:") } == ["a", "c"])
-        #expect(librarySongsOnly(songs, hide: false) { $0.hasPrefix("find:") } == songs)
-    }
-
-    @Test func theWordsHaveNoDashes() {
-        for words in [LibraryOnlyWords.setting, LibraryOnlyWords.help, LibraryOnlyWords.onlyMySongs] {
-            #expect(!words.unicodeScalars.contains { $0.value == 0x2014 || $0.value == 0x2013 })
-        }
-    }
-}
-
 @Suite struct SearchSectionsTests {
-    private func song(_ id: String, external: Bool = true) -> Song { Song(id: id, title: id, isExternal: external) }
+    private func song(_ id: String) -> LibraryTrack {
+        LibraryTrack(id: id, sourceId: "server:x", nativeId: id, title: id, searchKey: id, sortKey: id, artist: "Air", artistId: "a",
+                     album: "Moon Safari", albumId: "al", durationMs: 200_000, addedAt: 0)
+    }
+
+    private func online(_ id: String, owned: Int? = nil) -> OnlineAlbum {
+        OnlineAlbum(id: id, title: id, artist: "Drake", artistId: nil, year: nil, songCount: 11, artwork: nil, ownedCount: owned)
+    }
 
     @Test func capsFollowTheFilter() {
         #expect(searchCaps(.all) == SearchCaps(artists: 10, albums: 20, songs: 50, playlists: 10))
@@ -204,61 +156,33 @@ private func artist(_ id: String, _ name: String) -> Artist {
     }
 
     @Test func aSongAddedWhileShownStaysAmongTheFindsUntilTheNextSearch() {
-        let found = Discovered(songs: [song("e1"), song("e2")])
+        let found = Discovered(songs: [song("find:e1"), song("find:e2")], albums: [], artists: [])
         // The library was searched before the song arrived: nothing listed yet.
-        #expect(found.without(listedFinds([:], songIds: ["t-1"])).songs.map(\.id) == ["e1", "e2"])
+        #expect(found.without(listedFinds([:], songIds: ["t-1"])).songs.map(\.id) == ["find:e1", "find:e2"])
     }
 
     @Test func aRebuildListsTheAddedSongOnceAsTheLibrarySong() {
         let adoptions = ["e1": "t-9"]
-        let found = Discovered(songs: [song("e1"), song("e2")])
+        let found = Discovered(songs: [song("find:e1"), song("find:e2")], albums: [], artists: [])
         let listed = listedFinds(adoptions, songIds: ["t-9"])
-        #expect(listed == ["e1"])
-        #expect(found.without(listed).songs.map(\.id) == ["e2"])
+        #expect(listed == ["find:e1"])
+        #expect(found.without(listed).songs.map(\.id) == ["find:e2"])
     }
 
     @Test func aFindWhoseLibrarySongIsNotListedStays() {
         let listed = listedFinds(["e1": "t-9"], songIds: ["t-1"])
         #expect(listed.isEmpty)
-        #expect(Discovered(songs: [song("e1")]).without(listed).songs.map(\.id) == ["e1"])
-    }
-
-    @Test func albumsHeldInPartStayApartFromTheFinds() {
-        let wattba = album("What A Time To Be Alive", songs: 11, owned: 2)
-        let partOnly = Discovered(partAlbums: [wattba])
-        #expect(partOnly.notInLibraryEmpty)
-        #expect(!partOnly.isEmpty)
+        #expect(Discovered(songs: [song("find:e1")], albums: [], artists: []).without(listed).songs.map(\.id) == ["find:e1"])
     }
 
     @Test func eachFilterShowsItsOwnFinds() {
-        let found = Discovered(songs: [song("s")], albums: [album("a", songs: 3, owned: 0)], artists: [artist("ext-1", "x")],
-                               partAlbums: [album("p", songs: 3, owned: 1)])
+        let found = Discovered(songs: [song("find:s")], albums: [online("a")],
+                               artists: [OnlineArtist(id: "ext-1", name: "x", albumCount: 1, artwork: nil)], partAlbums: [online("p", owned: 1)])
         #expect(found.only(.playlists) == nil)
         #expect(found.only(.songs)?.songs.count == 1 && found.only(.songs)?.albums.isEmpty == true)
         #expect(found.only(.albums)?.partAlbums.count == 1 && found.only(.albums)?.songs.isEmpty == true)
         #expect(found.only(.artists)?.artists.count == 1 && found.only(.artists)?.partAlbums.isEmpty == true)
         #expect(found.only(.all)?.songs.count == 1)
-    }
-
-    @Test func searchSortsTheServersAnswer() throws {
-        let answer = try JSONDecoder().decode(SearchResult.self, from: Data("""
-        {"artist":[{"id":"ar1","name":"Drake"},{"id":"ext-deezer-artist-9","name":"Drake & Future"},
-                   {"id":"ext-deezer-artist-10","name":"DRAKE"}],
-         "album":[{"id":"al1","name":"Views","artist":"Drake"},
-                  {"id":"ext-a1","name":"Views (Deluxe)","artist":"Drake","isExternal":true,"songCount":20,"ownedCount":0},
-                  {"id":"ext-a2","name":"What A Time To Be Alive","artist":"Drake","isExternal":true,"songCount":11,"ownedCount":2},
-                  {"id":"ext-a3","name":"Take Care","artist":"Drake","isExternal":true,"songCount":18,"ownedCount":18},
-                  {"id":"ext-a4","name":"Scorpion","artist":"Drake","isExternal":true,"songCount":25}],
-         "song":[{"id":"s1","title":"Hotline Bling"},{"id":"ext-s2","title":"Jumbotron","isExternal":true}]}
-        """.utf8))
-        let library = SearchResult(artist: answer.artist.filter { !isOnlineId($0.id) }, album: answer.album.filter { !$0.isExternal })
-        let found = discovered(from: answer, libraryAlbums: library.album, libraryArtists: library.artist) { $0.isExternal }
-        #expect(found.songs.map(\.id) == ["ext-s2"])
-        // "Views (Deluxe)" names the library's "Views" once its brackets are left out.
-        #expect(found.albums.map(\.id) == ["ext-a4"])
-        #expect(found.partAlbums.map(\.id) == ["ext-a2"])
-        // The library's Drake is the same name as the server's DRAKE.
-        #expect(found.artists.map(\.id) == ["ext-deezer-artist-9"])
     }
 
     @Test func theAddHintShowsTheFirstFiveTimes() {

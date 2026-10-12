@@ -6,6 +6,12 @@ import OctoKit
 // how its downloads are going: a little later, and once more for slow ones.
 private let checkAfterMs: [Int64] = [2 * 60_000, 8 * 60_000]
 
+// How often Octo's admin pages are read while downloads are on their way, for how long, and how
+// many times the library is copied again for one finished song.
+private let watchEveryMs: Int64 = 20_000
+private let watchForMs: Int64 = 30 * 60_000
+private let syncsPerSong = 3
+
 /// Finds that have not come up for this long are let go.
 private let forgetMs: Int64 = 30 * 24 * 60 * 60_000
 
@@ -52,6 +58,22 @@ final class Downloads {
     @ObservationIgnored private var failedBefore = Set<String>()
     @ObservationIgnored private var lastSource: String?
     @ObservationIgnored private var findsWatch: Watch<Int>?
+
+    /// A song Octo's admin pages list as downloaded.
+    struct AdminDownload: Sendable {
+        var title: String
+        var artist: String
+    }
+
+    /// Octo's admin pages, once another part of the app can reach them: where they answer now for
+    /// the server in use (nil when away from home or not on Octo), and the songs they list as
+    /// downloaded there. A failed read throws.
+    struct AdminPages {
+        var locate: @MainActor () async -> URL?
+        var downloaded: @MainActor (_ base: URL) async throws -> [AdminDownload]
+    }
+
+    @ObservationIgnored var adminPages: AdminPages?
 
     /// `announce` shows a line: the words, and whether it marks something done.
     init(session: Session, library: Library, sync: ServerSync, announce: @escaping @MainActor (String, Bool) -> Void) {
@@ -215,7 +237,7 @@ final class Downloads {
         guard !waiting.isEmpty else { return }
         let keys = Array(Set(waiting.flatMap { titleKeys($0.title) }))
         let candidates = ((try? await store.tracksWithKeys(keys)) ?? []).filter { !isFind($0.id) }
-        let adopted = adoptionsOf(waiting, candidates)
+        let adopted = OctoKit.adoptions(waiting, candidates)
         for find in waiting {
             if let track = adopted[find.id] { try? await store.adopt(find.id, trackId: track.id) }
         }
@@ -232,7 +254,8 @@ final class Downloads {
     }
 
     /// Follows the downloads asked for: by asking the server how they are going when it can say;
-    /// otherwise by copying the library again a little later, and once more after that.
+    /// otherwise by copying the library again once Octo's admin pages list one as finished, when
+    /// they can be reached, or a little later, and once more after that for slow ones.
     private func follow() {
         if following {
             tracker.wake()
@@ -247,7 +270,31 @@ final class Downloads {
                 self.following = false
                 if done { return }
             }
-            await self.checkOnTimer()
+            if let pages = self.adminPages, let base = await pages.locate() {
+                await self.watch(base, pages)
+            } else {
+                await self.checkOnTimer()
+            }
+        }
+    }
+
+    /// Reads the admin pages until every download asked for has arrived, or for half an hour; a
+    /// song listed there as finished has the library copied again, at most three times.
+    private func watch(_ base: URL, _ pages: AdminPages) async {
+        var syncs: [String: Int] = [:]
+        let until = epochNowMs() + watchForMs
+        while epochNowMs() < until {
+            try? await Task.sleep(for: .milliseconds(watchEveryMs))
+            if Task.isCancelled { return }
+            let waiting = watchedWaiting()
+            if waiting.isEmpty { return }
+            guard let finished = try? await pages.downloaded(base) else { continue }
+            let due = waiting.filter { find in finished.contains { sameRecording($0.title, $0.artist, find.title, find.artist) } }
+                .filter { (syncs[$0.id] ?? 0) < syncsPerSong }
+            if !due.isEmpty {
+                for find in due { syncs[find.id, default: 0] += 1 }
+                sync.syncNow()
+            }
         }
     }
 
@@ -360,20 +407,6 @@ final class Downloads {
             }
         }
     }
-}
-
-/// The library song each find arrived as: the first with the same title, the same kind of
-/// recording and the same artist, of about the same length when both are known. Finds not in the
-/// library yet are left out.
-func adoptionsOf(_ waiting: [OnlineSong], _ library: [LibraryTrack]) -> [String: LibraryTrack] {
-    let byTitle = TitleIndex(library, title: \.title, artist: \.artist)
-    var found: [String: LibraryTrack] = [:]
-    for find in waiting {
-        if let track = byTitle.candidates(find.title, find.artist).first(where: { sameSong(find.title, find.artist, find.durationMs, $0) }) {
-            found[find.id] = track
-        }
-    }
-    return found
 }
 
 /// The downloads follower's line to the rest of the app.

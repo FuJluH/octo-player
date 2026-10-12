@@ -26,23 +26,16 @@ private let chartKeptSeconds: TimeInterval = 60 * 60
 /// How long a server's list of charts, and one chart's songs, are kept.
 private let chartChoicesKeptSeconds: TimeInterval = 24 * 60 * 60
 private let chartSongsKeptSeconds: TimeInterval = 60 * 60
-/// How many ids or keys one database lookup takes.
-private let lookupChunk = 900
-
-/// One page from the server of an album the library does not hold whole.
-struct OnlineAlbumPage: Sendable {
-    var album: Album
-    var songs: [Song]
-}
 
 /// What the signed-in server offers beyond the library: songs, albums and artists found online,
-/// ranked lists, charts and stations, each matched to the library. Every call throws when the
+/// ranked lists, charts and stations, each matched to the library. What the server finds is read
+/// through `ServerDiscovery`; the ranked lists and charts are kept here. Every call throws when the
 /// server cannot answer, and answers nothing when no server is signed in.
 @MainActor
 @Observable
 final class Discovery {
     @ObservationIgnored private let session: Session
-    @ObservationIgnored private let downloads: Downloads
+    @ObservationIgnored private let online: ServerDiscovery
     @ObservationIgnored let library: Library
 
     @ObservationIgnored private var offered: [String: Bool] = [:]
@@ -51,13 +44,10 @@ final class Discovery {
     @ObservationIgnored private var choices: [String: (at: Date, value: ChartChoices)] = [:]
     @ObservationIgnored private var chartLists: [String: (at: Date, value: ChartList<Song>)] = [:]
     @ObservationIgnored private var albumTops: [String: [TopSongRef]] = [:]
-    /// Which of Octo's radio sources suggested a song, as its last radio answer said. Kept while the
-    /// app runs, not saved.
-    @ObservationIgnored private let suggested = RadioSuggestions()
 
-    init(session: Session, downloads: Downloads, library: Library) {
+    init(session: Session, online: ServerDiscovery, library: Library) {
         self.session = session
-        self.downloads = downloads
+        self.online = online
         self.library = library
     }
 
@@ -97,43 +87,7 @@ final class Discovery {
     // MARK: Search
 
     /// Songs, albums and artists the server has beyond the library. Nil with no server.
-    func search(_ query: String) async throws -> Discovered? {
-        guard let client = session.client, let sourceId else { return nil }
-        let found = try await client.search(query.trimmingCharacters(in: .whitespacesAndNewlines), artists: 10, albums: 20,
-                                            songs: discoverSongs)
-        let songs = await resolve(found.song).filter { isFind($0.id) }.map(\.asSong)
-        // Octo counts how many songs of each album the library holds. One it holds every song of
-        // is not a find; one it holds some of goes apart, saying how many.
-        let albums = await notInLibrary(sourceId, found.album).filter { albumShare($0) != .whole }
-        return Discovered(songs: songs, albums: albums.filter { albumShare($0) != .part }.map(counted),
-                          artists: await artistsNotInLibrary(sourceId, found.artist),
-                          partAlbums: albums.filter { albumShare($0) == .part }.map(counted))
-    }
-
-    /// Albums the library has neither from this server nor by the same name and artist from
-    /// anywhere else.
-    private func notInLibrary(_ sourceId: String, _ albums: [Album]) async -> [Album] {
-        if albums.isEmpty { return [] }
-        let ids = albums.map(\.id)
-        let known = Set((try? await library.store.knownAlbums(sourceId, ids)) ?? [])
-        let named = Set(await library.albumsWithKeys(albums.map { searchKey("\($0.name) \($0.artist)") })
-            .map { discoveryNameKey($0.title) + "|" + discoveryNameKey($0.artist) })
-        return albums.filter { !known.contains($0.id) && !named.contains(discoveryNameKey($0.name) + "|" + discoveryNameKey($0.artist)) }
-    }
-
-    private func artistsNotInLibrary(_ sourceId: String, _ artists: [Artist]) async -> [Artist] {
-        if artists.isEmpty { return [] }
-        let known = Set((try? await library.store.knownArtists(artists.map { "\(sourceId):\($0.id)" })) ?? [])
-        let named = Set(await library.artistsWithKeys(artists.map { searchKey($0.name) }).map { discoveryNameKey($0.name) })
-        return artists.filter { !known.contains("\(sourceId):\($0.id)") && !named.contains(discoveryNameKey($0.name)) }
-    }
-
-    /// An online album's owned count is kept only when the server marks the album external.
-    private func counted(_ album: Album) -> Album {
-        var shown = album
-        if !album.isExternal { shown.ownedCount = nil }
-        return shown
-    }
+    func search(_ query: String) async throws -> Discovered? { try await online.search(query) }
 
     // MARK: Ranked lists
 
@@ -202,7 +156,7 @@ final class Discovery {
         // Another server in use by the time it came: not this one's chart.
         guard session.activeId == asked else { return nil }
         let entries = list.entry.filter { $0.song != nil }
-        let tracks = await resolveInPlace(entries.compactMap(\.song)).map { $0?.asSong }
+        let tracks = await online.resolveInPlace(entries.compactMap(\.song)).map { $0?.asSong }
         let songs = rankTracks(entries, tracks, id: \.id)
         let shown = ChartList(chart: id, name: list.name, source: list.source, country: list.country, songs: songs)
         chartLists[key] = (Date(), shown)
@@ -212,90 +166,32 @@ final class Discovery {
     /// The server's songs as the app shows them, each in its place.
     private func ranked(_ list: TopSongs) async -> RankedSongs<Song>? {
         let entries = list.entry.filter { $0.song != nil }
-        let tracks = await resolveInPlace(entries.compactMap(\.song)).map { $0?.asSong }
+        let tracks = await online.resolveInPlace(entries.compactMap(\.song)).map { $0?.asSong }
         let songs = rankTracks(entries, tracks, id: \.id)
         return songs.isEmpty ? nil : RankedSongs(artist: list.artist, source: list.source, songs: songs)
-    }
-
-    /// Which radio source suggested a song, for its info.
-    func suggestedBy(_ trackId: String) -> String? { suggested[trackId] }
-
-    // MARK: Radio
-
-    /// The song first, then songs like it, each once.
-    func radio(seed: LibraryTrack, count: Int = 50) async -> [LibraryTrack] {
-        guard let client = session.client, let seedId = await serverIdOf(seed, client: client),
-              let similar = try? await client.radio(from: seedId, count: count)
-        else { return [] }
-        var seen = Set<String>()
-        return ([seed] + (await resolve(similar))).filter { seen.insert($0.id).inserted }
-    }
-
-    /// The server's id for a song: a find's own, a library song's server copy, or, for a song only
-    /// on the phone, the same song as the server knows it: the same recording when the server has
-    /// it, or else another version.
-    private func serverIdOf(_ track: LibraryTrack, client: SubsonicClient) async -> String? {
-        if isFind(track.id) { return String(track.id.dropFirst(findPrefix.count)) }
-        if let copy = await library.copies(track.id).first(where: { isServerSource($0.sourceId) }) { return copy.nativeId }
-        guard let found = try? await client.search("\(track.artist) \(track.title)", artists: 0, albums: 0, songs: discoverSongs).song
-        else { return nil }
-        return (found.first { sameRecording($0.title, $0.artist ?? "", track.title, track.artist) }
-            ?? found.first { sameSongAnyVersion($0.title, $0.artist ?? "", track.title, track.artist) })?.id
     }
 
     // MARK: Stations
 
     /// The kept server whose stations Home shows: the one signed in to, while it runs Octo.
-    var stationsFrom: String? { session.client != nil && session.isOcto ? session.activeId : nil }
+    var stationsFrom: String? { online.offersStations ? session.activeId : nil }
 
-    /// Only Octo runs stations. Other servers list internet radio here, which is a stream, not
-    /// songs, so nothing is shown for them.
-    func stations() async throws -> [RadioStation] {
-        guard let client = session.client, session.isOcto else { return [] }
-        return try await client.stations()
-    }
+    /// The stations the server runs: only Octo's.
+    func stations() async throws -> [Station] { try await online.stations() }
 
     /// The lists Octo made for the listener, from its playlists.
-    func madeForYou() async throws -> [Playlist] {
-        guard let client = session.client, session.isOcto else { return [] }
-        return madeForYouLists(try await client.playlists())
-    }
+    func madeForYou() async throws -> [Station] { try await online.madeForYou() }
 
     /// The songs a station, or a Made for you list, has lined up now.
-    func stationSongs(_ id: String) async throws -> [Song] {
-        guard let client = session.client else { return [] }
-        return await resolve(try await client.playlist(id).entry).map(\.asSong)
-    }
+    func stationSongs(_ id: String) async throws -> [Song] { try await online.stationSongs(id).map(\.asSong) }
 
     // MARK: Pages
 
     /// An album the server found, with its songs in the server's order.
-    func album(_ id: String) async throws -> OnlineAlbumPage? {
-        guard let client = session.client else { return nil }
-        let album = try await client.album(id)
-        return OnlineAlbumPage(album: album, songs: await resolve(album.song).map(\.asSong))
-    }
-
-    /// A library album as the server lists it now, found from its songs: the library's songs and,
-    /// as finds, the ones it lacks, in the server's order. Nil when no Octo server is signed in
-    /// (only Octo lists songs outside the library) or none of the songs came from it.
-    func libraryAlbum(_ trackIds: [String]) async -> [LibraryTrack]? {
-        guard session.isOcto, let client = session.client, let sourceId else { return nil }
-        let copies = ((try? await library.store.copies(of: trackIds)) ?? []).filter { $0.sourceId == sourceId }
-        var counts: [String: Int] = [:]
-        for copy in copies { counts[copy.albumId, default: 0] += 1 }
-        guard let albumRow = counts.max(by: { $0.value < $1.value })?.key,
-              let native = try? await library.store.albumNativeId(albumRow),
-              let sent = try? await client.album(native).song
-        else { return nil }
-        return outsideAlbumSongs(sent, await resolve(sent))
-    }
+    func album(_ id: String) async throws -> OnlineAlbumPage? { try await online.album(id) }
 
     /// An artist the server found, with the albums it lists.
-    func artist(_ id: String) async throws -> Artist? {
-        guard let client = session.client else { return nil }
-        return try await client.artist(id)
-    }
+    func artist(_ id: String) async throws -> OnlineArtistPage? { try await online.artist(id) }
 
     /// The artist's top songs, for marking an album's main song: kept for the app's run per user,
     /// server and artist; nothing when it cannot be reached (asked again then).
@@ -311,55 +207,7 @@ final class Discovery {
 
     // MARK: Resolving
 
-    /// Songs from the server as the app shows them, in the order sent: a library song as it is in
-    /// the library, anything else as a find. A find already downloaded is the library song it
-    /// became. Repeats are dropped by id.
-    func resolve(_ songs: [Song]) async -> [LibraryTrack] {
-        var seen = Set<String>()
-        return await resolveInPlace(songs).compactMap { $0 }.filter { seen.insert($0.id).inserted }
-    }
-
-    /// The same, one for each song sent and in its place, nil where a library song is gone.
-    func resolveInPlace(_ songs: [Song]) async -> [LibraryTrack?] {
-        guard let sourceId, !songs.isEmpty else { return [] }
-        let ids = Array(Set(songs.map(\.id)))
-        var links: [String: String] = [:]
-        for link in (try? await library.store.libraryLinks(sourceId, ids)) ?? [] { links[link.serverId] = link.trackId }
-        let unlinked = songs.filter { links[$0.id] == nil }
-        let keys = Array(Set(unlinked.flatMap { titleKeys($0.title) }))
-        var candidates: [LibraryTrack] = []
-        for start in stride(from: 0, to: keys.count, by: lookupChunk) {
-            candidates += await library.tracksWithKeys(Array(keys[start..<min(start + lookupChunk, keys.count)]))
-        }
-        var each = resolveSongs(songs, sourceId: sourceId, links: links, library: candidates, now: msSince1970())
-        // Finds as stored, so a length learned from playing one shows.
-        var foundRows: [OnlineSong] = []
-        var foundSeen = Set<String>()
-        for case .found(let row) in each where foundSeen.insert(row.id).inserted { foundRows.append(row) }
-        if let kept = try? await library.store.keepFinds(foundRows) {
-            let byId = Dictionary(kept.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-            each = each.map { resolved in
-                if case .found(let row) = resolved, let stored = byId[row.id] { return .found(stored) }
-                return resolved
-            }
-        }
-        var wanted: [String] = []
-        for resolved in each {
-            switch resolved {
-            case .inLibrary(let trackId): wanted.append(trackId)
-            case .found(let row): if !row.adoptedId.isEmpty { wanted.append(row.adoptedId) }
-            }
-        }
-        let known = await library.tracks(ids: Array(Set(wanted)))
-        let byId = Dictionary(known.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        let inLibrary = Set(byId.keys)
-        let tracks: [LibraryTrack?] = each.map { resolved in
-            switch asAdopted(resolved, library: inLibrary) {
-            case .inLibrary(let trackId): byId[trackId]
-            case .found(let row): row.asTrack
-            }
-        }
-        suggested.putAll(suggestionsOf(tracks.map { $0?.id }, songs))
-        return tracks
-    }
+    /// Songs from the server as the app shows them, in the order sent, each once: a library song as
+    /// it is in the library, anything else as a find.
+    func resolve(_ songs: [Song]) async -> [LibraryTrack] { await online.resolveFromServer(songs) }
 }

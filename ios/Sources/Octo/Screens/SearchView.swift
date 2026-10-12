@@ -217,7 +217,7 @@ struct SearchView: View {
 
     /// Every song shown, library ones first, then the finds and the top songs, each once.
     private func pickable(_ found: LibraryResults, _ online: DiscoverState) -> [Pickable] {
-        let finds: [Song] = if case .done(let discovered) = online { discovered.songs } else { [] }
+        let finds: [Song] = if case .done(let discovered) = online { discovered.songs.map(\.asSong) } else { [] }
         var seen = Set<String>()
         return (found.songs.map(\.asSong) + finds + (top?.songs.map(\.track) ?? []))
             .filter { seen.insert($0.id).inserted }
@@ -356,7 +356,7 @@ struct SearchView: View {
     /// line says so.
     @ViewBuilder
     private func discoverSection(_ online: DiscoverState, spaced: Bool) -> some View {
-        let part: [Album] = if case .done(let found) = online { found.partAlbums } else { [] }
+        let part: [OnlineAlbum] = if case .done(let found) = online { found.partAlbums } else { [] }
         if !part.isEmpty {
             TitleRow(title: partlyInLibraryText, top: spaced ? 12 : 0)
             SideScroller {
@@ -381,11 +381,12 @@ struct SearchView: View {
                         .onAppear { model.hintSeen() }
                 }
                 if !found.songs.isEmpty {
+                    let songs = found.songs.map(\.asSong)
                     FindsSubtitle(text: "Songs")
-                    ForEach(Array(found.songs.enumerated()), id: \.element.id) { position, song in
+                    ForEach(Array(songs.enumerated()), id: \.element.id) { position, song in
                         // A find that turns into its library song ends like the library songs
                         // listed above, at its length.
-                        SongRow(song: song, list: found.songs, position: position, offersAdd: true, addSpace: false,
+                        SongRow(song: song, list: songs, position: position, offersAdd: true, addSpace: false,
                                 tap: { model.playFound(song) })
                             .id("discover:\(song.id)")
                     }
@@ -400,7 +401,7 @@ struct SearchView: View {
                     FindsSubtitle(text: "Artists")
                     SideScroller {
                         ForEach(found.artists) { artist in
-                            OnlineArtistCircle(id: artist.id, name: artist.name, coverArt: artist.coverArt) { model.keepSearch() }
+                            OnlineArtistCircle(id: artist.id, name: artist.name, coverArt: coverId(of: artist.artwork)) { model.keepSearch() }
                         }
                     }
                 }

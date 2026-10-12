@@ -34,21 +34,22 @@ struct OnlineAlbumView: View {
 
     var body: some View {
         LoadStateView(state: page, retry: { Task { await reload() } }) { found in
+            let songs = found.songs.map(\.asSong)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    header(found)
-                    let mixed = found.songs.contains(where: \.isExternal)
-                    ForEach(Array(found.songs.enumerated()), id: \.element.id) { index, song in
+                    header(found.album, songs)
+                    let mixed = songs.contains(where: \.isExternal)
+                    ForEach(Array(songs.enumerated()), id: \.element.id) { index, song in
                         // Only say who is singing when it is not the album's artist.
-                        SongRow(song: song, list: found.songs, position: index, showsCover: false, number: index + 1,
+                        SongRow(song: song, list: songs, position: index, showsCover: false, number: index + 1,
                                 describe: { $0.byline != found.album.artist ? $0.byline : "" },
-                                highlight: song.id == highlight, ownership: mixed) { player.play(found.songs, from: index) }
+                                highlight: song.id == highlight, ownership: mixed) { player.play(songs, from: index) }
                     }
                 }
             }
             .barClearance()
         }
-        .pageArtwork(.onlineAlbum(id: id, name: name), page.value?.album.coverArt)
+        .pageArtwork(.onlineAlbum(id: id, name: name), coverId(of: page.value?.album.artwork))
         .task { if page.value == nil { await reload() } }
         .task(id: page.value?.album.id) { await markHighlight() }
         .onChange(of: downloads.arrived) { _, _ in
@@ -56,7 +57,7 @@ struct OnlineAlbumView: View {
             // once its check has landed.
             Task {
                 try? await Task.sleep(for: .milliseconds(checkHoldMs + swapFadeDurationMs))
-                let songs = page.value?.songs ?? []
+                let songs = (page.value?.songs ?? []).map(\.asSong)
                 if songs.contains(where: { $0.isExternal && downloads.state($0.id) == .done }) { await refresh() }
             }
         }
@@ -64,24 +65,23 @@ struct OnlineAlbumView: View {
 
     /// Whether the album is on its way: asked for here, or every song from it that is not in the
     /// library already asked for.
-    private func downloading(_ found: OnlineAlbumPage) -> Bool {
-        let finds = found.songs.filter(\.isExternal)
+    private func downloading(_ songs: [Song]) -> Bool {
+        let finds = songs.filter(\.isExternal)
         return asked || (!finds.isEmpty && finds.allSatisfy { downloads.state($0.id) != .none })
     }
 
-    private func header(_ found: OnlineAlbumPage) -> some View {
-        let album = found.album
+    private func header(_ album: OnlineAlbum, _ songs: [Song]) -> some View {
         // The length only adds up when every song's length is known.
-        let lengths = found.songs.map { $0.isExternal ? Int(knownLengthMs($0) / 1_000) : $0.duration }
+        let lengths = songs.map { $0.isExternal ? Int(knownLengthMs($0) / 1_000) : $0.duration }
         let length = !lengths.isEmpty && lengths.allSatisfy { $0 > 0 } ? lengths.reduce(0, +).spokenLength : nil
         let details = [album.year.map(String.init), album.songCount == 1 ? "1 song" : "\(album.songCount) songs", length]
             .compactMap { $0 }.joined(separator: " • ")
         let artistId = album.artistId.flatMap { $0.isEmpty ? nil : $0 }
         return VStack(alignment: .leading, spacing: 0) {
             VStack(spacing: 0) {
-                Cover(id: album.coverArt, size: 240, radius: 10)
+                Cover(id: coverId(of: album.artwork), size: 240, radius: 10)
                     .shadow(color: .black.opacity(0.4), radius: 16, y: 8)
-                Text(album.name)
+                Text(album.title)
                     .font(.octoTitle)
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.center)
@@ -104,16 +104,16 @@ struct OnlineAlbumView: View {
                 }
                 .frame(minHeight: 44)
                 .padding(.top, 14)
-                PlayButtons(songs: found.songs).padding(.top, 4)
+                PlayButtons(songs: songs).padding(.top, 4)
             }
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 20)
             // The cover stays clean. The plus adds the album to the library; for an album partly
             // there, a note says how much of it is.
-            if found.songs.contains(where: \.isExternal) {
-                let busy = downloading(found)
+            if songs.contains(where: \.isExternal) {
+                let busy = downloading(songs)
                 HStack(spacing: 0) {
-                    Button { add(found) } label: {
+                    Button { add(album, songs) } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "plus.circle")
                                 .font(.system(size: 17))
@@ -129,8 +129,8 @@ struct OnlineAlbumView: View {
                     .buttonStyle(.plain)
                     .disabled(busy)
                     .opacity(busy ? 0.6 : 1)
-                    if let note = albumLibraryNote(songs: found.songs.count,
-                                                   outside: found.songs.filter { isOutsideLibrary($0, adopted: downloads.adopted) }.count) {
+                    if let note = albumLibraryNote(songs: songs.count,
+                                                   outside: songs.filter { isOutsideLibrary($0, adopted: downloads.adopted) }.count) {
                         Spacer(minLength: 0)
                         Text(note)
                             .font(.octoCaption)
@@ -147,10 +147,10 @@ struct OnlineAlbumView: View {
     }
 
     /// Has the server download the whole album into the library.
-    private func add(_ found: OnlineAlbumPage) {
+    private func add(_ album: OnlineAlbum, _ songs: [Song]) {
         asked = true
         Task {
-            if !(await downloads.requestAlbum(id, songs: found.songs, title: found.album.name)) { asked = false }
+            if !(await downloads.requestAlbum(id, songs: songs, title: album.title)) { asked = false }
         }
     }
 
@@ -169,7 +169,7 @@ struct OnlineAlbumView: View {
     private func markHighlight() async {
         guard let found = page.value else { return }
         let ranked = await discovery.artistTopRefs(found.album.artist)
-        highlight = albumHighlight(found.songs.map { ($0.id, $0.title, $0.byline) }, ranked)
+        highlight = albumHighlight(found.songs.map(\.asSong).map { ($0.id, $0.title, $0.byline) }, ranked)
     }
 }
 
@@ -180,23 +180,24 @@ struct OnlineArtistView: View {
     let id: String
     let name: String
     @Environment(Discovery.self) private var discovery
-    @State private var page: LoadState<Artist> = .loading
+    @State private var page: LoadState<OnlineArtistPage> = .loading
     @State private var width: CGFloat = 390
 
     var body: some View {
-        LoadStateView(state: page, retry: { Task { await reload() } }) { artist in
+        LoadStateView(state: page, retry: { Task { await reload() } }) { found in
+            let artist = found.artist
             let columns = max(1, Int((width - 40 + 14) / (150 + 14)))
             let cell = (width - 40 - 14 * CGFloat(columns - 1)) / CGFloat(columns)
             ScrollView {
                 VStack(spacing: 0) {
                     // The picture stays clean; the line under the name says it.
-                    Cover(id: artist.coverArt, size: 160, radius: 80)
+                    Cover(id: coverId(of: artist.artwork), size: 160, radius: 80)
                     Text(artist.name)
                         .font(.octoTitle)
                         .foregroundStyle(.white)
                         .multilineTextAlignment(.center)
                         .padding(.top, 16)
-                    Text("\(artist.album.count == 1 ? "1 album" : "\(artist.album.count) albums") • \(notInLibraryText)")
+                    Text("\(found.albums.count == 1 ? "1 album" : "\(found.albums.count) albums") • \(notInLibraryText)")
                         .font(.octoCaption)
                         .foregroundStyle(OctoColor.textMuted)
                         .padding(.top, 4)
@@ -206,24 +207,17 @@ struct OnlineArtistView: View {
                 .padding(.bottom, 8 + 18)
                 LazyVGrid(columns: Array(repeating: GridItem(.fixed(cell), spacing: 14, alignment: .top), count: columns),
                           alignment: .leading, spacing: 18) {
-                    ForEach(artist.album) { album in
-                        OnlineAlbumCard(album: counted(album), width: cell)
+                    ForEach(found.albums) { album in
+                        OnlineAlbumCard(album: album, width: cell)
                     }
                 }
                 .padding(.horizontal, 20)
             }
             .barClearance()
         }
-        .pageArtwork(.onlineArtist(id: id, name: name), page.value?.coverArt)
+        .pageArtwork(.onlineArtist(id: id, name: name), coverId(of: page.value?.artist.artwork))
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .task { if page.value == nil { await reload() } }
-    }
-
-    /// An online album's owned count is kept only when the server marks the album external.
-    private func counted(_ album: Album) -> Album {
-        var shown = album
-        if !album.isExternal { shown.ownedCount = nil }
-        return shown
     }
 
     private func reload() async {

@@ -138,16 +138,16 @@ struct OutsideCover: View {
 /// its cover and, when the library holds some of its songs, how many. No menu; a tap opens the
 /// album's page from the server.
 struct OnlineAlbumCard: View {
-    let album: Album
+    let album: OnlineAlbum
     var width: CGFloat = 150
     var opened: () -> Void = {}
 
     var body: some View {
-        NavigationLink(value: Route.onlineAlbum(id: album.id, name: album.name)) {
+        NavigationLink(value: Route.onlineAlbum(id: album.id, name: album.title)) {
             VStack(alignment: .leading, spacing: 0) {
-                OutsideCover(id: album.coverArt, size: width, outside: true)
+                OutsideCover(id: coverId(of: album.artwork), size: width, outside: true)
                 Spacer().frame(height: 8)
-                Text(album.name)
+                Text(album.title)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
