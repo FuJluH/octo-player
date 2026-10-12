@@ -804,6 +804,9 @@ final class Player {
         shuffled = queueState.shuffle
         upNextSlots = queueState.upNext()
         playedSlots = queueState.played()
+        let soon = ([current].compactMap { $0 } + upNext.prefix(2))
+        Covers.shared.coming(soon.compactMap { song in song.coverArt.map { (reference: $0, online: song.isExternal) } },
+                             client: session.client)
     }
 
     private func publishState() {

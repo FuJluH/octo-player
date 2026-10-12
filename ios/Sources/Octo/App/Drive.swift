@@ -249,7 +249,7 @@ enum CoverTiming {
             asks.append((coverId, "song \(coverId) \(song.title)"))
         }
         for (coverId, name) in asks {
-            for size in [600, 128] {
+            for size in [600, 128, 600] {
                 var request = URLRequest(url: client.coverURL(coverId, size: size))
                 request.cachePolicy = .reloadIgnoringLocalCacheData
                 for (name, value) in client.headers { request.setValue(value, forHTTPHeaderField: name) }
