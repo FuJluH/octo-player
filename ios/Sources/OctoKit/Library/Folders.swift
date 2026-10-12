@@ -158,7 +158,7 @@ public let serverFolderLimit = 400
 /// Collects every song under a folder, in the order the folders show them: each inside folder in
 /// turn, then the folder's own songs. Stops at `limit` songs, or after opening `maxFolders`
 /// folders. A folder seen twice is opened once.
-public func gatherSongs<S>(_ start: FolderContents<S>, limit: Int, maxFolders: Int,
+public func gatherSongs<S>(_ start: FolderContents<S>, limit: Int, maxFolders: Int, isolation: isolated (any Actor)? = #isolation,
                            open: (String) async throws -> FolderContents<S>) async rethrows -> Gathered<S> {
     var out: [S] = []
     var seen = Set<String>()

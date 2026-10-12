@@ -67,8 +67,250 @@ struct NowPlayingBars: View {
     }
 }
 
-/// One song in a list. Tapping plays `list` from this song; holding opens its menu; swiping
-/// right puts it next in the queue.
+/// What sits at the start of a song row.
+enum SongLead: Equatable {
+    case artwork
+    case number(Int?)
+    /// A place in a ranking, then the artwork.
+    case ranked(Int)
+}
+
+/// One song in a list, from the library or found online. A tap plays (or picks it while the list
+/// is picking); a long press opens its menu; a swipe right puts it next in the queue on lists
+/// where a swipe does nothing else.
+struct TrackRow: View {
+    let track: LibraryTrack
+    var lead: SongLead = .artwork
+    /// Words under the title in place of "Artist • Album"; empty leaves the line out.
+    var subtitle: String?
+    var context = SongMenuContext()
+    var selection: SongSelection?
+    /// The row's key for picking: its id, or its playlist row on a playlist page.
+    var selectKey: String?
+    var swipe: SwipeKind = .playNext
+    /// Whether this list offers add: a find ends with the add button, and a library song keeps
+    /// the same space empty when `addSpace` so lengths line up.
+    var offersAdd = false
+    var addSpace = false
+    /// A list mixing library songs with finds: a check or the add button after the number.
+    var ownership = false
+    /// An album's main song, starred.
+    var highlighted = false
+    var trailing: AnyView?
+    let onTap: () -> Void
+
+    /// What a swipe does on this row.
+    enum SwipeKind {
+        case none, playNext
+        case remove(() -> Void)
+    }
+
+    @Environment(Player.self) private var player
+    @Environment(LibraryActions.self) private var actions
+
+    private var key: String { selectKey ?? track.id }
+    private var song: Song { track.asSong }
+    private var selecting: Bool { selection?.active == true }
+    private var picked: Bool { selection?.isPicked(key) == true }
+    private var isNow: Bool { player.current.map { $0.id == song.id && $0.isExternal == song.isExternal } ?? false }
+
+    var body: some View {
+        Button {
+            if selecting { selection?.toggle(key) } else { onTap() }
+        } label: {
+            face
+                .padding(.horizontal, 20)
+                .padding(.vertical, 4)
+                .frame(minHeight: 56)
+                .contentShape(Rectangle())
+                .opacity(outOfReach ? 0.4 : 1)
+        }
+        .buttonStyle(PressSqueeze())
+        .background {
+            if picked {
+                RoundedRectangle(cornerRadius: OctoRadius.row)
+                    .fill(LibraryLook.accentSelected)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: OctoRadius.row)
+                            .strokeBorder(LinearGradient(colors: [.white.opacity(0.12), .black.opacity(0.25)], startPoint: .top, endPoint: .bottom),
+                                          lineWidth: 1)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+            }
+        }
+        .contextMenu {
+            SongActions(track: track, context: context, selection: selection)
+        } preview: {
+            MenuHeader(artwork: track.artwork, title: track.title, line: track.artist)
+        }
+        .rowSwipe(rowSwipe, enabled: !selecting)
+        .accessibilityAddTraits(selecting && picked ? .isSelected : [])
+        .accessibilityAction(named: "Play next") { actions.playNextUndoable(song) }
+        .accessibilityAction(named: "Add to queue") { player.append([song]) }
+    }
+
+    private var rowSwipe: RowSwipe {
+        switch swipe {
+        case .none: .none
+        case .playNext: .playNext { actions.playNextUndoable(song) }
+        case .remove(let run): .remove(run)
+        }
+    }
+
+    /// With no connection, a song that cannot play is drawn faint.
+    private var outOfReach: Bool {
+        !actions.state.online && !track.onPhone && actions.state.kept.status(track.id)?.status != .done
+    }
+
+    private var shownSubtitle: String {
+        subtitle ?? songSubtitle(title: track.title, artist: track.artist, album: track.album, find: track.isFound)
+    }
+
+    private var face: some View {
+        HStack(spacing: 12) {
+            leadView
+            if ownership { ownershipMark }
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 0) {
+                    if highlighted {
+                        Image(systemName: MenuIcon.starFilled)
+                            .font(.system(size: 11))
+                            .foregroundStyle(OctoColor.accent)
+                            .frame(width: 14, height: 14)
+                            .padding(.trailing, 6)
+                            .accessibilityLabel("Most popular")
+                    }
+                    Text(track.title)
+                        .font(.octoBodySmall)
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                    if track.explicit == true {
+                        ExplicitMark().padding(.leading, 6).layoutPriority(1)
+                    }
+                }
+                if !shownSubtitle.isEmpty {
+                    Text(shownSubtitle)
+                        .font(.octoCaption)
+                        .foregroundStyle(OctoColor.textMuted)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+            HStack(spacing: 6) {
+                sourceMark
+                lengthSlot
+            }
+            end
+        }
+    }
+
+    @ViewBuilder
+    private var leadView: some View {
+        switch lead {
+        case .artwork:
+            artwork
+        case .ranked(let rank):
+            HStack(spacing: 10) {
+                Text("\(rank)")
+                    .font(.octoCaption)
+                    .foregroundStyle(OctoColor.textMuted)
+                    .frame(width: 20, alignment: .trailing)
+                artwork
+            }
+        case .number(let number):
+            ZStack(alignment: .trailing) {
+                if picked {
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 19)).foregroundStyle(.white)
+                } else if isNow {
+                    NowPlayingBars(playing: player.isPlaying, size: 14)
+                } else {
+                    Text(number.map(String.init) ?? "")
+                        .font(.octoCaption.monospacedDigit())
+                        .foregroundStyle(OctoColor.textMuted)
+                }
+            }
+            .frame(width: 28, alignment: .trailing)
+        }
+    }
+
+    private var artwork: some View {
+        ArtCover(artwork: track.artwork, size: 44, radius: OctoRadius.artS)
+            .overlay(alignment: .bottomTrailing) {
+                if track.isFound && !offersAdd { NotInLibraryMark(artSize: 44) }
+            }
+            .overlay {
+                if picked || isNow {
+                    RoundedRectangle(cornerRadius: OctoRadius.artS).fill(.black.opacity(0.5))
+                    if picked {
+                        Image(systemName: "checkmark.circle.fill").font(.system(size: 19)).foregroundStyle(.white)
+                    } else {
+                        NowPlayingBars(playing: player.isPlaying)
+                    }
+                }
+            }
+            .accessibilityLabel(track.isFound ? "Not in your library" : "")
+    }
+
+    @ViewBuilder
+    private var ownershipMark: some View {
+        ZStack {
+            if track.isFound {
+                AddToLibraryButton(song: song, size: 32, iconSize: 20)
+            } else {
+                Image(systemName: MenuIcon.check)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(OctoColor.accent)
+                    .accessibilityLabel("In your library")
+            }
+        }
+        .frame(width: 32)
+    }
+
+    @ViewBuilder
+    private var sourceMark: some View {
+        if !track.isFound {
+            if actions.state.kept.status(track.id)?.status == .done {
+                Image(systemName: MenuIcon.downloaded)
+                    .font(.system(size: 11))
+                    .foregroundStyle(OctoColor.textMuted)
+                    .frame(width: 14, height: 14)
+                    .accessibilityLabel("Downloaded")
+            } else if !track.onPhone {
+                Image(systemName: MenuIcon.cloud)
+                    .font(.system(size: 11))
+                    .foregroundStyle(OctoColor.textMuted)
+                    .frame(width: 14, height: 14)
+                    .accessibilityLabel("Streams from your server")
+            }
+        }
+    }
+
+    /// The length in a column at least as wide as "00:00", so lengths line up.
+    private var lengthSlot: some View {
+        ZStack(alignment: .trailing) {
+            Text(lengthSlotSample).hidden()
+            Text(rowLength(track.durationMs) ?? "")
+        }
+        .font(.octoCaption.monospacedDigit())
+        .foregroundStyle(OctoColor.textMuted)
+        .lineLimit(1)
+    }
+
+    @ViewBuilder
+    private var end: some View {
+        if offersAdd && track.isFound && !ownership {
+            AddToLibraryButton(song: song, size: 40, iconSize: 22)
+        } else if let trailing {
+            trailing
+        } else if offersAdd && addSpace {
+            Color.clear.frame(width: 40, height: 40)
+        }
+    }
+}
+
+/// One song as the server lists it, in a list. Tapping plays `list` from this song; holding opens
+/// its menu; swiping right puts it next in the queue.
 struct SongRow: View {
     let song: Song
     let list: [Song]
@@ -81,100 +323,16 @@ struct SongRow: View {
     /// the same space empty when `addSpace` so lengths line up.
     var offersAdd = false
     var addSpace = false
+    var lead: SongLead?
+    var context = SongMenuContext()
     @Environment(Player.self) private var player
-    @Environment(Router.self) private var router
+    @Environment(LibraryActions.self) private var actions
 
     var body: some View {
-        Button {
+        TrackRow(track: actions.state.provisional(song), lead: lead ?? (showsCover ? .artwork : .number(number)), subtitle: subtitle,
+                 context: context, offersAdd: offersAdd, addSpace: addSpace) {
             player.play(list, from: position)
-        } label: {
-            HStack(spacing: 12) {
-                lead
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(song.title)
-                            .font(.octoBodySmall)
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-                        if song.explicitStatus == "explicit" { ExplicitMark() }
-                    }
-                    Text(subtitle ?? [song.byline, song.album ?? ""].filter { !$0.isEmpty }.joined(separator: " • "))
-                        .font(.octoCaption)
-                        .foregroundStyle(OctoColor.textMuted)
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 8)
-                Text(song.duration > 0 ? Duration.seconds(song.duration).formatted(.time(pattern: .minuteSecond)) : "")
-                    .font(.octoCaption.monospacedDigit())
-                    .foregroundStyle(OctoColor.textMuted)
-                if offersAdd && song.isExternal {
-                    AddToLibraryButton(song: song, size: 40, iconSize: 22)
-                } else if offersAdd && addSpace {
-                    Color.clear.frame(width: 40, height: 40)
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 4)
-            .frame(minHeight: 56)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(PressSqueeze())
-        .contextMenu { SongActions(song: song) } preview: { SongPreview(song: song) }
-        .swipeActions(edge: .leading) {
-            Button {
-                player.playNext([song])
-                router.show("Playing next", done: true)
-            } label: {
-                Label("Play next", systemImage: "text.insert")
-            }
-            .tint(OctoColor.accent.opacity(0.6))
-        }
-        .accessibilityAction(named: "Play next") { player.playNext([song]) }
-        .accessibilityAction(named: "Add to queue") { player.append([song]) }
-    }
-
-    private var isCurrent: Bool { player.current?.id == song.id }
-
-    @ViewBuilder
-    private var lead: some View {
-        if showsCover {
-            BadgedCover(id: song.coverArt, size: 44, radius: OctoRadius.artS, external: song.isExternal && !offersAdd)
-                .overlay {
-                    if isCurrent {
-                        RoundedRectangle(cornerRadius: OctoRadius.artS).fill(.black.opacity(0.5))
-                        NowPlayingBars(playing: player.isPlaying)
-                    }
-                }
-        } else {
-            ZStack(alignment: .trailing) {
-                if isCurrent {
-                    NowPlayingBars(playing: player.isPlaying, size: 14)
-                } else if let number {
-                    Text("\(number)")
-                        .font(.octoBodySmall.monospacedDigit())
-                        .foregroundStyle(OctoColor.textMuted)
-                }
-            }
-            .frame(width: 28, alignment: .trailing)
-        }
-    }
-}
-
-/// What a held song row shows above its menu.
-private struct SongPreview: View {
-    let song: Song
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Cover(id: song.coverArt, size: 56, radius: OctoRadius.artS)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(song.title).font(.octoBody).lineLimit(2)
-                Text(song.byline).font(.octoCaption).foregroundStyle(OctoColor.textMuted)
-            }
-        }
-        .padding(14)
-        .frame(width: 300, alignment: .leading)
-        .background(OctoColor.backgroundTertiary)
     }
 }
 
@@ -185,80 +343,21 @@ struct PressSqueeze: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed ? amount : 1)
-            .animation(.spring(response: 0.2, dampingFraction: 0.7), value: configuration.isPressed)
+            .animation(.easeInOut(duration: 0.17), value: configuration.isPressed)
     }
 }
 
-/// What can be done with a song, in the other apps' groups.
-struct SongActions: View {
-    let song: Song
-    @Environment(Player.self) private var player
-    @Environment(Downloads.self) private var downloads
-    @Environment(Session.self) private var session
-    @Environment(Router.self) private var router
-
-    var body: some View {
-        Section {
-            Button { player.playNext([song]); router.show("Playing next", done: true) } label: { Label("Play next", systemImage: "text.insert") }
-            Button { player.append([song]); router.show("Added to the queue", done: true) } label: { Label("Add to queue", systemImage: "text.append") }
-            Button { Task { await player.startRadio(from: song) } } label: { Label("Start radio", systemImage: "dot.radiowaves.left.and.right") }
-        }
-        Section {
-            if song.isExternal {
-                switch downloads.phase(song.id).state {
-                case .none:
-                    Button { Task { _ = await downloads.request(song) } } label: { Label("Add to your library", systemImage: "plus.circle") }
-                case .requested:
-                    Button {} label: { Label("Adding to your library", systemImage: "checkmark") }.disabled(true)
-                case .done:
-                    Button {} label: { Label("In your library", systemImage: "checkmark") }.disabled(true)
-                }
-            } else {
-                Button { Task { await heart() } } label: {
-                    Label(song.isStarred ? "Remove from Liked songs" : "Add to Liked songs", systemImage: song.isStarred ? "heart.slash" : "heart")
-                }
-            }
-        }
-        if !song.isExternal {
-            Section {
-                if let albumId = song.albumId {
-                    NavigationLink(value: Route.album(Album(id: albumId, name: song.album ?? "", artist: song.artist ?? "", coverArt: song.coverArt))) {
-                        Label("Go to album", systemImage: "square.stack")
-                    }
-                }
-                if let artistId = song.artistId {
-                    NavigationLink(value: Route.artist(id: artistId, name: song.artist ?? "")) {
-                        Label("Go to artist", systemImage: "music.microphone")
-                    }
-                }
-            }
-        }
-    }
-
-    private func heart() async {
-        guard let client = session.client else { return }
-        do {
-            if song.isStarred {
-                try await client.unstar(songId: song.id)
-                router.show("Removed from Liked songs")
-            } else {
-                try await client.star(songId: song.id)
-                router.show("Added to Liked songs", done: true)
-            }
-        } catch {
-            router.show(error.localizedDescription)
-        }
-    }
-
-}
-
-/// An album as a card: square cover, title and artist, 150 wide.
+/// An album as a card: square cover, title and artist. A library album opens its menu on a long
+/// press; one found online carries the not-in-library mark and how much of it the library has.
 struct AlbumCard: View {
     let album: Album
     var width: CGFloat = 150
+    /// The library's album, for its menu.
+    var library: LibraryAlbum?
+    @Environment(LibraryActions.self) private var actions
 
     var body: some View {
-        NavigationLink(value: Route.album(album)) {
+        let card = NavigationLink(value: Route.album(album)) {
             VStack(alignment: .leading, spacing: 8) {
                 BadgedCover(id: album.coverArt, size: width, external: album.isExternal)
                 VStack(alignment: .leading, spacing: 1) {
@@ -270,7 +369,7 @@ struct AlbumCard: View {
                         .font(.octoCaption)
                         .foregroundStyle(OctoColor.textMuted)
                         .lineLimit(1)
-                    if album.isExternal, let owned = album.ownedCount, owned > 0, album.songCount > 0 {
+                    if album.isExternal, let owned = album.ownedCount, owned > 0, owned < album.songCount {
                         Text("\(owned) of \(album.songCount) in your library")
                             .font(.octoCaption)
                             .foregroundStyle(OctoColor.textMuted)
@@ -281,18 +380,40 @@ struct AlbumCard: View {
             .frame(width: width, alignment: .leading)
         }
         .buttonStyle(PressSqueeze(amount: 0.97))
+        if album.isExternal {
+            card
+        } else {
+            let shown = library ?? actions.state.provisionalAlbum(album)
+            card.contextMenu {
+                CollectionActions(target: .album(shown.id), album: shown)
+            } preview: {
+                MenuHeader(artwork: shown.artwork, title: shown.title, line: shown.artist)
+            }
+        }
     }
 }
 
-/// A song as a card, for shelves of songs.
+/// An album card that fills its grid cell.
+struct GridAlbumCard: View {
+    let album: LibraryAlbum
+
+    var body: some View {
+        GeometryReader { box in AlbumCard(album: album.asAlbum, width: box.size.width, library: album) }
+            .aspectRatio(0.78, contentMode: .fit)
+    }
+}
+
+/// A song as a card, for shelves of songs: tap plays, long press opens its menu.
 struct SongCard: View {
     let song: Song
     let list: [Song]
     let position: Int
     var width: CGFloat = 150
     @Environment(Player.self) private var player
+    @Environment(LibraryActions.self) private var actions
 
     var body: some View {
+        let track = actions.state.provisional(song)
         Button { player.play(list, from: position) } label: {
             VStack(alignment: .leading, spacing: 8) {
                 BadgedCover(id: song.coverArt, size: width, external: song.isExternal)
@@ -301,13 +422,24 @@ struct SongCard: View {
                         Text(song.title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
                         if song.explicitStatus == "explicit" { ExplicitMark(size: 12) }
                     }
-                    Text(song.byline).font(.octoCaption).foregroundStyle(OctoColor.textMuted).lineLimit(1)
+                    HStack(spacing: 4) {
+                        Text(song.byline).font(.octoCaption).foregroundStyle(OctoColor.textMuted).lineLimit(1)
+                        if !song.isExternal {
+                            Image(systemName: MenuIcon.cloud).font(.system(size: 10)).foregroundStyle(OctoColor.textMuted)
+                                .accessibilityLabel("Streams from your server")
+                        }
+                    }
                 }
             }
             .frame(width: width, alignment: .leading)
+            .opacity(!actions.state.online && !song.isExternal ? 0.4 : 1)
         }
         .buttonStyle(PressSqueeze(amount: 0.97))
-        .contextMenu { SongActions(song: song) }
+        .contextMenu {
+            SongActions(track: track)
+        } preview: {
+            MenuHeader(artwork: track.artwork, title: track.title, line: track.artist)
+        }
     }
 }
 
@@ -337,21 +469,142 @@ struct StationCard: View {
     }
 }
 
-/// An artist as a circle with the name under it.
+/// An artist as a circle with the name under it. A library artist opens its menu on a long
+/// press; one only on the server carries the not-in-library mark.
 struct ArtistCircle: View {
     let id: String
     let name: String
     let coverArt: String?
     var size: CGFloat = 96
+    var external = false
+    var library: LibraryArtist?
 
     var body: some View {
-        NavigationLink(value: Route.artist(id: id, name: name)) {
+        let circle = NavigationLink(value: Route.artist(id: id, name: name)) {
             VStack(spacing: 8) {
-                Cover(id: coverArt, size: size, radius: size / 2)
+                BadgedCover(id: coverArt, size: size, radius: size / 2, external: external)
                 Text(name).font(.octoCaption).foregroundStyle(.white).lineLimit(1).frame(width: size)
             }
         }
         .buttonStyle(PressSqueeze(amount: 0.97))
+        if let library {
+            circle.contextMenu {
+                CollectionActions(target: .artist(library.id), artist: library)
+            } preview: {
+                MenuHeader(artwork: library.artwork, title: library.name, line: albumsCount(library.albumCount), round: true)
+            }
+        } else {
+            circle
+        }
+    }
+}
+
+/// An artist line: round picture, name, album count. A long press opens the artist's menu.
+struct ArtistRow: View {
+    let artist: LibraryArtist
+
+    var body: some View {
+        NavigationLink(value: Route.artist(id: artist.id, name: artist.name)) {
+            HStack(spacing: 12) {
+                ArtCover(artwork: artist.artwork, size: 48, radius: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(artist.name).font(.octoBodySmall).foregroundStyle(.white).lineLimit(1)
+                    Text(albumsCount(artist.albumCount)).font(.octoCaption).foregroundStyle(OctoColor.textMuted)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 4)
+            .frame(minHeight: 64)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressSqueeze())
+        .contextMenu {
+            CollectionActions(target: .artist(artist.id), artist: artist)
+        } preview: {
+            MenuHeader(artwork: artist.artwork, title: artist.name, line: albumsCount(artist.albumCount), round: true)
+        }
+    }
+}
+
+/// A playlist's picture: its first cover, or with four, a 2 by 2 grid of quarter-size covers.
+struct PlaylistCover: View {
+    let covers: [String]
+    var size: CGFloat
+    var radius: CGFloat = OctoRadius.artS
+    var notice: String?
+
+    var body: some View {
+        ZStack {
+            if covers.count >= 4 {
+                VStack(spacing: 0) {
+                    HStack(spacing: 0) { quarter(0); quarter(1) }
+                    HStack(spacing: 0) { quarter(2); quarter(3) }
+                }
+            } else {
+                ArtCover(artwork: covers.first, size: size, radius: 0)
+            }
+            if let glyph = noticeGlyph {
+                Rectangle().fill(.black.opacity(0.35))
+                Image(systemName: glyph).font(.system(size: size * 0.32, weight: .semibold)).foregroundStyle(.white)
+            }
+        }
+        .frame(width: size, height: size)
+        .background(OctoColor.backgroundTertiary)
+        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .overlay {
+            if size >= 96 || covers.count >= 4 {
+                RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(.white.opacity(0.1), lineWidth: 1)
+            }
+        }
+    }
+
+    /// Octo's own lists draw their kind: the review list a magnifier, the duplicates list two
+    /// squares, a liked list a heart.
+    private var noticeGlyph: String? {
+        switch notice {
+        case "review": "magnifyingglass"
+        case "duplicates": "square.on.square"
+        case "liked": "heart.fill"
+        default: nil
+        }
+    }
+
+    private func quarter(_ index: Int) -> some View {
+        ArtCover(artwork: covers[index], size: size / 2, radius: 0)
+    }
+}
+
+/// A playlist line: its picture, the name, and a line under it with a cloud for one kept with
+/// the server. A long press opens its menu.
+struct PlaylistLine<Picture: View>: View {
+    let name: String
+    var subtitle: String?
+    var onServer = false
+    @ViewBuilder var picture: Picture
+
+    var body: some View {
+        HStack(spacing: 14) {
+            picture.frame(width: 56, height: 56)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name).font(.octoBodySmall).foregroundStyle(.white).lineLimit(1)
+                if subtitle != nil || onServer {
+                    HStack(spacing: 4) {
+                        if let subtitle { Text(subtitle).font(.octoCaption).foregroundStyle(OctoColor.textMuted).lineLimit(1) }
+                        if onServer {
+                            Image(systemName: MenuIcon.cloud).font(.system(size: 11)).foregroundStyle(OctoColor.textMuted)
+                                .frame(width: 14, height: 14)
+                                .accessibilityLabel("On your server")
+                        }
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 4)
+        .frame(minHeight: 72)
+        .contentShape(Rectangle())
     }
 }
 
@@ -400,21 +653,7 @@ struct PlayButtons: View {
     @Environment(Player.self) private var player
 
     var body: some View {
-        GlassEffectContainer(spacing: 12) {
-            HStack(spacing: 12) {
-                Button { player.play(songs) } label: {
-                    Label("Play", systemImage: "play.fill").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.glassProminent)
-                Button { player.shuffle(songs) } label: {
-                    Label("Shuffle", systemImage: "shuffle").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.glass)
-            }
-            .controlSize(.large)
-            .font(.octoBody)
-        }
-        .disabled(songs.isEmpty)
+        PlayShuffle(enabled: !songs.isEmpty) { player.play(songs) } shuffle: { player.shuffle(songs) }
     }
 }
 
@@ -424,23 +663,30 @@ struct LoadFailed: View {
     let retry: () async -> Void
 
     var body: some View {
-        VStack(spacing: 16) {
-            Text(message)
-                .font(.octoBodySmall)
-                .foregroundStyle(OctoColor.textSecondary)
-                .multilineTextAlignment(.center)
-            Button("Try again") { Task { await retry() } }
-                .buttonStyle(.glassProminent)
-        }
-        .padding(32)
-        .frame(maxWidth: .infinity)
+        LibraryFailure(message: message, retry: retry)
     }
 }
 
 extension Int {
     /// "1 hr 12 min" or "48 min", for an album's or playlist's length.
-    var spokenLength: String {
-        let minutes = (self + 30) / 60
-        return minutes >= 60 ? "\(minutes / 60) hr \(minutes % 60) min" : "\(minutes) min"
+    var spokenLength: String { asLength(self) }
+}
+
+extension LibraryState {
+    /// A library album as a plain server album shows it, before the library is asked.
+    func provisionalAlbum(_ album: Album) -> LibraryAlbum {
+        let source = library.serverInUse ?? ""
+        let prefixed: (String?) -> String = { id in
+            guard let id, !id.isEmpty else { return "" }
+            return id.hasPrefix(source + ":") ? id : "\(source):\(id)"
+        }
+        let art = album.coverArt.flatMap { $0.isEmpty ? nil : ArtworkRef.server(sourceId: source, coverId: $0).encode() }
+        let isLibraryId = album.id.hasPrefix(source + ":") || source.isEmpty
+        return LibraryAlbum(
+            id: isLibraryId ? album.id : prefixed(album.id), sourceId: source,
+            nativeId: isLibraryId ? String(album.id.dropFirst(source.isEmpty ? 0 : source.count + 1)) : album.id,
+            title: album.name, searchKey: searchKey(album.name), sortKey: sortKey(album.name), artist: album.byline,
+            artistId: prefixed(album.artistId), year: album.year, songCount: album.songCount,
+            durationMs: Int64(album.duration) * 1_000, addedAt: 0, artwork: art)
     }
 }

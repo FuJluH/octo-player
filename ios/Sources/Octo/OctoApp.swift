@@ -10,6 +10,8 @@ struct OctoApp: App {
     @State private var downloads: Downloads
     @State private var library: Library
     @State private var serverSync: ServerSync
+    @State private var libraryActions: LibraryActions
+    @State private var selections = SelectionBoard()
 
     init() {
         let session = Session()
@@ -26,8 +28,12 @@ struct OctoApp: App {
         serverSync.start()
         _session = State(initialValue: session)
         _sound = State(initialValue: sound)
-        _player = State(initialValue: Player(session: session, sound: sound.processor))
+        let player = Player(session: session, sound: sound.processor)
+        _player = State(initialValue: player)
         _lyrics = State(initialValue: LyricsStore(session: session))
+        _libraryActions = State(initialValue: LibraryActions(
+            state: LibraryState(library: library, session: session, sync: serverSync),
+            player: player, router: router, session: session))
     }
 
     var body: some Scene {
@@ -41,6 +47,9 @@ struct OctoApp: App {
                 .environment(downloads)
                 .environment(library)
                 .environment(serverSync)
+                .environment(libraryActions)
+                .environment(libraryActions.state)
+                .environment(selections)
                 .tint(OctoColor.accent)
                 .preferredColorScheme(.dark)
                 #if DEBUG

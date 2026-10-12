@@ -52,14 +52,59 @@ extension View {
 /// Space a detail page leaves at its top for the back button.
 let detailTopGap: CGFloat = 56
 
+/// What going back does on a page that has something to close first, like a selection or a
+/// search: set by the page, run by the back button and the edge swipe in place of leaving.
+@MainActor
+final class BackHandler: Equatable {
+    var run: @MainActor @Sendable () -> Void = {}
+
+    /// The handler of the page in front, for the edge swipe.
+    static weak var current: BackHandler?
+
+    nonisolated static func == (a: BackHandler, b: BackHandler) -> Bool { a === b }
+}
+
+struct BackHandlerKey: PreferenceKey {
+    static var defaultValue: BackHandler? { nil }
+
+    static func reduce(value: inout BackHandler?, nextValue: () -> BackHandler?) {
+        value = nextValue() ?? value
+    }
+}
+
+extension View {
+    /// While `run` is set, going back runs it instead of leaving the page.
+    func backAction(_ run: (@MainActor @Sendable () -> Void)?) -> some View {
+        modifier(BackActionSetter(run: run))
+    }
+}
+
+private struct BackActionSetter: ViewModifier {
+    let run: (@MainActor @Sendable () -> Void)?
+    @State private var handler = BackHandler()
+
+    func body(content: Content) -> some View {
+        if let run { handler.run = run }
+        return content.preference(key: BackHandlerKey.self, value: run == nil ? nil : handler)
+    }
+}
+
 private struct DetailPage: ViewModifier {
     @Environment(\.dismiss) private var dismiss
+    @State private var handler: BackHandler?
 
     func body(content: Content) -> some View {
         content
             .toolbar(.hidden, for: .navigationBar)
+            .onPreferenceChange(BackHandlerKey.self) { value in
+                Task { @MainActor in
+                    handler = value
+                    BackHandler.current = value
+                }
+            }
+            .onDisappear { if BackHandler.current === handler { BackHandler.current = nil } }
             .overlay(alignment: .topLeading) {
-                Button { dismiss() } label: {
+                Button { if let handler { handler.run() } else { dismiss() } } label: {
                     Image(systemName: "arrow.left")
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(.white)
@@ -83,6 +128,11 @@ extension UINavigationController: @retroactive UIGestureRecognizerDelegate {
     }
 
     public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        viewControllers.count > 1
+        guard viewControllers.count > 1 else { return false }
+        if let handler = MainActor.assumeIsolated({ BackHandler.current }) {
+            MainActor.assumeIsolated { handler.run() }
+            return false
+        }
+        return true
     }
 }

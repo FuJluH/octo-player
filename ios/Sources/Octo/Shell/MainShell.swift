@@ -30,6 +30,8 @@ enum Route: Hashable {
     case artist(id: String, name: String)
     case playlist(Playlist)
     case artists, albums, playlists, favorites
+    /// The library pages beyond these: songs, genres, folders, history, downloads and the rest.
+    case library(LibraryPage)
 }
 
 /// The app's frame: every tab's pages, kept alive while another tab is in front, the floating
@@ -70,6 +72,7 @@ struct MainShell: View {
                 OctoBar(tab: $tab, playerMode: $playerMode, reselect: popToRoot) {
                     withAnimation(.easeOut(duration: 0.4)) { playerOpen = true }
                 }
+                .selectionBarOver()
             }
             .padding(.bottom, OctoBar.bottomGap)
             .opacity(playerOpen ? 0 : 1)
@@ -105,6 +108,7 @@ struct MainShell: View {
             }
             if request == .lyrics { router.lyricsRequested = true }
         }
+        .modifier(LibraryPresenter())
         .task(id: session.activeId) { await downloads.resume() }
         .onChange(of: session.client == nil) { _, _ in Task { await downloads.resume() } }
         .onChange(of: scenePhase, initial: true) { _, phase in downloads.setForeground(phase == .active) }
@@ -149,6 +153,7 @@ extension View {
                 case .albums: AlbumsView()
                 case .playlists: PlaylistsView()
                 case .favorites: FavoritesView()
+                case .library(let page): LibraryPageView(page: page)
                 }
             }
             .detailPage()
