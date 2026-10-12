@@ -81,8 +81,7 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
         didSet {
             guard pace != oldValue else { return }
             crossfader.paceChanged()
-            for each in decks where each !== crossfader.spare || crossfader.isBlending { each.setPace(pace) }
-            crossfader.spare.setPace(pace)
+            for each in decks { each.setPace(pace) }
             output.updateDelays()
         }
     }
@@ -149,11 +148,18 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
         if shuffled == true, let first = queue.firstIndex, startIndex < 0 { queue.setCurrent(first) }
         ended = false
         stoppedAtEnd = false
-        if play { playWhenReady = true }
+        let wasPlaying = playWhenReady
+        // A queue put in place to carry on from elsewhere waits paused.
+        playWhenReady = play
         loadCurrent(atMs: startMs)
         onQueueChange?()
         onSongChange?(.playlistChanged)
-        if play { startOutput() }
+        if play {
+            startOutput()
+            if !wasPlaying { onPlayWhenReadyChange?(true, false) }
+        } else if wasPlaying {
+            onPlayWhenReadyChange?(false, false)
+        }
     }
 
     /// A queue brought back as it was left, paused, without loading anything until it plays.
@@ -213,6 +219,9 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
             playWhenReady = true
             if deck.item == nil || deck.item?.entryId != queue.currentItem?.entryId {
                 loadCurrent(atMs: restoredPositionMs)
+            } else if deck.current?.failure != nil {
+                // The song failed to load before: it is tried again from where it was.
+                loadCurrent(atMs: deck.positionMs)
             } else {
                 deck.playWhenReady = true
             }
@@ -511,7 +520,7 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
             onLengthFound?(item, measured)
         }
         loadFollowingWhenNear()
-        if !playWhenReady && !playing && crossfader.outgoing == nil && deck.state != .buffering {
+        if (!playWhenReady || ended) && !playing && crossfader.outgoing == nil {
             ticker?.invalidate()
             ticker = nil
         }

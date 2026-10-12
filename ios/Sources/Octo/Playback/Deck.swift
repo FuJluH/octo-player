@@ -147,7 +147,6 @@ final class DeckRender: @unchecked Sendable {
             if !started {
                 guard readyToStart(source) else {
                     phaseCode.store(source.failure != nil ? DeckState.ended.code : DeckState.buffering.code, ordering: .relaxed)
-                    songMsBits.store(Double(source.jumpMs.load(ordering: .relaxed)).bitPattern, ordering: .relaxed)
                     break
                 }
                 started = true
