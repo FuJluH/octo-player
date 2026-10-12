@@ -139,26 +139,6 @@ extension SubsonicClient {
         guard let value = body.lyrics?.value, !value.isBlankText else { return nil }
         return value
     }
-
-    /// Whether the server lists an extension at this version, or nil when it could not be asked:
-    /// out of reach, a proxy answering while it restarts, a page that is not the server's, or the
-    /// sign-in refused. A server that answers the call with an error has no extensions to list,
-    /// which is a no.
-    public func supportsIfKnown(_ name: String, version: Int = 1) async -> Bool? {
-        do {
-            return try await profile().lists(name, version: version)
-        } catch is URLError {
-            return nil
-        } catch OctoError.notSubsonic {
-            return nil
-        } catch OctoError.wrongCredentials {
-            return nil
-        } catch OctoError.http(let status) {
-            return status == 404 ? false : nil
-        } catch {
-            return false
-        }
-    }
 }
 
 /// Reads LRC text: "[01:02.34]words" lines, several stamps on one line allowed, through
