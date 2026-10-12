@@ -499,6 +499,8 @@ final class LyricsStore {
            ref.sourceId == nil || ref.sourceId == inUse {
             return (ref.serverId, nil)
         }
+        // Server ids never hold a ":"; library ids always do.
+        if !songId.contains(":") { return (songId, nil) }
         return nil
     }
 

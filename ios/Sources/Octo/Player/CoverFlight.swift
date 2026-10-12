@@ -37,6 +37,9 @@ final class CoverFlight {
     @ObservationIgnored var barFrame: CGRect?
     /// Where the player's card is, while the player shows.
     @ObservationIgnored private(set) var cardFrame: CGRect?
+    /// Where the card was last laid out, kept across closing, since the card can be placed
+    /// before the player says it is opening.
+    @ObservationIgnored private var lastCard: CGRect?
     @ObservationIgnored private var image: (coverId: String, picture: UIImage)?
     @ObservationIgnored private var coverId: String?
 
@@ -60,17 +63,28 @@ final class CoverFlight {
         self.coverId = coverId
         cardFrame = nil
         waitingForCard = barFrame != nil
+        // The card may already be laid out: then the cover flies at once.
+        if waitingForCard, let lastCard { cardPlaced(lastCard) }
+        // Never left hidden: whatever happens to the layout, the card shows a moment later.
+        if waitingForCard {
+            Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(600))
+                self?.waitingForCard = false
+            }
+        }
     }
 
     /// The player's card is laid out here.
     func cardPlaced(_ frame: CGRect) {
         guard frame.width > 1, frame.height > 1 else { return }
         cardFrame = frame
+        lastCard = frame
         guard waitingForCard else { return }
         waitingForCard = false
         guard let barFrame else { return }
         trip = Trip(coverId: coverId, from: barFrame, to: frame, fromCorner: 0.5, toCorner: CGFloat(PlayerArtCorner),
                     opening: true, image: picture(coverId))
+        endLater(trip)
     }
 
     /// The player is closing: with the small player showing, the cover flies home to it from
@@ -83,11 +97,21 @@ final class CoverFlight {
         }
         trip = Trip(coverId: coverId, from: cardFrame, to: barFrame, fromCorner: CGFloat(PlayerArtCorner), toCorner: 0.5,
                     opening: false, image: picture(coverId))
+        endLater(trip)
         self.cardFrame = nil
     }
 
     func landed(_ id: UUID) {
         if trip?.id == id { trip = nil }
+    }
+
+    /// A flight always ends, even when its animation never says it landed.
+    private func endLater(_ trip: Trip?) {
+        guard let id = trip?.id else { return }
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(1_200))
+            self?.landed(id)
+        }
     }
 
     private func picture(_ coverId: String?) -> UIImage? {

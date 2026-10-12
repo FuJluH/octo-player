@@ -343,8 +343,10 @@ final class WashView: UIView {
     private func wake() {
         guard foreground, link == nil, inputs != nil else { return }
         let link = CADisplayLink(target: WashTarget(self), selector: #selector(WashTarget.tick(_:)))
+        // The clock paces the wash itself; the range never caps the screen below what the rest
+        // of the app asks for (the system picks one rate that suits every link).
         let limit = Float(inputs?.fpsLimit ?? 60)
-        link.preferredFrameRateRange = CAFrameRateRange(minimum: 10, maximum: max(limit, 30), preferred: limit)
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 10, maximum: 120, preferred: limit)
         link.add(to: .main, forMode: .common)
         self.link = link
         clock?.start(Int(link.timestamp * 1e9))

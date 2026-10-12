@@ -42,20 +42,24 @@ final class FlowingModel {
     @ObservationIgnored var calm = false
 
     @ObservationIgnored private var link: CADisplayLink?
+    /// The layers the lines are drawn in, placed again every frame.
+    @ObservationIgnored weak var surface: FlowingLayerView?
     @ObservationIgnored private var slow = false
     @ObservationIgnored private var measuring: Task<Void, Never>?
-    @ObservationIgnored private var measuredFor: CGSize?
+    /// The size and text scale last laid out for.
+    @ObservationIgnored private var measuredFor: (size: CGSize, textScale: CGFloat)?
 
     init(_ lines: [SyncLine]) {
         self.lines = lines
         engine = LyricEngine(lines)
     }
 
-    /// Lays the lines out for a size, off the main thread; after the first time, only once the
-    /// size has held still for a moment. Once measured, every line jumps into place.
+    /// Lays the lines out for a size and text scale, off the main thread; after the first time,
+    /// only once they have held still for a moment. Once measured, every line jumps into place.
     func measure(_ size: CGSize, textScale: CGFloat) {
-        guard size.width > 0, size.height > 0, size != measuredFor else { return }
-        measuredFor = size
+        guard size.width > 0, size.height > 0 else { return }
+        if let measuredFor, measuredFor.size == size, measuredFor.textScale == textScale { return }
+        measuredFor = (size, textScale)
         measuring?.cancel()
         let first = layout == nil
         let lines = self.lines
@@ -71,7 +75,7 @@ final class FlowingModel {
                                     interludeFull: Double(measured.spec.interludeFull), height: Double(size.height))
             self.layout = measured
             if first {
-                withAnimation(.easeInOut(duration: FADE_IN.seconds)) { self.shown = 1 }
+                withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: FADE_IN.seconds)) { self.shown = 1 }
             }
             self.start()
         }
@@ -116,6 +120,10 @@ final class FlowingModel {
             release: { index in layout.release(index) }
         )
         frame = engine.frames
+        surface?.render()
+        #if DEBUG
+        FrameProbe.shared.trace(engine, time: link.timestamp)
+        #endif
         // Nothing moved, nothing plays and nobody scrolls: look again about every 32 ms.
         let rest = engine.settled
         if rest != slow {
@@ -162,27 +170,32 @@ struct FlowingLyricsView: View {
     let seek: (TimeInterval) -> Void
     @Environment(Player.self) private var player
     @Environment(\.scenePhase) private var phase
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var stamp: Int?
     @State private var stampToken = 0
 
     var body: some View {
         GeometryReader { box in
-            let _ = model.frame
             ZStack(alignment: .topLeading) {
-                if let layout = model.layout {
-                    lines(layout, width: box.size.width)
-                    if let stamp, model.engine.states.indices.contains(stamp) {
-                        TimeStampPill(engine: model.engine, index: stamp, spec: layout.spec,
-                                      text: asClock(max(heardAt(Int((model.lines[stamp].start * 1000).rounded()), songOffsetMs + outputOffsetMs), 0) / 1000))
+                if model.layout != nil {
+                    FlowingLayers(model: model, ink: ink, calm: calm, tap: tap, hold: hold,
+                                  press: { index, down in model.engine.press(index, down: down) },
+                                  dragStart: { model.engine.dragStart() },
+                                  dragBy: { model.engine.dragBy($0) },
+                                  dragEnd: { model.engine.dragEnd() })
+                    if let stamp, let layout = model.layout, model.engine.states.indices.contains(stamp) {
+                        FrameFollower(model: model) {
+                            TimeStampPill(engine: model.engine, index: stamp, spec: layout.spec,
+                                          text: asClock(max(heardAt(Int((model.lines[stamp].start * 1000).rounded()), songOffsetMs + outputOffsetMs), 0) / 1000))
+                        }
                     }
                 }
             }
             .frame(width: box.size.width, height: box.size.height, alignment: .topLeading)
-            .contentShape(Rectangle())
             .opacity(model.shown)
-            .gesture(scroll)
             .onAppear { model.measure(box.size, textScale: UIFontMetrics.default.scaledValue(for: 1)) }
             .onChange(of: box.size) { _, size in model.measure(size, textScale: UIFontMetrics.default.scaledValue(for: 1)) }
+            .onChange(of: typeSize) { _, _ in model.measure(box.size, textScale: UIFontMetrics.default.scaledValue(for: 1)) }
         }
         .clipped()
         .onAppear(perform: sync)
@@ -192,11 +205,12 @@ struct FlowingLyricsView: View {
         .onChange(of: player.isPlaying) { _, _ in sync(); model.anchor() }
         .onChange(of: player.current?.id) { _, _ in model.anchor() }
         .onChange(of: player.speed) { _, _ in sync(); model.anchor() }
+        // The loop rests only while the app is out of sight; Control Center and the like leave
+        // it running.
         .onChange(of: phase) { _, now in
-            if now == .active { model.start() } else { model.stop() }
+            if now == .background { model.stop() } else { model.start() }
         }
         .onDisappear { model.stop() }
-        .onChange(of: held) { _, now in if !now { endDrag() } }
         .task(id: stampToken) {
             guard stamp != nil else { return }
             try? await Task.sleep(for: STAMP_SHOWN)
@@ -214,88 +228,7 @@ struct FlowingLyricsView: View {
         model.outputOffsetMs = outputOffsetMs
         model.ink = UIColor(ink)
         model.calm = calm
-        if phase == .active { model.start() }
-    }
-
-    @ViewBuilder
-    private func lines(_ layout: LyricsLayout, width: CGFloat) -> some View {
-        let engine = model.engine
-        let range = engine.shown
-        if !range.isEmpty {
-            ForEach(range.first...range.last, id: \.self) { index in
-                let state = engine.states[index]
-                let box = layout.lines[index]
-                let line = model.lines[index]
-                let height = line.isInterlude ? layout.spec.interludeFull : box.height
-                LineDrawing(model: model, index: index, version: state.drawVersion, ink: ink, calm: calm)
-                    .equatable()
-                    .frame(width: width, height: height)
-                    .blur(radius: Self.blurRadius(shownBlur(state.blur)), opaque: false)
-                    .modifier(LinePlace(transform: Self.place(engine, state, box, nodeHeight: height), opacity: state.opacity))
-                    .modifier(LineTouch(line: line, engine: engine, index: index, tap: tap, hold: hold))
-            }
-        }
-    }
-
-    /// The spread a platform blur gives for this radius.
-    private static func blurRadius(_ radius: Double) -> CGFloat {
-        radius <= 0 ? 0 : CGFloat(radius * 0.57735 + 0.5)
-    }
-
-    /// A line's place, size and turn for this frame, about its own text's start edge.
-    private static func place(_ engine: LyricEngine, _ st: LineState, _ box: LineBox, nodeHeight: CGFloat) -> CATransform3D {
-        let look = engine.look
-        let inactive = look.fraction(.inactiveScale)
-        var scale = inactive + (1 - inactive) * st.grown.value()
-        scale *= 1 - (1 - PRESSED_SCALE) * st.press
-        let y = st.y.value() + engine.scrollOffset
-        let pivot = CGPoint(x: box.pivotX, y: nodeHeight / 2)
-        var translateX = 0.0
-        var yaw = 0.0
-        if look.arc && onScreen(y, height: st.height, viewHeight: engine.viewHeight) {
-            let pose = arcPose(centre: y + st.height / 2, viewHeight: engine.viewHeight, side: st.line.alignRight ? -1 : 1)
-            translateX = pose.translationX
-            yaw = pose.rotationY
-            scale *= pose.scale
-        }
-        var t = CATransform3DMakeTranslation(-pivot.x, -pivot.y, 0)
-        t = CATransform3DConcat(t, CATransform3DMakeScale(scale, scale, 1))
-        if yaw != 0 {
-            t = CATransform3DConcat(t, CATransform3DMakeRotation(yaw, 0, 1, 0))
-            var perspective = CATransform3DIdentity
-            perspective.m34 = -1 / CGFloat(ARC_PERSPECTIVE)
-            t = CATransform3DConcat(t, perspective)
-        }
-        return CATransform3DConcat(t, CATransform3DMakeTranslation(pivot.x + translateX, pivot.y + y, 0))
-    }
-
-    /// A vertical drag anywhere scrolls by hand. There is no fling: the lyrics follow the song
-    /// again a moment after the finger lifts.
-    private var scroll: some Gesture {
-        DragGesture(minimumDistance: 10)
-            .updating($held) { _, held, _ in held = true }
-            .onChanged { drag in
-                let engine = model.engine
-                if !dragging {
-                    dragging = true
-                    lastDrag = 0
-                    engine.dragStart()
-                }
-                engine.dragBy(Double(drag.translation.height - lastDrag))
-                lastDrag = drag.translation.height
-            }
-            .onEnded { _ in endDrag() }
-    }
-
-    @State private var lastDrag: CGFloat = 0
-    @State private var dragging = false
-    @GestureState private var held = false
-
-    private func endDrag() {
-        guard dragging else { return }
-        dragging = false
-        lastDrag = 0
-        model.engine.dragEnd()
+        if phase != .background { model.start() }
     }
 
     private func tap(_ index: Int) {
@@ -307,59 +240,14 @@ struct FlowingLyricsView: View {
         let target = heardAt(Int((line.start * 1000).rounded()), totalOffset(songMs: songOffsetMs, outputMs: outputOffsetMs))
         model.engine.tapped(index, playerTarget: Double(target) / 1000)
         seek(Double(target) / 1000)
-        UIAccessibility.post(notification: .announcement, argument: "Playing from \(asClock(max(target, 0) / 1000))")
+        UIAccessibility.post(notification: .announcement, argument: NSAttributedString(
+            string: "Playing from \(asClock(max(target, 0) / 1000))",
+            attributes: [.accessibilitySpeechAnnouncementPriority: UIAccessibilityPriority.low]))
     }
 
     private func hold(_ index: Int) {
         stamp = index
         stampToken += 1
-    }
-}
-
-/// Moves, scales, turns and fades one line.
-private struct LinePlace: ViewModifier {
-    let transform: CATransform3D
-    let opacity: Double
-
-    func body(content: Content) -> some View {
-        content
-            .projectionEffect(ProjectionTransform(transform))
-            .opacity(min(max(opacity, 0), 1))
-    }
-}
-
-/// A finger on a line presses it in; a tap plays from it; a long press shows when it is sung.
-/// Every line but the credit takes them.
-private struct LineTouch: ViewModifier {
-    let line: SyncLine
-    let engine: LyricEngine
-    let index: Int
-    let tap: (Int) -> Void
-    let hold: (Int) -> Void
-
-    func body(content: Content) -> some View {
-        if line.isCredit {
-            content.accessibilityElement().accessibilityLabel(described)
-        } else {
-            content
-                .contentShape(Rectangle())
-                .onTapGesture { tap(index) }
-                .onLongPressGesture(minimumDuration: 0.5, maximumDistance: 10) {
-                    hold(index)
-                } onPressingChanged: { pressing in
-                    engine.press(index, down: pressing)
-                }
-                .accessibilityElement()
-                .accessibilityLabel(described)
-                .accessibilityAddTraits(.isButton)
-                .accessibilityAction(named: "Play from \(asClock(max(Int((line.start * 1000).rounded()), 0) / 1000))") { tap(index) }
-        }
-    }
-
-    /// What a line reads as, aloud.
-    private var described: String {
-        if line.isInterlude { return "Instrumental" }
-        return [line.text, line.translation].compactMap { $0 }.joined(separator: ". ")
     }
 }
 
@@ -376,7 +264,7 @@ private struct TimeStampPill: View {
         let top = st.y.value() + engine.scrollOffset
         let right = st.line.alignRight
         Text(text)
-            .font(.system(size: 11.52, weight: .bold).monospacedDigit())
+            .font(.system(size: UIFontMetrics.default.scaledValue(for: 11.52), weight: .bold).monospacedDigit())
             .foregroundStyle(.white)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
@@ -390,38 +278,19 @@ private struct TimeStampPill: View {
     }
 }
 
-/// One line's drawing: its dots, its words with their fill, lift and bloom, or its text whole,
-/// then any translation or romanization under it. It draws again only when the engine says what
-/// it shows changed.
-private struct LineDrawing: View, Equatable {
+/// Reads the frame counter, so what it holds follows the lines every frame.
+private struct FrameFollower<Content: View>: View {
     let model: FlowingModel
-    let index: Int
-    let version: Int
-    let ink: Color
-    let calm: Bool
-
-    nonisolated static func == (a: LineDrawing, b: LineDrawing) -> Bool {
-        a.model === b.model && a.index == b.index && a.version == b.version && a.ink == b.ink && a.calm == b.calm
-    }
+    @ViewBuilder let content: Content
 
     var body: some View {
-        let layout = model.layout
-        let engine = model.engine
-        let ink = UIColor(self.ink)
-        let index = self.index
-        let calm = self.calm
-        Canvas { context, _ in
-            guard let layout else { return }
-            context.withCGContext { cg in
-                LyricPainter(engine: engine, layout: layout, index: index, ink: ink, calm: calm).draw(cg)
-            }
-        }
-        .allowsHitTesting(false)
+        let _ = model.frame
+        content
     }
 }
 
 /// Draws one flowing line with Core Text.
-private struct LyricPainter {
+struct LyricPainter {
     let engine: LyricEngine
     let layout: LyricsLayout
     let index: Int
@@ -638,5 +507,22 @@ final class FrameProbe {
     }
 
     func spent(_ seconds: CFTimeInterval) { work += seconds }
+
+    private var lastFocus = -1
+    private var traceUntil: CFTimeInterval = 0
+
+    /// For a second after the sung line changes, logs every frame where that line sits and how
+    /// far the lines have scrolled.
+    func trace(_ engine: LyricEngine, time: CFTimeInterval) {
+        guard ProcessInfo.processInfo.environment["OCTO_DRIVE"]?.contains("lyricstrace") == true else { return }
+        let focus = engine.focus
+        if focus != lastFocus {
+            lastFocus = focus
+            traceUntil = time + 1
+        }
+        guard time < traceUntil, engine.states.indices.contains(focus) else { return }
+        let y = engine.states[focus].y.value()
+        log.notice("trace t \(time, format: .fixed(precision: 3)) focus \(focus) y \(y, format: .fixed(precision: 1)) scroll \(engine.scrollOffset, format: .fixed(precision: 1)) lyric \(engine.lyricTime, format: .fixed(precision: 3))")
+    }
 }
 #endif

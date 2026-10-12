@@ -49,10 +49,36 @@ private struct AddButton: View {
     let iconSize: CGFloat
     @Environment(Downloads.self) private var downloads
     @Environment(Router.self) private var router
+    @Environment(Accounts.self) private var accounts
     @Environment(\.octoReduceMotion) private var calm
     @State private var release: (@Sendable () -> Void)?
 
     var body: some View {
+        if accounts.family.outside.addLabel != nil {
+            saveHeart
+        } else {
+            addButton
+        }
+    }
+
+    /// For a family member whose songs are saved rather than added: a heart that saves the song or
+    /// takes it off Saved.
+    private var saveHeart: some View {
+        let id = song.id.hasPrefix("find:") ? song.id : findId(song.id)
+        let saved = accounts.family.isSaved(id)
+        return Button { accounts.family.toggleSaved(id, title: song.title) } label: {
+            IconView(saved ? .liked : .like, size: iconSize, color: saved ? .white : .white.opacity(0.6))
+                .iconGlow(saved)
+                .frame(width: size, height: size)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(NoPress())
+        .accessibilityLabel("Save")
+        .accessibilityValue(saved ? "Saved" : "Not saved")
+    }
+
+    @ViewBuilder
+    private var addButton: some View {
         let phase = downloads.phase(song.id)
         let onItsWay = phase.state == .requested
         let follows = onItsWay && downloads.keepsLog
