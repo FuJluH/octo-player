@@ -78,6 +78,7 @@ struct NameForm: View {
     let action: String
     var initial = ""
     var capitalization: TextInputAutocapitalization = .sentences
+    var autocorrects = true
     var ready: (String) -> Bool = { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
     var note: (String) -> String? = { _ in nil }
     let onDone: (String) -> Void
@@ -100,6 +101,7 @@ struct NameForm: View {
                     .foregroundStyle(.white)
                     .tint(OctoColor.accent)
                     .textInputAutocapitalization(capitalization)
+                    .autocorrectionDisabled(!autocorrects)
                     .submitLabel(.done)
                     .focused($focused)
                     .onSubmit { if canDo { onDone(name) } }
@@ -134,13 +136,13 @@ extension View {
 
     /// Asks for a name in a popover beside this control while `isPresented`.
     func namePopover(isPresented: Binding<Bool>, title: String, placeholder: String, action: String, initial: String = "",
-                     capitalization: TextInputAutocapitalization = .sentences,
+                     capitalization: TextInputAutocapitalization = .sentences, autocorrects: Bool = true,
                      ready: @escaping (String) -> Bool = { !$0.trimmingCharacters(in: .whitespaces).isEmpty },
                      note: @escaping (String) -> String? = { _ in nil },
                      onDone: @escaping (String) -> Void) -> some View {
         glassPopover(isPresented: isPresented) {
             NameForm(title: title, placeholder: placeholder, action: action, initial: initial, capitalization: capitalization,
-                     ready: ready, note: note, onDone: onDone)
+                     autocorrects: autocorrects, ready: ready, note: note, onDone: onDone)
         }
     }
 }

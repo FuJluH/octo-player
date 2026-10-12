@@ -130,7 +130,7 @@ private struct SoundPageContent: View {
                 SoundTextAction("Save as preset\u{2026}") { saving = true }
                     .padding(.horizontal, 4)
                     .namePopover(isPresented: $saving, title: "Save as preset", placeholder: "Preset name", action: "Save",
-                                 capitalization: .words, ready: { UserPresetRules.canSaveAs($0) },
+                                 capitalization: .words, autocorrects: false, ready: { UserPresetRules.canSaveAs($0) },
                                  note: { name in
                                      !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !UserPresetRules.canSaveAs(name)
                                          ? "A built-in preset has that name." : nil
