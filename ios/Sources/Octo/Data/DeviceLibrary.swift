@@ -26,6 +26,8 @@ final class DeviceLibrary {
     /// Each phone song's folder names and file path from the last scan, by media id.
     private(set) var paths: [Int64: [String]] = [:]
     private(set) var files: [Int64: String] = [:]
+    /// Every phone song from the last scan by its file name, switched-off folders included.
+    @ObservationIgnored private(set) var named: [String: [NamedCandidate]] = [:]
 
     @ObservationIgnored private let library: Library
     @ObservationIgnored private let settings = AppSettings.shared
@@ -146,6 +148,8 @@ final class DeviceLibrary {
         folders = result.folders
         paths = result.paths
         files = result.files
+        let listed = found.files
+        named = await Task.detached(priority: .utility) { namedCandidates(listed) }.value
         songCount = result.catalog.tracks.count
         try? await store.replaceSource(deviceSource, tracks: result.catalog.tracks, albums: result.catalog.albums,
                                        artists: result.catalog.artists)
@@ -223,6 +227,16 @@ final class DeviceLibrary {
         var value: UInt64 = 0
         for byte in bytes.prefix(8) { value = value << 8 | UInt64(byte) }
         return Int64(bitPattern: value)
+    }
+
+    /// The id of a file in Octo's folder, or nil for a file anywhere else.
+    nonisolated static func ownFileId(_ url: URL) -> Int64? {
+        guard url.isFileURL else { return nil }
+        let root = filesFolder.resolvingSymlinksInPath().standardizedFileURL.path
+        let path = url.resolvingSymlinksInPath().standardizedFileURL.path
+        guard path.hasPrefix(root + "/") else { return nil }
+        let relative = String(path.dropFirst(root.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return relative.isEmpty ? nil : fileId(relative)
     }
 
     /// Files in Octo's own folder with their lengths, read from each file, 4 at a time.
