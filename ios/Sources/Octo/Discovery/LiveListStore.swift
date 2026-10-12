@@ -103,6 +103,27 @@ final class LiveLibrary {
         version += 1
     }
 
-    /// The songs `query` picks now.
-    func pick(_ query: LibraryQuery) -> [LibraryTrack] { query.select(tracks, now: msSince1970(), fields: fields) }
+    /// The songs each query picked, for the library as last read.
+    private(set) var picked: [LibraryQuery: [LibraryTrack]] = [:]
+    @ObservationIgnored private var pickedFor = -1
+
+    /// The songs `query` picks, as last worked out; nil until it has been.
+    func songs(_ query: LibraryQuery) -> [LibraryTrack]? { pickedFor == version ? picked[query] : nil }
+
+    /// Works out the songs `query` picks, away from the main thread.
+    func pick(_ query: LibraryQuery) async {
+        if pickedFor != version {
+            picked = [:]
+            pickedFor = version
+        }
+        if picked[query] != nil { return }
+        let tracks = tracks
+        let fields = fields
+        let readVersion = version
+        let songs = await Task.detached(priority: .userInitiated) {
+            query.select(tracks, now: msSince1970(), fields: fields)
+        }.value
+        guard readVersion == version else { return }
+        picked[query] = songs
+    }
 }

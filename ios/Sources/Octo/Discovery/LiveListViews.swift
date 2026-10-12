@@ -73,7 +73,7 @@ struct LiveListView: View {
 
     var body: some View {
         let list = store.byId(id)
-        let songs = list.map { liveLibrary.pick($0.query) } ?? []
+        let songs = list.flatMap { liveLibrary.songs($0.query) } ?? []
         let playable = songs.map(\.asSong)
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
@@ -120,6 +120,7 @@ struct LiveListView: View {
         .barClearance()
         .selectableSongs(playable.map { Pickable($0) })
         .task(id: library.stamp(.library, .likes, .plays)) { await liveLibrary.read() }
+        .task(id: PickKey(version: liveLibrary.version, query: list?.query)) { if let list { await liveLibrary.pick(list.query) } }
         // Leaves the page once the list is deleted.
         .onChange(of: list == nil) { _, gone in if gone { dismiss() } }
         .glassPopup(isPresented: $renaming, title: "Rename live list") {
@@ -196,7 +197,8 @@ struct LiveListEditView: View {
     var body: some View {
         let draft = self.draft ?? editorStart(id.flatMap { store.byId($0) }, start: start)
         let query = draft.query
-        let preview = liveLibrary.pick(query)
+        let picked = liveLibrary.songs(query)
+        let preview = picked ?? []
         let playable = preview.map(\.asSong)
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
@@ -260,7 +262,7 @@ struct LiveListEditView: View {
                         .buttonStyle(PressSqueeze())
                     }
                 }
-                if liveLibrary.version > 0 {
+                if picked != nil {
                     Text(preview.isEmpty ? noRuleMatches : matchWords(preview.count))
                         .font(.octoCaption)
                         .foregroundStyle(OctoColor.textMuted)
@@ -276,6 +278,7 @@ struct LiveListEditView: View {
         .barClearance()
         .scrollDismissesKeyboard(.immediately)
         .task(id: library.stamp(.library, .likes, .plays)) { await liveLibrary.read() }
+        .task(id: PickKey(version: liveLibrary.version, query: query)) { await liveLibrary.pick(query) }
         .onAppear {
             if self.draft == nil { self.draft = editorStart(id.flatMap { store.byId($0) }, start: start) }
             starters = offersStarters(store.lists, id: id, start: start)
@@ -373,3 +376,9 @@ struct LiveListEditView: View {
 }
 
 
+
+/// Which songs to work out: a query, against the library as last read.
+private struct PickKey: Hashable {
+    let version: Int
+    let query: LibraryQuery?
+}

@@ -58,7 +58,10 @@ extension Library: HomeLibrary {
     func homeRandomArtists(_ count: Int) async -> [LibraryArtist] { Array(await artists().shuffled().prefix(count)) }
 
     func homeRevisit() async -> RevisitShelves {
-        revisitShelves(await albums(), await playedTracks(), nowMs: msSince1970())
+        let albums = await albums()
+        let played = await playedTracks()
+        // Worked out from the whole library, so away from the main thread.
+        return await Task.detached(priority: .userInitiated) { revisitShelves(albums, played, nowMs: msSince1970()) }.value
     }
 
     func homePins() async -> [HomePin] {
@@ -80,7 +83,7 @@ extension Library: HomeLibrary {
 
 /// The shelves from the library's own plays. An album shows on one shelf only: not played lately
 /// first, then never finished; never played is apart.
-func revisitShelves(_ albums: [LibraryAlbum], _ played: [PlayedTrack], nowMs: Int64) -> RevisitShelves {
+nonisolated func revisitShelves(_ albums: [LibraryAlbum], _ played: [PlayedTrack], nowMs: Int64) -> RevisitShelves {
     struct Listening {
         var songs: Int
         var playedSongs: Int
