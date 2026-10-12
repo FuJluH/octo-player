@@ -36,6 +36,8 @@ struct StreamContext: Sendable {
     let keeping: Bool
     /// The sign-in, asked again as each request goes out.
     let session: Session?
+    /// When the app started.
+    var startedAt = Date.distantPast
 
     @MainActor
     static func now(_ session: Session) -> StreamContext {
@@ -45,14 +47,15 @@ struct StreamContext: Sendable {
             keptSources: Set(session.servers.map(\.sourceId)),
             quality: AppSettings.shared.qualityInUse,
             keeping: AppSettings.shared.offline.cacheSize != .off,
-            session: session)
+            session: session, startedAt: session.startedAt)
     }
 
     /// The server in use as a request goes out: the address in use now (the home one while at
-    /// home). As the app starts, the saved sign-in gets up to 3 s to come back.
-    private func serverNow() -> (client: SubsonicClient, sourceId: String)? {
+    /// home). In the first 3 s after the app starts, the saved sign-in gets until then to come
+    /// back; after that, no server means none at once.
+    func serverNow() -> (client: SubsonicClient, sourceId: String)? {
         guard let session else { return client.map { ($0, sourceId ?? "") } }
-        let deadline = Date().addingTimeInterval(3)
+        let deadline = min(Date().addingTimeInterval(3), startedAt.addingTimeInterval(3))
         while true {
             let found = try? blocking { await MainActor.run { session.inUse.map { Unchecked(($0.client, $0.sourceId)) } } }
             if let found = found ?? nil { return found.value }
@@ -123,8 +126,12 @@ enum SongOpener {
                 if let key = context.savedKey(pinned),
                    let saved = try? blocking({ await StreamCache.shared.savedFile(key) }),
                    let file = try? LocalFile(url: saved.url, contentType: saved.mimeType) {
-                    token.adopt(file)
-                    return OpenedSong(decoder: try SongDecoder(source: file, mimeType: saved.mimeType ?? mime, outputRate: outputRate), bytes: file)
+                    // A saved copy that fails part way is passed over for the server's.
+                    let copy = SavedCopy(file) {
+                        try RemoteFile(online: { OnlineWatch.shared.online }) { try context.sign(pinned) }
+                    }
+                    token.adopt(copy)
+                    return OpenedSong(decoder: try SongDecoder(source: copy, mimeType: saved.mimeType ?? mime, outputRate: outputRate), bytes: copy)
                 }
                 let remote = try RemoteFile(savedKey: context.savedKey(pinned), online: { OnlineWatch.shared.online }) {
                     try context.sign(pinned)
@@ -134,6 +141,12 @@ enum SongOpener {
                 if token.isCancelled { throw PlayError(.ioUnspecified, detail: "stopped") }
                 return OpenedSong(decoder: try SongDecoder(source: remote, mimeType: pinned.request(context.quality).mimeType(pinned.mimeType),
                                                            outputRate: outputRate), bytes: remote)
+            }
+            // A server song's address that cannot be read names no song to ask for.
+            if uri.lowercased().hasPrefix(streamScheme + ":") {
+                guard OnlineWatch.shared.online else { throw PlayError(.ioUnspecified, detail: "No connection") }
+                guard context.serverNow() != nil else { throw PlayError(.ioUnspecified, detail: "No server signed in") }
+                throw PlayError(.ioUnspecified, detail: "No song id")
             }
             guard let url = URL(string: uri) else { throw PlayError(.fileNotFound, detail: "no address") }
             switch url.scheme?.lowercased() {

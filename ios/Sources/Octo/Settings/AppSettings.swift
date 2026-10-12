@@ -62,8 +62,8 @@ final class AppSettings {
         listenBrainz = readListenBrainz()
         migrateOldQuality()
         network.pathUpdateHandler = { [weak self] path in
+            // Mobile data: connected, with neither Wi-Fi nor a cable.
             let mobile = path.status == .satisfied && !path.usesInterfaceType(.wifi) && !path.usesInterfaceType(.wiredEthernet)
-                && path.usesInterfaceType(.cellular)
             Task { @MainActor in
                 guard let self, self.onMobileData != mobile else { return }
                 self.onMobileData = mobile

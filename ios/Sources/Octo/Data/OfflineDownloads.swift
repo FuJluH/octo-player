@@ -356,17 +356,31 @@ final class OfflineDownloads {
         }
         let maxKbps = downloadMaxKbps(mimeType: copy.mimeType, bitrate: downloadBitrate(copy), quality: settings.offline.downloadQuality)
         let format = downloadFormat(serverMimeType: copy.mimeType, maxKbps: maxKbps)
-        var params = [("id", next.serverId)]
-        if let maxKbps {
-            params += [("format", "mp3"), ("maxBitRate", "\(maxKbps)"), ("estimateContentLength", "true")]
-        } else {
-            params.append(("format", "raw"))
+        let fileName = downloadFileName(artist: copy.artist, title: copy.title, sourceId: next.sourceId, serverId: next.serverId, format: format)
+        // A song saved whole as it played is copied from the phone rather than fetched again.
+        let ref = StreamRef(sourceId: next.sourceId, serverId: next.serverId, mimeType: copy.mimeType, bitrate: nil)
+        if let saved = await StreamCache.shared.savedFile(streamCacheKey(next.sourceId, ref, StreamRequest(maxKbps))) {
+            let part = Self.folder.appendingPathComponent(downloadPartName(fileName))
+            let target = Self.folder.appendingPathComponent(fileName)
+            try? FileManager.default.removeItem(at: part)
+            try? FileManager.default.removeItem(at: target)
+            if (try? FileManager.default.copyItem(at: saved.url, to: part)) != nil,
+               (try? FileManager.default.moveItem(at: part, to: target)) != nil {
+                let size = (try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? NSNumber)?.int64Value ?? 0
+                try? await store.finishDownload(next.sourceId, next.serverId, path: target.path, size: size, format: format)
+                Task { await self.pump() }
+                return
+            }
+            try? FileManager.default.removeItem(at: part)
         }
+        var params = [("id", next.serverId)]
+        params += StreamRequest(maxKbps).params
         var request = URLRequest(url: server.client.url("stream", params))
         for (name, value) in server.client.headers { request.setValue(value, forHTTPHeaderField: name) }
+        // The server is told this is an offline copy, so an Octo server does not count it as a play.
+        request.setValue(octoPurposeOffline, forHTTPHeaderField: octoPurposeHeader)
         request.allowsCellularAccess = !settings.offline.wifiOnly
         request.allowsExpensiveNetworkAccess = !settings.offline.wifiOnly
-        let fileName = downloadFileName(artist: copy.artist, title: copy.title, sourceId: next.sourceId, serverId: next.serverId, format: format)
         let task = transfer.downloadTask(with: request)
         task.taskDescription = [downloadKey(next.sourceId, next.serverId), fileName, format ?? ""].joined(separator: "\n")
         running = Running(row: next, task: task, fileName: fileName, format: format)
@@ -459,6 +473,10 @@ final class OfflineDownloads {
 
 /// What a family member with offline copies off is told.
 private let offlineCopiesOffWords = "Offline copies are off for this account"
+
+/// The header that tells an Octo server why a song is asked for, and the word for a download.
+let octoPurposeHeader = "X-Octo-Purpose"
+let octoPurposeOffline = "offline"
 
 /// The background transfer's delegate. The system hands the finished file over only for the
 /// length of the call, so it is moved aside here before the owner hears of it.
