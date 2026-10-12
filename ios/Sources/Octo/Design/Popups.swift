@@ -227,9 +227,9 @@ enum PopupWidth {
 }
 
 /// The glass card every pop-up sits in: 20 point corners, Liquid Glass with the menu's darker
-/// film and a soft shadow under it. As wide as its content within `width` (never more than
-/// `maxWidth`), and as tall as its content up to `maxHeight`, past which the content's own
-/// `HuggingScroll` scrolls.
+/// film, a shadow pooled under it, a dark halo and an inner hairline. As wide as its content
+/// within `width` (never more than `maxWidth`), and as tall as its content up to `maxHeight`,
+/// past which the content's own `HuggingScroll` scrolls.
 struct GlassPopupCard<Content: View>: View {
     var width: PopupWidth = .fit(min: 0, max: CGFloat(PopupMeasures.maxWidth))
     let maxWidth: CGFloat
@@ -239,8 +239,11 @@ struct GlassPopupCard<Content: View>: View {
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: CGFloat(PopupMeasures.corner), style: .continuous)
         CardWidth(width: width, maxWidth: maxWidth, maxHeight: maxHeight) { content }
-            .glassEffect(.regular.tint(OctoColor.popupFilm), in: shape)
-            .shadow(color: .black.opacity(0.45), radius: 20, y: 8)
+            // Floating glass with the menu plate's edges: the shadow pooled under it, an even
+            // dark halo all round, and a faint light hairline just inside the rim, so its words
+            // stay legible over a busy page.
+            .floatingGlass(shape, film: OctoColor.popupFilm, halo: true)
+            .overlay { shape.strokeBorder(Color.white.opacity(0.06), lineWidth: 1).allowsHitTesting(false) }
     }
 }
 
