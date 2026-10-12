@@ -68,6 +68,30 @@ class ServerArtworkTest {
         assertEquals(serverCoverKey(found, 0), serverCoverKey(found, noon))
     }
 
+    @Test
+    fun aSmallAskReadsItsOwnSizeThenLargerCopiesFromTheDisk() {
+        val song = ArtworkRef.Server("server:music.example", "mf-1")
+        assertEquals(
+            listOf(150, 300, 600, 1200).map { "server-art:server:music.example|mf-1|$it" },
+            keptCoverKeys(song, 108),
+        )
+        assertEquals(listOf("server-art:server:music.example|mf-1|1200"), keptCoverKeys(song, 936))
+    }
+
+    @Test
+    fun aKeptOnlyAskTakesSmallerCopiesLast() {
+        val song = ArtworkRef.Server("server:music.example", "mf-1")
+        assertEquals(
+            listOf(1200, 600, 300, 150).map { "server-art:server:music.example|mf-1|$it" },
+            keptCoverKeys(song, 936, anySize = true),
+        )
+    }
+
+    @Test
+    fun copiesOfAnOnlineCoverNeverAnswerForTheLibrarysOne() {
+        assertTrue(keptCoverKeys(found, 150).none { it in keptCoverKeys(library, 150) })
+    }
+
     private fun download(bytes: ByteArray) =
         SourceFetchResult(ImageSource(Buffer().write(bytes), FileSystem.SYSTEM), "image/jpeg", DataSource.NETWORK)
 

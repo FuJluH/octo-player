@@ -22,8 +22,15 @@ import coil3.SingletonImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.crossfade
 import dagger.hilt.android.HiltAndroidApp
+import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
 import javax.inject.Inject
+
+// How many cover downloads may be open to one server at once. The lanes in
+// CoverTraffic decide which covers go; this only keeps the HTTP client from
+// queueing the urgent ones behind the rest, or the app's other calls
+// behind covers.
+private const val COVER_REQUESTS_PER_HOST = 16
 
 @HiltAndroidApp
 class OctoApp : Application(), SingletonImageLoader.Factory {
@@ -64,11 +71,13 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
         family.start()
     }
 
-    override fun newImageLoader(context: PlatformContext): ImageLoader =
-        ImageLoader.Builder(context)
+    override fun newImageLoader(context: PlatformContext): ImageLoader {
+        // Covers from a server load through the same connection pool as the
+        // API, with calls of their own.
+        val covers = http.newBuilder().dispatcher(Dispatcher().apply { maxRequestsPerHost = COVER_REQUESTS_PER_HOST }).build()
+        return ImageLoader.Builder(context)
             .components {
-                // Covers from a server load through the same connection pool as the API.
-                add(OkHttpNetworkFetcherFactory(callFactory = { http }))
+                add(OkHttpNetworkFetcherFactory(callFactory = { covers }))
                 // Artwork embedded in files on the phone.
                 add(DeviceArtworkFetcher.Factory(this@OctoApp))
                 add(DeviceArtworkKeyer())
@@ -78,4 +87,5 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
             }
             .crossfade(true)
             .build()
+    }
 }

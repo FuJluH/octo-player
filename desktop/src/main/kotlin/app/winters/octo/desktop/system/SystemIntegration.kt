@@ -79,7 +79,7 @@ class SystemIntegration(
     private val session = MediaSession(
         player = app.player,
         controls = controls,
-        covers = ServerCovers(app.http, { app.connection?.client }, File(places.cache, "now-playing")),
+        covers = ServerCovers(app.http, { app.connection?.client }, File(places.cache, "now-playing"), images = { app.coverImages?.invoke() }),
         scope = app.scope,
         others = ::otherEvent,
     )

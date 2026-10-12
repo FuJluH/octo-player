@@ -114,6 +114,7 @@ class OctoPlaybackService : MediaLibraryService() {
     @Inject lateinit var serverQueue: QueueSync
     @Inject lateinit var quickPicks: QuickPicks
     @Inject lateinit var prefetch: Prefetcher
+    @Inject lateinit var coversAhead: CoversAhead
     @Inject lateinit var editor: QueueEditor
     @Inject lateinit var autoplay: Autoplay
     @Inject lateinit var downloads: Downloads
@@ -181,6 +182,8 @@ class OctoPlaybackService : MediaLibraryService() {
         sleep.attach(player)
         // Saving songs ahead is for the phone's own playing.
         prefetch.attach(local)
+        // The covers of the song on and the next ones, wherever it plays.
+        coversAhead.attach(player)
         editor.attach(player)
         autoplay.attach(player, scope)
         // Casting to a TV or speaker swaps the session's player to one that
@@ -278,6 +281,7 @@ class OctoPlaybackService : MediaLibraryService() {
         headsets.stop()
         sleep.detach()
         prefetch.detach()
+        coversAhead.detach()
         editor.detach()
         autoplay.detach()
         outputs.detach(casting)

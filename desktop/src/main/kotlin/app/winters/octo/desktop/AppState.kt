@@ -86,6 +86,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import coil3.ImageLoader
 import okhttp3.OkHttpClient
 
 // How long a notice said in passing stays up.
@@ -232,8 +233,13 @@ class AppState(
         playerPanel = if (playerPanel == panel) null else panel
     }
 
+    // The app's image loader, for what needs a cover outside a picture on
+    // screen (the background, the system's player). Main sets it; with none
+    // they download covers themselves.
+    var coverImages: (() -> ImageLoader)? = null
+
     // Covers made ready for the full player's background.
-    val washCovers = WashCovers(http)
+    val washCovers = WashCovers(http, images = { coverImages?.invoke() })
 
     // Playlists' designed covers; Main gives them a folder in the cache.
     val playlistArt = PlaylistArtStore(http)

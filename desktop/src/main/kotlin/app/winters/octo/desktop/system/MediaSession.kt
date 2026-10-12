@@ -1,8 +1,10 @@
 package app.winters.octo.desktop.system
 
+import app.winters.octo.desktop.library.coverBytes
 import app.winters.octo.desktop.player.DesktopPlayer
 import app.winters.octo.desktop.player.RepeatMode
 import app.winters.octo.subsonic.SubsonicClient
+import coil3.ImageLoader
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -26,20 +28,28 @@ fun interface CoverSource {
 // kept as a file in the cache folder. The system is only ever given the
 // picture or that file, never the server's signed address, which would
 // hand the listener's sign-in to every program that asks what is playing.
+// With an image loader from `images`, the picture comes through its caches
+// and downloads, shared with every other place that shows the cover.
 class ServerCovers(
     private val http: OkHttpClient,
     private val client: () -> SubsonicClient?,
     private val folder: File,
     private val size: Int = 600,
+    private val images: () -> ImageLoader? = { null },
 ) : CoverSource {
     override suspend fun load(coverId: String): CoverArt? = withContext(Dispatchers.IO) {
         val server = client() ?: return@withContext null
         val name = sha(server.primaryUrl.host + "/" + coverId).take(24) + ".img"
         val file = File(folder, name)
         if (file.isFile && file.length() > 0) return@withContext CoverArt(file.readBytes(), file)
+        val loader = images()
         val bytes = runCatching {
-            http.newCall(Request.Builder().url(server.coverArtUrl(coverId, size)).build()).execute().use { response ->
-                if (!response.isSuccessful) null else response.body.bytes().takeIf { it.isNotEmpty() && looksLikeImage(it) }
+            if (loader != null) {
+                coverBytes(loader, server, coverId, size)?.takeIf { it.isNotEmpty() && looksLikeImage(it) }
+            } else {
+                http.newCall(Request.Builder().url(server.coverArtUrl(coverId, size)).build()).execute().use { response ->
+                    if (!response.isSuccessful) null else response.body.bytes().takeIf { it.isNotEmpty() && looksLikeImage(it) }
+                }
             }
         }.getOrNull() ?: return@withContext null
         runCatching {

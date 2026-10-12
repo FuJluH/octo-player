@@ -5,7 +5,14 @@ import app.winters.octo.catalog.StandInCovers
 import app.winters.octo.catalog.drawnCoverStamp
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
+import app.winters.octo.covers.AheadCoverBucket
+import app.winters.octo.covers.CoverDownloads
+import app.winters.octo.covers.CoverLanes
+import app.winters.octo.covers.coverBucket
+import app.winters.octo.covers.keptCoverOrder
 import coil3.ImageLoader
+import coil3.decode.DataSource
+import coil3.decode.ImageSource
 import coil3.fetch.FetchResult
 import coil3.fetch.Fetcher
 import coil3.fetch.SourceFetchResult
@@ -17,9 +24,13 @@ import kotlinx.coroutines.flow.first
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 
-// Covers are asked for at one of these sizes, so one download serves every
-// size up to it.
-private val Sizes = listOf(150, 300, 600, 1200)
+// The order cover downloads go to the server in, and the downloads under
+// way, for the whole app. The player marks the covers it shows now and
+// next as urgent (see CoversAhead).
+object CoverTraffic {
+    val lanes = CoverLanes()
+    val downloads = CoverDownloads()
+}
 
 // Covers of things found online used to come with a mark the server drew in
 // a corner. Octo now sends them clean to this app, so they are kept under
@@ -41,6 +52,11 @@ fun serverCoverKey(art: ArtworkRef.Server, nowMs: Long = System.currentTimeMilli
 // What one downloaded size of a cover is kept on disk under.
 fun serverCoverDiskKey(art: ArtworkRef.Server, px: Int, nowMs: Long = System.currentTimeMillis()): String = "${serverCoverKey(art, nowMs)}|$px"
 
+// The disk keys of the copies of a cover that answer an ask at `px`, best
+// first (see keptCoverOrder).
+fun keptCoverKeys(art: ArtworkRef.Server, px: Int, anySize: Boolean = false, nowMs: Long = System.currentTimeMillis()): List<String> =
+    keptCoverOrder(px, anySize).map { serverCoverDiskKey(art, it, nowMs) }
+
 // Draws a cover from the signed-in server. Its address is signed afresh for
 // each download, so the download is cached under what the picture is, never
 // under the address. A cover the server has none for answers "not found";
@@ -51,6 +67,14 @@ fun serverCoverDiskKey(art: ArtworkRef.Server, px: Int, nowMs: Long = System.cur
 // let go, from the disk too, and the cover's fallback is drawn in its place:
 // for a library song, the cover of its album's first song. With no fallback
 // the picture fails, so the app's own empty tile shows.
+//
+// A copy already on the disk at the size asked for, or a larger one, which
+// the decoder shrinks, answers without the server. A request that may only
+// use kept copies (no network) takes a smaller one too. Downloads wait for
+// their turn in CoverTraffic's lanes, and an ask waits for a download of
+// the same cover at its size or larger already under way. The covers the
+// player shows now and next are downloaded at the largest size, so every
+// place that shows them shares one download.
 class ServerArtworkFetcher(
     private val sessions: SessionRepository,
     private val art: ArtworkRef.Server,
@@ -65,22 +89,51 @@ class ServerArtworkFetcher(
         if (session.sourceId != art.sourceId) return null
         // With no size given, a middling one.
         val wanted = maxOf(options.size.width.pxOrElse { 0 }, options.size.height.pxOrElse { 0 }).takeIf { it > 0 } ?: 600
-        val px = Sizes.firstOrNull { it >= wanted } ?: Sizes.last()
-        suspend fun download(cover: ArtworkRef.Server): FetchResult? {
-            val key = serverCoverDiskKey(cover, px)
+        val px = coverBucket(wanted)
+        val keptOnly = !options.networkCachePolicy.readEnabled
+        suspend fun download(cover: ArtworkRef.Server, size: Int): FetchResult? {
+            val key = serverCoverDiskKey(cover, size)
             if (key in standIns) return null
-            val url = client.coverArtUrl(cover.coverId, px).toString().toUri()
+            val url = client.coverArtUrl(cover.coverId, size).toString().toUri()
             val (fetcher, _) = imageLoader.components.newFetcher(url, options.copy(diskCacheKey = key), imageLoader) ?: return null
-            val result = fetcher.fetch() ?: return null
-            if (!isStandIn(result)) return result
-            (result as? SourceFetchResult)?.source?.close()
-            imageLoader.diskCache?.remove(key)
-            standIns += key
-            return null
+            return fetcher.fetch()?.let { checked(it, key) }
         }
-        download(art)?.let { return it }
+        suspend fun picture(cover: ArtworkRef.Server): FetchResult? {
+            val name = serverCoverKey(cover)
+            val size = if (CoverTraffic.lanes.isUrgent(name)) AheadCoverBucket else px
+            return CoverTraffic.downloads.get(
+                name,
+                size,
+                kept = { kept(cover, px, anySize = keptOnly) },
+                download = { if (keptOnly) null else CoverTraffic.lanes.pass(name) { download(cover, size) } },
+            )
+        }
+        picture(art)?.let { return it }
         val fallback = art.fallbackId?.let { ArtworkRef.Server(art.sourceId, it, art.online) }
-        return fallback?.let { download(it) } ?: throw NoCover(art.coverId)
+        return fallback?.let { picture(it) } ?: throw NoCover(art.coverId)
+    }
+
+    // A copy of `cover` on the disk that answers an ask at `px`, best first
+    // (see keptCoverOrder), or null.
+    private fun kept(cover: ArtworkRef.Server, px: Int, anySize: Boolean): FetchResult? {
+        if (!options.diskCachePolicy.readEnabled) return null
+        val disk = imageLoader.diskCache ?: return null
+        for (key in keptCoverKeys(cover, px, anySize)) {
+            val snapshot = disk.openSnapshot(key) ?: continue
+            val result = SourceFetchResult(ImageSource(snapshot.data, disk.fileSystem, key, snapshot, null), null, DataSource.DISK)
+            checked(result, key)?.let { return it }
+        }
+        return null
+    }
+
+    // The result, unless it is the server's stand-in, which is let go, from
+    // the disk too.
+    private fun checked(result: FetchResult, key: String): FetchResult? {
+        if (!isStandIn(result)) return result
+        (result as? SourceFetchResult)?.source?.close()
+        imageLoader.diskCache?.remove(key)
+        standIns += key
+        return null
     }
 
     class Factory(private val sessions: SessionRepository) : Fetcher.Factory<ArtworkRef.Server> {
