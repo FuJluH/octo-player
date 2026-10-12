@@ -40,7 +40,7 @@ extension SubsonicClient {
             : []
         return ServerProfile(
             info: info,
-            extensions: extensions.flatMap { e in e.versions.isEmpty ? ["\(e.name):1"] : e.versions.map { "\(e.name):\($0)" } }
+            extensions: extensions.flatMap { e in e.versions.map { "\(e.name):\($0)" } }
         )
     }
 
