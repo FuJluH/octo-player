@@ -19,13 +19,15 @@ enum PageMotion {
 }
 
 extension View {
-    /// Gives the stack this view sits in Octo's page motion.
-    func pageMotion() -> some View {
-        background(PageMotionInstaller().allowsHitTesting(false).accessibilityHidden(true))
+    /// Gives the stack this view sits in Octo's page motion. `rootBack`, when given, is what a
+    /// swipe in from the left edge does at the stack's first page.
+    func pageMotion(rootBack: (() -> Void)? = nil) -> some View {
+        background(PageMotionInstaller(rootBack: rootBack).allowsHitTesting(false).accessibilityHidden(true))
     }
 }
 
 private struct PageMotionInstaller: UIViewRepresentable {
+    let rootBack: (() -> Void)?
     @Environment(\.motionScale) private var motion
     @Environment(\.accessibilityReduceMotion) private var systemCalm
 
@@ -37,11 +39,13 @@ private struct PageMotionInstaller: UIViewRepresentable {
 
     func updateUIView(_ probe: Probe, context: Context) {
         probe.still = motion.still || systemCalm
+        probe.rootBack = rootBack
         probe.install()
     }
 
     final class Probe: UIView {
         var still = false
+        var rootBack: (() -> Void)?
 
         override func didMoveToWindow() {
             super.didMoveToWindow()
@@ -53,7 +57,9 @@ private struct PageMotionInstaller: UIViewRepresentable {
             var responder: UIResponder? = self
             while let current = responder, !(current is UINavigationController) { responder = current.next }
             guard let navigation = responder as? UINavigationController else { return }
-            PageMotionDelegate.install(on: navigation).still = still
+            let delegate = PageMotionDelegate.install(on: navigation)
+            delegate.still = still
+            delegate.rootBack = rootBack
         }
     }
 }
@@ -67,7 +73,10 @@ final class PageMotionDelegate: NSObject, UINavigationControllerDelegate, UIGest
     nonisolated(unsafe) weak var original: UINavigationControllerDelegate?
     weak var navigation: UINavigationController?
     var still = false
+    /// What the edge swipe does at the first page, if anything.
+    var rootBack: (() -> Void)?
     private var interaction: EdgeBack?
+    private var swipingAtRoot = false
     private var edge: UIScreenEdgePanGestureRecognizer?
 
     /// The delegate on `navigation`, put there the first time and again if the stack replaced it.
@@ -129,7 +138,8 @@ final class PageMotionDelegate: NSObject, UINavigationControllerDelegate, UIGest
     // MARK: The edge swipe
 
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        (navigation?.viewControllers.count ?? 0) > 1 && navigation?.transitionCoordinator == nil
+        guard let navigation, navigation.transitionCoordinator == nil else { return false }
+        return navigation.viewControllers.count > 1 || rootBack != nil
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
@@ -140,6 +150,14 @@ final class PageMotionDelegate: NSObject, UINavigationControllerDelegate, UIGest
         guard let navigation, let view = navigation.view else { return }
         let width = max(1, view.bounds.width)
         let progress = min(1, max(0, pan.translation(in: view).x / width))
+        if pan.state == .began {
+            swipingAtRoot = navigation.viewControllers.count <= 1
+        }
+        if swipingAtRoot {
+            // At the first page there is nothing to slide back to: far enough, the swipe acts.
+            if pan.state == .ended, pan.translation(in: view).x > 60 { rootBack?() }
+            return
+        }
         switch pan.state {
         case .began:
             let back = EdgeBack(still: still)

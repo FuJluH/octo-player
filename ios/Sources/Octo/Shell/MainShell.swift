@@ -193,7 +193,7 @@ struct MainShell: View {
                 NavigationStack(path: path(item)) {
                     root(item)
                         .background { PageBackdrop(page: item.rootPage, route: nil) }
-                        .pageMotion()
+                        .pageMotion(rootBack: item == .home ? nil : { select(.home) })
                         .routes()
                         .environment(\.tabReselects, reselects[item, default: 0])
                         .background(ScrollTopProbe(signal: reselects[item, default: 0]))
@@ -206,7 +206,6 @@ struct MainShell: View {
                 .animation(front ? .octoTween(260, OctoEasing.spring, scale: motion) : nil, value: tab)
                 .allowsHitTesting(front)
                 .accessibilityHidden(!front)
-                .simultaneousGesture(homeEdge, including: front ? .all : .subviews)
             }
         }
     }
@@ -279,17 +278,6 @@ struct MainShell: View {
         } else if tab != .home {
             select(.home)
         }
-    }
-
-    /// At the first page of Search, Library or Settings, a swipe in from the left edge goes Home.
-    private var homeEdge: some Gesture {
-        DragGesture(minimumDistance: 20)
-            .onEnded { drag in
-                guard drag.startLocation.x < 24, drag.translation.width > 60,
-                      abs(drag.translation.height) < drag.translation.width,
-                      tab != .home, paths[tab]?.isEmpty != false else { return }
-                select(.home)
-            }
     }
 }
 

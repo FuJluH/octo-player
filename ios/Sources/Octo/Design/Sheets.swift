@@ -70,7 +70,6 @@ struct GlassSheetFrame<Content: View>: View {
         }
         .frame(maxWidth: .infinity)
         .frame(maxHeight: most, alignment: .top)
-        .fixedSize(horizontal: false, vertical: true)
         .background {
             shape.fill(OctoColor.sheetFill)
                 .overlay(alignment: .top) { Color.white.opacity(0.10).frame(height: 1).clipShape(shape) }

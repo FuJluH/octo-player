@@ -130,12 +130,13 @@ extension View {
     /// screen when none was, while `isPresented`. A tap off the card or back closes it.
     /// `usesPressSpot` false keeps it to `anchor` alone, in the middle when that is nil.
     func glassPopup<Content: View>(isPresented: Binding<Bool>, title: String? = nil, anchor: CGRect? = nil,
-                                   usesPressSpot: Bool = true,
+                                   usesPressSpot: Bool = true, revision: AnyHashable? = nil,
                                    maxWidth: CGFloat = CGFloat(PopupMeasures.maxWidth),
                                    heightShare: Double = PopupMeasures.heightShare,
                                    onBack: @escaping () -> Bool = { false },
                                    @ViewBuilder content: @escaping () -> Content) -> some View {
-        modifier(PopupPresenter(isPresented: isPresented, title: title, anchor: anchor, usesPressSpot: usesPressSpot, maxWidth: maxWidth,
+        modifier(PopupPresenter(isPresented: isPresented, title: title, anchor: anchor, usesPressSpot: usesPressSpot,
+                                revision: revision, maxWidth: maxWidth,
                                 heightShare: heightShare, onBack: onBack, content: { AnyView(content()) }))
     }
 }
@@ -187,6 +188,8 @@ private struct PopupPresenter: ViewModifier {
     let title: String?
     let anchor: CGRect?
     let usesPressSpot: Bool
+    /// A new revision while it is open shows the content afresh.
+    let revision: AnyHashable?
     let maxWidth: CGFloat
     let heightShare: Double
     let onBack: () -> Bool
@@ -205,6 +208,9 @@ private struct PopupPresenter: ViewModifier {
                 } else {
                     overlays.hidePopup(id)
                 }
+            }
+            .onChange(of: revision) { _, _ in
+                if isPresented { overlays.updatePopup(id, content: content()) }
             }
             .onDisappear { if isPresented { isPresented = false } }
     }

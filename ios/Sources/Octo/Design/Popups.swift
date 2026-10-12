@@ -35,8 +35,6 @@ struct GlassPopupFrame: View {
                     .gesture(edgeBack)
                 popup.content
                     .frame(maxWidth: widest, maxHeight: tallest, alignment: .topLeading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxHeight: tallest)
                     .floatingGlass(RoundedRectangle(cornerRadius: CGFloat(PopupMeasures.corner), style: .continuous),
                                    film: OctoColor.popupFilm, halo: true)
                     .overlay {
@@ -195,14 +193,27 @@ struct HuggingScroll<Content: View>: View {
     @State private var height: CGFloat = 0
 
     var body: some View {
-        ScrollView(.vertical) {
-            content.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+        HugHeight(height: height) {
+            ScrollView(.vertical) {
+                content.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .scrollIndicators(.hidden)
         }
-        .scrollBounceBehavior(.basedOnSize)
-        .scrollIndicators(.hidden)
-        .frame(idealHeight: height)
-        .fixedSize(horizontal: false, vertical: true)
-        .frame(maxHeight: height)
+    }
+}
+
+/// Takes `height`, or less when less is offered; as wide as offered, or as its content.
+private struct HugHeight: Layout {
+    let height: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? subviews.first?.sizeThatFits(.unspecified).width ?? 0
+        return CGSize(width: width, height: min(height, proposal.height ?? .infinity))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: bounds.height))
     }
 }
 
@@ -590,6 +601,7 @@ struct PopupNameForm: View {
 @Observable
 final class Prompts {
     struct ChoiceRequest {
+        let id = UUID()
         let title: String
         let choices: [Choice]
         /// The chosen answer, or below zero when the answers are actions.
@@ -599,6 +611,7 @@ final class Prompts {
     }
 
     struct QuestionRequest {
+        let id = UUID()
         let title: String
         let detail: String?
         let confirm: String
@@ -640,14 +653,14 @@ struct PromptsHost: View {
         Color.clear
             .glassPopup(isPresented: Binding(get: { prompts.choice != nil }, set: { if !$0 { prompts.closeChoice() } }),
                         title: (prompts.choice ?? lastChoice)?.title, anchor: (prompts.choice ?? lastChoice)?.anchor,
-                        usesPressSpot: false) {
+                        usesPressSpot: false, revision: prompts.choice?.id) {
                 if let request = prompts.choice ?? lastChoice {
                     ChoiceList(request: request) { prompts.closeChoice() }
                 }
             }
             .glassPopup(isPresented: Binding(get: { prompts.question != nil }, set: { if !$0 { prompts.closeQuestion() } }),
                         title: (prompts.question ?? lastQuestion)?.title, anchor: (prompts.question ?? lastQuestion)?.anchor,
-                        usesPressSpot: false) {
+                        usesPressSpot: false, revision: prompts.question?.id) {
                 if let request = prompts.question ?? lastQuestion {
                     PopupQuestion(title: request.title, detail: request.detail, confirm: request.confirm, cancel: request.cancel,
                                   onConfirm: {
@@ -660,8 +673,8 @@ struct PromptsHost: View {
                                   })
                 }
             }
-            .onChange(of: prompts.choice?.title, initial: true) { if let choice = prompts.choice { lastChoice = choice } }
-            .onChange(of: prompts.question?.title, initial: true) { if let question = prompts.question { lastQuestion = question } }
+            .onChange(of: prompts.choice?.id, initial: true) { if let choice = prompts.choice { lastChoice = choice } }
+            .onChange(of: prompts.question?.id, initial: true) { if let question = prompts.question { lastQuestion = question } }
             .allowsHitTesting(false)
     }
 }
