@@ -28,7 +28,9 @@ final class PlaylistSync {
     @ObservationIgnored private let session: Session
     @ObservationIgnored private let library: Library
     @ObservationIgnored private let discovery: ServerDiscovery
-    @ObservationIgnored private let prefs = Prefs("playlist_sync")
+    @ObservationIgnored private let prefs = Prefs(ServerSyncChoices.playlistsStore)
+    @ObservationIgnored private let choices = ServerSyncChoices()
+    @ObservationIgnored private var choiceWatch: NSObjectProtocol?
     /// One change to the server's playlists at a time.
     @ObservationIgnored private var running: Task<Void, Never>?
     /// Edits waiting to be sent, by playlist.
@@ -40,7 +42,14 @@ final class PlaylistSync {
         self.session = session
         self.library = library
         self.discovery = discovery
-        newOnServer = Prefs("playlist_sync").bool("new_on_server") ?? false
+        newOnServer = choices.newPlaylistsOnServer
+        // A backup put back sets the choice in the same place; the switch follows it.
+        choiceWatch = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.newOnServer != self.choices.newPlaylistsOnServer else { return }
+                self.newOnServer = self.choices.newPlaylistsOnServer
+            }
+        }
         sync.afterSync("playlists") { [weak self] in await self?.afterSync() }
     }
 
@@ -49,7 +58,7 @@ final class PlaylistSync {
 
     func setNewOnServer(_ on: Bool) {
         newOnServer = on
-        prefs.set(on, "new_on_server")
+        choices.setNewPlaylistsOnServer(on)
     }
 
     /// Runs `work` after any change already running, so changes to the server go one at a time.
