@@ -1,4 +1,5 @@
 import Foundation
+import MediaPlayer
 import OctoKit
 
 /// Turns songs into songs the player can play. Each library song plays from one of its copies,
@@ -10,17 +11,20 @@ struct PlayableItems {
     let session: Session
     let data: DataServices?
 
-    /// One queue item for each song asked for, in order; nil for any that cannot be found.
+    /// One queue item for each song asked for, in order; nil for any that cannot be found. A song
+    /// as the server lists it that the library does not know yet is taken in first, as the
+    /// library song or the find it is, like every song from the server before it plays.
     func items(_ songs: [Song], source: QueueSource, streamUnknown: Bool = true) async -> [QueueItem?] {
         guard !songs.isEmpty else { return [] }
+        var songs = songs
+        if streamUnknown, let data { songs = await takenIn(songs, data) }
         let context = StreamContext.now(session)
         let ids = songs.map(\.id)
         var byId: [String: QueueItem] = [:]
         if let data {
             let library = data.library
-            let tracks = await library.songs(ids: ids.filter { !isRadio($0) && !isOpenedFile($0) })
-            let finds = await library.finds(ids.filter(isFind))
-            let downloads = await data.offline.playableCopies(tracks.map(\.id))
+            let tracks = await library.songs(ids: distinct(ids.filter { !isRadio($0) && !isOpenedFile($0) }))
+            let finds = await library.finds(distinct(ids.filter(isFind)))
             var tracksById: [String: LibraryTrack] = [:]
             for track in tracks { tracksById[track.id] = track }
             for find in finds {
@@ -30,9 +34,19 @@ struct PlayableItems {
                     byId[find.id] = findItem(find, context: context, source: source)
                 }
             }
-            for id in Set(ids) where byId[id] == nil {
+            let wanted = distinct(ids.filter { byId[$0] == nil }).compactMap { tracksById[$0] }
+            let copies = await batchCopies(distinct(wanted.map(\.id)), data)
+            let onServer = copies.filter { $0.value.contains(where: \.isServerCopy) }
+            // Only ask about the server when some song is on one.
+            let reachable = !onServer.isEmpty && OnlineWatch.shared.online && context.client != nil
+            // Phone files that could be swapped for a stream, checked in case one is gone.
+            let phoneFiles = onServer.values.flatMap { $0 }.filter { !$0.isServerCopy }.compactMap(\.uri)
+            let missing = reachable ? await Self.missingPhoneFiles(phoneFiles) : []
+            let downloads = onServer.isEmpty ? [:] : await data.offline.playableCopies(Array(onServer.keys))
+            for id in distinct(ids) where byId[id] == nil {
                 guard let track = tracksById[id] else { continue }
-                byId[id] = await libraryItem(track, download: downloads[track.id], context: context, source: source)
+                byId[id] = libraryItem(track, copies: copies[track.id] ?? [], download: downloads[track.id], reachable: reachable,
+                                       missing: missing, context: context, source: source)
             }
         }
         let orders = albumOrders(songs)
@@ -40,10 +54,43 @@ struct PlayableItems {
             if let item = byId[song.id] { return item.withSource(source) }
             if isRadio(song.id) { return radioItem(song.id, source: source) }
             if isOpenedFile(song.id) { return openedFileItem(song.id, source: source) }
-            // A song the library does not hold: the server in use streams it.
-            guard streamUnknown, context.sourceId != nil else { return nil }
+            // Without the library (a preview), a song streams from the server in use.
+            guard streamUnknown, data == nil, context.sourceId != nil else { return nil }
             return queueItem(song, sourceId: context.sourceId, quality: context.quality, source: source, albumOrder: orders[index])
         }
+    }
+
+    /// Songs as the server lists them that the library does not know become the library songs
+    /// or finds they are, stored as finds are. Ids already the library's own, finds, stations and
+    /// opened files stay as they are; one the library no longer knows is then dropped.
+    private func takenIn(_ songs: [Song], _ data: DataServices) async -> [Song] {
+        let plain = songs.filter { song in
+            !isRadio(song.id) && !isOpenedFile(song.id) && !isFind(song.id)
+                && !song.id.hasPrefix("server:") && !song.id.hasPrefix(deviceSource + ":")
+        }
+        guard !plain.isEmpty else { return songs }
+        let known = Set(await data.library.tracks(ids: distinct(plain.map(\.id))).map(\.id))
+        var seen = Set<String>()
+        let raw = plain.filter { !known.contains($0.id) && seen.insert($0.id).inserted }
+        guard !raw.isEmpty else { return songs }
+        let ids = await data.discovery.idsFromServer(raw)
+        var taken: [String: String] = [:]
+        for (song, id) in zip(raw, ids) { taken[song.id] = id }
+        return songs.map { song in
+            guard let id = taken[song.id] else { return song }
+            var copy = song
+            copy.id = id
+            return copy
+        }
+    }
+
+    /// Every copy of these library songs, by song, read in batches.
+    private func batchCopies(_ trackIds: [String], _ data: DataServices) async -> [String: [SongCopy]] {
+        guard !trackIds.isEmpty else { return [:] }
+        let rows = (try? await data.library.store.copies(of: trackIds)) ?? []
+        var byTrack: [String: [SongCopy]] = [:]
+        for row in rows { byTrack[row.mergedId, default: []].append(songCopy(row)) }
+        return byTrack
     }
 
     /// Songs by their ids, as the library holds them.
@@ -53,19 +100,19 @@ struct PlayableItems {
 
     // MARK: Each kind
 
-    private func libraryItem(_ track: LibraryTrack, download: KeptDownload?, context: StreamContext, source: QueueSource) async -> QueueItem {
-        let copies = (await data?.library.copies(track.id) ?? []).map(songCopy)
+    private func libraryItem(_ track: LibraryTrack, copies: [SongCopy], download: KeptDownload?, reachable: Bool, missing: Set<String>,
+                             context: StreamContext, source: QueueSource) -> QueueItem {
         let downloadCopy = download.flatMap { kept -> SongCopy? in
             let server = copies.first { $0.sourceId == kept.sourceId && $0.nativeId == kept.serverId } ?? copies.first(where: \.isServerCopy)
             guard let server else { return nil }
             return downloadedCopy(server, uri: URL(fileURLWithPath: kept.path).absoluteString, format: kept.format, sizeBytes: Int(kept.sizeBytes))
         }
         let online = OnlineWatch.shared.online
-        let reachable = copies.contains(where: \.isServerCopy) && online && context.client != nil
         let prefs = AppSettings.shared
+        // Downloads play first, unless streaming on Wi-Fi is preferred and the phone is on it.
         let streamInstead = prefs.offline.streamOnWifi && online && !OnlineWatch.shared.onMobileData
         let chosen = chooseCopy(copies, download: downloadCopy, streamInstead: streamInstead, prefs.stream.copies,
-                                serverReachable: reachable, phoneFileMissing: { copy in Self.fileMissing(copy.uri) })
+                                serverReachable: reachable, phoneFileMissing: { copy in missing.contains(copy.uri ?? "") })
         var uri = track.uri ?? ""
         var mime = track.mimeType
         let fileMime = chosen?.mimeType ?? track.mimeType
@@ -96,11 +143,11 @@ struct PlayableItems {
         var item = QueueItem(
             trackId: find.id, uri: streamUri(ref), title: find.title, artist: find.artist, album: find.album,
             durationMs: Int(find.durationMs), mimeType: phoneRequest(find.mimeType, bitrate, context.quality).mimeType(find.mimeType),
-            fileMime: find.mimeType, artwork: onlineArtwork(find.sourceId, find.coverId), albumId: find.albumId,
-            artistId: find.artistId, explicit: find.explicit ?? false, source: source, isFind: true)
-        var song = Song(id: find.id, title: find.title, artist: find.artist, album: find.album, albumId: find.albumId,
+            // A find has no album or artist in the library to open.
+            fileMime: find.mimeType, artwork: onlineArtwork(find.sourceId, find.coverId), albumId: "",
+            artistId: "", explicit: find.explicit ?? false, source: source, isFind: true)
+        let song = Song(id: find.id, title: find.title, artist: find.artist, album: find.album, albumId: nil,
                         duration: Int((find.durationMs + 500) / 1_000), coverArt: find.coverId, isExternal: true)
-        song.artistId = find.artistId
         item.song = song
         return item
     }
@@ -111,8 +158,9 @@ struct PlayableItems {
     }
 
     private func openedFileItem(_ id: String, source: QueueSource) -> QueueItem? {
-        guard let file = openedFileOf(id), let url = URL(string: file.uri) else { return nil }
-        if url.isFileURL && !FileManager.default.isReadableFile(atPath: url.path) { return nil }
+        // Only a file Octo can read plays; anything else is dropped quietly.
+        guard let file = openedFileOf(id), let url = URL(string: file.uri), url.isFileURL,
+              FileManager.default.isReadableFile(atPath: url.path) else { return nil }
         return QueueItem(trackId: id, uri: file.uri, title: file.shownTitle, artist: file.artist, source: source)
     }
 
@@ -124,11 +172,34 @@ struct PlayableItems {
                  albumPeak: copy.albumPeak.map(Double.init))
     }
 
-    /// Whether a phone file has gone. Songs of the media library are taken to be there.
-    private static func fileMissing(_ uri: String?) -> Bool {
-        guard let uri, let url = URL(string: uri) else { return true }
-        guard url.isFileURL else { return false }
-        return !FileManager.default.fileExists(atPath: url.path)
+    /// The phone files among these that are gone: files in Octo's folder no longer there, and
+    /// songs the Music app's library no longer has. Without access to the Music app's library,
+    /// none of its songs can play.
+    nonisolated private static func missingPhoneFiles(_ uris: [String]) async -> Set<String> {
+        guard !uris.isEmpty else { return [] }
+        return await Task.detached(priority: .userInitiated) {
+            let allowed = MPMediaLibrary.authorizationStatus() == .authorized
+            var missing = Set<String>()
+            for uri in Set(uris) {
+                guard let url = URL(string: uri) else {
+                    missing.insert(uri)
+                    continue
+                }
+                if url.isFileURL {
+                    if !FileManager.default.fileExists(atPath: url.path) { missing.insert(uri) }
+                } else if url.scheme == "ipod-library" {
+                    guard allowed, let id = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+                        .first(where: { $0.name == "id" })?.value.flatMap(UInt64.init) else {
+                        missing.insert(uri)
+                        continue
+                    }
+                    let query = MPMediaQuery.songs()
+                    query.addFilterPredicate(MPMediaPropertyPredicate(value: NSNumber(value: id), forProperty: MPMediaItemPropertyPersistentID))
+                    if (query.items ?? []).isEmpty { missing.insert(uri) }
+                }
+            }
+            return missing
+        }.value
     }
 
     /// A library song as the screens show it.

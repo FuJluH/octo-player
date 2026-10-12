@@ -70,14 +70,14 @@ final class DeckSource: @unchecked Sendable {
     /// Where the latest jump went, in ms, to show before sound arrives.
     let jumpMs: Atomic<Int>
 
-    init(item: QueueItem, setUp: SongSetUp?, startMs: Int, outputRate: Double, isLocal: Bool, skipSilence: Bool,
-         open: @escaping @Sendable (OpenToken) throws -> OpenedSong) {
+    init(item: QueueItem, setUp: SongSetUp?, startMs: Int, outputRate: Double, isLocal: Bool, holdSeconds: Double = 15,
+         skipSilence: Bool, open: @escaping @Sendable (OpenToken) throws -> OpenedSong) {
         self.item = item
         self.setUp = setUp
         self.outputRate = outputRate
         self.isLocal = isLocal
         self.open = open
-        ring = PCMRing(seconds: 15, sampleRate: outputRate)
+        ring = PCMRing(seconds: holdSeconds, sampleRate: outputRate)
         self.skipSilence = Atomic(skipSilence)
         jumpMs = Atomic(max(0, startMs))
         let start = max(0, startMs)

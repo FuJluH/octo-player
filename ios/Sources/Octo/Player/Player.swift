@@ -118,8 +118,10 @@ final class Player {
     @ObservationIgnored private var lastSkipSilence: Bool?
     /// Lengths learned by playing, kept with songs found online too.
     @ObservationIgnored private var findLengths: FindLengths?
-    /// Play was asked for before the saved queue was back.
-    @ObservationIgnored private var playWhenRestored = false
+    /// Requests made while the saved queue was coming back, run in order once it is.
+    @ObservationIgnored private var afterRestore: [@MainActor () -> Void] = []
+    /// While the server in use changes, nothing is saved over the queue being handed over.
+    @ObservationIgnored private var holding = false
 
     init(session: Session, sound: SoundProcessor, data: DataServices? = nil) {
         self.session = session
@@ -189,8 +191,8 @@ final class Player {
             let found = await playable.items(songs, source: source)
             let items = found.compactMap { $0 }
             guard !items.isEmpty else { return }
-            let startAt = chosenStart(found, min(max(start, 0), songs.count - 1))
-            load(items, startIndex: shuffled ? -1 : startAt, shuffled: shuffled)
+            // The chosen song by its place; the first when it is gone.
+            load(items, startIndex: shuffled ? -1 : chosenStart(found, start), shuffled: shuffled)
         }
     }
 
@@ -202,12 +204,11 @@ final class Player {
             let found = await playable.items(ids: ids, source: .played(name))
             let items = found.compactMap { $0 }
             guard !items.isEmpty else { return }
-            load(items, startIndex: shuffled ? -1 : chosenStart(found, min(max(start, 0), ids.count - 1)), shuffled: shuffled)
+            load(items, startIndex: shuffled ? -1 : chosenStart(found, start), shuffled: shuffled)
         }
     }
 
     private func load(_ items: [QueueItem], startIndex: Int, shuffled: Bool) {
-        failuresInARow = 0
         headset.forgetLoss()
         // Shuffled, the queue starts at the first song of its random order.
         engine.setQueue(items, startIndex: shuffled ? -1 : startIndex, shuffled: shuffled, play: true)
@@ -276,42 +277,60 @@ final class Player {
         var seed = await data.library.songs(ids: [song.id]).first
         if seed == nil { seed = await data.discovery.resolveFromServer([song]).first }
         guard let seed else {
-            play([song], radio: song)
+            announce("No similar songs found")
             return
         }
-        let ids = await LibraryRadio(data: data).songsLike([seed], count: radioLength, exclude: [seed.id])
-        let found = await playable.items(ids: [seed.id] + ids, source: .played(nil))
+        // Spaced on from the seed, which plays first; the queue is named for it.
+        let ids = await LibraryRadio(data: data).songsLike([seed], count: radioLength, before: [seed.id])
+        guard !ids.isEmpty else {
+            announce("No similar songs found")
+            return
+        }
+        let found = await playable.items(ids: [seed.id] + ids, source: .played("\(seed.title) radio"))
         let items = found.compactMap { $0 }
         guard !items.isEmpty else { return }
         radioSeed = song
         load(items, startIndex: 0, shuffled: false)
     }
 
+    /// Play or pause. With nothing queued, the whole library plays shuffled. Asked while the saved
+    /// queue is still coming back, it waits for it.
     func toggle() {
-        if engine.queue.isEmpty {
-            Task { await shuffleLibrary() }
-        } else if engine.playWhenReady && engine.state != .ended {
-            pause()
-        } else {
-            resume()
+        whenRestored { [weak self] in
+            guard let self else { return }
+            if self.engine.queue.isEmpty {
+                Task { await self.shuffleLibrary() }
+            } else if self.engine.playWhenReady && self.engine.state != .ended {
+                self.pause()
+            } else {
+                self.resume()
+            }
         }
     }
 
+    /// Plays the queue. Asked while the saved queue is still coming back, it plays once it is.
     func resume() {
-        if restoring && engine.queue.isEmpty {
-            // Asked to play while the saved queue is still coming back: it plays once it is.
-            playWhenRestored = true
-            return
+        whenRestored { [weak self] in
+            guard let self, !self.engine.queue.isEmpty else { return }
+            self.headset.forgetLoss()
+            self.engine.play()
         }
-        guard !engine.queue.isEmpty else { return }
-        headset.forgetLoss()
-        failuresInARow = 0
-        engine.play()
     }
 
+    /// A queue coming back is paused anyway, so a pause never waits.
     func pause() {
         headset.forgetLoss()
         engine.pause()
+    }
+
+    /// Runs a request now, or once the saved queue is back, in the order asked, so nothing
+    /// mistakes a queue still coming back for an empty one.
+    private func whenRestored(_ request: @escaping @MainActor () -> Void) {
+        if restoring {
+            afterRestore.append(request)
+        } else {
+            request()
+        }
     }
 
     /// Nothing playing and nothing queued, as after signing out.
@@ -338,20 +357,17 @@ final class Player {
 
     /// Next always moves on, even when repeating one song.
     func next() {
-        failuresInARow = 0
-        engine.next()
+        whenRestored { [weak self] in self?.engine.next() }
     }
 
     /// Back to the start of the song, or to the one before when the song has barely begun.
     func previous() {
-        failuresInARow = 0
-        engine.previous()
+        whenRestored { [weak self] in self?.engine.previous() }
     }
 
     /// Plays the song at a queue position.
     func jump(to position: Int) {
         guard engine.queue.items.indices.contains(position) else { return }
-        failuresInARow = 0
         engine.seek(to: position)
         if !engine.playWhenReady { engine.play() }
     }
@@ -374,16 +390,22 @@ final class Player {
     }
 
     func setRepeat(_ mode: RepeatMode) {
-        engine.repeatMode = mode
-        repeatMode = mode
-        autoplay?.check()
+        whenRestored { [weak self] in
+            guard let self else { return }
+            self.engine.repeatMode = mode
+            self.repeatMode = mode
+            self.autoplay?.check()
+        }
     }
 
     /// Shuffle changes the play order only; the queue keeps its order.
     func toggleShuffle() {
-        engine.shuffle = !engine.shuffle
-        shuffled = engine.shuffle
-        autoplay?.check()
+        whenRestored { [weak self] in
+            guard let self else { return }
+            self.engine.shuffle = !self.engine.shuffle
+            self.shuffled = self.engine.shuffle
+            self.autoplay?.check()
+        }
     }
 
     func setSpeed(_ value: Float) {
@@ -417,21 +439,21 @@ final class Player {
 
     // MARK: The queue
 
-    /// "Play next": right after the song on now, in the queue and in the play order.
+    /// "Play next": right after the song on now, in the queue and in the play order. With nothing
+    /// queued, the songs wait there, paused.
     func playNext(_ songs: [Song]) {
-        guard !engine.queue.isEmpty else { play(songs, source: .you); return }
         Task {
             let items = await playable.items(songs, source: .you).compactMap { $0 }
-            engine.addNext(items)
+            whenRestored { [weak self] in self?.engine.addNext(items) }
         }
     }
 
-    /// "Add to queue": at the end, before any Autoplay songs still to come.
+    /// "Add to queue": at the end, before any Autoplay songs still to come. With nothing queued,
+    /// the songs wait there, paused.
     func append(_ songs: [Song]) {
-        guard !engine.queue.isEmpty else { play(songs, source: .you); return }
         Task {
             let items = await playable.items(songs, source: .you).compactMap { $0 }
-            engine.add(items)
+            whenRestored { [weak self] in self?.engine.add(items) }
         }
     }
 
@@ -442,18 +464,19 @@ final class Player {
             guard let self else { return }
             let items = await self.playable.items(songs, source: .you).compactMap { $0 }
             guard !items.isEmpty else { return }
-            if self.engine.queue.isEmpty {
-                self.engine.setQueue(items, startIndex: 0, play: true)
-            } else {
-                self.engine.addNext(items)
-            }
-            let ids = items.map(\.trackId)
-            let near = self.engine.queue.current + 1
-            inserted { [weak self] in
-                guard let self else { return }
-                if let first = findInserted(self.engine.queue.trackIds, ids, insertedAt: near) {
-                    self.engine.remove(from: first, to: first + ids.count)
-                }
+            self.whenRestored { [weak self] in self?.putNextUndoable(items, inserted: inserted) }
+        }
+    }
+
+    private func putNextUndoable(_ items: [QueueItem], inserted: @escaping (@escaping () -> Void) -> Void) {
+        // Where the songs go in the list, which is where undo looks first.
+        let near = min(engine.queue.current + 1, engine.queue.count)
+        engine.addNext(items)
+        let ids = items.map(\.trackId)
+        inserted { [weak self] in
+            guard let self else { return }
+            if let first = findInserted(self.engine.queue.trackIds, ids, insertedAt: near) {
+                self.engine.remove(from: first, to: first + ids.count)
             }
         }
     }
@@ -602,6 +625,9 @@ final class Player {
         engine.onIsPlayingChange = { [weak self] playing in self?.isPlayingChanged(playing) }
         engine.onPlayWhenReadyChange = { [weak self] playWhenReady, endOfSong in
             guard let self else { return }
+            // Any pause or playing again forgets when the output went away; a pause because it
+            // went away notes the time again after this.
+            self.headset.forgetLoss()
             self.sleepTimer.playWhenReadyChanged(playWhenReady, endOfSong: endOfSong)
             if !playWhenReady {
                 self.saveQueue()
@@ -652,6 +678,8 @@ final class Player {
     private func isPlayingChanged(_ playing: Bool) {
         isPlaying = playing
         tracker.playingChanged(playing)
+        // Saved whenever the music stops being heard: a pause, the queue playing out, a stall.
+        if !playing { saveQueue() }
         publishState()
         publishPosition()
         nowPlaying.publish()
@@ -690,7 +718,8 @@ final class Player {
     }
 
     /// A song that fails while music should play is skipped with one line; once as many songs
-    /// have failed in a row as the queue holds, or nothing is next, it stops.
+    /// have failed in a row as the queue holds, or nothing is next, it stops. The count starts
+    /// over only when a song becomes ready.
     private func failed(_ item: QueueItem, _ error: PlayError) {
         guard engine.playWhenReady else { return }
         let why = playFailureOf(error, outside: item.isFind).words
@@ -700,10 +729,11 @@ final class Player {
         if failuresInARow >= engine.queue.count || engine.queue.nextForSkip == nil {
             announce(stoppedLine(title, why))
             engine.pause()
-            failuresInARow = 0
         } else {
             announce(skippedLine(title, why))
             engine.next()
+            // A sound device that would not start is asked again for the next song.
+            if !engine.output.isRunning { engine.play() }
         }
     }
 
@@ -713,51 +743,43 @@ final class Player {
     private func announceNowPlaying(_ trackId: String) {
         guard let item = engine.queue.items.first(where: { $0.trackId == trackId }) else { return }
         if isRadio(trackId) { return }
-        if isOpenedFile(trackId) {
-            ListenBrainzSync.shared.nowPlaying(playedSong(item, reachesServer: false))
+        if let data {
+            data.plays.started(trackId)
+            // A file opened from another app goes to ListenBrainz by its title and artist alone.
+            if isOpenedFile(trackId) { ListenBrainzSync.shared.nowPlaying(openedFileSong(item)) }
             return
         }
         Task {
-            if let data, await inCatalog(trackId) {
-                data.plays.started(trackId)
-            } else if let serverId = parseStreamUri(item.uri)?.serverId, let client = session.client {
+            if let serverId = parseStreamUri(item.uri)?.serverId, let client = session.client {
                 try? await client.scrobble(serverId, submission: false, at: Date())
-                ListenBrainzSync.shared.nowPlaying(playedSong(item, reachesServer: true))
             }
         }
     }
 
-    /// A song was heard enough to count: kept on the phone, sent to the server and ListenBrainz.
+    /// A song was heard enough to count: kept on the phone at once (an opened file under its own
+    /// id, which no library song has), noted for the server in use now and sent there, and sent to
+    /// ListenBrainz. Noted at once, so a play counted as a server switch begins still counts for
+    /// the server it played from.
     private func recordPlay(_ trackId: String, startedAt: Int, heardMs: Int, durationMs: Int) {
         guard countsAsPlay(playedMs: heardMs, durationMs: durationMs), !isRadio(trackId) else { return }
         let item = engine.queue.items.first { $0.trackId == trackId }
-        if isOpenedFile(trackId) {
-            if let item {
-                ListenBrainzSync.shared.played(playedSong(item, reachesServer: false),
-                                               startedAt: Date(timeIntervalSince1970: Double(startedAt) / 1000))
+        if let data {
+            data.plays.record(trackId, startedAt: Int64(startedAt), playedMs: Int64(heardMs), durationMs: Int64(durationMs))
+            if isOpenedFile(trackId), let item {
+                ListenBrainzSync.shared.played(openedFileSong(item), startedAt: Date(timeIntervalSince1970: Double(startedAt) / 1000))
             }
             return
         }
-        let server = session.inUse
+        guard let item, let serverId = parseStreamUri(item.uri)?.serverId, let server = session.inUse else { return }
         Task {
-            if let data, await inCatalog(trackId) {
-                data.plays.record(trackId, startedAt: Int64(startedAt), playedMs: Int64(heardMs), durationMs: Int64(durationMs))
-            } else if let item, let serverId = parseStreamUri(item.uri)?.serverId, let server {
-                let started = Date(timeIntervalSince1970: Double(startedAt) / 1000)
-                try? await server.client.scrobble(serverId, submission: true, at: started)
-                ListenBrainzSync.shared.played(playedSong(item, reachesServer: true), startedAt: started)
-            }
+            try? await server.client.scrobble(serverId, submission: true, at: Date(timeIntervalSince1970: Double(startedAt) / 1000))
         }
     }
 
-    private func inCatalog(_ trackId: String) async -> Bool {
-        guard let data else { return false }
-        return !(await data.library.songs(ids: [trackId]).isEmpty)
-    }
-
-    private func playedSong(_ item: QueueItem, reachesServer: Bool) -> PlayedSong {
-        PlayedSong(item.title, item.artist, item.album, durationMs: Int64(lengths.lengthMs(item.trackId, listedMs: item.durationMs)),
-                   trackNumber: item.trackNo, reachesServer: reachesServer)
+    /// An opened file as ListenBrainz hears of it: its title and artist, and nothing else, never
+    /// reaching the server.
+    private func openedFileSong(_ item: QueueItem) -> PlayedSong {
+        PlayedSong(item.title, item.artist, "", durationMs: 0, trackNumber: nil, reachesServer: false)
     }
 
     // MARK: What the screens show
@@ -878,21 +900,22 @@ final class Player {
                                      shuffle: state.shuffle, items: state.items)
     }
 
-    /// Saves the queue in use now.
+    /// Saves the queue in use now; never while it is coming back, or while a server switch hands
+    /// the queues over.
     func saveQueue() {
-        guard !restoring else { return }
+        guard !restoring, !holding else { return }
         queueStore.save(queueSnapshot())
     }
 
     /// Brings back the queue in use, paused at its song and place, once the library is there.
+    /// Requests made meanwhile run after, in order.
     private func restoreSaved() async {
         restoring = true
         defer {
             restoring = false
-            if playWhenRestored {
-                playWhenRestored = false
-                resume()
-            }
+            let waiting = afterRestore
+            afterRestore = []
+            for request in waiting { request() }
         }
         if let data {
             let deadline = Date().addingTimeInterval(5)
@@ -904,18 +927,14 @@ final class Player {
         }
         let resolved = await playable.items(ids: saved.trackIds, source: .none)
         let savedItems = saved.items ?? []
-        let sourceInUse = session.inUse?.sourceId
         var items: [QueueItem?] = []
+        // Songs gone from the library are left out.
         for (position, id) in saved.trackIds.enumerated() {
             let old = savedItems.indices.contains(position) && savedItems[position].trackId == id ? savedItems[position] : nil
             if var fresh = resolved[position] {
                 // Each song keeps where it came from; entries are given again as they go in.
                 if let old { fresh.source = old.source }
                 items.append(fresh)
-            } else if var old, let ref = parseStreamUri(old.uri), ref.sourceId == nil || ref.sourceId == sourceInUse {
-                // A server song the library does not hold still streams from its server.
-                old.entryId = nil
-                items.append(old)
             } else {
                 items.append(nil)
             }
@@ -967,25 +986,35 @@ final class Player {
 // MARK: Changing server
 
 extension Player: SwitchPlayer {
-    /// Stops what plays for the server being left: the last song counts, the queue goes to that
-    /// server, and the player is emptied.
+    /// Stops what plays for the server being left: the last song counts, and the player is
+    /// emptied; then the queue goes to that server (at most 3 s). Nothing is saved over the queues
+    /// until the switch is done.
     func leave() async -> Bool {
-        let wasPlaying = engine.playWhenReady
+        holding = true
+        saveSoon?.cancel()
+        let wasPlaying = engine.isPlaying
         let left = queueSnapshot()
-        leftQueue = left
+        let leftItems = engine.queue.items
+        leftQueue = left.trackIds.isEmpty ? nil : left
+        empty()
+        if !left.trackIds.isEmpty { await serverQueue.leaving(left, items: leftItems) }
+        return wasPlaying
+    }
+
+    /// What plays stops and counts, the timer goes, and the player is empty.
+    private func empty() {
+        guard !engine.queue.isEmpty else { return }
         tracker.flush()
         sleepTimer.cancel()
-        await serverQueue.leaving(left, items: engine.queue.items)
         engine.clear()
         radioSeed = nil
         publishQueue()
         publishPosition()
         nowPlaying.publish()
-        return wasPlaying
     }
 
     func handOver(from: String, to: String, keepWhenNone: Bool) async -> Bool {
-        let left = leftQueue ?? (engine.queue.isEmpty ? nil : queueSnapshot())
+        let left = leftQueue
         leftQueue = nil
         return await queueStore.handOver(from: from, left: left, to: to, keepWhenNone: keepWhenNone)
     }
@@ -994,11 +1023,17 @@ extension Player: SwitchPlayer {
         serverQueue.arrived()
     }
 
+    /// The arriving server's queue comes back in place of whatever is in the player, paused.
     func restore() async {
+        empty()
         await restoreSaved()
+        holding = false
+        saveQueue()
     }
 
-    func keep() async {}
+    func keep() async {
+        holding = false
+    }
 
     func libraryChanged() {
         onLibraryChanged?()

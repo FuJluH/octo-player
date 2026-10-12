@@ -13,7 +13,8 @@ public let radioPrefix = "radio:"
 public func isRadio(_ id: String) -> Bool { id.hasPrefix(radioPrefix) }
 
 public func radioId(_ streamUrl: String, _ name: String = "") -> String {
-    radioPrefix + javaEncode(streamUrl.trimmingCharacters(in: .whitespaces)) + ":" + javaEncode(name.trimmingCharacters(in: .whitespaces))
+    radioPrefix + javaEncode(streamUrl.trimmingCharacters(in: .whitespacesAndNewlines)) + ":"
+        + javaEncode(name.trimmingCharacters(in: .whitespacesAndNewlines))
 }
 
 /// The station's stream address and name, or nil when the id is not one.
@@ -63,8 +64,9 @@ public struct OpenedFile: Sendable, Equatable {
 }
 
 public func openedFileId(_ uri: String, _ title: String = "", _ artist: String = "") -> String {
-    openedFilePrefix + javaEncode(uri.trimmingCharacters(in: .whitespaces)) + ":"
-        + javaEncode(title.trimmingCharacters(in: .whitespaces)) + ":" + javaEncode(artist.trimmingCharacters(in: .whitespaces))
+    openedFilePrefix + javaEncode(uri.trimmingCharacters(in: .whitespacesAndNewlines)) + ":"
+        + javaEncode(title.trimmingCharacters(in: .whitespacesAndNewlines)) + ":"
+        + javaEncode(artist.trimmingCharacters(in: .whitespacesAndNewlines))
 }
 
 /// The file's address, title and artist, or nil when the id is not one.

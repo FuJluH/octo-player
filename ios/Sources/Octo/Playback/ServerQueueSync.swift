@@ -38,10 +38,14 @@ struct ResumeQueue {
 final class ServerQueueSync {
     /// The offer showing, if any.
     private(set) var offer: ResumeOffer?
-    /// "Sync play queue with the server", on unless switched off.
-    private(set) var enabled: Bool
+    /// "Sync play queue with the server", on unless switched off, as the Server page and backups
+    /// keep it.
+    var enabled: Bool { ServerSyncChoices().syncQueue }
 
     @ObservationIgnored private let session: Session
+    /// The choice as last seen, so turning it off is caught once.
+    @ObservationIgnored private var wasEnabled = ServerSyncChoices().syncQueue
+    @ObservationIgnored private var choiceWatch: NSObjectProtocol?
     @ObservationIgnored private let data: DataServices?
     @ObservationIgnored private let store = UserDefaults(suiteName: "server_queue") ?? .standard
     @ObservationIgnored private var pending: Task<Void, Never>?
@@ -55,7 +59,22 @@ final class ServerQueueSync {
     init(session: Session, data: DataServices?) {
         self.session = session
         self.data = data
-        enabled = (UserDefaults(suiteName: "server_queue") ?? .standard).object(forKey: "sync_on") as? Bool ?? true
+        choiceWatch = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil,
+                                                             queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.choiceChanged() }
+        }
+    }
+
+    /// Switching syncing off cancels a save waiting to go and puts the offer away.
+    private func choiceChanged() {
+        let now = enabled
+        guard now != wasEnabled else { return }
+        wasEnabled = now
+        if !now {
+            pending?.cancel()
+            pending = nil
+            offer = nil
+        }
     }
 
     #if DEBUG
@@ -66,12 +85,8 @@ final class ServerQueueSync {
     #endif
 
     func setEnabled(_ on: Bool) {
-        enabled = on
-        store.set(on, forKey: "sync_on")
-        if !on {
-            pending?.cancel()
-            offer = nil
-        }
+        ServerSyncChoices().setSyncQueue(on)
+        choiceChanged()
     }
 
     /// The queue the phone brought back from last time. Bringing it back is not a change, so it
@@ -113,12 +128,18 @@ final class ServerQueueSync {
         baseline = nil
         offer = nil
         let work = Task { await self.save(server, snapshot, items, exact: true) }
-        let timeout = Task {
-            try? await Task.sleep(for: .milliseconds(leaveSaveMs))
-            work.cancel()
+        // Whichever comes first: the save done, or the time up. The save carries on unwatched.
+        let once = Once()
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            Task {
+                await work.value
+                if once.take() { done.resume() }
+            }
+            Task {
+                try? await Task.sleep(for: .milliseconds(leaveSaveMs))
+                if once.take() { done.resume() }
+            }
         }
-        await work.value
-        timeout.cancel()
     }
 
     /// Forgets what was noted for a server taken off the list.
@@ -174,7 +195,7 @@ final class ServerQueueSync {
             offer = nil
             return
         }
-        let indexBased = server.lists(indexBasedQueue)
+        let indexBased = takesIndex(server)
         let remote: RemoteQueue?
         do {
             remote = indexBased ? try await server.client.playQueueByIndex().map(remoteQueueOf(byIndex:))
@@ -208,7 +229,7 @@ final class ServerQueueSync {
             guard let queue = serverQueueOf(snapshot, serverIdOf: { serverIds[$0] })?.trimmed() else { return }
             let sent = self.lastSent?.account == server.account ? self.lastSent?.queue : nil
             if sent == queue || (!exact && sent?.ids == queue.ids && sent?.index == queue.index) { return }
-            let indexBased = server.lists(indexBasedQueue)
+            let indexBased = takesIndex(server)
             do {
                 if indexBased {
                     try await server.client.savePlayQueueByIndex(queue.ids, currentIndex: queue.index, positionMs: queue.positionMs)
@@ -246,6 +267,9 @@ final class ServerQueueSync {
         return ids
     }
 
+    /// Whether the server takes a queue by index: it lists the extension, at any version.
+    private func takesIndex(_ server: ServerInUse) -> Bool { server.extensions.contains { $0.hasPrefix(indexBasedQueue + ":") } }
+
     private func number(_ key: String) -> Int? { store.object(forKey: key) as? Int }
 
     private func epochMs() -> Int { Int(Date().timeIntervalSince1970 * 1000) }
@@ -258,4 +282,17 @@ final class ServerQueueSync {
     private func oldSavedKey(_ sourceId: String) -> String { "saved_at:\(sourceId)" }
     private func oldAnsweredKey(_ sourceId: String) -> String { "answered_at:\(sourceId)" }
     private func oldStampKey(_ sourceId: String) -> String { "own_stamp:\(sourceId)" }
+}
+
+/// Says yes to the first that asks, whichever thread it is on, and no after.
+private final class Once: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done = false
+
+    func take() -> Bool {
+        lock.withLock {
+            defer { done = true }
+            return !done
+        }
+    }
 }

@@ -172,13 +172,13 @@ final class LibraryActions {
     /// Plays `seed`, then songs like the seeds, in place of the queue. Nothing found says so.
     private func radio(_ seeds: [LibraryTrack], exclude: Set<String>) async {
         guard let seed = seeds.first else { return }
-        let ids = await LibraryRadio(data: data).songsLike(seeds, count: 50, exclude: exclude)
+        let ids = await LibraryRadio(data: data).songsLike(seeds, count: radioLength, exclude: exclude, before: [seed.id])
         if ids.isEmpty {
             router.show("No similar songs found")
             return
         }
         let first = seed.queueSong
-        player.play([first] + ids.map { Song(id: $0, title: "") }, from: 0, radio: first)
+        player.play([first] + ids.map { Song(id: $0, title: "") }, from: 0, radio: first, source: .played("\(seed.title) radio"))
     }
 
     /// A radio from an album: its most played song here, else its first, then the album's songs as

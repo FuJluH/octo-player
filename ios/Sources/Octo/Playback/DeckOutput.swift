@@ -35,31 +35,39 @@ final class DeckOutput {
         engine.connect(deck.timePitch, to: engine.mainMixerNode, format: format)
     }
 
-    /// Starts the sound: the session for long playback, then the engine. False when the system
-    /// refused (a call is on).
+    /// How starting the sound went.
+    enum Start {
+        case started
+        /// The system would not give the sound (a call is on).
+        case refused
+        /// The sound device would not start.
+        case failed
+    }
+
+    /// Starts the sound: the session for long playback, then the engine.
     @discardableResult
-    func start() -> Bool {
+    func start() -> Start {
         stopTask?.cancel()
         stopTask = nil
-        wanted = true
         let session = AVAudioSession.sharedInstance()
         do {
             try session.setCategory(.playback, mode: .default, policy: .longFormAudio)
             try session.setActive(true)
         } catch {
             playbackLog.info("audio session refused: \(String(describing: error), privacy: .public)")
-            return false
+            return .refused
         }
+        wanted = true
         if !engine.isRunning {
             do {
                 try engine.start()
             } catch {
                 playbackLog.info("audio engine did not start: \(String(describing: error), privacy: .public)")
-                return false
+                return .failed
             }
         }
         updateDelays()
-        return true
+        return .started
     }
 
     /// Lets the engine stop once it has stayed silent for `after` seconds; playing again before
