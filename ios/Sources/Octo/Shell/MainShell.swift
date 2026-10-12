@@ -159,6 +159,8 @@ struct MainShell: View {
                                             removal: .opacity.animation(.octoTween(fixed: 300))))
                     .zIndex(1)
             }
+            // The cover flying between the bar and the player, above both.
+            CoverFlightLayer().zIndex(1.2)
 
             // Over the bar and even the player, under the sheets and menus.
             SelectionBarHost().zIndex(1.5)
@@ -168,7 +170,6 @@ struct MainShell: View {
             PromptsHost().zIndex(5)
         }
         .environment(\.nowPlayingArt, art)
-        .environment(\.playerShown, playerOpen && hasTrack)
         .environment(drift)
         .task(id: drifting) { if drifting { await drift.run() } }
         .environment(\.nowMark, NowMark(songId: player.current?.id, isPlaying: player.isPlaying))
