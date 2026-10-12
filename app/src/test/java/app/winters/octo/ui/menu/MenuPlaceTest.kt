@@ -30,6 +30,22 @@ class MenuPlaceTest {
     }
 
     @Test
+    fun onlyThePlayersMoreButtonOpensTheMenuInThePlayer() {
+        assertTrue(place(SongMenuContext(fromPlayer = true)).inPlayer)
+        assertFalse(place(SongMenuContext()).inPlayer)
+        assertFalse(place(SongMenuContext(albumId = "album:1", playlistId = "p", playlistItemId = 7)).inPlayer)
+    }
+
+    @Test
+    fun theMenuRemembersWhereItWasOpenedFrom() {
+        val menu = SongMenuState()
+        menu.open("t", SongMenuContext(fromPlayer = true))
+        assertTrue(menu.lastContext.fromPlayer)
+        menu.open("t")
+        assertFalse(menu.lastContext.fromPlayer)
+    }
+
+    @Test
     fun onItsOwnAlbumPageThereIsNoGoingToTheAlbum() {
         val here = place(SongMenuContext(albumId = "album:1"))
         assertTrue(here.onAlbumPage)

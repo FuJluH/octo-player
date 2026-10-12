@@ -43,6 +43,7 @@ import app.winters.octo.health.DELETE_FROM_DISK
 import app.winters.octo.offline.DownloadStatus
 import app.winters.octo.offline.Reasons
 import app.winters.octo.offline.reasons
+import app.winters.octo.output.OutputChoice
 import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.GlassMenuAction
 import app.winters.octo.ui.common.GlassMenuBack
@@ -55,6 +56,9 @@ import app.winters.octo.ui.common.SelectionBarHost
 import app.winters.octo.ui.common.rememberOpenedBeside
 import app.winters.octo.ui.nav.AlbumRoute
 import app.winters.octo.ui.nav.ArtistRoute
+import app.winters.octo.ui.nav.SoundRoute
+import app.winters.octo.ui.output.OutputList
+import app.winters.octo.ui.output.OutputsViewModel
 import app.winters.octo.ui.playlist.PlaylistPickerPage
 import app.winters.octo.ui.playlist.PlaylistSheetsViewModel
 import app.winters.octo.ui.server.ShareLinkPage
@@ -65,9 +69,10 @@ import dev.chrisbanes.haze.HazeState
 
 // The song menu, a glass card that floats beside the row held or the button
 // tapped, over everything, the player included. Adding to a playlist,
-// sharing, rating and the song's info open as its next pages, with a way
-// back. `onOpen` goes to a page, and is expected to close the player if it
-// is open. `backdrop` is what the card frosts: the player while it is open.
+// sharing, rating, the song's info and, from the player, the places to play
+// open as its next pages, with a way back. `onOpen` goes to a page, and is
+// expected to close the player if it is open. `backdrop` is what the card
+// frosts: the player while it is open.
 @Composable
 fun SongMenuHost(
     state: SongMenuState,
@@ -123,6 +128,7 @@ fun SongMenuHost(
                         state.close()
                     }
                 }
+                SongPage.Cast -> CastPage(onBack = back, onDone = state::close)
             }
         }
     }
@@ -302,8 +308,39 @@ private fun SongActionsPage(
                     state.close()
                     vm.findSongs(trackId, song.title)
                 })
+                SongAction.Cast -> CastAction(onClick = { state.pages.open(SongPage.Cast) })
+                SongAction.Sound -> {
+                    val equalizerOn by vm.equalizerOn.collectAsStateWithLifecycle()
+                    GlassMenuAction(OctoIcons.Sound, "Sound", detail = soundDetail(equalizerOn), onClick = {
+                        state.close()
+                        onOpen(SoundRoute)
+                    })
+                }
             }
         }
+    }
+}
+
+// Where the music plays: the Cast mark lights up and the device is named
+// under it while casting. It leads on to the list of places to play.
+@Composable
+private fun CastAction(onClick: () -> Unit, outputs: OutputsViewModel = hiltViewModel()) {
+    val current by outputs.current.collectAsStateWithLifecycle()
+    GlassMenuAction(
+        if (current is OutputChoice.Phone) OctoIcons.Cast else OctoIcons.CastConnected,
+        "Cast",
+        detail = castDetail(current),
+        opensPage = true,
+        onClick = onClick,
+    )
+}
+
+// The places music can play, as the menu's next page. Choosing one closes
+// the menu.
+@Composable
+private fun CastPage(onBack: () -> Unit, onDone: () -> Unit) {
+    GlassMenuPage(header = { GlassMenuBack("Play on", onBack) }) {
+        OutputList(onDone = onDone)
     }
 }
 

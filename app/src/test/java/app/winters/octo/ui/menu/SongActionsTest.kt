@@ -2,9 +2,14 @@ package app.winters.octo.ui.menu
 
 import app.winters.octo.discovery.DownloadState
 import app.winters.octo.offline.DownloadStatus
+import app.winters.octo.output.DeviceShape
+import app.winters.octo.output.OutputChoice
+import app.winters.octo.output.OutputDevice
+import app.winters.octo.output.OutputFamily
 import app.winters.octo.ui.menu.SongAction.AddToLastPlaylist
 import app.winters.octo.ui.menu.SongAction.AddToPlaylist
 import app.winters.octo.ui.menu.SongAction.AddToQueue
+import app.winters.octo.ui.menu.SongAction.Cast
 import app.winters.octo.ui.menu.SongAction.DeleteFromDisk
 import app.winters.octo.ui.menu.SongAction.DeleteFromPhone
 import app.winters.octo.ui.menu.SongAction.Download
@@ -20,8 +25,11 @@ import app.winters.octo.ui.menu.SongAction.Rate
 import app.winters.octo.ui.menu.SongAction.SetAsSound
 import app.winters.octo.ui.menu.SongAction.Share
 import app.winters.octo.ui.menu.SongAction.ShareFile
+import app.winters.octo.ui.menu.SongAction.Sound
 import app.winters.octo.ui.menu.SongAction.StartRadio
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class SongActionsTest {
@@ -40,6 +48,38 @@ class SongActionsTest {
         assertEquals(listOf(PlayNext, AddToQueue, Download, Info, FindSongs), songActions(find = true, radio = false, findSongs = true))
         assertEquals(listOf(Info, FindSongs), songMenuGroups(songActions(find = false, radio = false, findSongs = true))[3])
         assertEquals(false, FindSongs in songActions(find = false, radio = true))
+    }
+
+    @Test
+    fun theMenuFromThePlayerEndsWithCastAndSound() {
+        val player = MenuPlace(inPlayer = true)
+        assertEquals(
+            listOf(PlayNext, AddToQueue, StartRadio, AddToPlaylist, Like, Rate, GoToAlbum, GoToArtist, Info, Cast, Sound),
+            songActions(find = false, radio = true, place = player),
+        )
+        // A song found online plays somewhere and through the equalizer too.
+        assertEquals(
+            listOf(PlayNext, AddToQueue, Download, Info, FindSongs, Cast, Sound),
+            songActions(find = true, radio = false, findSongs = true, place = player),
+        )
+        // Anywhere else, neither: a row held on a page is about the song only.
+        val elsewhere = songActions(find = false, radio = true, share = true, offline = true, phone = true, findSongs = true, disk = true)
+        assertFalse(Cast in elsewhere)
+        assertFalse(Sound in elsewhere)
+    }
+
+    @Test
+    fun theCastRowNamesTheDeviceOnlyWhileTheMusicIsElsewhere() {
+        val tv = OutputDevice("cast:tv", "Living room TV", OutputFamily.Cast, DeviceShape.Tv)
+        assertEquals("Living room TV", castDetail(OutputChoice.Casting(tv)))
+        assertEquals("Connecting to Living room TV", castDetail(OutputChoice.Connecting(tv)))
+        assertNull(castDetail(OutputChoice.Phone))
+    }
+
+    @Test
+    fun theSoundRowSaysWhetherTheEqualizerIsOn() {
+        assertEquals("Equalizer on", soundDetail(equalizerOn = true))
+        assertEquals("Equalizer off", soundDetail(equalizerOn = false))
     }
 
     @Test

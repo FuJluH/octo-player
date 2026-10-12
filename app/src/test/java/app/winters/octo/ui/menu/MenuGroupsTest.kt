@@ -2,6 +2,8 @@ package app.winters.octo.ui.menu
 
 import app.winters.octo.ui.menu.SongAction.AddToPlaylist
 import app.winters.octo.ui.menu.SongAction.AddToQueue
+import app.winters.octo.ui.menu.SongAction.Cast
+import app.winters.octo.ui.menu.SongAction.DeleteFromDisk
 import app.winters.octo.ui.menu.SongAction.DeleteFromPhone
 import app.winters.octo.ui.menu.SongAction.Download
 import app.winters.octo.ui.menu.SongAction.FindFlac
@@ -17,6 +19,7 @@ import app.winters.octo.ui.menu.SongAction.Select
 import app.winters.octo.ui.menu.SongAction.SetAsSound
 import app.winters.octo.ui.menu.SongAction.Share
 import app.winters.octo.ui.menu.SongAction.ShareFile
+import app.winters.octo.ui.menu.SongAction.Sound
 import app.winters.octo.ui.menu.SongAction.StartRadio
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -55,6 +58,18 @@ class MenuGroupsTest {
                 listOf(RemoveFromPlaylist, DeleteFromPhone),
             ),
             songMenuGroups(actions),
+        )
+    }
+
+    @Test
+    fun castAndSoundAreTheirOwnGroupAfterEverythingElse() {
+        val groups = songMenuGroups(songActions(find = false, radio = false, phone = true, disk = true, place = MenuPlace(inPlayer = true)))
+        assertEquals(listOf(Cast, Sound), groups.last())
+        assertEquals(listOf(DeleteFromPhone, DeleteFromDisk), groups[groups.size - 2])
+        // A found song's menu in the player ends the same way.
+        assertEquals(
+            listOf(listOf(PlayNext, AddToQueue), listOf(Download), listOf(Info), listOf(Cast, Sound)),
+            songMenuGroups(songActions(find = true, radio = false, place = MenuPlace(inPlayer = true))),
         )
     }
 

@@ -21,6 +21,7 @@ import app.winters.octo.discovery.asTrack
 import app.winters.octo.offline.DownloadEntity
 import app.winters.octo.offline.DownloadStatus
 import app.winters.octo.offline.OfflineDownloads
+import app.winters.octo.output.OutputChoice
 import app.winters.octo.playback.LibraryRadio
 import app.winters.octo.playback.LikeStore
 import app.winters.octo.playback.PlaybackConnection
@@ -28,6 +29,7 @@ import app.winters.octo.playback.PlaylistStore
 import app.winters.octo.playback.RADIO_LENGTH
 import app.winters.octo.playback.RatingStore
 import app.winters.octo.server.ServerControls
+import app.winters.octo.sound.SoundEngine
 import app.winters.octo.ui.common.Feedback
 import app.winters.octo.ui.common.SelectionBarState
 import app.winters.octo.ui.common.SongSelection
@@ -46,6 +48,7 @@ import javax.inject.Inject
 // leave out what would only lead back to the same page: the album page it
 // is on, the artist page, or its row on a playlist page. `selection` is the
 // list's, when the list can pick songs, and `selectKey` the row's key in it.
+// `fromPlayer` is the full player's More button, for the song playing.
 data class SongMenuContext(
     val albumId: String? = null,
     val artistId: String? = null,
@@ -53,6 +56,7 @@ data class SongMenuContext(
     val playlistItemId: Long? = null,
     val selection: SongSelection? = null,
     val selectKey: String? = null,
+    val fromPlayer: Boolean = false,
 )
 
 // What a song row can do without opening the menu: a swipe, or a screen
@@ -64,8 +68,8 @@ interface QuickSongActions {
 }
 
 // The pages of a song's menu: its actions first, and what some of them open
-// in its place, each with a way back.
-enum class SongPage { Actions, AddToPlaylist, AddToLastPlaylist, Rate, Share, Info, DeleteFromDisk }
+// in its place, each with a way back. `Cast` is the list of places to play.
+enum class SongPage { Actions, AddToPlaylist, AddToLastPlaylist, Rate, Share, Info, DeleteFromDisk, Cast }
 
 // Which song the menu is open for, if any. Any song on any screen can
 // open it: a long press on a row, or the more button in the player. It also
@@ -114,7 +118,7 @@ val LocalSongMenu = staticCompositionLocalOf<SongMenuState> { error("No song men
 // The choices in a song's menu, in the order shown.
 enum class SongAction {
     PlayNext, AddToQueue, StartRadio, Download, RequestCopy, AddToLastPlaylist, AddToPlaylist, RemoveFromPlaylist, Select, KeepOffline, FindFlac, ShareFile, Share, Like,
-    Rate, GoToAlbum, GoToArtist, SetAsSound, DeleteFromPhone, RemoveFromMyLibrary, DeleteFromDisk, Info, FindSongs,
+    Rate, GoToAlbum, GoToArtist, SetAsSound, DeleteFromPhone, RemoveFromMyLibrary, DeleteFromDisk, Info, FindSongs, Cast, Sound,
 }
 
 // Where the menu was opened, as the choices care about it.
@@ -126,6 +130,8 @@ data class MenuPlace(
     val inPlaylist: Boolean = false,
     // In a list that can pick songs, and not picking already.
     val selectable: Boolean = false,
+    // In the full player, for the song playing.
+    val inPlayer: Boolean = false,
 )
 
 // What the context means for one song: "Go to album" only leads somewhere
@@ -135,6 +141,7 @@ fun menuPlace(context: SongMenuContext, albumId: String, artistId: String): Menu
     onArtistPage = context.artistId != null && context.artistId == artistId,
     inPlaylist = context.playlistId != null && context.playlistItemId != null,
     selectable = context.selection != null && context.selectKey != null && !context.selection.active,
+    inPlayer = context.fromPlayer,
 )
 
 // What a song's menu offers. A song found online has no album or artist in
@@ -151,7 +158,9 @@ fun menuPlace(context: SongMenuContext, albumId: String, artistId: String): Menu
 // `disk` is whether that server lets this user delete its copy from disk.
 // In a family, a member who asks for copies gets Request a copy beside the
 // add for a song found online (`requestCopy`), and a managed member can take
-// a library song out of their own library (`removeFromMine`).
+// a library song out of their own library (`removeFromMine`). In the full
+// player the menu ends with where the music plays (Cast) and the Sound page,
+// for a found song as much as a library one.
 fun songActions(
     find: Boolean,
     radio: Boolean,
@@ -196,17 +205,23 @@ fun songActions(
     }
     add(SongAction.Info)
     if (findSongs) add(SongAction.FindSongs)
+    if (place.inPlayer) {
+        add(SongAction.Cast)
+        add(SongAction.Sound)
+    }
 }
 
 // How a song's menu groups its actions, top to bottom: playing it, keeping
-// it, going to its album or artist, sharing and looking into it, and last,
-// what takes it away. A hairline parts the groups.
+// it, going to its album or artist, sharing and looking into it, what takes
+// it away, and last, in the player, where the music plays and how it
+// sounds. A hairline parts the groups.
 private val SongMenuOrder = listOf(
     listOf(SongAction.PlayNext, SongAction.AddToQueue, SongAction.StartRadio),
     listOf(SongAction.AddToLastPlaylist, SongAction.AddToPlaylist, SongAction.Like, SongAction.Rate, SongAction.Download, SongAction.RequestCopy, SongAction.KeepOffline, SongAction.FindFlac),
     listOf(SongAction.GoToAlbum, SongAction.GoToArtist),
     listOf(SongAction.Share, SongAction.ShareFile, SongAction.SetAsSound, SongAction.Info, SongAction.FindSongs, SongAction.Select),
     listOf(SongAction.RemoveFromPlaylist, SongAction.DeleteFromPhone, SongAction.RemoveFromMyLibrary, SongAction.DeleteFromDisk),
+    listOf(SongAction.Cast, SongAction.Sound),
 )
 
 // The actions offered, in their groups, leaving out empty groups.
@@ -232,6 +247,17 @@ fun keepOfflineLabel(state: DownloadStatus?, byHand: Boolean): String = when (st
     DownloadStatus.Failed -> "Download failed, try again"
 }
 
+// The line under the Cast row: the device the music plays on, or is moving
+// to. Nothing while it plays on this phone.
+fun castDetail(choice: OutputChoice): String? = when (choice) {
+    is OutputChoice.Casting -> choice.device.name
+    is OutputChoice.Connecting -> "Connecting to ${choice.device.name}"
+    OutputChoice.Phone -> null
+}
+
+// The line under the Sound row.
+fun soundDetail(equalizerOn: Boolean): String = if (equalizerOn) "Equalizer on" else "Equalizer off"
+
 // Whether the row can be tapped.
 fun keepOfflineEnabled(state: DownloadStatus?, byHand: Boolean): Boolean =
     state == null || state == DownloadStatus.Failed || (state == DownloadStatus.Done && byHand)
@@ -255,6 +281,7 @@ class SongMenuViewModel @Inject constructor(
     private val files: LibraryFiles,
     // What adding a song found online does in a family, and its requests.
     val family: FamilyHub,
+    sound: SoundEngine,
 ) : ViewModel() {
     val liked: StateFlow<Set<String>> = likes.liked
     val downloadStates: StateFlow<Map<String, DownloadState>> = downloads.states
@@ -265,6 +292,10 @@ class SongMenuViewModel @Inject constructor(
     fun keepOffline(id: String) = offline.download(listOf(id))
     fun removeOffline(id: String) = offline.remove(id) { restore -> feedback.undoable("Download removed", restore) }
     fun retryOffline(id: String) = offline.retry(id)
+
+    // Whether the equalizer is on, for the Sound row's line.
+    val equalizerOn: StateFlow<Boolean> = sound.current.map { it.eqEnabled }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), sound.current.value.eqEnabled)
 
     // Whether songs can start a radio: always, since the library alone can make one.
     val radio: StateFlow<Boolean> = MutableStateFlow(true)

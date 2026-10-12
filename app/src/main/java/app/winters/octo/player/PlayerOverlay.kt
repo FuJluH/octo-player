@@ -141,6 +141,7 @@ import app.winters.octo.ui.common.pressSpot
 import app.winters.octo.ui.common.rememberOpenedBeside
 import app.winters.octo.ui.common.RatingStars
 import app.winters.octo.ui.menu.LocalSongMenu
+import app.winters.octo.ui.menu.SongMenuContext
 import app.winters.octo.ui.output.CastButton
 import app.winters.octo.ui.common.asClock
 import app.winters.octo.ui.common.rememberSystemReduceMotion
@@ -754,7 +755,9 @@ private fun SongButtons(now: NowPlaying, model: PlayerViewModel) {
             .size(44.dp)
             // The song's menu floats beside this button.
             .pressSpot(LocalPressSpot.current)
-            .clickable(interactionSource = null, indication = null, role = Role.Button) { now.trackId?.let(menu::open) }
+            .clickable(interactionSource = null, indication = null, role = Role.Button) {
+                now.trackId?.let { menu.open(it, SongMenuContext(fromPlayer = true)) }
+            }
             .semantics { contentDescription = "More" },
         contentAlignment = Alignment.Center,
     ) {

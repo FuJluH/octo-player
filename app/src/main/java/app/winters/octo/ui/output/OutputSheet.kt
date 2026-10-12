@@ -115,60 +115,69 @@ fun CastButton(modifier: Modifier = Modifier, model: OutputsViewModel = hiltView
     OutputSheet(open, anchor, onDismiss = { open = false }, model = model)
 }
 
-// The list of places music can play: this phone and its other outputs,
-// Cast devices, then TVs and speakers found as media renderers. The one
-// playing is the darker pill. It looks for devices only while it is open.
+// The Cast button's card, holding the list of places to play.
 @Composable
 fun OutputSheet(visible: Boolean, anchor: IntRect?, onDismiss: () -> Unit, model: OutputsViewModel = hiltViewModel()) {
-    DisposableEffect(visible) {
-        if (visible) model.startLooking()
-        onDispose { if (visible) model.stopLooking() }
+    GlassPopup(visible = visible, anchor = anchor, onDismiss = onDismiss, backdrop = LocalHaze.current, title = "Play on") {
+        Column(Modifier.width(300.dp).verticalScroll(rememberScrollState()).padding(6.dp)) {
+            OutputList(onDone = onDismiss, model = model)
+        }
+    }
+}
+
+// The list of places music can play: this phone and its other outputs,
+// Cast devices, then TVs and speakers found as media renderers. The one
+// playing is the darker pill. It looks for devices only while it is shown.
+// Choosing a place calls `onDone`.
+@Composable
+fun OutputList(onDone: () -> Unit, model: OutputsViewModel = hiltViewModel()) {
+    DisposableEffect(model) {
+        model.startLooking()
+        onDispose { model.stopLooking() }
     }
     val devices by model.devices.collectAsStateWithLifecycle()
     val current by model.current.collectAsStateWithLifecycle()
     val searching by model.searching.collectAsStateWithLifecycle()
     val renderersOn by model.renderersOn.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    GlassPopup(visible = visible, anchor = anchor, onDismiss = onDismiss, backdrop = LocalHaze.current, title = "Play on") {
-        Column(Modifier.width(300.dp).verticalScroll(rememberScrollState()).padding(6.dp)) {
-            GroupTitle("This phone")
-            DeviceRow(
-                icon = OctoIcons.Phone,
-                label = "This phone",
-                selected = current is OutputChoice.Phone,
-            ) {
-                model.choosePhone()
-                onDismiss()
-            }
-            DeviceRow(icon = OctoIcons.Headphones, label = "Other outputs", detail = "Bluetooth, headphones or the speaker", selected = false) {
-                openSystemOutputs(context)
-                onDismiss()
-            }
-
-            val cast = devices.filter { it.family == OutputFamily.Cast }
-            val renderers = devices.filter { it.family == OutputFamily.Renderer }
-            if (cast.isNotEmpty()) {
-                GroupTitle("Cast")
-                cast.forEach { DeviceLine(it, current, model, onDismiss) }
-            }
-            if (renderers.isNotEmpty()) {
-                GroupTitle("TVs and speakers")
-                renderers.forEach { DeviceLine(it, current, model, onDismiss) }
-            }
-            if (devices.isEmpty()) {
-                val kinds = if (renderersOn && OutputFamily.Renderer in model.families) "TVs and speakers" else "Cast devices"
-                QuietLine(
-                    if (searching) {
-                        "Looking for devices"
-                    } else {
-                        "No devices found. $kinds show up here when they are on the same Wi-Fi as this phone."
-                    },
-                )
-            } else if (searching) {
-                QuietLine("Looking for more devices")
-            }
-            if (current !is OutputChoice.Phone) QuietLine("Sound settings apply on this phone only")
+    Column(Modifier.fillMaxWidth()) {
+        GroupTitle("This phone")
+        DeviceRow(
+            icon = OctoIcons.Phone,
+            label = "This phone",
+            selected = current is OutputChoice.Phone,
+        ) {
+            model.choosePhone()
+            onDone()
         }
+        DeviceRow(icon = OctoIcons.Headphones, label = "Other outputs", detail = "Bluetooth, headphones or the speaker", selected = false) {
+            openSystemOutputs(context)
+            onDone()
+        }
+
+        val cast = devices.filter { it.family == OutputFamily.Cast }
+        val renderers = devices.filter { it.family == OutputFamily.Renderer }
+        if (cast.isNotEmpty()) {
+            GroupTitle("Cast")
+            cast.forEach { DeviceLine(it, current, model, onDone) }
+        }
+        if (renderers.isNotEmpty()) {
+            GroupTitle("TVs and speakers")
+            renderers.forEach { DeviceLine(it, current, model, onDone) }
+        }
+        if (devices.isEmpty()) {
+            val kinds = if (renderersOn && OutputFamily.Renderer in model.families) "TVs and speakers" else "Cast devices"
+            QuietLine(
+                if (searching) {
+                    "Looking for devices"
+                } else {
+                    "No devices found. $kinds show up here when they are on the same Wi-Fi as this phone."
+                },
+            )
+        } else if (searching) {
+            QuietLine("Looking for more devices")
+        }
+        if (current !is OutputChoice.Phone) QuietLine("Sound settings apply on this phone only")
     }
 }
 
