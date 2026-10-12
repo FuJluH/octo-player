@@ -148,9 +148,29 @@ final class ArtworkColorStore {
     }
 }
 
+/// The glow's drift time, one for every page, so the pools carry on from where they stopped
+/// and a page opened over another shows them where they were. It moves at a fifth of the
+/// player's pace, ten steps a second, only while music plays, the app is in view, the player
+/// does not cover the pages and Reduce motion is off.
+@MainActor
+@Observable
+final class AmbientDrift {
+    private(set) var time = 0.0
+
+    /// Moves time on until the task running it ends.
+    func run() async {
+        var last = Date()
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(AmbientTiming.frameMs))
+            let now = Date()
+            time += now.timeIntervalSince(last) * AmbientTiming.pace
+            last = now
+        }
+    }
+}
+
 /// The glow behind every page: the artwork's colors, faint and dark, above the plain
-/// background and under the page. It drifts only while music plays, the app is in view and
-/// nothing covers it (`awake`), and never with Reduce motion.
+/// background and under the page.
 struct AmbientBackdrop: View {
     let page: AmbientPage?
     let route: Route?
@@ -159,8 +179,6 @@ struct AmbientBackdrop: View {
     @Environment(PageArtworks.self) private var pages
     @Environment(ArtworkColorStore.self) private var store
     @Environment(Player.self) private var player
-    @Environment(\.motionScale) private var motion
-    @Environment(\.scenePhase) private var phase
     @State private var held: ArtworkColors?
 
     var body: some View {
@@ -176,8 +194,7 @@ struct AmbientBackdrop: View {
         // Kept through a turn to none, so the old colors fade out as they are.
         let colors = found ?? held
         let strength = source == .none || colors == nil ? 0 : ambientAlpha(prefs.strength)
-        let moving = awake && player.isPlaying && !motion.still && phase == .active && strength > 0
-        AmbientField(paint: AmbientPaint(colors: colors ?? .quiet, strength: strength), moving: moving)
+        AmbientField(paint: AmbientPaint(colors: colors ?? .quiet, strength: strength), shown: awake)
             .animation(.octoTween(fixed: AmbientTiming.crossMs), value: AmbientPaint(colors: colors ?? .quiet, strength: strength))
             .onChange(of: found) { _, new in if let new { held = new } }
             .allowsHitTesting(false)
@@ -222,8 +239,10 @@ struct AmbientPaint: VectorArithmetic {
 /// times a second, faded toward the bottom so lists and the bar sit on its quietest part.
 private struct AmbientField: View, Animatable {
     var paint: AmbientPaint
-    let moving: Bool
-    @State private var clock = DriftClock()
+    /// Pages out of sight keep the time they were drawn at.
+    let shown: Bool
+    @Environment(AmbientDrift.self) private var drift
+    @State private var still = 0.0
 
     nonisolated var animatableData: AmbientPaint {
         get { paint }
@@ -232,35 +251,17 @@ private struct AmbientField: View, Animatable {
 
     var body: some View {
         if paint.strength > AmbientTiming.threshold {
-            TimelineView(.periodic(from: .now, by: Double(AmbientTiming.frameMs) / 1_000)) { context in
-                let time = clock.time(at: context.date, moving: moving)
-                MeshImage(colors: paint.colors, time: time)
-                    .opacity(paint.strength)
-                    .overlay {
-                        LinearGradient(stops: [.init(color: .clear, location: 0.35),
-                                               .init(color: OctoColor.background.opacity(0.4), location: 1)],
-                                       startPoint: .top, endPoint: .bottom)
-                    }
-            }
+            MeshImage(colors: paint.colors, time: shown ? drift.time : still)
+                .opacity(paint.strength)
+                .overlay {
+                    LinearGradient(stops: [.init(color: .clear, location: 0.35),
+                                           .init(color: OctoColor.background.opacity(0.4), location: 1)],
+                                   startPoint: .top, endPoint: .bottom)
+                }
+                .onChange(of: shown, initial: true) { _, now in if !now { still = drift.time } }
         } else {
             Color.clear
         }
-    }
-}
-
-/// Drift time, kept while the glow rests, so the pools carry on from where they stopped.
-private final class DriftClock {
-    private var kept = 0.0
-    private var since: Date?
-
-    func time(at now: Date, moving: Bool) -> Double {
-        if moving {
-            if since == nil { since = now }
-        } else if let start = since {
-            kept += now.timeIntervalSince(start) * AmbientTiming.pace
-            since = nil
-        }
-        return kept + (since.map { now.timeIntervalSince($0) * AmbientTiming.pace } ?? 0)
     }
 }
 

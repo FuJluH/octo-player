@@ -100,9 +100,17 @@ struct MainShell: View {
     /// The tab that was in front before the last change, still drawn full size while it fades.
     @State private var leaving: AppTab?
     @State private var reselects: [AppTab: Int] = [:]
+    @State private var drift = AmbientDrift()
     @Namespace private var art
 
     private var hasTrack: Bool { player.current != nil }
+
+    /// The glow drifts only while music plays, the app is in view, the player does not cover
+    /// the pages, the glow shows and nothing asks for less motion.
+    private var drifting: Bool {
+        player.isPlaying && scenePhase == .active && !(playerOpen && hasTrack) && !motion.still
+            && ambience.prefs.strength != .off
+    }
 
     var body: some View {
         ZStack {
@@ -143,6 +151,8 @@ struct MainShell: View {
             PromptsHost().zIndex(5)
         }
         .environment(\.nowPlayingArt, art)
+        .environment(drift)
+        .task(id: drifting) { if drifting { await drift.run() } }
         .environment(\.nowMark, NowMark(songId: player.current?.id, isPlaying: player.isPlaying))
         .onChange(of: router.route) { _, route in
             guard let route else { return }
