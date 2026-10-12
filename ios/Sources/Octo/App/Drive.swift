@@ -21,7 +21,9 @@ import UIKit
 ///   card opened on its speed page), `player:timing` (lyrics open, then the lyrics timing
 ///   popover), `player:chooser` (the Choose lyrics sheet), `player:look:flowing`,
 ///   `player:look:classic` (lyrics open in that style),
-///   `player:background:immersive|artwork|color|classic`. The song menu and the lyrics menu are
+///   `player:background:immersive|artwork|color|classic`, `player:album` (the song's album opened
+///   from inside the player, as the song menu does, so the player closes with its cover flying
+///   home). The song menu and the lyrics menu are
 ///   system menus, which only a finger opens.
 /// - `list:NAME` plays the server playlist with that name
 /// - `found:TEXT` plays the songs not in the library that a search for TEXT finds

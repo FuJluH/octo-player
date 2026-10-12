@@ -635,6 +635,11 @@ struct NowPlayingView: View {
     private func take(_ request: PlayerDrive.Request) {
         switch request.name {
         case "close": close()
+        case "album":
+            // As the song menu's Go to album does: the page opens and the player closes around it.
+            if let song = player.current, let albumId = song.albumId, !albumId.isEmpty {
+                router.go(.album(Album(id: albumId, name: song.album ?? "", artist: song.artist ?? "", coverArt: song.coverArt)))
+            }
         case "queue": showsQueue = true
         case "sleep":
             if let minutes = Int(request.value) { player.startSleep(minutes: minutes) }
