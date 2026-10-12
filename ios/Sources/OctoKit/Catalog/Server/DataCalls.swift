@@ -172,30 +172,25 @@ struct FullPlaylists: Decodable {
 }
 
 extension SubsonicClient {
-    /// A call that only answers ok or an error. Param names may repeat.
-    public func send(_ endpoint: String, _ params: [(String, String)]) async throws {
-        let _: Empty = try await get(endpoint, params, key: nil)
-    }
-
     /// Stars songs for the signed-in user, several in one call.
-    public func star(songIds: [String]) async throws { try await send("star", songIds.map { ("id", $0) }) }
-    public func unstar(songIds: [String]) async throws { try await send("unstar", songIds.map { ("id", $0) }) }
+    public func star(songIds: [String]) async throws { try await call("star", songIds.map { ("id", $0) }) }
+    public func unstar(songIds: [String]) async throws { try await call("unstar", songIds.map { ("id", $0) }) }
     /// Stars whole albums. On Octo an album found online is downloaded.
-    public func star(albumIds: [String]) async throws { try await send("star", albumIds.map { ("albumId", $0) }) }
-    public func unstar(albumIds: [String]) async throws { try await send("unstar", albumIds.map { ("albumId", $0) }) }
+    public func star(albumIds: [String]) async throws { try await call("star", albumIds.map { ("albumId", $0) }) }
+    public func unstar(albumIds: [String]) async throws { try await call("unstar", albumIds.map { ("albumId", $0) }) }
     /// Stars whole artists, as favorites.
-    public func star(artistIds: [String]) async throws { try await send("star", artistIds.map { ("artistId", $0) }) }
-    public func unstar(artistIds: [String]) async throws { try await send("unstar", artistIds.map { ("artistId", $0) }) }
+    public func star(artistIds: [String]) async throws { try await call("star", artistIds.map { ("artistId", $0) }) }
+    public func unstar(artistIds: [String]) async throws { try await call("unstar", artistIds.map { ("artistId", $0) }) }
 
     /// Rates a song, 1 to 5 stars; 0 takes the rating off.
     public func setRating(_ id: String, rating: Int) async throws {
-        try await send("setRating", [("id", id), ("rating", "\(min(max(rating, 0), 5))")])
+        try await call("setRating", [("id", id), ("rating", "\(min(max(rating, 0), 5))")])
     }
 
     /// Tells the server a song was played (submission) or is playing now. The time is when it
     /// started, in milliseconds.
     public func scrobble(_ id: String, timeMs: Int64, submission: Bool) async throws {
-        try await send("scrobble", [("id", id), ("time", "\(timeMs)"), ("submission", submission ? "true" : "false")])
+        try await call("scrobble", [("id", id), ("time", "\(timeMs)"), ("submission", submission ? "true" : "false")])
     }
 
     /// The server's playlists with every field the phone keeps in step.
@@ -236,7 +231,7 @@ extension SubsonicClient {
         }
     }
 
-    public func deletePlaylist(_ id: String) async throws { try await send("deletePlaylist", [("id", id)]) }
+    public func deletePlaylist(_ id: String) async throws { try await call("deletePlaylist", [("id", id)]) }
 
     /// The signed-in user, as the server knows them.
     public func user(_ username: String) async throws -> ServerUser {
