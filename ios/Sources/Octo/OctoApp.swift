@@ -8,13 +8,22 @@ struct OctoApp: App {
     @State private var lyrics: LyricsStore
     @State private var sound: SoundStore
     @State private var downloads: Downloads
+    @State private var library: Library
+    @State private var serverSync: ServerSync
 
     init() {
         let session = Session()
         let sound = SoundStore()
         let router = Router()
+        let library = Library.open()
+        let serverSync = ServerSync(session: session, library: library)
+        _library = State(initialValue: library)
+        _serverSync = State(initialValue: serverSync)
         _router = State(initialValue: router)
-        _downloads = State(initialValue: Downloads(session: session) { words, done in router.show(words, done: done) })
+        _downloads = State(initialValue: Downloads(session: session, library: library, sync: serverSync) { words, done in
+            router.show(words, done: done)
+        })
+        serverSync.start()
         _session = State(initialValue: session)
         _sound = State(initialValue: sound)
         _player = State(initialValue: Player(session: session, sound: sound.processor))
@@ -30,6 +39,8 @@ struct OctoApp: App {
                 .environment(lyrics)
                 .environment(sound)
                 .environment(downloads)
+                .environment(library)
+                .environment(serverSync)
                 .tint(OctoColor.accent)
                 .preferredColorScheme(.dark)
                 #if DEBUG
