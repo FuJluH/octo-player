@@ -43,6 +43,15 @@ final class AppUpdates {
         return URLSession(configuration: config)
     }()
 
+    /// Where the list of releases is asked for. A test build can point it elsewhere with the
+    /// OCTO_UPDATES_API launch variable.
+    private static var api: URL {
+        #if DEBUG
+        if let other = ProcessInfo.processInfo.environment["OCTO_UPDATES_API"], let url = URL(string: other) { return url }
+        #endif
+        return URL(string: "https://api.github.com/")!
+    }
+
     private static var cacheFile: URL {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("updates/releases.json")
     }
@@ -156,7 +165,7 @@ final class AppUpdates {
     private func feed() async -> ReleaseFeedAnswer {
         let cached = try? Data(contentsOf: Self.cacheFile)
         let saved = cached.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: String] }
-        var request = URLRequest(url: releasesURL())
+        var request = URLRequest(url: releasesURL(api: Self.api))
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
         request.setValue("Octo/\(Session.appVersion) (ios)", forHTTPHeaderField: "User-Agent")

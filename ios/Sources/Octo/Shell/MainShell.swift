@@ -184,7 +184,9 @@ struct MainShell: View {
             guard let route else { return }
             closePlayer()
             if tab != .settings { select(.settings) }
-            paths[.settings, default: NavigationPath()].append(route)
+            if !(route == .imports && router.importInFront) {
+                paths[.settings, default: NavigationPath()].append(route)
+            }
             router.accountRouteTaken()
         }
         .onChange(of: hasTrack) { _, has in

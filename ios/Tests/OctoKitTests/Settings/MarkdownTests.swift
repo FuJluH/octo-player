@@ -149,6 +149,18 @@ import Testing
         }
     }
 
+    @Test func eachPartHasItsNumberOfLines() {
+        let blocks = Markdown.parse(WhatsNew.notes)
+        var counts: [Int] = []
+        for (index, block) in blocks.enumerated() {
+            guard case .heading = block, index + 1 < blocks.count, case .bullets(let items) = blocks[index + 1] else { continue }
+            #expect(items.allSatisfy { $0.children.isEmpty })
+            counts.append(items.count)
+        }
+        #expect(counts == [4, 8, 8, 9, 4, 5, 10, 4])
+        #expect(counts.reduce(0, +) == 52)
+    }
+
     @Test func theHomeCardLineIsShort() {
         #expect(WhatsNew.summary.count <= 70)
     }

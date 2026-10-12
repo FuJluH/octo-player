@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 struct ImportScreen: View {
     @Environment(Session.self) private var session
     @Environment(Accounts.self) private var accounts
+    @Environment(Router.self) private var router
     @State private var model: ImportModel?
     @State private var picking = false
     @State private var pasting = false
@@ -28,11 +29,15 @@ struct ImportScreen: View {
         .barClearance()
         .background(OctoColor.background)
         .onAppear {
+            router.importInFront = true
             let model = model ?? makeModel()
             self.model = model
             model.watch()
         }
-        .onDisappear { model?.stop() }
+        .onDisappear {
+            router.importInFront = false
+            model?.stop()
+        }
         .onChange(of: session.activeId) {
             model?.forget()
             model?.watch()

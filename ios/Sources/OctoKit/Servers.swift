@@ -41,9 +41,10 @@ public struct StoredServer: Codable, Sendable, Identifiable, Equatable {
         self.signedOut = signedOut
     }
 
-    /// The name people see: the label, else the host.
+    /// The name people see: the label without its edge spaces, else the host.
     public var name: String {
-        if let label, !label.trimmingCharacters(in: .whitespaces).isEmpty { return label }
+        let trimmed = label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmed.isEmpty { return trimmed }
         return address.host ?? ServerAddress.shown(address)
     }
 

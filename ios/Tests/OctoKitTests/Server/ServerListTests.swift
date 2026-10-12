@@ -8,6 +8,9 @@ import Testing
         #expect(serverName(label: " Home ", address: "https://music.example.com/") == "Home")
         #expect(serverName(label: "", address: "https://music.example.com:4533/") == "music.example.com")
         #expect(serverName(label: "", address: "not an address/") == "not an address")
+        let address = URL(string: "https://music.example.com/")!
+        #expect(StoredServer(label: "  Home  ", address: address, username: "me").name == "Home")
+        #expect(StoredServer(label: "   ", address: address, username: "me").name == "music.example.com")
     }
 
     @Test func theRowSaysWhoAndWhere() {

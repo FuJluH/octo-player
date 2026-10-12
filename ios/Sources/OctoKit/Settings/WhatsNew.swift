@@ -78,8 +78,10 @@ public enum WhatsNew {
     - **Pick several songs** at once to play, queue, add to a playlist, download or like.
     - **Song info** shows everything known about a song.
     - Swipe a song to the right to play it next.
+    - **Home Screen widgets** for what is playing and for quick play.
+    - Ask Siri or Shortcuts to play Liked songs, recently added or an album mix, start a radio, or resume.
     - Audio files from the Files app open straight in Octo.
-    - Share a song's file.
+    - Share a song's file, or delete it from the phone.
     - Search remembers your recent searches, and can show only songs, albums, artists or playlists.
     - Bring in playlists from files, and save them out again.
 

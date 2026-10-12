@@ -20,6 +20,10 @@ final class Router {
     func openInSettings(_ route: AccountRoute) { accountRoute = route }
     func accountRouteTaken() { accountRoute = nil }
 
+    /// Whether Import is the page in front of the Settings tab's stack, so a list shared in
+    /// while it shows lands on it instead of opening a second one.
+    var importInFront = false
+
     /// A change of screen asked for from outside the pages.
     var drive: DriveRequest?
 
