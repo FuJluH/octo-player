@@ -113,8 +113,13 @@ final class NowPlayingCenter {
     private func setUpCommands() {
         let commands = MPRemoteCommandCenter.shared()
         commands.playCommand.addTarget { [weak self] _ in
-            MainActor.assumeIsolated { self?.player.resume() }
-            return .success
+            MainActor.assumeIsolated {
+                guard let player = self?.player else { return .commandFailed }
+                // Nothing to resume: no queue was kept, or none of it can play.
+                if player.engine.queue.isEmpty && !player.restoring { return .noActionableNowPlayingItem }
+                player.resume()
+                return .success
+            }
         }
         commands.pauseCommand.addTarget { [weak self] _ in
             MainActor.assumeIsolated { self?.player.pause() }

@@ -199,6 +199,38 @@ final class Player {
         engine.setQueue(items, startIndex: shuffled ? -1 : startIndex, shuffled: shuffled, play: true)
     }
 
+    /// A spoken request, like "play Nothing Was the Same". An album or artist named exactly (case,
+    /// accents and punctuation aside) wins, then songs that match; saying nothing in particular
+    /// shuffles everything. Only the library is searched. Nothing matching leaves the queue empty.
+    func playFromSearch(_ query: String) async {
+        guard let library = data?.library else { return }
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        var ids: [String] = []
+        var shuffled = false
+        if text.isEmpty {
+            ids = await library.tracks().sorted { $0.sortKey < $1.sortKey }.map(\.id)
+            shuffled = true
+        } else {
+            let name = matchKey(text)
+            let found = await library.search(text, artists: 5, albums: 5, songs: 50)
+            if let album = found.albums.prefix(5).first(where: { !name.isEmpty && matchKey($0.title) == name }) {
+                ids = await library.albumTracks(album.id).map(\.id)
+            } else if let artist = found.artists.prefix(5).first(where: { SongIdentity.sameArtistName($0.name, text) }) {
+                for album in await library.artistAlbums(artist.id) { ids += await library.albumTracks(album.id).map(\.id) }
+                shuffled = true
+            } else {
+                ids = found.tracks.prefix(50).map(\.id)
+            }
+        }
+        guard !ids.isEmpty else {
+            engine.clear()
+            return
+        }
+        let items = await playable.items(ids: ids, source: .none).compactMap { $0 }
+        guard !items.isEmpty else { return }
+        load(items, startIndex: 0, shuffled: shuffled)
+    }
+
     func shuffle(_ songs: [Song]) {
         play(songs, shuffled: true)
     }
