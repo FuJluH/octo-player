@@ -12,6 +12,10 @@ import OctoKit
 /// - `playlist:NAME` makes a phone playlist NAME with the first five songs of the library
 /// - `pin` pins the newest album to Home
 /// - `history` shows how many plays the history holds and the first day heading
+/// - `phone` shows the phone's music as the settings see it: access, songs, folders, protected songs
+/// - `download:TEXT` downloads the first library song a search for TEXT finds
+/// - `offline` shows how many downloads kept on the phone there are in each state
+/// - `refresh` runs a pull to refresh and shows how it went
 @MainActor
 enum DataDrive {
     static func install(_ data: DataServices, show: @escaping @MainActor (String) -> Void) {
@@ -50,6 +54,20 @@ enum DataDrive {
         case "history":
             let days = await library.historyDays()
             show("\(days.reduce(0) { $0 + $1.plays.count }) plays, \(days.first?.label ?? "none")")
+        case "phone":
+            let phone = PhoneMusic.shared
+            show("\(phone.access), \(phone.songCount) songs, \(phone.folders.count) folders, \(data.device.protectedSongs) protected")
+        case "download":
+            guard let song = await library.search(value).tracks.first else { show("No song for \(value)"); return true }
+            data.offline.download([song.id])
+            show("Download asked: \(song.title)")
+        case "offline":
+            let rows = data.offline.rows
+            let states = Dictionary(grouping: rows, by: { "\($0.state)" }).map { "\($0.value.count) \($0.key)" }.sorted()
+            show(rows.isEmpty ? "No downloads" : states.joined(separator: ", "))
+        case "refresh":
+            let problem = await data.refresh.refresh()
+            show(problem ?? "Refreshed")
         default:
             return false
         }
