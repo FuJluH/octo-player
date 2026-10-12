@@ -74,6 +74,13 @@ import Testing
         #expect(PhoneSound.alarm.done == "Set as your alarm")
     }
 
+    @Test func filesInTheAppsOwnFolderCount() {
+        let own = copy("device:7", deviceSource, "g", "file:///var/mobile/Documents/Albums/g.mp3", "audio/mpeg")
+        let elsewhere = copy("device:8", deviceSource, "h", "file:///var/mobile/tmp/h.mp3", "audio/mpeg")
+        #expect(phoneFiles([own, elsewhere], ownFolder: "file:///var/mobile/Documents/").map(\.trackId) == ["g"])
+        #expect(phoneFiles([own, elsewhere]) == [])
+    }
+
     @Test func theIPhoneMediaLibrarysAddressesCount() {
         let phone = copy("device:6", deviceSource, "f", "ipod-library://item/item.m4a?id=6", "audio/mp4")
         #expect(phoneFiles([phone]) == [PhoneFile(trackId: "f", uri: "ipod-library://item/item.m4a?id=6", mimeType: "audio/mp4")])

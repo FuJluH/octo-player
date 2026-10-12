@@ -12,10 +12,6 @@ struct TransitionProfileBody: Decodable {
     let transitionProfile: TransitionProfileAnswer?
 }
 
-struct ExtensionsBody: Decodable {
-    let openSubsonicExtensions: [Extension]?
-}
-
 extension SubsonicClient {
     /// The signed address of a server song for one request: its id there and the request's
     /// parameters. A fresh signature every time, so never keep it.
@@ -28,12 +24,6 @@ extension SubsonicClient {
     public func transitionProfile(_ id: String) async throws -> TransitionProfileAnswer {
         let body: TransitionProfileBody = try await get("getTransitionProfile", [("id", id)], key: nil)
         return body.transitionProfile ?? TransitionProfileAnswer(id: id)
-    }
-
-    /// Whether the server lists an extension, asked of it now; nil when it could not be asked.
-    public func supportsIfKnown(_ name: String) async -> Bool? {
-        guard let body: ExtensionsBody = try? await get("getOpenSubsonicExtensions", key: nil) else { return nil }
-        return (body.openSubsonicExtensions ?? []).contains { $0.name == name }
     }
 
     /// The queue saved on the server by place in the list, or nil when none is.

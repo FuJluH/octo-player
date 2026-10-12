@@ -58,12 +58,6 @@ private struct RadioInputs: Sendable {
 
     /// A phone song as the radio sees it.
     private func radio(_ track: LibraryTrack) -> RadioSong {
-        let artists = [track.artist].filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-        let seen = played[track.id]
-        return RadioSong(
-            id: track.id, title: track.title, artists: artists.isEmpty ? [track.artistId] : artists, album: track.albumId,
-            genres: track.genre.trimmingCharacters(in: .whitespaces).isEmpty ? [] : [track.genre], year: track.year,
-            durationMs: Int(track.durationMs), liked: liked.contains(track.id), rating: track.rating,
-            plays: seen?.plays ?? 0, lastPlayedAt: seen.map { Int($0.lastPlayedAt) })
+        radioSong(track, liked: liked, played: played[track.id])
     }
 }

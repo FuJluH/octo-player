@@ -305,3 +305,23 @@ final class FakeListenBrainz: @unchecked Sendable {
         #expect(fake.requests.count == 2)
     }
 }
+
+/// Which plays go to ListenBrainz under each "send plays" choice.
+@Suite struct ListenBrainzSendTest {
+    @Test func allSongsSendsEverything() {
+        #expect(shouldSend(.all, reachesServer: true))
+        #expect(shouldSend(.all, reachesServer: false))
+    }
+
+    @Test func onlySongsOnThisPhoneLeavesOutWhatTheServerHears() {
+        #expect(!shouldSend(.phoneOnly, reachesServer: true))
+        #expect(shouldSend(.phoneOnly, reachesServer: false))
+    }
+
+    @Test func theServerHearsFindsAndSongsWithAServerCopy() {
+        #expect(playReachesServer(isFind: isFind("find:abc"), copySources: []))
+        #expect(playReachesServer(isFind: false, copySources: ["device", "server:home"]))
+        #expect(!playReachesServer(isFind: false, copySources: ["device"]))
+        #expect(!playReachesServer(isFind: isFind("file:content%3A%2F%2Fx::"), copySources: []))
+    }
+}

@@ -13,15 +13,23 @@ func serverId(of catalogId: String, sourceId: String?) -> String? {
     return native
 }
 
-/// The server cover a library picture names, or nil for a picture from the phone.
+/// What a song or album shown by its server id carries as its cover: the server cover a library
+/// picture names, or for a picture from the phone the stored reference itself, which `Cover`
+/// draws as it is. Nil when there is no picture.
 func coverId(of artwork: String?) -> String? {
     switch ArtworkRef.decode(artwork) {
-    case .server(_, let coverId, _, _): return coverId
-    // A cover inside the phone's own music travels as its whole reference, which the cover views
-    // and the cover cache read from the phone.
-    case .device: return artwork
-    case nil: return nil
+    case .server(_, let coverId, _, _): coverId
+    case .device: artwork
+    case nil: nil
     }
+}
+
+/// A stored artwork reference from what a song or album carries as its cover: a reference as it
+/// is, or a bare cover id of `source`.
+func artworkOf(cover: String?, source: String, online: Bool = false) -> String? {
+    guard let cover, !cover.isEmpty else { return nil }
+    if ArtworkRef.decode(cover) != nil { return cover }
+    return ArtworkRef.server(sourceId: source, coverId: cover, online: online).encode()
 }
 
 extension LibraryTrack {

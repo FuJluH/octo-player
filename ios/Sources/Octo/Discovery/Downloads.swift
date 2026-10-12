@@ -245,7 +245,9 @@ final class Downloads {
         guard let source = sourceInUse else { return }
         let store = library.store
         let kept = session.servers.map(\.sourceId) + [source]
-        try? await store.pruneFinds(sourceId: source, kept: kept, before: epochNowMs() - forgetMs)
+        // Finds in the saved queue stay, so the queue comes back whole.
+        let queued = await QueueFile.standard.read()?.trackIds ?? []
+        try? await store.pruneFinds(sourceId: source, kept: kept, before: epochNowMs() - forgetMs, queued: queued)
         let waiting = (try? await store.waitingFinds()) ?? []
         guard !waiting.isEmpty else { return }
         let keys = Array(Set(waiting.flatMap { titleKeys($0.title) }))

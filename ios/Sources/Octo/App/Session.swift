@@ -61,6 +61,8 @@ final class Session {
     @ObservationIgnored private var checks: Task<Void, Never>?
     @ObservationIgnored private var checkAgain = false
     @ObservationIgnored private let prefs = UserDefaults.standard
+    /// When the app started, for anything that waits on the saved sign-in only as it comes back.
+    @ObservationIgnored let startedAt = Date()
 
     private static let serversKey = "servers"
     private static let activeKey = "servers.active"

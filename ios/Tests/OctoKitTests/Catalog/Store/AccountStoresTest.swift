@@ -8,6 +8,12 @@ import Testing
 @Suite struct AccountStoresTest {
     private let home = "home"
 
+    @Test func anOlderVersionsKeyIsTheKeptServersId() {
+        let url = "https://music.test/"
+        #expect(accountOfServerKey("winters@\(url)") == serverAccountKey("winters", url))
+        #expect(accountOfServerKey("me@mail.test@\(url)") == serverAccountKey("me@mail.test", url))
+    }
+
     @Test func eachAccountsValuesHaveTheirOwnNames() {
         #expect(accountKey("pending_plays", "home") == "pending_plays@home")
         #expect(accountKey("pending_plays", "home") != accountKey("pending_plays", "work"))

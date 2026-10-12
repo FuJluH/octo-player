@@ -81,7 +81,7 @@ struct OnlineAlbumView: View {
         let artistId = album.artistId.flatMap { $0.isEmpty ? nil : $0 }
         return VStack(alignment: .leading, spacing: 0) {
             VStack(spacing: 0) {
-                Cover(id: coverId(of: album.artwork), size: 240, radius: 10)
+                Cover(id: album.artwork, size: 240, radius: 10)
                     .shadow(color: .black.opacity(0.4), radius: 16, y: 8)
                 Text(album.title)
                     .font(.octoTitle)
@@ -193,7 +193,7 @@ struct OnlineArtistView: View {
             ScrollView {
                 VStack(spacing: 0) {
                     // The picture stays clean; the line under the name says it.
-                    Cover(id: coverId(of: artist.artwork), size: 160, radius: 80)
+                    Cover(id: artist.artwork, size: 160, radius: 80)
                     Text(artist.name)
                         .font(.octoTitle)
                         .foregroundStyle(.white)

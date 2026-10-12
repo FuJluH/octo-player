@@ -86,7 +86,7 @@ final class CarLibrary {
         let ids = songs.map(\.id)
         let songItems = songs.enumerated().map { index, track in
             item(track.title, track.artist, track.artwork) { [weak self] in
-                self?.play(ids, from: index, name: "Most played")
+                self?.play(ids, from: index)
             }
         }
         recent.updateSections([
@@ -102,21 +102,30 @@ final class CarLibrary {
         let liked = await library.likedCount()
         if liked > 0 {
             items.append(item("Liked songs", songCount(liked), nil) { [weak self] in
-                Task {
-                    guard let tracks = await self?.data?.library.likedTracks() else { return }
-                    self?.play(tracks.map(\.id), from: 0, name: "Liked songs")
-                }
+                self?.openList("Liked songs") { await $0.likedTracks() }
             })
         }
         for list in await library.playlists() {
             items.append(item(list.name, songCount(list.songCount), list.covers.first) { [weak self] in
-                Task {
-                    guard let tracks = await self?.data?.library.playlistTracks(list.id) else { return }
-                    self?.play(tracks.map(\.track.id), from: 0, name: list.name)
-                }
+                self?.openList(list.name) { await $0.playlistTracks(list.id).map(\.track) }
             })
         }
         playlists.updateSections([CPListSection(items: Array(items.prefix(most)))])
+    }
+
+    /// An album, a playlist or Liked songs opens its songs, with Play first to play it from the
+    /// top; choosing a song plays the list from that song.
+    private func openList(_ title: String, _ songs: @escaping @MainActor (Library) async -> [LibraryTrack]) {
+        Task {
+            guard let library = data?.library else { return }
+            let tracks = await songs(library)
+            let ids = tracks.map(\.id)
+            var rows = [item("Play", songCount(tracks.count), nil, symbol: "play.fill") { [weak self] in self?.play(ids, from: 0) }]
+            rows += tracks.prefix(max(0, most - 1)).enumerated().map { index, track in
+                item(track.title, track.artist, track.artwork) { [weak self] in self?.play(ids, from: index) }
+            }
+            interface?.pushTemplate(CPListTemplate(title: title, sections: [CPListSection(items: rows)]), animated: true, completion: nil)
+        }
     }
 
     private func fillAlbums() async {
@@ -145,10 +154,7 @@ final class CarLibrary {
 
     private func albumItem(_ album: LibraryAlbum) -> CPListItem {
         item(album.title, album.artist, album.artwork) { [weak self] in
-            Task {
-                guard let tracks = await self?.data?.library.albumTracks(album.id) else { return }
-                self?.play(tracks.map(\.id), from: 0, name: album.title)
-            }
+            self?.openList(album.title) { await $0.albumTracks(album.id) }
         }
     }
 
@@ -156,8 +162,9 @@ final class CarLibrary {
 
     // MARK: Rows
 
-    private func item(_ text: String, _ detail: String?, _ artwork: String?, choose: @escaping @MainActor () -> Void) -> CPListItem {
-        let row = CPListItem(text: text, detailText: detail, image: UIImage(systemName: "music.note"))
+    private func item(_ text: String, _ detail: String?, _ artwork: String?, symbol: String = "music.note",
+                      choose: @escaping @MainActor () -> Void) -> CPListItem {
+        let row = CPListItem(text: text, detailText: detail, image: UIImage(systemName: symbol))
         row.handler = { _, done in
             MainActor.assumeIsolated { choose() }
             done()
@@ -197,9 +204,10 @@ final class CarLibrary {
         CPNowPlayingTemplate.shared.updateNowPlayingButtons(buttons)
     }
 
-    private func play(_ ids: [String], from index: Int, name: String?) {
+    /// Plays a list from one of its songs. Lists chosen in the car carry no name.
+    private func play(_ ids: [String], from index: Int) {
         guard !ids.isEmpty else { return }
-        player.play(ids: ids, from: index, name: name)
+        player.play(ids: ids, from: index)
         interface?.pushTemplate(CPNowPlayingTemplate.shared, animated: true, completion: nil)
     }
 }

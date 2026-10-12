@@ -112,7 +112,7 @@ public actor CatalogStore {
 }
 
 /// How many ids go in one lookup, well under what one query can take.
-let lookupChunk = 500
+let lookupChunk = 900
 
 /// `?, ?, ?` for a list of values.
 func marks(_ count: Int) -> String { Array(repeating: "?", count: count).joined(separator: ", ") }

@@ -17,6 +17,11 @@ import SwiftUI
 /// - `speed:VALUE`, `pitch:SEMITONES`, `keeppitch:on|off`, `skipsilence:on|off`
 /// - `startafter:NAME` (Instant, Short, Steady, Safe, Long as kept)
 /// - `shuffle-library` shuffles the whole library
+/// - `station:URL` or `station:URL|NAME` plays a live station
+/// - `castkeep:on|off` keeps playing on the phone, or pauses, when an AirPlay device goes away
+/// - `queuesync:on|off` switches syncing the play queue with the server
+/// - `prefetch:WIFI` or `prefetch:WIFI,MOBILE` sets how many songs are fetched ahead
+/// - `savedstate` shows how many of the next songs are saved whole on the phone
 /// - `playstate` shows a line with what the player is doing
 @MainActor
 enum PlaybackDrive {
@@ -91,6 +96,28 @@ enum PlaybackDrive {
         case "skipsilence": settings.setSkipSilence(value != "off")
         case "startafter": settings.setStartAfter(StartAfter(rawValue: value) ?? .short)
         case "shuffle-library": await player.shuffleLibrary()
+        case "station":
+            // A live station by its address, with an optional name after a "|".
+            let parts = value.split(separator: "|", maxSplits: 1).map(String.init)
+            if let url = parts.first, let song = radioSong(radioId(streamUrl: url, name: parts.count > 1 ? parts[1] : "")) {
+                player.play([song], from: 0)
+            }
+        case "castkeep": settings.setCastKeepPlaying(value != "off")
+        case "queuesync": player.setQueueSync(value != "off")
+        case "prefetch":
+            let counts = value.split(separator: ",").compactMap { Int($0) }
+            if let wifi = counts.first { settings.setPrefetchWifi(wifi) }
+            if counts.count > 1 { settings.setPrefetchMobile(counts[1]) }
+        case "savedstate":
+            // How many of the next songs are saved whole on the phone (fetched ahead or played).
+            let context = StreamContext.now(player.session)
+            var saved = 0, servers = 0
+            for slot in player.upNextSlots.dropFirst().prefix(5) where player.items.indices.contains(slot.index) {
+                guard let ref = parseStreamUri(player.items[slot.index].uri), let source = ref.sourceId ?? context.sourceId else { continue }
+                servers += 1
+                if await StreamCache.shared.isFullySaved(streamCacheKey(source, ref, ref.request(context.quality))) { saved += 1 }
+            }
+            router.show("\(saved) of the next \(servers) server songs saved whole")
         case "playstate":
             let quality = player.quality.map { "\($0.label) \($0.full)" } ?? "no badge"
             let fade = settings.player.crossfade ? "crossfade \(settings.player.crossfadeSeconds) s" : "no crossfade"

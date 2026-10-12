@@ -20,8 +20,7 @@ final class ListenBrainzSync {
     @ObservationIgnored private var started = false
     @ObservationIgnored private var sending = false
     @ObservationIgnored private var sendAgain = false
-    /// Whether an ask that came in during a send wanted to try at once, even while waiting after
-    /// failures.
+    /// Whether a send asked for while another ran was one that goes at once.
     @ObservationIgnored private var sendAgainNow = false
     /// Failures in a row, and when the next try is due after them.
     @ObservationIgnored private var failures = 0
@@ -178,6 +177,7 @@ final class ListenBrainzSync {
         defer {
             sending = false
             if sendAgain {
+                // The send asked for meanwhile runs next, as it was asked: at once when it was.
                 let now = sendAgainNow
                 sendAgain = false
                 sendAgainNow = false

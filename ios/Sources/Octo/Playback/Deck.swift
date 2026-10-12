@@ -207,7 +207,7 @@ final class DeckRender: @unchecked Sendable {
         guard waiting > 0 else { return false }
         let bufferedUs = Int(Double(waiting) * 1_000_000 / deckRate)
         let startAfter = source.isLocal ? 250 : held.startAfterMs
-        // The ring holds 15 s; never wait for more than most of it.
+        // Never wait for more than most of what the ring holds.
         if waiting >= source.ring.capacity * PCMRing.chunkFrames * 3 / 4 { return true }
         return hasEnoughToStart(bufferedUs: bufferedUs, speed: held.speed, rebuffering: rebuffering, startAfterMs: startAfter)
     }

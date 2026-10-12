@@ -242,16 +242,3 @@ public func downloadMaxKbps(mimeType: String?, bitrate: Int?, quality: StreamQua
 public func downloadFormat(serverMimeType: String?, maxKbps: Int?) -> String? {
     maxKbps == nil ? serverMimeType : "audio/mpeg"
 }
-
-/// The header that tells the server's own addresses what a request is for, so an Octo server
-/// does not count a download as playing.
-public let octoPurposeHeader = "X-Octo-Purpose"
-
-/// What a download says it is for: a copy kept on the device to play without a connection.
-public let octoPurposeOffline = "offline"
-
-/// The name a download's song has among the songs kept as they play, at the size the download
-/// asks for (`maxKbps`, nil for the file as it is), so one saved whole there is copied from it.
-public func downloadCacheKey(sourceId: String, serverId: String, mimeType: String?, maxKbps: Int?) -> String {
-    streamCacheKey(sourceId, StreamRef(sourceId: sourceId, serverId: serverId, mimeType: mimeType, bitrate: nil), StreamRequest(maxKbps))
-}

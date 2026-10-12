@@ -78,15 +78,18 @@ extension CatalogStore {
     }
 
     /// Lets go of finds from servers no longer kept, and this server's old ones nothing needs: not
-    /// asked for, and not in the saved queue or a playlist.
-    public func pruneFinds(sourceId: String, kept: [String], before: Int64) throws {
+    /// asked for, and not in the saved queue or a playlist. `queued` is the saved queue's songs,
+    /// when it is kept outside the library.
+    public func pruneFinds(sourceId: String, kept: [String], before: Int64, queued: [String] = []) throws {
         let notKept = kept.isEmpty ? "1" : "sourceId NOT IN (\(marks(kept.count)))"
+        let inQueue = Array(Set(queued.filter(isFind)))
+        let notQueued = inQueue.isEmpty ? "" : "AND id NOT IN (\(marks(inQueue.count)))"
         try db.run("""
             DELETE FROM online_song WHERE \(notKept) OR (
                 sourceId = ? AND requestedAt = 0 AND seenAt < ? AND id NOT IN (SELECT trackId FROM queue_item)
-                AND id NOT IN (SELECT trackId FROM playlist_item)
+                AND id NOT IN (SELECT trackId FROM playlist_item) \(notQueued)
             )
-            """, (kept as [any SQLBindable]) + [sourceId, before])
+            """, (kept as [any SQLBindable]) + [sourceId, before] + (inQueue as [any SQLBindable]))
         if db.changes > 0 { changed(.finds) }
     }
 

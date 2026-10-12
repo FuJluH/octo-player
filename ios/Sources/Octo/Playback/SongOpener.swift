@@ -36,6 +36,8 @@ struct StreamContext: Sendable {
     let keeping: Bool
     /// The sign-in, asked again as each request goes out.
     let session: Session?
+    /// When the app started.
+    var startedAt = Date.distantPast
 
     @MainActor
     static func now(_ session: Session) -> StreamContext {
@@ -45,21 +47,21 @@ struct StreamContext: Sendable {
             keptSources: Set(session.servers.map(\.sourceId)),
             quality: AppSettings.shared.qualityInUse,
             keeping: AppSettings.shared.offline.cacheSize != .off,
-            session: session)
+            session: session, startedAt: session.startedAt)
     }
 
     /// The server in use as a request goes out: the address in use now (the home one while at
-    /// home), or nil at once when none is signed in.
-    private func serverNow() -> (client: SubsonicClient, sourceId: String)? {
+    /// home). In the first 3 s after the app starts, the saved sign-in gets until then to come
+    /// back; after that, no server means none at once.
+    func serverNow() -> (client: SubsonicClient, sourceId: String)? {
         guard let session else { return client.map { ($0, sourceId ?? "") } }
-        let found: Unchecked<(SubsonicClient, String)>?
-        if Thread.isMainThread {
-            found = MainActor.assumeIsolated { session.inUse.map { Unchecked(($0.client, $0.sourceId)) } }
-        } else {
-            found = (try? blocking { await MainActor.run { session.inUse.map { Unchecked(($0.client, $0.sourceId)) } } }) ?? nil
+        let deadline = min(Date().addingTimeInterval(3), startedAt.addingTimeInterval(3))
+        while true {
+            let found = try? blocking { await MainActor.run { session.inUse.map { Unchecked(($0.client, $0.sourceId)) } } }
+            if let found = found ?? nil { return found.value }
+            if Date() >= deadline { return nil }
+            Thread.sleep(forTimeInterval: 0.1)
         }
-        guard let found else { return nil }
-        return found.value
     }
 
     /// Whether a song is another kept server's than the one in use: its id would be some other
@@ -117,23 +119,22 @@ enum SongOpener {
                        scouting: Bool = false) -> @Sendable (OpenToken) throws -> OpenedSong {
         let uri = item.uri
         let mime = item.mimeType
+        let trackId = item.trackId
         return { token in
             if let ref = parseStreamUri(uri) {
                 guard OnlineWatch.shared.online || context.keeping else { throw PlayError(.ioUnspecified, detail: "No connection") }
                 let pinned = context.pinned(ref)
-                // A saved copy that cannot be read is passed over for the server's.
-                var savedUnreadable = false
                 if let key = context.savedKey(pinned),
-                   let saved = try? blocking({ await StreamCache.shared.savedFile(key) }) {
-                    if let file = try? LocalFile(url: saved.url, contentType: saved.mimeType),
-                       let decoder = try? SongDecoder(source: file, mimeType: saved.mimeType ?? mime, outputRate: outputRate) {
-                        token.adopt(file)
-                        return OpenedSong(decoder: decoder, bytes: file)
+                   let saved = try? blocking({ await StreamCache.shared.savedFile(key) }),
+                   let file = try? LocalFile(url: saved.url, contentType: saved.mimeType) {
+                    // A saved copy that fails part way is passed over for the server's.
+                    let copy = SavedCopy(file) {
+                        try RemoteFile(online: { OnlineWatch.shared.online }) { try context.sign(pinned) }
                     }
-                    savedUnreadable = true
+                    token.adopt(copy)
+                    return OpenedSong(decoder: try SongDecoder(source: copy, mimeType: saved.mimeType ?? mime, outputRate: outputRate), bytes: copy)
                 }
-                let remote = try RemoteFile(savedKey: context.savedKey(pinned), readsSaved: !savedUnreadable,
-                                            online: { OnlineWatch.shared.online }) {
+                let remote = try RemoteFile(savedKey: context.savedKey(pinned), online: { OnlineWatch.shared.online }) {
                     try context.sign(pinned)
                 }
                 token.adopt(remote)
@@ -141,6 +142,12 @@ enum SongOpener {
                 if token.isCancelled { throw PlayError(.ioUnspecified, detail: "stopped") }
                 return OpenedSong(decoder: try SongDecoder(source: remote, mimeType: pinned.request(context.quality).mimeType(pinned.mimeType),
                                                            outputRate: outputRate), bytes: remote)
+            }
+            // A server song's address that cannot be read names no song to ask for.
+            if uri.lowercased().hasPrefix(streamScheme + ":") {
+                guard OnlineWatch.shared.online else { throw PlayError(.ioUnspecified, detail: "No connection") }
+                guard context.serverNow() != nil else { throw PlayError(.ioUnspecified, detail: "No server signed in") }
+                throw PlayError(.ioUnspecified, detail: "No song id")
             }
             guard let url = URL(string: uri) else { throw PlayError(.fileNotFound, detail: "no address") }
             switch url.scheme?.lowercased() {
@@ -151,6 +158,13 @@ enum SongOpener {
                     return OpenedSong(decoder: decoder, bytes: file)
                 }
                 return OpenedSong(decoder: try AssetDecoder(url: url, outputRate: outputRate), bytes: file)
+            case "http" where isRadio(trackId), "https" where isRadio(trackId):
+                // A live station: read as it comes, with no length and no end.
+                guard OnlineWatch.shared.online else { throw PlayError(.ioUnspecified, detail: "No connection") }
+                let live = LiveBytes(request: URLRequest(url: url))
+                token.adopt(live)
+                if token.isCancelled { throw PlayError(.ioUnspecified, detail: "stopped") }
+                return OpenedSong(decoder: try LiveStreamDecoder(bytes: live, mimeType: mime, outputRate: outputRate), bytes: live)
             case "http", "https":
                 let remote = try RemoteFile(online: { OnlineWatch.shared.online }) {
                     guard OnlineWatch.shared.online else { throw PlayError(.ioUnspecified, detail: "No connection") }

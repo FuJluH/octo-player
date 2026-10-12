@@ -14,6 +14,9 @@ enum AccountHooks {
         // what its family notices already told.
         data.serverSwitch.onForget("octo_admin") { account in OctoAdminPages.shared.forget(server: account) }
         data.serverSwitch.onForget("family_notices") { account in Prefs("family_notices").forgetAccount(account) }
+        // ...and the playlists it used lately, and its live lists.
+        data.serverSwitch.onForget("recent_playlists") { account in UserDefaults.standard.removeObject(forKey: "playlists.recent.\(account)") }
+        data.serverSwitch.onForget("live_lists") { account in UserDefaults.standard.removeObject(forKey: "live_lists.lists:\(account)") }
         data.downloads.adminPages = Downloads.AdminPages(
             locate: { [weak session] in
                 guard let session, session.runsOcto else { return nil }

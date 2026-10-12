@@ -121,6 +121,18 @@ import Testing
         #expect(try await store.find(findId("x")) == nil)
     }
 
+    @Test func oldFindsGoUnlessTheSavedQueueHoldsThem() async throws {
+        let store = try store()
+        let old = [findId("q"), findId("gone")].map {
+            OnlineSong(id: $0, sourceId: server, nativeId: String($0.dropFirst(findPrefix.count)), title: "Found", artist: "Someone",
+                       durationMs: 90_000, seenAt: 1, requestedAt: 0)
+        }
+        try await store.insertFinds(old)
+        try await store.pruneFinds(sourceId: server, kept: [server], before: 100, queued: ["device:1", findId("q")])
+        #expect(try await store.find(findId("q")) != nil)
+        #expect(try await store.find(findId("gone")) == nil)
+    }
+
     @Test func listenersHearAboutChanges() async throws {
         let store = try store()
         let heard = Heard()

@@ -76,9 +76,3 @@ public func streamCacheEvictions(_ spans: [StreamCacheSpan], limitBytes: Int64?,
 
 /// How much the store holds: every saved piece, nothing else it keeps beside them.
 public func streamCacheUsedBytes(_ spans: [StreamCacheSpan]) -> Int64 { spans.reduce(Int64(0)) { $0 + $1.length } }
-
-/// The last byte to ask the server for when a song is read from `position` on and `saved` holds
-/// parts of it: the one before the next saved part, or nil for the rest of the song.
-public func streamCacheGapEnd(_ saved: ByteRanges, from position: Int64) -> Int64? {
-    saved.ranges.first { $0.lowerBound > position }.map { $0.lowerBound - 1 }
-}

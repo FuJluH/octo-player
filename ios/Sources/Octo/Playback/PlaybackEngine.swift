@@ -66,7 +66,10 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
     func makeSource(_ item: QueueItem, startMs: Int, setUp: SongSetUp? = nil) -> DeckSource {
         let scheme = URL(string: item.uri)?.scheme
         let local = parseStreamUri(item.uri) == nil && isLocalScheme(scheme)
+        // The sound waiting is held long enough for the start-after wait at the fastest speed.
+        let holdSeconds = max(15, Double(startAfterMs) / 1_000 * Double(Pace.fastestSpeed) / 0.75)
         return DeckSource(item: item, setUp: setUp ?? songSetUp?(item), startMs: startMs, outputRate: deckRate, isLocal: local,
+                          holdSeconds: holdSeconds,
                           skipSilence: skipSilence,
                           open: SongOpener.opener(item, context: streamContext(), outputRate: deckRate))
     }
@@ -149,13 +152,14 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
         ended = false
         stoppedAtEnd = false
         let wasPlaying = playWhenReady
-        // A queue put in place to carry on from elsewhere waits paused.
-        playWhenReady = play
+        // A queue put in place to carry on from elsewhere waits paused; so does one asked to play
+        // while the system will not give the sound (a call).
+        let playing = play && startOutput()
+        playWhenReady = playing
         loadCurrent(atMs: startMs)
         onQueueChange?()
         onSongChange?(.playlistChanged)
-        if play {
-            startOutput()
+        if playing {
             if !wasPlaying { onPlayWhenReadyChange?(true, false) }
         } else if wasPlaying {
             onPlayWhenReadyChange?(false, false)
@@ -197,6 +201,8 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
 
     func play() {
         guard !queue.isEmpty else { return }
+        // Playing asks for the sound first: refused (a call is on), the player stays paused.
+        guard startOutput() else { return }
         resumeWhenFocusReturns = false
         if ended {
             // The queue played out: it starts again from its first song.
@@ -226,7 +232,6 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
                 deck.playWhenReady = true
             }
         }
-        startOutput()
         onPlayWhenReadyChange?(true, false)
         ensureTicking()
     }
@@ -395,15 +400,23 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
         changedUnder()
     }
 
-    /// Runs an edit of the queue that keeps the song on now.
-    func edit(_ change: (inout PlayQueue) -> Void) {
+    /// Runs an edit of the queue. `change` answers whether it took out the song on now with
+    /// nothing left to play after it: then the queue has played out.
+    func edit(_ change: (inout PlayQueue) -> Bool) {
         crossfader.interrupt()
         let before = queue.currentItem?.entryId
-        change(&queue)
+        let playedOut = change(&queue)
         if queue.isEmpty {
             stop()
         } else if queue.currentItem?.entryId != before {
-            loadCurrent(atMs: 0)
+            if playedOut {
+                ended = true
+                playWhenReady = false
+                deck.clear()
+                onPlayWhenReadyChange?(false, false)
+            } else {
+                loadCurrent(atMs: 0)
+            }
             onSongChange?(.playlistChanged)
         }
         changedUnder()
@@ -463,7 +476,7 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
     private func interruption(began: Bool, shouldResume: Bool) {
         if began {
             // A call or a short interruption: pause, and come back after if it was playing.
-            resumeWhenFocusReturns = isPlaying || playWhenReady || resumeWhenFocusReturns
+            resumeWhenFocusReturns = isPlaying || resumeWhenFocusReturns
             guard playWhenReady else { return }
             playWhenReady = false
             crossfader.interrupt()
@@ -478,9 +491,24 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
 
     // MARK: The ticker
 
-    private func startOutput() {
-        output.start()
-        output.updateDelays()
+    /// Starts the sound for playing. False when the system refused it (a call is on). A sound
+    /// device that will not start fails the song on now, as a song that could not play.
+    private func startOutput() -> Bool {
+        switch output.start() {
+        case .started:
+            output.updateDelays()
+            return true
+        case .refused:
+            return false
+        case .failed:
+            if let item = queue.currentItem {
+                // Told once this request is done, so the failure is handled with the player wanting to play.
+                DispatchQueue.main.async { [weak self] in
+                    self?.onFailure?(item, PlayError(.audioTrackInitFailed, detail: "the sound device did not start"))
+                }
+            }
+            return true
+        }
     }
 
     /// While paused the sound waits a while silent, so headphones and the lock screen can bring
@@ -515,9 +543,14 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
             lastState = now
             onStateChange?(now)
         }
-        if let item = queue.currentItem, lengthTold != item.entryId, let measured = measuredMs, measured > 0 {
-            lengthTold = item.entryId
-            onLengthFound?(item, measured)
+        // The length is taught each time the deck has a new measure of the song (a reopened
+        // source measures again); a live station's measure is never believed.
+        if let item = queue.currentItem, !item.isRadioStation, let measured = measuredMs, measured > 0 {
+            let told = "\(item.entryId ?? "")|\(measured)"
+            if lengthTold != told {
+                lengthTold = told
+                onLengthFound?(item, measured)
+            }
         }
         loadFollowingWhenNear()
         if (!playWhenReady || ended) && !playing && crossfader.outgoing == nil {

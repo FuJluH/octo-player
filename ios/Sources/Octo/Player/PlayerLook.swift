@@ -121,7 +121,7 @@ final class WashArtwork {
         let task = Task<WashCover, Never> {
             _ = await before?.value
             var source: CGImage?
-            if let coverId, let client { source = await Covers.shared.image(coverId, size: WashSize, client: client)?.cgImage }
+            if let coverId { source = await Covers.shared.image(coverId, size: WashSize, client: client)?.cgImage }
             let mesh = colors.mesh
             return await Task.detached(priority: .userInitiated) {
                 let pixels = source.flatMap { WashArtwork.processed($0, tuning) } ?? WashArtwork.blend(mesh, tuning)

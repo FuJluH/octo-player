@@ -57,13 +57,19 @@ final class DataServices {
         device = DeviceLibrary(library: library)
         offline = OfflineDownloads(session: session, library: library, connectivity: connectivity, sync: serverSync) { words in announce(words, false) }
         marks = OfflineMarkings(downloads: offline, connectivity: connectivity)
-        prefetcher = Prefetcher(session: session, connectivity: connectivity)
+        prefetcher = Prefetcher(connectivity: connectivity)
+        prefetcher.context = { [weak session] in session.map { StreamContext.now($0) } }
         controls = ServerControls(session: session, library: library, sync: serverSync)
         refresh = LibraryRefresh(device: device, sync: serverSync, downloads: downloads, session: session)
         serverSwitch = ServerSwitch(session: session, library: library, sync: serverSync, listening: listening,
                                     favorites: favoriteSync, playlists: playlistSync)
         let offline = offline
         serverSwitch.onForgetDownloads { sourceId in await offline.forgetSource(sourceId) }
+        // Covers named by a bare id are the server in use's.
+        Covers.signedInSource.withLock { $0 = session.inUse?.sourceId }
+        watches.append(Watch({ [weak session] in session?.inUse?.sourceId }) { source in
+            Covers.signedInSource.withLock { $0 = source }
+        })
     }
 
     /// Starts the work that runs on its own: the phone's music, copying the server's library,
@@ -82,8 +88,6 @@ final class DataServices {
             let before = resize
             resize = Task { await Self.applySize(to: size, after: before) }
         })
-        // Fetching ahead follows the player, which hands itself to the server switch as it is made.
-        if let player = serverSwitch.player as? Player { prefetcher.follow(player) }
     }
 
     private static func applySize(to size: CacheSize, after before: Task<Void, Never>?) async {

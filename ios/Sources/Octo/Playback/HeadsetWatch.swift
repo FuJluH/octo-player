@@ -1,4 +1,5 @@
 import AVFoundation
+import AVKit
 import OctoKit
 
 /// Brings the music back when headphones connect, as the listener asked: wired and Bluetooth
@@ -31,11 +32,16 @@ final class HeadsetWatch {
         switch reason {
         case .oldDeviceUnavailable:
             let wasPlaying = player.engine.playWhenReady
-            if let speaker = before.first(where: { $0.portType == .airPlay }) {
-                // An AirPlay speaker or TV went away: the music carries on here only when it was
-                // playing and "Keep playing on the phone when casting ends" is on.
-                if !(wasPlaying && AppSettings.shared.player.castKeepPlaying) { player.pause() }
-                SystemEntries.shared?.router.show("Lost the connection to \(speaker.portName)")
+            if before.contains(where: { $0.portType == .airPlay }), !now.contains(where: { $0.portType == .airPlay }) {
+                // Playing on an AirPlay device ended. Picking the phone carries on as it was;
+                // the device going away pauses, unless the listener asked to keep playing here.
+                let chosen = RouteChoice.shared.choosing
+                if !playsOnReturn(wasPlaying: wasPlaying, chosen: chosen, keepPlaying: AppSettings.shared.player.castKeepPlaying) {
+                    player.pause()
+                }
+                if !chosen, let speaker = before.first(where: { $0.portType == .airPlay }) {
+                    SystemEntries.shared?.router.show("Lost the connection to \(speaker.portName)")
+                }
                 return
             }
             // Headphones pulled out: stop rather than play out loud.
@@ -76,4 +82,26 @@ final class HeadsetWatch {
     }
 
     private func epochMs() -> Int { Int(Date().timeIntervalSince1970 * 1000) }
+}
+
+/// Whether the listener is picking an output in one of Octo's AirPlay pickers, so a move off an
+/// AirPlay device then is their choice rather than the device going away. Every route picker in
+/// the app reports to this.
+@MainActor
+final class RouteChoice: NSObject, AVRoutePickerViewDelegate {
+    static let shared = RouteChoice()
+
+    /// Until when a route change counts as chosen: open while the list shows, and a few seconds
+    /// after it closes for the sound to move.
+    private var until: Date?
+
+    var choosing: Bool { until.map { Date() <= $0 } ?? false }
+
+    nonisolated func routePickerViewWillBeginPresentingRoutes(_ routePickerView: AVRoutePickerView) {
+        MainActor.assumeIsolated { until = .distantFuture }
+    }
+
+    nonisolated func routePickerViewDidEndPresentingRoutes(_ routePickerView: AVRoutePickerView) {
+        MainActor.assumeIsolated { until = Date().addingTimeInterval(3) }
+    }
 }

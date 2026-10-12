@@ -65,3 +65,39 @@ func pageTrack(_ id: String, _ title: String, artist: String = "A", album: Strin
         #expect(songListening(played)["2"] == Listening(plays: 3, lastPlayedAt: 5))
     }
 }
+
+/// What songs, albums and artists add up to from the plays here and on the server.
+@Suite struct PlayedListeningTest {
+    private func album(_ id: String) -> LibraryAlbum {
+        LibraryAlbum(id: id, sourceId: "s", nativeId: id, title: id, searchKey: id, sortKey: id, artist: "", artistId: "",
+                     songCount: 1, durationMs: 0, addedAt: 0)
+    }
+
+    @Test func albumsAddUpTheirSongsAndTakeTheLatestPlay() {
+        let played = [
+            PlayedTrack(track: pageTrack("1", "a", albumId: "x"), plays: 2, lastPlayedAt: 10),
+            PlayedTrack(track: pageTrack("2", "b", albumId: "x"), plays: 5, lastPlayedAt: 40),
+            PlayedTrack(track: pageTrack("3", "c", albumId: "y"), plays: 1, lastPlayedAt: 20),
+        ]
+        let server = [PlayedAlbum(album: album("y"), lastPlayedAt: 90), PlayedAlbum(album: album("z"), lastPlayedAt: 30)]
+        #expect(albumListening(played, server) == [
+            "x": Listening(plays: 7, lastPlayedAt: 40),
+            "y": Listening(plays: 1, lastPlayedAt: 90),
+            "z": Listening(plays: 0, lastPlayedAt: 30),
+        ])
+    }
+
+    @Test func artistsAddUpTheSongsOnTheirAlbums() {
+        let played = [
+            PlayedTrack(track: pageTrack("1", "a", artist: "p"), plays: 2, lastPlayedAt: 10),
+            PlayedTrack(track: pageTrack("2", "b", artist: "p"), plays: 4, lastPlayedAt: 5),
+            PlayedTrack(track: pageTrack("3", "c", artist: "q"), plays: 1, lastPlayedAt: 20),
+        ]
+        #expect(artistListening(played) == ["artist:p": Listening(plays: 6, lastPlayedAt: 10), "artist:q": Listening(plays: 1, lastPlayedAt: 20)])
+    }
+
+    @Test func songsKeepTheirCombinedCounts() {
+        let played = [PlayedTrack(track: pageTrack("1", "a"), plays: 9, lastPlayedAt: 77)]
+        #expect(songListening(played) == ["1": Listening(plays: 9, lastPlayedAt: 77)])
+    }
+}

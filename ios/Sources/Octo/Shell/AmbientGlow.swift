@@ -95,7 +95,8 @@ final class ArtworkColorStore {
     }
 
     private func load(_ coverId: String) {
-        guard !loading.contains(coverId), let client = session.client else { return }
+        guard !loading.contains(coverId) else { return }
+        let client = session.client
         loading.insert(coverId)
         Task {
             let image = await Covers.shared.image(coverId, size: artworkSampleSize, client: client)

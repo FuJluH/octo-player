@@ -353,7 +353,7 @@ struct NowPlayingFace: View {
             ZStack {
                 // With no artwork, no picture and no dim: the sign sits on the glass.
                 if let cover = player.current?.coverArt {
-                    Cover(id: cover, size: OctoBar.height - 12, radius: (OctoBar.height - 12) / 2)
+                    Cover(id: cover, size: OctoBar.height - 12, radius: (OctoBar.height - 12) / 2, online: player.current?.isExternal ?? false)
                         .overlay(Circle().fill(.black.opacity(0.35)))
                 }
                 if player.isPlaying {

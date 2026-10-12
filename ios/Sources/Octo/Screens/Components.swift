@@ -30,7 +30,7 @@ struct BadgedCover: View {
     var external = false
 
     var body: some View {
-        Cover(id: id, size: size, radius: radius)
+        Cover(id: id, size: size, radius: radius, online: external)
             .overlay(alignment: .bottomTrailing) {
                 if external { NotInLibraryMark(artSize: size, round: radius >= size / 2) }
             }
@@ -367,6 +367,8 @@ struct SongRow: View {
     var tap: (() -> Void)?
     /// Where the row's menu was opened from.
     var context = SongMenuContext()
+    /// The name of the list the song plays in, for the queue's headings.
+    var listName: String?
     @Environment(Player.self) private var player
     @Environment(Router.self) private var router
     @Environment(Downloads.self) private var downloads
@@ -393,7 +395,7 @@ struct SongRow: View {
             } else if let tap {
                 tap()
             } else {
-                player.play(list, from: position)
+                player.play(list, from: position, source: .played(listName))
             }
         } label: {
             HStack(spacing: 12) {
@@ -823,10 +825,14 @@ struct Shelf<Content: View>: View {
 /// Play and Shuffle side by side, as glass capsules of equal width.
 struct PlayButtons: View {
     let songs: [Song]
+    /// The name of the list, for the queue's headings.
+    var listName: String?
     @Environment(Player.self) private var player
 
     var body: some View {
-        PlayShuffle(enabled: !songs.isEmpty) { player.play(songs) } shuffle: { player.shuffle(songs) }
+        PlayShuffle(enabled: !songs.isEmpty) { player.play(songs, source: .played(listName)) } shuffle: {
+            player.play(songs, source: .played(listName), shuffled: true)
+        }
     }
 }
 
@@ -853,7 +859,7 @@ extension LibraryState {
             guard let id, !id.isEmpty else { return "" }
             return id.hasPrefix(source + ":") ? id : "\(source):\(id)"
         }
-        let art = album.coverArt.flatMap { $0.isEmpty ? nil : ArtworkRef.server(sourceId: source, coverId: $0).encode() }
+        let art = artworkOf(cover: album.coverArt, source: source)
         let isLibraryId = album.id.hasPrefix(source + ":") || source.isEmpty
         return LibraryAlbum(
             id: isLibraryId ? album.id : prefixed(album.id), sourceId: source,

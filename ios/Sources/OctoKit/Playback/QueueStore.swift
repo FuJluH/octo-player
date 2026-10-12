@@ -101,6 +101,15 @@ public func restoredShuffle(_ order: [Int], _ found: [Bool]) -> [Int]? {
     return order.filter { found[$0] }.map { newIndex[$0] }
 }
 
+/// The saved queue in use as it is read back: nothing when it holds no songs; the current song
+/// held inside the queue and the place never below 0.
+public func savedQueueRead(_ text: String) -> QueueSnapshot? {
+    guard var queue = decodeQueue(text), !queue.trackIds.isEmpty else { return nil }
+    queue.index = min(max(queue.index, 0), queue.trackIds.count - 1)
+    queue.positionMs = max(0, queue.positionMs)
+    return queue
+}
+
 /// The queue as text, for keeping another account's queue.
 public func encodeQueue(_ queue: QueueSnapshot) -> String {
     (try? JSONEncoder().encode(queue)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"

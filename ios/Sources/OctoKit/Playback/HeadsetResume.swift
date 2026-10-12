@@ -42,6 +42,14 @@ public func shouldResumeOnConnect(_ kind: HeadsetKind, prefs: ResumePrefs, playi
     return (0...resumeWindowMs).contains(now - lostOutputAt)
 }
 
+/// Whether music carries on on the phone when playing on another device (AirPlay) ends. Picking
+/// the phone moves the music across as it was. When it ends any other way (the device went away,
+/// or was taken over from elsewhere), the music pauses unless the listener asked for it to keep
+/// playing.
+public func playsOnReturn(wasPlaying: Bool, chosen: Bool, keepPlaying: Bool) -> Bool {
+    wasPlaying && (chosen || keepPlaying)
+}
+
 /// The sound needs a moment to move to newly connected headphones; Bluetooth takes longer than a
 /// cable. Playing sooner would start on the speaker.
 public let wiredSettleMs = 500

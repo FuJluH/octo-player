@@ -136,7 +136,7 @@ struct HomeView: View {
                     case .artist(let artist):
                         PinnedCard(title: artist.name, subtitle: "Artist",
                                    route: .artist(id: artist.pageId(discovery.sourceId), name: artist.name)) {
-                            Cover(id: coverId(of: artist.artwork), size: 150, radius: 75)
+                            Cover(id: artist.artwork, size: 150, radius: 75)
                         }
                         .contextMenu { CollectionMenuItems(subject: .artist(artist)) }
                     case .playlist(let summary):

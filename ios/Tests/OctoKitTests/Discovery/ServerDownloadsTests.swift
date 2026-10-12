@@ -174,6 +174,21 @@ private func upgrade(_ id: String, _ state: String, acquisition: String? = nil, 
         #expect(pillCount([], [asked("a", 60 * 60_000)], listedSince: now - 5_000, now: now) == 0)
     }
 
+    @Test func aSongThatLandedLeavesThePillEvenBeforeAnyListComesBack() {
+        let landed = askedSongs([FindSong(id: "find:a", sourceId: "server:octo", title: "Nightcall", artist: "Kavinsky",
+                                          requestedAt: now - 1_000, adoptedId: "nd-7")], sourceId: "server:octo")
+        #expect(pillCount([], landed, listedSince: nil, now: now) == 0)
+    }
+
+    @Test func theReportersPillAnOldAskWithAnEmptyDrawerIsGone() {
+        let now: Int64 = 100 * 60_000
+        let asked = askedSongs([FindSong(id: "find:a", sourceId: "server:octo", title: "Nightcall", artist: "Kavinsky",
+                                         requestedAt: now - 60 * 60_000)], sourceId: "server:octo")
+        // After a list came back, and straight after a restart, before any list.
+        #expect(pillCount([], asked, listedSince: now - 3_000, now: now) == 0)
+        #expect(pillCount([], asked, listedSince: nil, now: now) == 0)
+    }
+
     @Test func aSongJustAskedForCountsUntilTheFirstListAfterIt() {
         let ask = asked("a", 1_000)
         #expect(pillCount([], [ask], listedSince: now - 10_000, now: now) == 1)

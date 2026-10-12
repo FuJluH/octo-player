@@ -144,19 +144,6 @@ final class ListeningSync {
         }
     }
 
-    /// A play of a song the server in use has but the library does not (a find, or a song not
-    /// copied yet), by its id there. It waits in the server's queue like any other play.
-    func played(serverId: String, startedAt: Int64) {
-        guard let server = session.inUse else { return }
-        store.addPending(server.account, PendingPlay(serverId: serverId, startedAt: startedAt))
-        let key = UUID()
-        noting[key] = Task { [weak self] in
-            guard let self else { return }
-            defer { self.noting[key] = nil }
-            await self.plays.run { await self.sendPending(server) }
-        }
-    }
-
     /// Waits until every play counted so far is noted for its server: before a switch, so the last
     /// song counts for the server it played from.
     func noted() async {
@@ -220,7 +207,8 @@ final class ListeningSync {
     private func sendPending(_ server: ServerInUse) async {
         for play in store.pending(server.account) {
             let failure = await failureOf { try await server.client.scrobble(play.serverId, timeMs: play.startedAt, submission: true) }
-            if let failure, worthRetrying(failure) { break }
+            // Cut short (the work was stopped): the play waits for the next send.
+            if let failure, isCancellation(failure) || worthRetrying(failure) { break }
             store.finishPending(server.account, play, sent: failure == nil)
         }
         if session.inUse?.account == server.account { refreshSent() }

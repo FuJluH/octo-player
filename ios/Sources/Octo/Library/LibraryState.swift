@@ -133,7 +133,7 @@ final class LibraryState {
             guard let id, !id.isEmpty else { return "" }
             return id.hasPrefix(source + ":") ? id : "\(source):\(id)"
         }
-        let art = song.coverArt.flatMap { $0.isEmpty ? nil : ArtworkRef.server(sourceId: source, coverId: $0, online: song.isExternal).encode() }
+        let art = artworkOf(cover: song.coverArt, source: source, online: song.isExternal)
         return LibraryTrack(
             id: id, sourceId: source, nativeId: native, title: song.title,
             searchKey: searchKey(song.title), sortKey: sortKey(song.title), artist: song.artist ?? song.byline,

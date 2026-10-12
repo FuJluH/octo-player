@@ -80,23 +80,6 @@ actor StreamCache {
         return Set(streamCacheFullySavedKeys(enabled: enabled, lengths: lengths, spans: spans()).map(savedSongOf))
     }
 
-    /// What is saved of a song, as it opens to stream: the parts held, its whole length and type.
-    /// Nil while songs are not kept or nothing of it is saved.
-    struct SavedParts: Sendable {
-        var ranges: ByteRanges
-        var length: Int64?
-        var mimeType: String?
-    }
-
-    func savedParts(_ key: String) -> SavedParts? {
-        guard enabled else { return nil }
-        dropIfGone(key)
-        guard let entry = entries[key], !entry.pieces.isEmpty else { return nil }
-        var ranges = ByteRanges()
-        for piece in entry.pieces where piece.count == 2 { ranges.insert(piece[0]..<(piece[0] + piece[1])) }
-        return SavedParts(ranges: ranges, length: entry.contentLength, mimeType: entry.mimeType)
-    }
-
     /// How much the saved songs take: their saved pieces, not the list of them.
     func usedBytes() -> Int64 {
         for key in Array(entries.keys) { dropIfGone(key) }

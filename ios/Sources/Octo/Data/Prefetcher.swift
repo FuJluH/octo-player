@@ -2,104 +2,84 @@ import Foundation
 import Observation
 import OctoKit
 
-/// One queue entry as fetching ahead sees it: the song, and its queue address when it is a
-/// server song (nil for anything else).
-struct PrefetchEntry: Equatable, Sendable {
+/// One queue entry as fetching ahead sees it: the song and its queue address (a server song's
+/// `octo-stream` address, or anything else, which is never fetched).
+struct PrefetchEntry: Equatable {
     var trackId: String
-    var stream: String?
+    var uri: String
 }
 
-/// The queue as fetching ahead sees it. It is read again whenever what comes next changes: the
-/// song, the queue, playing or paused, shuffle, repeat.
-struct PrefetchQueue: Equatable, Sendable {
+/// The queue as fetching ahead sees it. The player hands it over whenever what comes next changes:
+/// the song, the queue, playing or paused, shuffle, repeat.
+struct PrefetchQueue: Equatable {
     var entries: [PrefetchEntry]
     /// Every queue place in the order they play (shuffled when shuffle is on).
     var playOrder: [Int]
     var current: Int
     var repeatMode: PrefetchRepeat
     var playing: Bool
+    /// Fetching ahead is only for the phone's own playing.
+    var casting: Bool = false
 
     static let empty = PrefetchQueue(entries: [], playOrder: [], current: 0, repeatMode: .off, playing: false)
 }
 
-extension PrefetchQueue {
-    /// The player's queue as fetching ahead sees it.
-    init(_ queue: PlayQueue, playing: Bool) {
-        entries = queue.items.map { PrefetchEntry(trackId: $0.trackId, stream: prefetchIsServerStream($0.uri) ? $0.uri : nil) }
-        playOrder = queue.playOrder()
-        current = queue.current
-        repeatMode = prefetchRepeat(queue.repeatMode)
-        self.playing = playing
-    }
-}
-
 /// While music plays, fetches the next few server songs of the queue whole into the saved songs,
-/// so they start at once and still play if the connection drops: 5 s after the last change, one
+/// so they start at once and still play if the connection drops: 5 s after a song starts, one
 /// after another. How many depends on the connection (Wi-Fi and mobile data have their own
-/// counts). Any change to what comes next, or to the settings, starts it over; pausing stops it,
-/// mid-song too. Songs found online are never fetched ahead, only saved as they play. AirPlay
-/// plays from the phone, so it fetches ahead like the phone's own speaker.
+/// counts). Any change to what comes next, or to the settings, starts it over; pausing stops it.
+/// Songs found online are never fetched ahead, only saved as they play. Each song is pinned to
+/// the request it will play with and signed as its fetch goes out, through the same chain a deck
+/// opens it with.
 @MainActor
 final class Prefetcher {
-    private let session: Session
     private let settings: AppSettings
     private let connectivity: Connectivity
     private let cache: StreamCache
     private var queue = PrefetchQueue.empty
-    /// The addresses of the songs being fetched, so the same list is not started twice.
-    private var ahead: [String] = []
+    /// The songs being fetched, so the same list is not started twice.
+    private var ahead: [PrefetchEntry] = []
     private var job: Task<Void, Never>?
-    /// Counts the looks at what comes next, so only the latest one acts.
-    private var looks = 0
-    private var watches: [AnyObject] = []
+    private var watch: Watch<OfflinePrefs>?
+    /// The server in use and the stream size, as a deck would open a song now.
+    var context: @MainActor () -> StreamContext? = { nil }
 
-    init(session: Session, settings: AppSettings = .shared, connectivity: Connectivity, cache: StreamCache = .shared) {
-        self.session = session
+    init(settings: AppSettings = .shared, connectivity: Connectivity, cache: StreamCache = .shared) {
         self.settings = settings
         self.connectivity = connectivity
         self.cache = cache
-        watches.append(Watch({ [weak settings] in settings?.offline ?? OfflinePrefs() }) { [weak self] _ in self?.refresh() })
+        watch = Watch({ [weak settings] in settings?.offline ?? OfflinePrefs() }) { [weak self] _ in self?.refresh() }
         connectivity.onChange { [weak self] in self?.refresh() }
-    }
-
-    /// Follows the player from now on: each change to its song, queue, playing or paused,
-    /// shuffle or repeat reads the queue again.
-    func follow(_ player: Player) {
-        watches.append(Watch({ [weak player] () -> PrefetchQueue? in
-            guard let player else { return nil }
-            // What the player shows of its queue, read so any change to it is heard.
-            _ = (player.items, player.index, player.repeatMode, player.shuffled, player.isPlaying)
-            return PrefetchQueue(player.engine.queue, playing: player.isPlaying)
-        }) { [weak self] queue in self?.update(queue ?? .empty) })
-        update(PrefetchQueue(player.engine.queue, playing: player.isPlaying))
     }
 
     /// What comes next changed.
     func update(_ queue: PrefetchQueue) {
+        guard queue != self.queue else { return }
         self.queue = queue
         refresh()
     }
 
     private func refresh() {
-        looks += 1
-        let look = looks
         Task { [weak self] in
             guard let self else { return }
-            let enabled = await cache.enabled
-            guard look == looks else { return }
-            let next = upcoming(cacheEnabled: enabled)
+            let next = await upcoming()
             if next == ahead, job != nil { return }
             stop()
             ahead = next
             guard !next.isEmpty else { return }
             job = Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(prefetchStartAfterMs))
-                for stream in next {
+                for entry in next {
                     if Task.isCancelled { return }
-                    guard let self, await self.fetch(stream) else { break }
+                    guard let self, let context = self.context() else { return }
+                    let fetched = await Self.fetch(entry.uri, context: context)
+                    // What the saved songs take up is measured again after each try.
+                    await SettingsFeeds.shared.measureCache()
+                    guard fetched else {
+                        playbackLog.info("fetch ahead stopped")
+                        return
+                    }
                 }
-                // Done, or stopped at a connection error: the same list may start again.
-                if !Task.isCancelled { self?.job = nil }
             }
         }
     }
@@ -110,58 +90,51 @@ final class Prefetcher {
         ahead = []
     }
 
-    /// The addresses of the server songs among the next ones in play order, finds left out.
-    private func upcoming(cacheEnabled: Bool) -> [String] {
-        let count = prefetchCount(cacheEnabled: cacheEnabled, onWifi: connectivity.onWifi, online: connectivity.online,
+    /// The server songs among the next ones in play order, finds left out.
+    private func upcoming() async -> [PrefetchEntry] {
+        guard !queue.casting else { return [] }
+        let count = prefetchCount(cacheEnabled: await cache.enabled, onWifi: connectivity.onWifi, online: connectivity.online,
                                   prefs: settings.offline)
         let entries = queue.entries
         let places = prefetchAhead(playOrder: queue.playOrder, current: queue.current, repeatMode: queue.repeatMode,
                                    playing: queue.playing, count: count) { place in
-            place < entries.count && prefetchFetchable(trackId: entries[place].trackId, isServerStream: entries[place].stream != nil)
+            place < entries.count
+                && prefetchFetchable(trackId: entries[place].trackId, isServerStream: parseStreamUri(entries[place].uri) != nil)
         }
-        return places.compactMap { entries[$0].stream }
+        return places.map { entries[$0] }
     }
 
-    /// Saves one song whole at the size it will play, unless it already is. False when fetching
-    /// should stop, such as when the connection is gone. The cache is measured again after each
-    /// try.
-    private func fetch(_ stream: String) async -> Bool {
-        guard let ref = parseStreamUri(stream) else { return true }
-        switch await Self.prepare(ref, context: StreamContext.now(session)) {
-        case .skip:
-            return true
-        case .stop:
-            await SettingsFeeds.shared.measureCache()
-            return false
-        case .fetch(let key, let request):
-            let fetched = await Self.save(request, key: key, cache: cache)
-            await SettingsFeeds.shared.measureCache()
-            return fetched
-        }
-    }
-
-    private enum Prepared: Sendable {
+    /// How pinning and signing went: nothing to fetch (not a server song, not kept, or saved
+    /// whole already), a song to fetch under its saved name, or a refusal (no connection, no
+    /// server) that stops the run.
+    private enum Preparing: Sendable {
         case skip
-        case stop
         case fetch(key: String, request: URLRequest)
+        case stop
     }
 
-    /// Fixes the request the song will play with, the way playing it does, and signs it. Runs on
-    /// a thread that may wait, since both look at the saved songs and the sign-in.
-    nonisolated private static func prepare(_ ref: StreamRef, context: StreamContext) async -> Prepared {
-        await withCheckedContinuation { done in
+    /// Saves one song whole unless it already is. False when fetching should stop, such as when
+    /// the connection is gone or the server refused.
+    nonisolated private static func fetch(_ uri: String, context: StreamContext) async -> Bool {
+        // Pinning and signing wait on other threads, so they run away from the main thread.
+        let preparing: Preparing = await withCheckedContinuation { done in
             DispatchQueue.global(qos: .utility).async {
+                guard let ref = parseStreamUri(uri) else { return done.resume(returning: .skip) }
                 let pinned = context.pinned(ref)
                 guard let key = context.savedKey(pinned) else { return done.resume(returning: .skip) }
-                if (try? blocking({ await StreamCache.shared.isFullySaved(key) })) == true { return done.resume(returning: .skip) }
+                if (try? blocking({ await StreamCache.shared.isFullySaved(key) })) == true {
+                    return done.resume(returning: .skip)
+                }
                 guard let request = try? context.sign(pinned) else { return done.resume(returning: .stop) }
                 done.resume(returning: .fetch(key: key, request: request))
             }
         }
-    }
-
-    /// Downloads the whole song into the saved songs. False on any failure.
-    nonisolated private static func save(_ request: URLRequest, key: String, cache: StreamCache) async -> Bool {
+        let key: String, request: URLRequest
+        switch preparing {
+        case .skip: return true
+        case .stop: return false
+        case .fetch(let savedKey, let signed): (key, request) = (savedKey, signed)
+        }
         do {
             let (file, response) = try await ServerTrust.shared.session.download(for: request)
             defer { try? FileManager.default.removeItem(at: file) }
@@ -169,6 +142,7 @@ final class Prefetcher {
                   let handle = try? FileHandle(forReadingFrom: file)
             else { return false }
             defer { try? handle.close() }
+            let cache = StreamCache.shared
             var offset: Int64 = 0
             while let chunk = try handle.read(upToCount: 1 << 20), !chunk.isEmpty {
                 if Task.isCancelled { return false }
