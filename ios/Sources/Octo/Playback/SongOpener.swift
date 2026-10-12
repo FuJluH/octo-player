@@ -119,6 +119,7 @@ enum SongOpener {
                        scouting: Bool = false) -> @Sendable (OpenToken) throws -> OpenedSong {
         let uri = item.uri
         let mime = item.mimeType
+        let trackId = item.trackId
         return { token in
             if let ref = parseStreamUri(uri) {
                 guard OnlineWatch.shared.online || context.keeping else { throw PlayError(.ioUnspecified, detail: "No connection") }
@@ -157,6 +158,13 @@ enum SongOpener {
                     return OpenedSong(decoder: decoder, bytes: file)
                 }
                 return OpenedSong(decoder: try AssetDecoder(url: url, outputRate: outputRate), bytes: file)
+            case "http", "https" where isRadio(trackId):
+                // A live station: read as it comes, with no length and no end.
+                guard OnlineWatch.shared.online else { throw PlayError(.ioUnspecified, detail: "No connection") }
+                let live = LiveBytes(request: URLRequest(url: url))
+                token.adopt(live)
+                if token.isCancelled { throw PlayError(.ioUnspecified, detail: "stopped") }
+                return OpenedSong(decoder: try LiveStreamDecoder(bytes: live, mimeType: mime, outputRate: outputRate), bytes: live)
             case "http", "https":
                 let remote = try RemoteFile(online: { OnlineWatch.shared.online }) {
                     guard OnlineWatch.shared.online else { throw PlayError(.ioUnspecified, detail: "No connection") }
