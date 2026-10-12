@@ -1,72 +1,8 @@
-import Observation
 import OctoKit
 import SwiftUI
 
 /// The time card's two pages.
 enum TimePage: Equatable { case sleep, speed }
-
-/// The sleep timer as the player shows it, read from the player's own timer. A stop set from the
-/// queue for one song further down is named by that song.
-@MainActor
-@Observable
-final class PlayerSleep {
-    static let shared = PlayerSleep()
-
-    /// The song the music stops after, when the timer was set for it from the queue.
-    private(set) var afterTitle: String?
-    @ObservationIgnored private var afterSongs: Int?
-
-    func state(_ player: Player, at now: Date = Date()) -> PlayerRule.Sleep {
-        switch player.sleep {
-        case nil:
-            return .off
-        case .at(let date):
-            return .counting(remainingMs: max(0, Int((date.timeIntervalSince(now) * 1000).rounded(.up))))
-        case .afterSongs(let count):
-            if let afterTitle, afterSongs != nil, count > 1 { return .afterSong(title: afterTitle) }
-            return count <= 1 ? .endOfSong : .songs(count)
-        }
-    }
-
-    /// Counts down from now.
-    func start(minutes: Int, _ player: Player) {
-        clearNote()
-        player.setSleep(.at(Date().addingTimeInterval(TimeInterval(minutes * 60))))
-    }
-
-    /// Stops after this many songs end, the one playing included.
-    func stopAfter(songs: Int, _ player: Player) {
-        clearNote()
-        player.setSleep(.afterSongs(songs))
-    }
-
-    /// Stops after the song `ahead` places after the one playing, named `title`.
-    func stopAfter(ahead: Int, title: String, _ player: Player) {
-        if ahead <= 0 {
-            stopAfter(songs: 1, player)
-            return
-        }
-        afterTitle = title
-        afterSongs = ahead + 1
-        player.setSleep(.afterSongs(ahead + 1))
-    }
-
-    /// More time on a countdown.
-    func add(minutes: Int, _ player: Player) {
-        guard case .at(let date) = player.sleep else { return }
-        player.setSleep(.at(date.addingTimeInterval(TimeInterval(minutes * 60))))
-    }
-
-    func cancel(_ player: Player) {
-        clearNote()
-        player.setSleep(nil)
-    }
-
-    private func clearNote() {
-        afterTitle = nil
-        afterSongs = nil
-    }
-}
 
 /// The sleep timer and the speed, one glass card of two pages. Opened from the sleep button it
 /// starts on the timer, with the speed a page further; opened from the speed mark it starts on
@@ -91,52 +27,53 @@ private struct SleepPage: View {
     let dismiss: () -> Void
     let openSpeed: () -> Void
     @Environment(Player.self) private var player
-    @State private var sleep = PlayerSleep.shared
     @State private var settings = AppSettings.shared
     @State private var custom = false
     @State private var minutes = ""
 
-    private static let lengths = [5, 15, 30, 45, 60]
-    private static let extensions = [5, 10]
-    private static let songCounts = [1, 2, 3, 5]
-    private static let longest = 720
-
     var body: some View {
-        let state = sleep.state(player)
+        let state = player.sleepState
         VStack(alignment: .leading, spacing: 0) {
             Text("Sleep timer").font(.octoBody).foregroundStyle(.white)
                 .accessibilityAddTraits(.isHeader)
             if state != .off {
                 HStack(spacing: 12) {
-                    if case .counting = state {
-                        CountdownClock()
+                    if case .counting(let left) = state {
+                        // The timer ticks on each whole second, and ten times a second over its last
+                        // 30 seconds.
+                        Text(asClock((left + 999) / 1000))
+                            .font(.octo(32, .black).monospacedDigit())
+                            .tracking(octoDisplayTracking)
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
-                        Text(PlayerRule.sleepSummary(state))
+                        Text(sleepSummary(state))
                             .font(.octoBody)
                             .foregroundStyle(.white)
                             .lineLimit(2)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     GlazeButton("Cancel") {
-                        sleep.cancel(player)
+                        player.cancelSleep()
                         dismiss()
                     }
                 }
                 .padding(.top, 12)
                 if case .counting = state {
                     HStack(spacing: 10) {
-                        ForEach(Self.extensions, id: \.self) { more in
-                            GlazeButton("+\(more) min") { sleep.add(minutes: more, player) }
+                        ForEach(sleepExtensions, id: \.self) { more in
+                            GlazeButton("+\(more) min") { player.extendSleep(minutes: more) }
                         }
                     }
                     .padding(.top, 12)
                 }
             }
             FlowRow(spacing: 10) {
-                ForEach(Self.lengths, id: \.self) { length in
+                ForEach(sleepMinutes, id: \.self) { length in
                     GlazeButton(length == 60 ? "1 hour" : "\(length) min") {
-                        sleep.start(minutes: length, player)
+                        player.startSleep(minutes: length)
                         dismiss()
                     }
                 }
@@ -148,9 +85,9 @@ private struct SleepPage: View {
                 .foregroundStyle(OctoColor.accent)
                 .padding(.top, 16)
             FlowRow(spacing: 10) {
-                ForEach(Self.songCounts, id: \.self) { count in
+                ForEach(sleepSongCounts, id: \.self) { count in
                     GlazeButton(count == 1 ? "This song" : "\(count) songs") {
-                        sleep.stopAfter(songs: count, player)
+                        player.sleepAfterSongs(count)
                         dismiss()
                     }
                 }
@@ -168,7 +105,7 @@ private struct SleepPage: View {
     }
 
     private var chosen: Int? {
-        guard let value = Int(minutes), (1...Self.longest).contains(value) else { return nil }
+        guard let value = Int(minutes), (1...maxSleepMinutes).contains(value) else { return nil }
         return value
     }
 
@@ -187,7 +124,7 @@ private struct SleepPage: View {
 
     private func startCustom() {
         guard let chosen else { return }
-        sleep.start(minutes: chosen, player)
+        player.startSleep(minutes: chosen)
         dismiss()
     }
 
@@ -207,33 +144,6 @@ private struct SleepPage: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(RowPress())
-    }
-}
-
-/// The time left on a countdown, rounded up to the second: a second a tick, and ten ticks a
-/// second over the last 30 seconds.
-private struct CountdownClock: View {
-    @Environment(Player.self) private var player
-
-    var body: some View {
-        let near = PlayerSleep.shared.state(player).remaining.map { $0 <= 30_000 } ?? false
-        TimelineView(.periodic(from: .now, by: near ? 0.1 : 1)) { time in
-            let left = PlayerSleep.shared.state(player, at: time.date).remaining ?? 0
-            Text(asClock((left + 999) / 1000))
-                .font(.octo(32, .black).monospacedDigit())
-                .tracking(octoDisplayTracking)
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-        }
-    }
-}
-
-extension PlayerRule.Sleep {
-    /// The time left on a countdown, in milliseconds.
-    var remaining: Int? {
-        if case .counting(let ms) = self { return ms }
-        return nil
     }
 }
 

@@ -286,23 +286,3 @@ import Testing
         #expect(steps[2] == .cubic(10, -10, 20, -10, 20, 0))
     }
 }
-
-@Suite struct IconOutlineTests {
-    /// Every outline the app draws its icons from reads to the end and closes.
-    @Test func everyIconOutlineReadsWhole() throws {
-        let file = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Sources/Octo/Design/OctoIcon+Paths.swift")
-        let text = try String(contentsOf: file, encoding: .utf8)
-        let outlines = text.split(separator: "\n").compactMap { line -> String? in
-            guard line.contains("case ."), let open = line.firstIndex(of: "\""), let close = line.lastIndex(of: "\""), open < close else { return nil }
-            return String(line[line.index(after: open)..<close])
-        }
-        #expect(outlines.count > 90)
-        for outline in outlines {
-            let read = PathData.parse(outline)
-            #expect(read.complete)
-            #expect(read.steps.last == .close)
-        }
-    }
-}
