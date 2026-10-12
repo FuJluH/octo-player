@@ -1,6 +1,6 @@
 import Foundation
 
-/// One colour found in a picture, with how many of its pixels it stands for.
+/// One color found in a picture, with how many of its pixels it stands for.
 public struct Swatch: Sendable, Equatable {
     /// `0xRRGGBB`.
     public let rgb: UInt32
@@ -49,7 +49,7 @@ public struct PaletteTarget: Sendable, Equatable {
     public static let all = [lightVibrant, vibrant, darkVibrant, lightMuted, muted, darkMuted]
 }
 
-/// The colours picked out of a picture.
+/// The colors picked out of a picture.
 public struct ArtworkSwatches: Sendable {
     public let swatches: [Swatch]
     public let dominant: Swatch?
@@ -60,8 +60,8 @@ public struct ArtworkSwatches: Sendable {
     public let muted: Swatch?
     public let darkMuted: Swatch?
 
-    /// Picks the colours out of `pixels` (`0xAARRGGBB`, alpha ignored), with up to
-    /// `maximumColors` colours found first.
+    /// Picks the colors out of `pixels` (`0xAARRGGBB`, alpha ignored), with up to
+    /// `maximumColors` colors found first.
     public init(pixels: [UInt32], maximumColors: Int = 16) {
         let found = quantize(pixels, maxColors: maximumColors)
         swatches = found
@@ -109,8 +109,8 @@ private func normalized(_ w: (saturation: Float, lightness: Float, population: F
             w.population > 0 ? w.population / sum : w.population)
 }
 
-/// The colours a song's artwork lends the player and the glow: four for the moving field, a
-/// base under everything, and the artwork's main colour as it came.
+/// The colors a song's artwork lends the player and the glow: four for the moving field, a
+/// base under everything, and the artwork's main color as it came.
 public struct ArtworkColors: Sendable, Equatable {
     /// `0xRRGGBB` each.
     public let mesh: [UInt32]
@@ -126,7 +126,7 @@ public struct ArtworkColors: Sendable, Equatable {
     /// Before artwork loads, or for music without any: quiet shades of the accent.
     public static let quiet = ArtworkColors(mesh: [0x2A3438, 0x1A1A1B, 0x3A4A50, 0x0A0B0F], base: 0x0C0C0D)
 
-    /// The colours for a picture's pixels; nil when it has neither a main nor a dark muted colour.
+    /// The colors for a picture's pixels; nil when it has neither a main nor a dark muted color.
     public static func from(pixels: [UInt32]) -> ArtworkColors? {
         from(ArtworkSwatches(pixels: pixels, maximumColors: 16))
     }
@@ -140,7 +140,7 @@ public struct ArtworkColors: Sendable, Equatable {
     }
 }
 
-/// The side of the square picture colours are read from, before it is cut down to about
+/// The side of the square picture colors are read from, before it is cut down to about
 /// 112 by 112 pixels.
 public let artworkSampleSize = 128
 /// The most pixels a picture is read at.
@@ -160,7 +160,7 @@ public func shiftLightness(_ rgb: UInt32, _ amount: Float) -> UInt32 {
     return paletteColor(hue: hsl.hue, saturation: hsl.saturation, lightness: min(1, max(0, hsl.lightness + amount)))
 }
 
-/// Two colours blended, `ratio` of the way to the second, each channel cut to a whole byte.
+/// Two colors blended, `ratio` of the way to the second, each channel cut to a whole byte.
 public func blendToward(_ a: UInt32, _ b: UInt32, _ ratio: Float) -> UInt32 {
     let inverse = 1 - ratio
     func channel(_ shift: UInt32) -> UInt32 {
@@ -195,7 +195,7 @@ public func paletteHsl(_ rgb: UInt32) -> (hue: Float, saturation: Float, lightne
     return (min(360, max(0, h)), min(1, max(0, s)), min(1, max(0, l)))
 }
 
-/// A colour from hue (degrees), saturation and lightness, as the picture reader makes it.
+/// A color from hue (degrees), saturation and lightness, as the picture reader makes it.
 public func paletteColor(hue: Float, saturation: Float, lightness: Float) -> UInt32 {
     let c = (1 - abs(2 * lightness - 1)) * saturation
     let m = lightness - 0.5 * c
@@ -214,7 +214,7 @@ public func paletteColor(hue: Float, saturation: Float, lightness: Float) -> UIn
     return byte(rgb.0) << 16 | byte(rgb.1) << 8 | byte(rgb.2)
 }
 
-// MARK: Finding the colours
+// MARK: Finding the colors
 
 private let wordWidth: UInt32 = 5
 private let wordMask: UInt32 = (1 << wordWidth) - 1
@@ -249,7 +249,7 @@ private func ignored(_ hsl: (hue: Float, saturation: Float, lightness: Float)) -
     return isBlack || isWhite || nearRedLine
 }
 
-/// A box of colours in the 5-bit cube, over a run of the sorted colour list.
+/// A box of colors in the 5-bit cube, over a run of the sorted color list.
 private final class ColorBox {
     var lower: Int
     var upper: Int

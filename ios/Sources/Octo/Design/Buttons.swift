@@ -93,7 +93,7 @@ struct AccentButton: View {
     }
 }
 
-/// The quieter button: lit glass with white words. `tint` lays a fifth of a colour into its film.
+/// The quieter button: lit glass with white words. `tint` lays a fifth of a color into its film.
 struct GlazeButton: View {
     let text: String
     var icon: OctoIcon?

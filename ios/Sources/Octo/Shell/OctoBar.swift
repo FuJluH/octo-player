@@ -15,7 +15,7 @@ struct OctoBar: View {
     /// The folded tray tapped.
     let showTabs: () -> Void
     let openPlayer: () -> Void
-    /// The glass's film, which can carry a trace of the song's colour.
+    /// The glass's film, which can carry a trace of the song's color.
     var film: Color = OctoColor.glazeFilm
     @Environment(Player.self) private var player
 

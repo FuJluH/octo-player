@@ -1,7 +1,7 @@
 import Foundation
 
-/// Four soft pools of colour that drift around the corners. Each point takes a blend of the
-/// four, the nearer pools counting for more, so the colours flow into each other with no edges.
+/// Four soft pools of color that drift around the corners. Each point takes a blend of the
+/// four, the nearer pools counting for more, so the colors flow into each other with no edges.
 /// A slight ripple bends the blend, and a touch of grain keeps smooth gradients from banding.
 public enum MeshField {
     /// Where the four pools are at `time` seconds, as fractions of the width and height.
@@ -20,7 +20,7 @@ public enum MeshField {
         return (v - v.rounded(.down) - 0.5) * 0.008
     }
 
-    /// The colour at (`x`, `y`) in a field `width` by `height`, from `colors` (four, each red,
+    /// The color at (`x`, `y`) in a field `width` by `height`, from `colors` (four, each red,
     /// green and blue from 0 to 1), with pools placed by `pools`.
     public static func color(x: Double, y: Double, width: Double, height: Double,
                              time: Double, pools: [(x: Double, y: Double)],

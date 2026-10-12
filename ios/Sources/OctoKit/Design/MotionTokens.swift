@@ -23,7 +23,7 @@ public enum OctoSprings {
     public static let smooth = SpringSpec(0.75, 1500)
     /// Settles without a bounce: a card changing size, like a menu turning to its next page.
     public static let calm = SpringSpec(0.9, 500)
-    /// A colour or a corner changing state: no bounce, quick.
+    /// A color or a corner changing state: no bounce, quick.
     public static let state = SpringSpec(1, 1500)
     /// Something entering, leaving or flying to a new place: no bounce, medium.
     public static let move = SpringSpec(1, 400)
@@ -37,7 +37,7 @@ public enum OctoDuration {
     public static let hover = 140
     /// One icon or pop-up swapping for another.
     public static let swap = 160
-    /// A fill changing colour.
+    /// A fill changing color.
     public static let fill = 180
     /// A card or row changing, or a ripple of light.
     public static let card = 200
@@ -143,7 +143,7 @@ public struct MotionScale: Sendable, Equatable {
     public static let full = MotionScale()
 
     /// Reduced motion: nothing travels, grows or shrinks, and what still changes (a fade, a
-    /// colour) does so in half the time.
+    /// color) does so in half the time.
     public static let reduced = MotionScale(duration: 0.5, distance: 0)
 
     /// The scale from the phone's animation speed and Octo's own Reduce motion. Only the

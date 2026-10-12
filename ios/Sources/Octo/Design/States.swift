@@ -13,7 +13,7 @@ enum LoadState<Value> {
     }
 }
 
-/// Runs a read and turns any failure into words for the screen. A read that was cancelled is
+/// Runs a read and turns any failure into words for the screen. A read that was canceled is
 /// not a failure: it gives nil, and the page keeps what it had.
 func load<Value>(_ read: () async throws -> Value) async -> LoadState<Value>? {
     do {

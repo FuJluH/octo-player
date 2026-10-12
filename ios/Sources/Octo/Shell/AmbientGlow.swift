@@ -76,8 +76,8 @@ private struct PageArtworkMark: ViewModifier {
     }
 }
 
-/// The colours picked out of each artwork, the same for the player and the glow: the last 32
-/// kept. Quiet shades of the accent stand in for no artwork, or one with no usable colour.
+/// The colors picked out of each artwork, the same for the player and the glow: the last 32
+/// kept. Quiet shades of the accent stand in for no artwork, or one with no usable color.
 @MainActor
 @Observable
 final class ArtworkColorStore {
@@ -88,7 +88,7 @@ final class ArtworkColorStore {
 
     init(session: Session) { self.session = session }
 
-    /// The colours for a cover, once they are known; nil while they are being read.
+    /// The colors for a cover, once they are known; nil while they are being read.
     func colors(for coverId: String?) -> ArtworkColors? {
         guard let coverId else { return .quiet }
         if let known = colors[coverId] { return known }
@@ -114,7 +114,7 @@ final class ArtworkColorStore {
         while order.count > 32 { colors[order.removeFirst()] = nil }
     }
 
-    /// Reads a cover at 128 pixels, cuts it down to about 112 by 112, and picks its colours.
+    /// Reads a cover at 128 pixels, cuts it down to about 112 by 112, and picks its colors.
     nonisolated private static func extract(_ image: UIImage) -> ArtworkColors? {
         guard let source = image.cgImage else { return nil }
         let side = artworkSampleSize
@@ -148,7 +148,7 @@ final class ArtworkColorStore {
     }
 }
 
-/// The glow behind every page: the artwork's colours, faint and dark, above the plain
+/// The glow behind every page: the artwork's colors, faint and dark, above the plain
 /// background and under the page. It drifts only while music plays, the app is in view and
 /// nothing covers it (`awake`), and never with Reduce motion.
 struct AmbientBackdrop: View {
@@ -173,7 +173,7 @@ struct AmbientBackdrop: View {
         case .page(let cover): .some(cover)
         }
         let found = artwork.flatMap { store.colors(for: $0) }
-        // Kept through a turn to none, so the old colours fade out as they are.
+        // Kept through a turn to none, so the old colors fade out as they are.
         let colors = found ?? held
         let strength = source == .none || colors == nil ? 0 : ambientAlpha(prefs.strength)
         let moving = awake && player.isPlaying && !motion.still && phase == .active && strength > 0
@@ -185,7 +185,7 @@ struct AmbientBackdrop: View {
     }
 }
 
-/// The glow's four colours and strength, as one value that can ease from one song to the next.
+/// The glow's four colors and strength, as one value that can ease from one song to the next.
 struct AmbientPaint: VectorArithmetic {
     var values: [Double]
 
@@ -218,7 +218,7 @@ struct AmbientPaint: VectorArithmetic {
     private var padded: [Double] { values.count >= 13 ? values : values + Array(repeating: 0, count: 13 - values.count) }
 }
 
-/// The colour field itself: the player's drifting mesh, at a fifth of its pace and redrawn ten
+/// The color field itself: the player's drifting mesh, at a fifth of its pace and redrawn ten
 /// times a second, faded toward the bottom so lists and the bar sit on its quietest part.
 private struct AmbientField: View, Animatable {
     var paint: AmbientPaint
@@ -310,7 +310,7 @@ struct AmbientPreview: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text(player.current?.title ?? "Nothing playing")
                     .font(.octoBodySmall).foregroundStyle(.white).lineLimit(1)
-                Text(player.current != nil ? (player.current?.artist ?? "") : "The glow takes its colours from the song on now.")
+                Text(player.current != nil ? (player.current?.artist ?? "") : "The glow takes its colors from the song on now.")
                     .font(.octoCaption).foregroundStyle(OctoColor.textSecondary).lineLimit(1)
             }
             .padding(.horizontal, 16)
@@ -321,7 +321,7 @@ struct AmbientPreview: View {
 }
 
 /// The bar's film: the plain dim, or with the bar tint on and a song loaded, a trace of the
-/// song's main colour laid over it. It changes over 800 ms.
+/// song's main color laid over it. It changes over 800 ms.
 struct BarFilm {
     @MainActor
     static func color(settings: AmbientSettings, store: ArtworkColorStore, player: Player) -> Color {

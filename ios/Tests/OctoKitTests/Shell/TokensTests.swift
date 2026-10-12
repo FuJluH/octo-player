@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import OctoKit
 
-/// Colours keep each channel to 1/255.
+/// Colors keep each channel to 1/255.
 private let byte = 1.0 / 255.0 + 1e-4
 
 @Suite struct TokensTests {
@@ -60,9 +60,9 @@ private let byte = 1.0 / 255.0 + 1e-4
     }
 
     @Test func theSwitchFromWhiteToBlackWordsIsAtAbout58Percent() {
-        let greys = (0...255).map { RGBA($0, $0, $0) }
-        let below = greys.last { perceivedLightness($0) <= lightFillThreshold }!
-        let above = greys.first { perceivedLightness($0) > lightFillThreshold }!
+        let grays = (0...255).map { RGBA($0, $0, $0) }
+        let below = grays.last { perceivedLightness($0) <= lightFillThreshold }!
+        let above = grays.first { perceivedLightness($0) > lightFillThreshold }!
         #expect(contentColorFor(below) == .white)
         #expect(contentColorFor(above) == .black)
         #expect(abs(perceivedLightness(above) - 0.58) < 0.01)
@@ -74,9 +74,9 @@ private let byte = 1.0 / 255.0 + 1e-4
         #expect(abs(accent.red * 0.4 - OctoPalette.accentSelected.red) < byte)
         #expect(abs(accent.green * 0.4 - OctoPalette.accentSelected.green) < byte)
         #expect(abs(accent.blue * 0.4 - OctoPalette.accentSelected.blue) < byte)
-        let grey = 30.0 / 255.0
-        #expect(abs(grey + (accent.red - grey) * 0.1 - OctoPalette.accentTonal.red) < byte)
-        #expect(abs(grey + (accent.blue - grey) * 0.1 - OctoPalette.accentTonal.blue) < byte)
+        let gray = 30.0 / 255.0
+        #expect(abs(gray + (accent.red - gray) * 0.1 - OctoPalette.accentTonal.red) < byte)
+        #expect(abs(gray + (accent.blue - gray) * 0.1 - OctoPalette.accentTonal.blue) < byte)
         #expect(OctoPalette.focusRing == accent.opacity(0.7))
         #expect(OctoPalette.menuPress == OctoPalette.accentSelected.opacity(0.55))
         #expect(OctoPalette.destructive == OctoPalette.signalRed.opacity(0.85))

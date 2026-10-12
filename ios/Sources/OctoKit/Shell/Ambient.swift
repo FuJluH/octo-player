@@ -1,6 +1,6 @@
 import Foundation
 
-/// How strongly the artwork's colours show behind the pages.
+/// How strongly the artwork's colors show behind the pages.
 public enum AmbientStrength: String, Codable, CaseIterable, Sendable {
     case off = "Off"
     case subtle = "Subtle"
@@ -13,12 +13,12 @@ public enum AmbientStrength: String, Codable, CaseIterable, Sendable {
     }
 }
 
-/// The parts of the app that can wear the artwork's colours.
+/// The parts of the app that can wear the artwork's colors.
 public enum AmbientArea: CaseIterable, Sendable {
     case home, library, search, settings
 }
 
-/// Where the ambient colour shows, and how strongly. Subtle everywhere by default.
+/// Where the ambient color shows, and how strongly. Subtle everywhere by default.
 public struct AmbientPrefs: Codable, Equatable, Sendable {
     public var strength: AmbientStrength = .subtle
     public var home = true
@@ -68,7 +68,7 @@ public struct AmbientPrefs: Codable, Equatable, Sendable {
     public var tintsBar: Bool { strength != .off && bar }
 }
 
-/// How much of the colour shows over the app's near-black background.
+/// How much of the color shows over the app's near-black background.
 public func ambientAlpha(_ strength: AmbientStrength) -> Double {
     switch strength {
     case .off: 0
@@ -77,7 +77,7 @@ public func ambientAlpha(_ strength: AmbientStrength) -> Double {
     }
 }
 
-/// How much of the colour tints the bar's glass: about half the page's, so the glass stays glass.
+/// How much of the color tints the bar's glass: about half the page's, so the glass stays glass.
 public func barTintAlpha(_ strength: AmbientStrength) -> Double {
     switch strength {
     case .off: 0
@@ -86,21 +86,21 @@ public func barTintAlpha(_ strength: AmbientStrength) -> Double {
     }
 }
 
-/// Artwork colours are held to this lightness and saturation before they glow.
+/// Artwork colors are held to this lightness and saturation before they glow.
 public let ambientMaxLightness = 0.5
 public let ambientMaxSaturation = 0.55
 
 /// The page background the glow sits on, as `0xAARRGGBB`.
 public let ambientBase: UInt32 = 0xFF0C0C0D
 
-/// An artwork colour made safe to glow: the same hue, no brighter and no more saturated than
+/// An artwork color made safe to glow: the same hue, no brighter and no more saturated than
 /// the limits above.
 public func ambientColor(_ argb: UInt32) -> UInt32 {
     let hsl = toHsl(argb)
     return fromHsl(hsl.hue, min(hsl.saturation, Float(ambientMaxSaturation)), min(hsl.lightness, Float(ambientMaxLightness)))
 }
 
-/// A colour laid over another at some opacity, as the screen draws it.
+/// A color laid over another at some opacity, as the screen draws it.
 public func composite(_ argb: UInt32, alpha: Double, over: UInt32 = ambientBase) -> UInt32 {
     func channel(_ shift: UInt32) -> UInt32 {
         let top = Double((argb >> shift) & 0xFF)
@@ -119,14 +119,14 @@ public func luminance(_ argb: UInt32) -> Double {
     return 0.2126 * linear(16) + 0.7152 * linear(8) + 0.0722 * linear(0)
 }
 
-/// The WCAG contrast ratio between two colours, from 1 to 21.
+/// The WCAG contrast ratio between two colors, from 1 to 21.
 public func contrast(_ a: UInt32, _ b: UInt32) -> Double {
     let la = luminance(a)
     let lb = luminance(b)
     return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
 }
 
-/// A colour as hue (degrees), saturation and lightness, the last two from 0 to 1.
+/// A color as hue (degrees), saturation and lightness, the last two from 0 to 1.
 public func toHsl(_ argb: UInt32) -> (hue: Float, saturation: Float, lightness: Float) {
     let r = Float((argb >> 16) & 0xFF) / 255
     let g = Float((argb >> 8) & 0xFF) / 255
@@ -148,7 +148,7 @@ public func toHsl(_ argb: UInt32) -> (hue: Float, saturation: Float, lightness: 
     return (sector * 60, min(1, max(0, saturation)), lightness)
 }
 
-/// A colour from hue (degrees), saturation and lightness.
+/// A color from hue (degrees), saturation and lightness.
 public func fromHsl(_ hue: Float, _ saturation: Float, _ lightness: Float) -> UInt32 {
     let chroma = (1 - abs(2 * lightness - 1)) * saturation
     let x = chroma * (1 - abs(positiveMod(hue / 60, 2) - 1))
@@ -203,7 +203,7 @@ public func hasOwnArtwork(_ page: AmbientPage?) -> Bool {
     page == .album || page == .artist || page == .onlineAlbum || page == .onlineArtist
 }
 
-/// Which colours a page glows with.
+/// Which colors a page glows with.
 public enum AmbientSource: Sendable, Equatable {
     /// The plain background.
     case none
@@ -222,7 +222,7 @@ public func ambientSource(prefs: AmbientPrefs?, page: AmbientPage?, pageArtwork:
     return hasTrack ? .playing(playingArtwork) : .none
 }
 
-/// The bar's glass film: a trace of the song's first colour, made safe to glow, at the bar
+/// The bar's glass film: a trace of the song's first color, made safe to glow, at the bar
 /// tint's opacity, laid over the glass's usual dim film.
 public func barFilm(_ firstMeshColor: UInt32, strength: AmbientStrength) -> RGBA {
     let tint = RGBA(argb: ambientColor(firstMeshColor)).opacity(barTintAlpha(strength))
@@ -235,7 +235,7 @@ public func barFilm(prefs: AmbientPrefs?, hasTrack: Bool, firstMeshColor: UInt32
     return barFilm(firstMeshColor, strength: prefs.strength)
 }
 
-/// One translucent colour over another, as a single colour.
+/// One translucent color over another, as a single color.
 public func compositeOver(_ top: RGBA, _ bottom: RGBA) -> RGBA {
     let alpha = top.alpha + bottom.alpha * (1 - top.alpha)
     guard alpha > 0 else { return .clear }
@@ -246,7 +246,7 @@ public func compositeOver(_ top: RGBA, _ bottom: RGBA) -> RGBA {
 
 /// The glow's timing.
 public enum AmbientTiming {
-    /// Colour and strength changes cross over this long, in milliseconds.
+    /// Color and strength changes cross over this long, in milliseconds.
     public static let crossMs = 800
     /// The glow drifts at this share of the player's pace.
     public static let pace = 0.2

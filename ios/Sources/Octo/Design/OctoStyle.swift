@@ -3,7 +3,7 @@ import SwiftUI
 import UIKit
 
 /// Winters' Glass, the palette every Octo app shares. Dark only. On iPhone the glass itself is
-/// Apple's Liquid Glass; these colours are what sits under and in it.
+/// Apple's Liquid Glass; these colors are what sits under and in it.
 enum OctoColor {
     static let background = Color(OctoPalette.background)
     /// A low-alpha wash that tints glass panels.
@@ -48,7 +48,7 @@ enum OctoColor {
     static let lavender = Color(hex: 0x9C8AF0)
 }
 
-/// White at falling opacities, for what has no Octo colour of its own.
+/// White at falling opacities, for what has no Octo color of its own.
 enum OctoInkColor {
     static let primary = Color(OctoInk.primary)
     static let secondary = Color(OctoInk.secondary)

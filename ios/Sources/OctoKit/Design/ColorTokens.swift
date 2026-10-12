@@ -1,6 +1,6 @@
 import Foundation
 
-/// A colour as sRGB channels and an opacity, each from 0 to 1.
+/// A color as sRGB channels and an opacity, each from 0 to 1.
 public struct RGBA: Sendable, Hashable {
     public var red: Double
     public var green: Double
@@ -14,18 +14,18 @@ public struct RGBA: Sendable, Hashable {
         self.alpha = alpha
     }
 
-    /// A colour from `0xRRGGBB`.
+    /// A color from `0xRRGGBB`.
     public init(hex: UInt32, alpha: Double = 1) {
         self.init(red: Double((hex >> 16) & 0xFF) / 255, green: Double((hex >> 8) & 0xFF) / 255,
                   blue: Double(hex & 0xFF) / 255, alpha: alpha)
     }
 
-    /// A colour from 0 to 255 channels.
+    /// A color from 0 to 255 channels.
     public init(_ r: Int, _ g: Int, _ b: Int, alpha: Double = 1) {
         self.init(red: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255, alpha: alpha)
     }
 
-    /// A colour from `0xAARRGGBB`.
+    /// A color from `0xAARRGGBB`.
     public init(argb: UInt32) {
         self.init(hex: argb & 0xFFFFFF, alpha: Double((argb >> 24) & 0xFF) / 255)
     }
@@ -34,10 +34,10 @@ public struct RGBA: Sendable, Hashable {
     public static let black = RGBA(red: 0, green: 0, blue: 0)
     public static let clear = RGBA(red: 0, green: 0, blue: 0, alpha: 0)
 
-    /// The same colour at another opacity.
+    /// The same color at another opacity.
     public func opacity(_ alpha: Double) -> RGBA { RGBA(red: red, green: green, blue: blue, alpha: alpha) }
 
-    /// The colour as `0xRRGGBB`, each channel rounded to a byte.
+    /// The color as `0xRRGGBB`, each channel rounded to a byte.
     public var hex: UInt32 {
         func byte(_ v: Double) -> UInt32 { UInt32(max(0, min(255, (v * 255).rounded()))) }
         return byte(red) << 16 | byte(green) << 8 | byte(blue)
@@ -50,7 +50,7 @@ public struct RGBA: Sendable, Hashable {
     }
 }
 
-/// Mixes two colours channel by channel, the way a stylesheet does. The result is opaque.
+/// Mixes two colors channel by channel, the way a stylesheet does. The result is opaque.
 public func mix(_ from: RGBA, _ to: RGBA, _ amount: Double) -> RGBA {
     RGBA(red: from.red + (to.red - from.red) * amount,
          green: from.green + (to.green - from.green) * amount,
@@ -65,7 +65,7 @@ public enum OctoPalette {
     /// The solid surface under cards and glazed controls.
     public static let backgroundTertiary = RGBA(hex: 0x1A1A1B)
     public static let accent = RGBA(hex: 0x97B1B9)
-    /// A raised surface for rows to read and change: the solid grey with a touch of the accent.
+    /// A raised surface for rows to read and change: the solid gray with a touch of the accent.
     public static let surfaceRaised = mix(RGBA(hex: 0x1A1A1B), RGBA(hex: 0x97B1B9), 0.06)
     public static let accentHover = RGBA(hex: 0xADC4CC)
     public static let textPrimary = RGBA.white
@@ -73,7 +73,7 @@ public enum OctoPalette {
     /// The quietest words: four fifths of the accent, 5.8:1 on the page.
     public static let textMuted = accent.opacity(0.8)
     public static let error = RGBA(hex: 0xEF4444)
-    /// A standard button's resting fill: a tenth of the accent in a dark grey.
+    /// A standard button's resting fill: a tenth of the accent in a dark gray.
     public static let accentTonal = mix(RGBA(hex: 0x1E1E1E), accent, 0.10)
     /// A selected list row: the accent 40% of the way out of black.
     public static let accentSelected = mix(.black, accent, 0.40)
@@ -100,7 +100,7 @@ public enum OctoPalette {
     public static let glazeSelected = RGBA.black.opacity(0.72)
 }
 
-/// White at falling opacities, for what has no Octo colour of its own.
+/// White at falling opacities, for what has no Octo color of its own.
 public enum OctoInk {
     public static let primaryAlpha = 0.85
     public static let secondaryAlpha = 0.55
@@ -150,7 +150,7 @@ public enum MenuRowHeight {
     public static let touch = 40.0
 }
 
-/// How light a colour looks, from 0 (black) to 1 (white): CIE L* from its luminance.
+/// How light a color looks, from 0 (black) to 1 (white): CIE L* from its luminance.
 public func perceivedLightness(_ color: RGBA) -> Double {
     let y = color.luminance
     let l = y > 216.0 / 24389.0 ? 116 * cbrt(y) - 16 : y * 24389.0 / 27.0
@@ -160,7 +160,7 @@ public func perceivedLightness(_ color: RGBA) -> Double {
 /// Where words switch from white to black on a fill.
 public let lightFillThreshold = 0.58
 
-/// The colour words take on a fill: black on a light one, white on a dark one.
+/// The color words take on a fill: black on a light one, white on a dark one.
 public func contentColorFor(_ fill: RGBA) -> RGBA {
     perceivedLightness(fill) > lightFillThreshold ? .black : .white
 }

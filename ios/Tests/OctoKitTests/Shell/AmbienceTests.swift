@@ -6,7 +6,7 @@ import Testing
     private let white: UInt32 = 0xFFFF_FFFF
     private let accent: UInt32 = 0xFF97_B1B9
 
-    /// Every colour on a 16-step grid of each channel: 4,096 colours, neon included.
+    /// Every color on a 16-step grid of each channel: 4,096 colors, neon included.
     private var everyColor: [UInt32] {
         var out: [UInt32] = []
         for r in stride(from: 0, through: 255, by: 17) {
