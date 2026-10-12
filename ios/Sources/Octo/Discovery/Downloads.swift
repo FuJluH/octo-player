@@ -68,6 +68,9 @@ final class Downloads {
 
     func phase(_ songId: String) -> DownloadPhase { phases[songId] ?? .none }
 
+    /// Called after a song or an album was asked for, so the server downloads list looks now.
+    @ObservationIgnored var onAsk: (@MainActor () -> Void)?
+
     /// The finds whose download has arrived in the library.
     var adopted: Set<String> { Set(phases.filter { $0.value == .done }.keys) }
 
@@ -118,6 +121,7 @@ final class Downloads {
         keep(song, source: source, requestedAt: nowMs())
         SearchModel.hintAdded()
         arrivals.askedSong(song.id, title: song.title)
+        onAsk?()
         tracker.retry(song.id)
         follow()
         return true
@@ -136,6 +140,7 @@ final class Downloads {
         let finds = songs.filter(\.isExternal)
         for song in finds { keep(song, source: source, requestedAt: now) }
         SearchModel.hintAdded()
+        onAsk?()
         let coming = finds.filter { state($0.id) != .done }
         arrivals.askedAlbum(title.isEmpty ? (coming.first?.album ?? "") : title, findIds: coming.map(\.id))
         for song in coming { tracker.retry(song.id) }

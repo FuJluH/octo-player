@@ -43,6 +43,7 @@ struct MainShell: View {
     @Environment(Router.self) private var router
     @Environment(Session.self) private var session
     @Environment(Downloads.self) private var downloads
+    @Environment(ServerDownloads.self) private var serverDownloads
     @Environment(\.scenePhase) private var scenePhase
     @SceneStorage("tab") private var tab: AppTab = .home
     @AppStorage("bar.player") private var playerMode = false
@@ -65,6 +66,13 @@ struct MainShell: View {
                 }
             }
             .animation(.easeOut(duration: 0.22).delay(0.04), value: tab)
+
+            DownloadsPill()
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.trailing, 20)
+                .padding(.bottom, OctoBar.bottomGap + OctoBar.height + 10)
+                .opacity(playerOpen ? 0 : 1)
+                .animation(.easeInOut(duration: 0.3), value: playerOpen)
 
             VStack(spacing: 10) {
                 if let toast = router.toast {
@@ -111,12 +119,32 @@ struct MainShell: View {
         }
         .task(id: session.activeId) { await downloads.resume() }
         .onChange(of: session.client == nil) { _, _ in Task { await downloads.resume() } }
-        .onChange(of: scenePhase, initial: true) { _, phase in downloads.setForeground(phase == .active) }
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            downloads.setForeground(phase == .active)
+            serverDownloads.setForeground(phase == .active)
+        }
+        .onChange(of: serverDownloadsKey, initial: true) {
+            serverDownloads.sessionChanged()
+        }
+        .onChange(of: router.serverDownloads) { _, page in
+            guard let page else { return }
+            router.serverDownloads = nil
+            serverDownloads.show(page)
+        }
+        .sheet(isPresented: Binding(get: { serverDownloads.view != nil }, set: { if !$0 { serverDownloads.close() } })) {
+            ServerDownloadsSheet()
+        }
         .fullScreenCover(item: $router.signIn) { form in
             SignInView(form: form, session: session) { notice in
                 if let notice { router.show(notice, done: true) }
             }
         }
+    }
+
+    /// The server in use as the downloads sheet follows it: which, signed in or not, and what it
+    /// lists.
+    private var serverDownloadsKey: String {
+        "\(session.activeId ?? "")|\(session.client != nil)|\(session.profile?.extensions.joined(separator: ",") ?? "-")"
     }
 
     @ViewBuilder

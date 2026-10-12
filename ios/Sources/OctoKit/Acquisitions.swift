@@ -49,10 +49,15 @@ public struct Acquisition: Decodable, Sendable, Equatable {
     public var kind: String?
     public var quality: String?
     public var coverArt: String?
+    /// The peer the copy comes from, and how many lines its log has.
+    public var peer: String?
+    public var logLines: Int = 0
+    /// The log, oldest first; only getAcquisition sends it.
+    public var event: [AcquisitionEvent] = []
 
     enum CodingKeys: String, CodingKey {
         case id, artist, title, album, state, progress, bytesDone, bytesTotal, source, startedAt, updatedAt, error
-        case libraryId, ahead, note, key, kind, quality, coverArt
+        case libraryId, ahead, note, key, kind, quality, coverArt, peer, logLines, event
     }
 
     public init(id: String = "", artist: String = "", title: String = "", album: String? = nil, state: String = "",
@@ -102,6 +107,9 @@ public struct Acquisition: Decodable, Sendable, Equatable {
         kind = c.string(.kind)
         quality = c.string(.quality)
         coverArt = c.string(.coverArt)
+        peer = c.string(.peer)
+        logLines = c.int(.logLines) ?? 0
+        event = (try? c.decodeIfPresent([AcquisitionEvent].self, forKey: .event)) ?? []
     }
 
     public var stage: AcquisitionStage { .of(state) }
