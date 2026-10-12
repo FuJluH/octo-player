@@ -21,10 +21,13 @@ import SwiftUI
 ///   `popup` a glass menu with a second page; `menu:page` opens it on its second page
 /// - `reducemotion:on`, `reducemotion:off` sets Octo's own Reduce motion
 /// - `glow:off`, `glow:subtle`, `glow:rich` sets the artwork's glow
+/// - `select:N` picks N songs of the queue (or of a sample list), showing the selection bar;
+///   `unselect` ends the picking
 @MainActor
 enum Drive {
     static func run(session: Session, player: Player, router: Router, prompts: Prompts, motion: MotionSettings,
-                    overlays: Overlays? = nil, ambience: AmbientSettings? = nil) async {
+                    overlays: Overlays? = nil, ambience: AmbientSettings? = nil,
+                    selectionBar: SelectionBarState? = nil) async {
         guard let script = ProcessInfo.processInfo.environment["OCTO_DRIVE"], !script.isEmpty else { return }
         for _ in 0..<40 where session.client == nil { try? await Task.sleep(for: .milliseconds(250)) }
         try? await Task.sleep(for: .seconds(1))
@@ -57,6 +60,23 @@ enum Drive {
             case "popup", "menu":
                 if let overlays { DriveSamples.menu(overlays, router: router, deeper: value == "page") }
             case "reducemotion": motion.reduceMotion = value != "off"
+            case "select":
+                guard let selectionBar else { continue }
+                let pool = player.queue.isEmpty ? (1...6).map { Song(id: "sample-\($0)", title: "Song \($0)") } : player.queue
+                let selection = SongSelection()
+                let target = SelectionTarget(selection: selection)
+                target.list = pool.map { Pickable($0) }
+                selectionBar.attach(target)
+                for song in pool.prefix(max(1, Int(value) ?? 2)) {
+                    if selection.active { selection.toggle(song.id) } else { selection.start(song.id) }
+                }
+                DriveSamples.selections.append(target)
+            case "unselect":
+                for target in DriveSamples.selections {
+                    target.selection.clear()
+                    selectionBar?.detach(target)
+                }
+                DriveSamples.selections = []
             case "glow":
                 if let strength = AmbientStrength(rawValue: value.capitalized) { ambience?.prefs.strength = strength }
             case "list":
@@ -84,6 +104,9 @@ enum Drive {
 /// The shell's sheet and menu as the drive steps show them.
 @MainActor
 enum DriveSamples {
+    /// The picks the drive steps made, so `unselect` can end them.
+    static var selections: [SelectionTarget] = []
+
     static func sheet(_ overlays: Overlays, router: Router) {
         let id = UUID()
         overlays.showSheet(id, tall: false, scrolls: true, content: AnyView(

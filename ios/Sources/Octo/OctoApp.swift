@@ -14,6 +14,8 @@ struct OctoApp: App {
     @State private var motion = MotionSettings()
     @State private var ambience = AmbientSettings()
     @State private var pageArtworks = PageArtworks()
+    @State private var selectionBar = SelectionBarState()
+    @State private var selectionActions = SelectionActions()
     @State private var artworkColors: ArtworkColorStore
 
     init() {
@@ -45,6 +47,8 @@ struct OctoApp: App {
                 .environment(ambience)
                 .environment(pageArtworks)
                 .environment(artworkColors)
+                .environment(selectionBar)
+                .environment(selectionActions)
                 .motionScaled(motion)
                 .recordsPresses(presses)
                 .onAppear { prompts.spots = presses }
@@ -52,7 +56,7 @@ struct OctoApp: App {
                 .preferredColorScheme(.dark)
                 #if DEBUG
                 .task { await Drive.run(session: session, player: player, router: router, prompts: prompts, motion: motion,
-                                         overlays: overlays, ambience: ambience) }
+                                         overlays: overlays, ambience: ambience, selectionBar: selectionBar) }
                 #endif
         }
     }

@@ -135,6 +135,8 @@ struct MainShell: View {
                     .zIndex(1)
             }
 
+            // Over the bar and even the player, under the sheets and menus.
+            SelectionBarHost().zIndex(1.5)
             SheetsLayer().zIndex(2)
             ToastHost().zIndex(3)
             PopupsLayer().zIndex(4)
