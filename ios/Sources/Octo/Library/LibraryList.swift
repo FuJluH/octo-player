@@ -78,6 +78,57 @@ private struct SongSwipes: ViewModifier {
     }
 }
 
+// MARK: A new order
+
+/// Where a list's first row sits on screen, by its top edge.
+@MainActor
+@Observable
+final class FirstRowWatch {
+    var y: CGFloat = .greatestFiniteMagnitude
+}
+
+extension View {
+    /// When the list shows up in a new `order`, it starts again from its first row (marked with
+    /// `FirstRowMark`) by `scroll`, rather than following the row that was at the top to its new
+    /// place. A page scrolled only within its header stays put.
+    func topOnNewOrder<Order: Equatable>(_ order: Order?, scroll: @escaping () -> Void) -> some View {
+        modifier(TopOnNewOrder(order: order, scroll: scroll))
+    }
+}
+
+private struct TopOnNewOrder<Order: Equatable>: ViewModifier {
+    let order: Order?
+    let scroll: () -> Void
+    @State private var watch = FirstRowWatch()
+    @State private var shown: Order?
+    @Environment(TitleWatch.self) private var title: TitleWatch?
+
+    func body(content: Content) -> some View {
+        content
+            .environment(watch)
+            .onChange(of: order, initial: true) { _, now in
+                guard let now else { return }
+                defer { shown = now }
+                guard let before = shown, before != now else { return }
+                if watch.y <= (title?.top ?? 0) + 1 { scroll() }
+            }
+    }
+}
+
+/// Marks the top of a list's first row, for `topOnNewOrder`. Once it has scrolled out of a lazy
+/// list it counts as above the top.
+struct FirstRowMark: View {
+    @Environment(FirstRowWatch.self) private var watch: FirstRowWatch?
+
+    var body: some View {
+        Color.clear
+            .frame(height: 0)
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { watch?.y = $0 }
+            .onDisappear { watch?.y = -.greatestFiniteMagnitude }
+            .accessibilityHidden(true)
+    }
+}
+
 // MARK: Inline title
 
 /// Where a page's big title is on screen, against the page's top.

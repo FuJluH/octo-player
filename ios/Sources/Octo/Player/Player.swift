@@ -42,6 +42,10 @@ final class Player {
     private(set) var playedSlots: [QueueSlot] = []
     /// True until the queue kept from last time is back.
     private(set) var restoring = true
+    /// Counts the moments the position jumps or changes pace: a seek, a new song or the same one
+    /// again, play or pause, a new speed. Views that run their own clock off the position take a
+    /// fresh reading on each.
+    private(set) var timeEvents = 0
 
     typealias RepeatMode = OctoKit.RepeatMode
 
@@ -77,6 +81,8 @@ final class Player {
     @ObservationIgnored let data: DataServices?
     @ObservationIgnored let engine: PlaybackEngine
     @ObservationIgnored let lengths = RealLengths()
+    /// The real lengths learned by playing, by song id, for rows to show.
+    private(set) var learnedLengths: [String: Int] = [:]
     @ObservationIgnored let serverQueue: ServerQueueSync
     @ObservationIgnored var playable: PlayableItems { PlayableItems(session: session, data: data) }
     /// Shows a line at the bottom of the screen.
@@ -136,9 +142,10 @@ final class Player {
             },
             isPlaying: { [weak self] in self?.engine.isPlaying ?? false },
             clock: clock)
-        sleepTimer = OctoKit.SleepTimer(clock: clock)
+        sleepTimer = OctoKit.SleepTimer(clock: SleepClock())
         sleepTimer.attach(engine)
         sleepTimer.onChange = { [weak self] state in self?.sleepState = state }
+        lengths.onChange = { [weak self] values in Task { @MainActor in self?.learnedLengths = values } }
         nowPlaying = NowPlayingCenter(player: self)
         CarLink.player = self
         headset = HeadsetWatch(player: self)
@@ -229,7 +236,10 @@ final class Player {
             return
         }
         let items = await playable.items(ids: ids, source: .none).compactMap { $0 }
-        guard !items.isEmpty else { return }
+        guard !items.isEmpty else {
+            engine.clear()
+            return
+        }
         load(items, startIndex: 0, shuffled: shuffled)
     }
 
@@ -268,7 +278,11 @@ final class Player {
             return
         }
         let ids = await LibraryRadio(data: data).songsLike([seed], count: radioLength, exclude: [seed.id])
-        let found = await playable.items(ids: [seed.id] + ids, source: .played(nil))
+        guard !ids.isEmpty else {
+            announce("No similar songs found")
+            return
+        }
+        let found = await playable.items(ids: [seed.id] + ids, source: .played("\(seed.title) radio"))
         let items = found.compactMap { $0 }
         guard !items.isEmpty else { return }
         radioSeed = song
@@ -354,6 +368,7 @@ final class Player {
         elapsed = max(0, seconds)
         tickedAt = Date()
         engine.seek(toMs: Int(max(0, seconds) * 1000))
+        timeEvents += 1
         nowPlaying.publish()
     }
 
@@ -622,6 +637,7 @@ final class Player {
     }
 
     private func songChanged(_ reason: SongChange) {
+        timeEvents += 1
         publishQueue()
         publishPosition()
         publishQuality()
@@ -637,6 +653,7 @@ final class Player {
 
     private func isPlayingChanged(_ playing: Bool) {
         isPlaying = playing
+        timeEvents += 1
         tracker.playingChanged(playing)
         publishState()
         publishPosition()
@@ -819,6 +836,7 @@ final class Player {
         if pace != lastPace {
             lastPace = pace
             engine.pace = pace
+            timeEvents += 1
         }
         if prefs.skipSilence != lastSkipSilence {
             lastSkipSilence = prefs.skipSilence

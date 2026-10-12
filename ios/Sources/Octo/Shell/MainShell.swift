@@ -38,10 +38,11 @@ enum Route: Hashable, Codable {
     case onlineAlbum(id: String, name: String)
     case onlineArtist(id: String, name: String)
     case charts
-    /// A live list, and its editor (a new one when `id` is nil, begun from a page's filters in
-    /// `start`, the query as saved).
+    /// A live list, and its editor (a new one when `id` is nil).
     case liveList(id: String)
-    case liveListEditor(id: String?, start: String? = nil)
+    case liveListEditor(id: String?)
+    /// A new live list's editor, started from a page's filters (a saved query).
+    case liveListFrom(query: String)
     /// The Sound page: equalizer, loudness, balance and headphone correction.
     case sound
 }
@@ -63,7 +64,7 @@ extension Route {
         case .onlineArtist: .onlineArtist
         case .charts: .charts
         case .liveList: .liveList
-        case .liveListEditor: .liveListEdit
+        case .liveListEditor, .liveListFrom: .liveListEdit
         }
     }
 }
@@ -178,13 +179,13 @@ struct MainShell: View {
         .environment(\.nowMark, NowMark(songId: player.current?.id, isPlaying: player.isPlaying))
         .onChange(of: router.route) { _, route in
             guard let route else { return }
-            closePlayer()
+            leavePlayer()
             paths[tab, default: NavigationPath()].append(route)
             router.routeTaken()
         }
         .onChange(of: router.accountRoute) { _, route in
             guard let route else { return }
-            closePlayer()
+            leavePlayer()
             let switching = tab != .settings
             if switching { select(.settings) }
             // A list shared in while Import is already on top stays on that page.
@@ -208,7 +209,7 @@ struct MainShell: View {
             switch request {
             case .tab(let item): select(item)
             case .openPlayer, .lyrics: openPlayer()
-            case .closePlayer: closePlayer()
+            case .closePlayer: leavePlayer()
             case .barPlayer: if hasTrack { barPlayer = true }
             case .showTabs: barPlayer = false
             case .reselect: select(tab)
@@ -217,11 +218,7 @@ struct MainShell: View {
             if request == .lyrics { router.lyricsRequested = true }
         }
         .modifier(LibraryPresenter())
-        .onAppear {
-            restorePaths()
-            let router = router
-            LiveListHook.newLiveList = { seed in router.go(.liveListEditor(id: nil, start: seed?.query.toJSON())) }
-        }
+        .onAppear(perform: restorePaths)
         .onChange(of: paths) { _, now in
             // A stack holding a page that cannot be kept starts afresh next time.
             let byName = Dictionary(uniqueKeysWithValues: now.compactMap { entry in
@@ -349,12 +346,22 @@ struct MainShell: View {
 
     private func closePlayer() { playerOpen = false }
 
+    /// Closes the player the way it closes itself, the cover flying home and the background
+    /// drawing back, whatever asks.
+    private func leavePlayer() {
+        if playerOpen && hasTrack {
+            PlayerDrive.shared.ask("close")
+        } else {
+            closePlayer()
+        }
+    }
+
     /// Back: a sheet opened from code first, then the player, then the page on top; at the first
     /// page of another tab, Home.
     private func back() {
         if overlays.back() { return }
         if playerOpen && hasTrack {
-            closePlayer()
+            leavePlayer()
         } else if paths[tab]?.isEmpty == false {
             paths[tab]?.removeLast()
         } else if tab != .home {
@@ -444,7 +451,8 @@ extension View {
                 case .onlineArtist(let id, let name): OnlineArtistView(id: id, name: name)
                 case .charts: ChartsView()
                 case .liveList(let id): LiveListView(id: id)
-                case .liveListEditor(let id, let start): LiveListEditView(id: id, start: start.flatMap(LibraryQuery.fromJSON))
+                case .liveListEditor(let id): LiveListEditView(id: id)
+                case .liveListFrom(let query): LiveListEditView(id: nil, start: LibraryQuery.fromJSON(query))
                 case .sound: SoundPage()
                 }
             }

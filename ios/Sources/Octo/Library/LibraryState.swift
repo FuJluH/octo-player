@@ -131,7 +131,8 @@ final class LibraryState {
             id: id, sourceId: source, nativeId: native, title: song.title,
             searchKey: searchKey(song.title), sortKey: sortKey(song.title), artist: song.artist ?? song.byline,
             artistId: song.isExternal ? "" : prefixed(song.artistId), album: song.album ?? "",
-            albumId: song.isExternal ? "" : prefixed(song.albumId), trackNo: song.track, discNo: song.discNumber, year: song.year,
+            albumId: song.isExternal ? "" : prefixed(song.albumId), trackNo: song.track.flatMap { $0 > 0 ? $0 : nil },
+            discNo: song.discNumber.flatMap { $0 > 0 ? $0 : nil }, year: song.year,
             durationMs: Int64(song.duration) * 1_000, addedAt: 0,
             mimeType: mimeTypeOf(contentType: song.contentType, suffix: song.suffix), artwork: art, onPhone: onPhone,
             rating: 0, explicit: song.explicitStatus.map { $0 == "explicit" })

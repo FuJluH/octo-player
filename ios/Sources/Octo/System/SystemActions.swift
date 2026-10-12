@@ -84,6 +84,8 @@ final class SystemActions: OctoIntentHandling {
     /// Carries on with the queue, or with none, shuffles everything, as the play button does.
     private func resumeOrShuffle() async -> String? {
         guard player.engine.queue.isEmpty else {
+            // A queue that played out starts the song it ended on again from its start.
+            if player.engine.state == .ended { player.engine.seek(to: player.engine.queue.current) }
             player.resume()
             return nil
         }

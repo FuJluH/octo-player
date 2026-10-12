@@ -39,6 +39,8 @@ final class SearchModel {
     @ObservationIgnored private var askedText: String?
     @ObservationIgnored private var namedFor: (NamedArtist, String)?
     @ObservationIgnored private var libraryKey: String?
+    /// What is typed, trimmed, as it stood when typing last paused.
+    @ObservationIgnored private var settledText = ""
     /// Whether this visit has counted the line saying what the plus does.
     @ObservationIgnored private(set) var hintCounted = false
 
@@ -67,7 +69,6 @@ final class SearchModel {
     private func textChanged() {
         searchLibrary(wait: true)
         askServer()
-        askTopSongs()
     }
 
     /// The playlists changed: the library is searched again.
@@ -78,12 +79,25 @@ final class SearchModel {
         askServer()
         askTopSongs()
         chartTask?.cancel()
+        chartTask = nil
         chart = nil
+        askChart()
+    }
+
+    /// Search is on screen again: the chart is asked for again, which is the one kept within the
+    /// hour, a fresh one after it, and another try when the last ask came back with nothing.
+    func shownAgain() {
+        guard chartTask == nil else { return }
+        askChart()
+    }
+
+    private func askChart() {
         guard let discovery, discovery.server != nil else { return }
         chartTask = Task { [weak self] in
             let list = await discovery.popularChart()
-            guard !Task.isCancelled else { return }
-            self?.chart = list
+            guard !Task.isCancelled, let self else { return }
+            self.chart = list
+            self.chartTask = nil
         }
     }
 
@@ -91,11 +105,13 @@ final class SearchModel {
     /// changes or the server is asked anew.
     private func searchLibrary(wait: Bool) {
         let folded = searchKey(text)
+        let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let filter = self.filter
         libraryTask?.cancel()
         libraryTask = Task { [weak self] in
             if wait { try? await Task.sleep(for: .milliseconds(librarySearchAfterMs)) }
             guard !Task.isCancelled, let self else { return }
+            self.settledText = typed
             guard folded.count >= 2, let discovery = self.discovery else {
                 self.setResults(nil)
                 return
@@ -145,13 +161,13 @@ final class SearchModel {
     }
 
     /// The top songs of the artist the search names, from the library's artists or those found
-    /// online, only for everything at once. Each change of artist closes "Show all" first.
+    /// online, only for everything at once, worked out from the text once typing pauses. Each
+    /// change of artist closes "Show all" first.
     private func askTopSongs() {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         var named: (NamedArtist, String)?
         if filter == .all, let results, let server = discovery?.server {
             let online: [OnlineArtist] = if case .done(let found) = discover { found.artists } else { [] }
-            named = namedArtist(trimmed, library: results.artists, online: online).map { ($0, server) }
+            named = namedArtist(settledText, library: results.artists, online: online).map { ($0, server) }
         }
         if named?.0 == namedFor?.0 && named?.1 == namedFor?.1 { return }
         namedFor = named
@@ -160,8 +176,6 @@ final class SearchModel {
         topSongs = nil
         guard let (artist, _) = named, let discovery else { return }
         topTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(librarySearchAfterMs))
-            guard !Task.isCancelled else { return }
             let list = await discovery.artistTopSongs(name: artist.name, libraryId: artist.libraryId, serverId: artist.serverId)
             guard !Task.isCancelled else { return }
             self?.topSongs = list

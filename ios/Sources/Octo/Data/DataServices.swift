@@ -7,6 +7,7 @@ import SwiftUI
 /// handed to the pages through the environment.
 @MainActor
 final class DataServices {
+    let session: Session
     let library: Library
     let connectivity: Connectivity
     let serverSync: ServerSync
@@ -36,6 +37,7 @@ final class DataServices {
 
     /// `announce` shows a line: the words, and whether it marks something done.
     init(session: Session, announce: @escaping @MainActor (String, Bool) -> Void) {
+        self.session = session
         library = Library.open()
         connectivity = Connectivity()
         serverSync = ServerSync(session: session, library: library)

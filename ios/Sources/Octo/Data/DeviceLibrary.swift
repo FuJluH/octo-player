@@ -16,6 +16,8 @@ import UIKit
 final class DeviceLibrary {
     private(set) var access: DeviceAccess
     private(set) var scanning = false
+    /// Whether a scan of this run has ended, so the phone's music is known.
+    private(set) var scannedOnce = false
     /// Every folder music was found in, most songs first, switched-off ones included. Empty until
     /// the first scan of this run ends.
     private(set) var folders: [MusicFolder] = []
@@ -127,7 +129,10 @@ final class DeviceLibrary {
 
     private func scan() async {
         scanning = true
-        defer { scanning = false }
+        defer {
+            scanning = false
+            scannedOnce = true
+        }
         let granted = access == .granted
         let nowSeconds = Int64(Date().timeIntervalSince1970)
         var found = await Task.detached(priority: .utility) {
@@ -359,22 +364,31 @@ final class DeviceLibrary {
     // MARK: Phone files
 
     /// Deletes the phone files of these songs: files in Octo's own folder go; songs in the Music
-    /// app's library can only be removed in the Music app. Answers the words to show, if any.
-    func delete(_ trackIds: [String]) async -> String? {
+    /// app's library can only be removed in the Music app. Answers how many files went and the
+    /// words to show, if any. Once any went, the phone is scanned again.
+    func delete(_ trackIds: [String]) async -> (removed: Int, words: String?) {
         let copies = (try? await library.store.copies(of: trackIds)) ?? []
-        guard let plan = deletePlan(trackIds, phoneFiles(copies)) else { return nil }
+        guard let plan = deletePlan(trackIds, phoneFiles(copies)) else { return (0, nil) }
         var kept = 0
+        var removed = 0
+        var failed = 0
         for uri in plan.uris {
             guard let url = URL(string: uri), url.isFileURL else {
                 kept += 1
                 continue
             }
-            try? FileManager.default.removeItem(at: url)
+            do {
+                try FileManager.default.removeItem(at: url)
+                removed += 1
+            } catch {
+                failed += 1
+            }
         }
-        await rescan()
-        if kept == 0 { return nil }
-        return kept == 1 ? "1 song is in the Music app's library. Remove it in the Music app."
-            : "\(kept) songs are in the Music app's library. Remove them in the Music app."
+        if removed > 0 { await rescan() }
+        if failed > 0 { return (removed, "Could not delete from the phone") }
+        if kept == 0 { return (removed, nil) }
+        return (removed, kept == 1 ? "1 song is in the Music app's library. Remove it in the Music app."
+            : "\(kept) songs are in the Music app's library. Remove them in the Music app.")
     }
 
     /// Files to hand to the share sheet for these songs: Octo's own files as they are, and songs

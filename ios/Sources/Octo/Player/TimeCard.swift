@@ -1,5 +1,6 @@
 import OctoKit
 import SwiftUI
+import UIKit
 
 /// The time card's two pages.
 enum TimePage: Equatable { case sleep, speed }
@@ -13,6 +14,7 @@ struct TimeCard: View {
     let dismiss: () -> Void
     @State private var page: TimePage
     @State private var deeper = true
+    @State private var height: CGFloat = 0
     @Environment(\.octoReduceMotion) private var calm
 
     init(start: TimePage, opening: TimePage? = nil, dismiss: @escaping () -> Void) {
@@ -21,18 +23,43 @@ struct TimeCard: View {
         _page = State(initialValue: opening ?? start)
     }
 
+    /// The card is at most 60% of the screen's height; a taller page scrolls inside it.
+    private var room: CGFloat {
+        let screen = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.screen.bounds.height }.first ?? 800
+        return screen * 0.6
+    }
+
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            switch page {
-            case .sleep:
-                SleepPage(dismiss: dismiss) { go(.speed, deeper: true) }
-                    .transition(slide)
-            case .speed:
-                SpeedPage(back: start == .sleep ? { go(.sleep, deeper: false) } : nil)
-                    .transition(slide)
+        let room = room
+        ScrollView(.vertical) {
+            ZStack(alignment: .topLeading) {
+                switch page {
+                case .sleep:
+                    SleepPage(dismiss: dismiss) { go(.speed, deeper: true) }
+                        .transition(slide)
+                case .speed:
+                    SpeedPage(back: start == .sleep ? { go(.sleep, deeper: false) } : nil)
+                        .transition(slide)
+                }
             }
+            .clipped()
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
         }
-        .clipped()
+        .scrollDisabled(height <= room)
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(width: 320, height: height > 0 ? min(height, room) : nil)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Sleep timer and speed")
+        .accessibilityAction(.escape) { back() }
+    }
+
+    /// Back from the speed, opened from the timer, goes to the timer; otherwise the card closes.
+    private func back() {
+        if page == .speed && start == .sleep {
+            go(.sleep, deeper: false)
+        } else {
+            dismiss()
+        }
     }
 
     private var slide: AnyTransition {
@@ -197,6 +224,7 @@ struct SpeedPage: View {
         VStack(alignment: .leading, spacing: 0) {
             if let back {
                 PopoverBack(title: "Sleep timer", onBack: back).padding(.top, 6)
+                SoundHairline().padding(.horizontal, 14).padding(.vertical, 4)
             }
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 12) {

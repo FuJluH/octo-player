@@ -27,6 +27,8 @@ enum DataDrive {
     private static func run(_ data: DataServices, _ name: String, _ value: String, _ show: @MainActor (String) -> Void) async -> Bool {
         let library = data.library
         switch name {
+        case "covertime":
+            await CoverTiming.run(session: data.session, library: library, count: Int(value) ?? 10)
         case "catalog":
             let line = "\(await library.trackCount()) songs, \(await library.albumCount()) albums, \(await library.artistCount()) artists, "
                 + "\(await library.playlists().count) playlists, \(await library.likedCount()) liked"

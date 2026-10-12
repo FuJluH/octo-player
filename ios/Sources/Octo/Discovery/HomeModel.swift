@@ -151,11 +151,15 @@ final class HomeModel {
         artists = await library.homeRandomArtists(16)
     }
 
-    /// A pull: picks again, and reads the stations and Made for you again when offered.
+    /// A pull, once the library has been looked at again: picks again and reads the shelves.
     func refresh() async {
         await reroll()
         await readLibrary()
-        if stationsFrom != nil, stationsFrom! != nil { loadStations() }
+    }
+
+    /// A pull reads the stations and Made for you again at once, when they are offered.
+    func refreshStations() {
+        if let from = stationsFrom, from != nil { loadStations() }
     }
 
     // MARK: Stations, Made for you and charts

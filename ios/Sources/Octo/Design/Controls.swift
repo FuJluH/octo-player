@@ -275,7 +275,8 @@ enum SliderLook { case glow, jewel }
 /// Jewel: a recessed track, an accent fill, a white jewel thumb with an accent dot, a ring and a
 /// glow while dragged, and the value in a bubble above. A tap seeks; a drag shows its own value
 /// and sends it when the finger lifts, unless `live`; a drag taken away sends nothing. `steps`
-/// snaps to that many steps.
+/// snaps to that many steps. A drag that goes up or down first is not the line's: it sends
+/// nothing and is handed to `passedDrag` when one is set.
 struct OctoSlider: View {
     let value: Double
     let onChange: (Double) -> Void
@@ -294,8 +295,14 @@ struct OctoSlider: View {
     @State private var thumb = 0.0
     @State private var ring = 0.0
     @State private var bubble = 0.0
+    /// The finger went up or down first: the line lets the drag go and sends nothing.
+    @State private var passed = false
     @GestureState private var touching = false
     @Environment(\.motionScale) private var motion
+    @Environment(\.passedDrag) private var passedDrag
+
+    /// How far the finger moves before a drag is told from a tap, and its way decided.
+    private static let slop: CGFloat = 8
 
     var body: some View {
         GeometryReader { box in
@@ -316,14 +323,30 @@ struct OctoSlider: View {
                 DragGesture(minimumDistance: 0)
                     .updating($touching) { _, state, _ in state = true }
                     .onChanged { drag in
-                        let f = snapToSteps(drag.location.x / width, steps)
-                        if dragging || abs(drag.translation.width) >= 4 {
-                            if !dragging { held(true) }
-                            dragValue = f
-                            if live { onChange(f) }
+                        if passed {
+                            passedDrag?.moved(drag.translation)
+                            return
                         }
+                        if !dragging {
+                            switch dragAxis(drag.translation.width, drag.translation.height, slop: Self.slop) {
+                            case .undecided: return
+                            case .vertical:
+                                passed = true
+                                passedDrag?.moved(drag.translation)
+                                return
+                            case .horizontal: held(true)
+                            }
+                        }
+                        let f = snapToSteps(drag.location.x / width, steps)
+                        dragValue = f
+                        if live { onChange(f) }
                     }
                     .onEnded { drag in
+                        if passed {
+                            passed = false
+                            passedDrag?.ended(drag.translation, drag.velocity)
+                            return
+                        }
                         let f = snapToSteps(drag.location.x / width, steps)
                         held(false)
                         onChange(f)
@@ -339,7 +362,12 @@ struct OctoSlider: View {
         }
         .onChange(of: touching) { _, now in
             // A drag taken away by something else sends nothing.
-            if !now && dragging { held(false) }
+            guard !now else { return }
+            if dragging { held(false) }
+            if passed {
+                passed = false
+                passedDrag?.cancelled()
+            }
         }
         .accessibilityElement()
         .accessibilityValue(valueLabel?(value) ?? "\(Int((value * 100).rounded())) percent")
@@ -494,4 +522,16 @@ private struct JewelLine: View, Animatable {
             }
         }
     }
+}
+
+/// Where a drag a control lets go of goes on: an upright drag that starts on a line slider, for
+/// the page around it to take (the player pulls down to close with it).
+struct PassedDrag {
+    let moved: @MainActor (CGSize) -> Void
+    let ended: @MainActor (_ translation: CGSize, _ velocity: CGSize) -> Void
+    let cancelled: @MainActor () -> Void
+}
+
+extension EnvironmentValues {
+    @Entry var passedDrag: PassedDrag? = nil
 }
