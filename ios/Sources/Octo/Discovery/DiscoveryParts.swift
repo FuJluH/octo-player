@@ -165,7 +165,7 @@ struct OnlineAlbumCard: View {
             .frame(width: width, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .buttonStyle(PressSqueeze(amount: 0.97))
+        .buttonStyle(PressScale(scale: 0.97))
         .simultaneousGesture(TapGesture().onEnded(opened))
     }
 }
@@ -193,7 +193,7 @@ struct OnlineArtistCircle: View {
             .frame(width: 96)
             .contentShape(Rectangle())
         }
-        .buttonStyle(PressSqueeze(amount: 0.97))
+        .buttonStyle(PressScale(scale: 0.97))
         .simultaneousGesture(TapGesture().onEnded(opened))
     }
 }
@@ -223,7 +223,7 @@ struct ArtistListRow: View {
             .frame(minHeight: 64)
             .contentShape(Rectangle())
         }
-        .buttonStyle(PressSqueeze())
+        .buttonStyle(SqueezeStyle())
         .simultaneousGesture(TapGesture().onEnded(opened))
     }
 }
@@ -259,7 +259,7 @@ struct PlaylistListRow: View {
             .frame(minHeight: 64)
             .contentShape(Rectangle())
         }
-        .buttonStyle(PressSqueeze())
+        .buttonStyle(SqueezeStyle())
         .simultaneousGesture(TapGesture().onEnded(opened))
     }
 }

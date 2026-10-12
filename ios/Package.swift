@@ -30,7 +30,7 @@ let package = Package(
         .testTarget(name: "OctoKitTests", dependencies: ["OctoKit", "ShareInbox"]),
     ] + (kitOnly ? [] : [
         // The iPhone app: SwiftUI, AVFoundation and Apple's Liquid Glass.
-        .target(name: "Octo", dependencies: ["OctoKit", "ShareInbox"]),
+        .target(name: "Octo", dependencies: ["OctoKit", "ShareInbox"], resources: [.copy("CoverArt")]),
         // "Share to Octo": the share extension that hands a shared list to Import.
         // Nothing names the extension's view controller when it is linked (the system finds it
         // by name), so the linker is told to keep the file it is in.

@@ -32,6 +32,8 @@ enum Route: Hashable, Codable {
     case artist(id: String, name: String)
     case playlist(Playlist)
     case artists, albums, playlists, favorites
+    /// The library pages beyond these: songs, genres, folders, history, downloads and the rest.
+    case library(LibraryPage)
     /// An album or artist the server found online, and the Charts page.
     case onlineAlbum(id: String, name: String)
     case onlineArtist(id: String, name: String)
@@ -54,6 +56,7 @@ extension Route {
         case .albums: .albums
         case .playlists: .playlists
         case .favorites: .favorites
+        case .library(let page): page.ambientPage
         case .sound: .sound
         case .onlineAlbum: .onlineAlbum
         case .onlineArtist: .onlineArtist
@@ -206,6 +209,7 @@ struct MainShell: View {
             }
             if request == .lyrics { router.lyricsRequested = true }
         }
+        .modifier(LibraryPresenter())
         .onAppear(perform: restorePaths)
         .onChange(of: paths) { _, now in
             // A stack holding a page that cannot be kept starts afresh next time.
@@ -420,6 +424,7 @@ extension View {
                 case .albums: AlbumsView()
                 case .playlists: PlaylistsView()
                 case .favorites: FavoritesView()
+                case .library(let page): LibraryPageView(page: page)
                 case .onlineAlbum(let id, let name): OnlineAlbumView(id: id, name: name)
                 case .onlineArtist(let id, let name): OnlineArtistView(id: id, name: name)
                 case .charts: ChartsView()

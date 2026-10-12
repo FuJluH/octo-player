@@ -121,7 +121,7 @@ private struct DownloadLine: View {
             .padding(.vertical, 8)
             .contentShape(Rectangle())
         }
-        .buttonStyle(PressSqueeze())
+        .buttonStyle(SqueezeStyle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(row.title), \(row.artist)")
         .accessibilityValue(row.status)
