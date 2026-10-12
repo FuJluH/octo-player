@@ -3,12 +3,6 @@ import OctoKit
 import SwiftUI
 import UIKit
 
-extension EnvironmentValues {
-    /// Whether the full player is showing. The bar's small player hands its cover to the
-    /// player's card while it does.
-    @Entry var playerShown = false
-}
-
 /// States of the full player asked for from outside: the drive steps.
 @MainActor
 @Observable

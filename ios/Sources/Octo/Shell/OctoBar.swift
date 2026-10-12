@@ -376,19 +376,17 @@ struct NowPlayingFace: View {
 struct MiniPlayerPill: View {
     let open: () -> Void
     @Environment(Player.self) private var player
-    @Environment(\.nowPlayingArt) private var art
-    @Environment(\.playerShown) private var playerShown
+    @Environment(Session.self) private var session
+    @Environment(\.displayScale) private var scale
+    @State private var flight = CoverFlight.shared
 
     var body: some View {
         HStack(spacing: 0) {
             ZStack {
-                if !playerShown {
-                    BadgedCover(id: player.current?.coverArt, size: 36, radius: 18, external: player.current?.isExternal ?? false)
-                        .modifier(BarArt(namespace: art))
-                        .transition(.identity)
-                } else {
-                    Color.clear.frame(width: 36, height: 36)
-                }
+                BadgedCover(id: player.current?.coverArt, size: 36, radius: 18, external: player.current?.isExternal ?? false)
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { flight.barFrame = $0 }
+                    .opacity(flight.hidesBar ? 0 : 1)
+                    .onDisappear { flight.barFrame = nil }
                 ProgressRing(lineWidth: 2).padding(1)
             }
             .frame(width: 44, height: 44)
@@ -409,14 +407,13 @@ struct MiniPlayerPill: View {
         .padding(.leading, 6)
         .padding(.trailing, 4)
         .contentShape(Capsule())
-        .onTapGesture(perform: openWithFlight)
+        .onTapGesture(perform: open)
         .background(PaceFollower())
-        .accessibilityAction(named: "Open player", openWithFlight)
-    }
-
-    /// The cover flies from here to the player's card on the player's own spring.
-    private func openWithFlight() {
-        withAnimation(.octoSpring(1, 400)) { open() }
+        .task(id: player.current?.coverArt) {
+            // The player's card is at most 312 points; the flight draws the cover at that size.
+            await flight.prepare(player.current?.coverArt, size: Int(312 * scale), client: session.client)
+        }
+        .accessibilityAction(named: "Open player", open)
     }
 
     private func transport(_ icon: OctoIcon, _ label: String, action: @escaping () -> Void) -> some View {
@@ -427,19 +424,6 @@ struct MiniPlayerPill: View {
         }
         .buttonStyle(NoHighlight())
         .accessibilityLabel(label)
-    }
-}
-
-/// The bar's cover as one end of the flight to the player's card.
-private struct BarArt: ViewModifier {
-    let namespace: Namespace.ID?
-
-    func body(content: Content) -> some View {
-        if let namespace {
-            content.matchedGeometryEffect(id: nowPlayingArtID, in: namespace)
-        } else {
-            content
-        }
     }
 }
 

@@ -15,7 +15,6 @@ struct NowPlayingView: View {
     @Environment(ArtworkColorStore.self) private var colorStore
     @Environment(Library.self) private var library
     @Environment(LikeStore.self) private var likes
-    @Environment(\.nowPlayingArt) private var art
     @Environment(\.octoReduceMotion) private var calm
     @Environment(\.scenePhase) private var scenePhase
     @State private var settings = AppSettings.shared
@@ -23,6 +22,7 @@ struct NowPlayingView: View {
     @State private var facts = PlayerSongFacts()
     @State private var drive = PlayerDrive.shared
     @State private var sleep = PlayerSleep.shared
+    @State private var flight = CoverFlight.shared
 
     // The way in and out.
     @State private var dolly = 0.0
@@ -278,8 +278,9 @@ struct NowPlayingView: View {
             let folded = folds ? fold : 0
             let swiped = 1 - 0.5 * min(abs(card) / max(box.size.width / 2, 1), 1)
             Cover(id: player.current?.coverArt, size: side, radius: side * corner / 100)
-                .modifier(SharedArt(namespace: art))
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { flight.cardPlaced($0) }
                 .elevation3()
+                .opacity(flight.hidesCard ? 0 : 1)
                 .scaleEffect(player.isPlaying ? 1 : 0.84)
                 .animation(.octoSpring(0.6, 300), value: player.isPlaying)
                 .scaleEffect(1 - 0.08 * folded)
@@ -393,6 +394,7 @@ struct NowPlayingView: View {
     // MARK: Opening and closing
 
     private func arrive() {
+        flight.playerOpening(player.current?.coverArt)
         showLyrics(lyrics.open, animated: false)
         withAnimation(PlayerDolly.open) { dolly = 1 }
         withAnimation(.octoSpring(1, 1500)) { corner = 3 }
@@ -405,6 +407,7 @@ struct NowPlayingView: View {
     private func close(then go: (() -> Void)? = nil) {
         guard !closing else { return }
         closing = true
+        flight.playerClosing(player.current?.coverArt)
         withAnimation(PlayerDolly.close) { dolly = 0 }
         withAnimation(.octoSpring(1, 1500)) { corner = 50 }
         DispatchQueue.main.async {
@@ -587,19 +590,6 @@ struct NowPlayingView: View {
             let modes: [String: BackgroundMode] = ["immersive": .immersive, "artwork": .artwork, "color": .color, "classic": .classic]
             if let mode = modes[request.value] { settings.setBackground { $0.mode = mode } }
         default: break
-        }
-    }
-}
-
-/// The cover the bar's small player and the player's card share, so it flies between them.
-private struct SharedArt: ViewModifier {
-    let namespace: Namespace.ID?
-
-    func body(content: Content) -> some View {
-        if let namespace {
-            content.matchedGeometryEffect(id: nowPlayingArtID, in: namespace)
-        } else {
-            content
         }
     }
 }
