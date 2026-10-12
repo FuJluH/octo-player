@@ -1,127 +1,342 @@
 import OctoKit
 import SwiftUI
 
-/// Octo's bar: one floating row on Apple's Liquid Glass. A capsule of four tabs and, beside it,
-/// the round now-playing button. Tapping that button grows it into the mini player in the same
-/// row while the tabs fold into a small circle at the left; tapping the circle brings them back.
+/// Octo's bar: two pieces of floating Liquid Glass, 10 points apart. The tab tray sits on the
+/// left and the round now-playing button on the right. Tapping that button grows it into the
+/// small player while the tray folds into a circle at the left: the two swap sizes in one
+/// spring that overshoots a little. Tapping the folded circle brings the tabs back.
 struct OctoBar: View {
-    @Binding var tab: AppTab
-    @Binding var playerMode: Bool
-    let reselect: (AppTab) -> Void
+    let tab: AppTab
+    let playerMode: Bool
+    /// A tab tapped, the one in use or another.
+    let select: (AppTab) -> Void
+    /// The round button tapped.
+    let roundButton: () -> Void
+    /// The folded tray tapped.
+    let showTabs: () -> Void
     let openPlayer: () -> Void
+    /// The glass's film, which can carry a trace of the song's colour.
+    var film: Color = OctoColor.glazeFilm
     @Environment(Player.self) private var player
-    @Namespace private var pill
 
-    static let height: CGFloat = 56
-    static let gap: CGFloat = 10
+    static let height = ShellMeasures.barHeight
+    static let gap = ShellMeasures.barGap
     /// How far above the bottom safe area the bar floats.
-    static let bottomGap: CGFloat = 14
+    static let bottomGap = ShellMeasures.barBottomGap
     /// Room pages leave under their content for the bar.
-    static let clearance: CGFloat = 120
-    /// The bar's shape change: a soft spring, like the other apps' (damping 0.75, stiffness 200).
-    static let morph = Animation.spring(response: 0.44, dampingFraction: 0.75)
+    static let clearance = ShellMeasures.clearance
+    /// The bar's shape change: damping 0.75, stiffness 200. Reduce motion leaves it as it is.
+    static let morph = Animation.octoSpring(0.75, 200)
 
     private var showsPlayer: Bool { playerMode && player.current != nil }
 
-    /// Two glass shapes that keep who they are while their widths change, so the growth is one
-    /// continuous motion: the tabs fold to a circle at the left as the player widens beside it.
     var body: some View {
         GeometryReader { box in
-            let wide = max(box.size.width - Self.height - Self.gap, Self.height)
-            GlassEffectContainer(spacing: Self.gap) {
-                HStack(spacing: Self.gap) {
-                    ZStack(alignment: .leading) {
-                        tabs
-                            .frame(width: wide)
-                            .opacity(showsPlayer ? 0 : 1)
-                            .allowsHitTesting(!showsPlayer)
-                        foldedTabs
-                            .opacity(showsPlayer ? 1 : 0)
-                            .allowsHitTesting(showsPlayer)
-                    }
-                    .frame(width: showsPlayer ? Self.height : wide, height: Self.height, alignment: .leading)
-                    .clipShape(Capsule())
-                    .glassEffect(.regular.interactive(), in: .capsule)
-
-                    ZStack(alignment: .trailing) {
-                        MiniPlayerPill(open: openPlayer)
-                            .frame(width: wide)
-                            .opacity(showsPlayer ? 1 : 0)
-                            .allowsHitTesting(showsPlayer)
-                        NowPlayingFace(tap: faceTapped)
-                            .opacity(showsPlayer ? 0 : 1)
-                            .allowsHitTesting(!showsPlayer)
-                    }
-                    .frame(width: showsPlayer ? wide : Self.height, height: Self.height, alignment: .trailing)
-                    .clipShape(Capsule())
-                    .glassEffect(.regular.interactive(), in: .capsule)
-                }
-            }
-            .animation(Self.morph, value: showsPlayer)
+            BarFrame(grown: showsPlayer ? 1 : 0, pill: Double(tab.index), width: box.size.width, tab: tab,
+                     folded: showsPlayer, hasSong: player.current != nil, film: film,
+                     select: select, roundButton: roundButton, showTabs: showTabs, openPlayer: openPlayer)
         }
         .frame(height: Self.height)
-        .frame(maxWidth: 520)
-        .padding(.horizontal, 20)
+        .frame(maxWidth: ShellMeasures.maxWidth)
+        .padding(.horizontal, ShellMeasures.sideMargin)
+        .animation(Self.morph, value: showsPlayer)
+        .animation(.octoSpring(0.8, 350), value: tab)
     }
+}
 
-    /// With a song loaded the button grows into the player; with nothing loaded it shuffles
-    /// the library.
-    private func faceTapped() {
-        if player.current != nil {
-            playerMode = true
-        } else {
-            Task { await player.shuffleLibrary() }
+/// The bar laid out from `grown` (0 open, 1 the small player shown) and the selected pill's
+/// place, both moving on springs. Widths follow `grown` as it overshoots; fades hold it to 0...1.
+private struct BarFrame: View, Animatable {
+    var grown: Double
+    var pill: Double
+    let width: CGFloat
+    let tab: AppTab
+    let folded: Bool
+    let hasSong: Bool
+    let film: Color
+    let select: (AppTab) -> Void
+    let roundButton: () -> Void
+    let showTabs: () -> Void
+    let openPlayer: () -> Void
+
+    nonisolated var animatableData: AnimatablePair<Double, Double> {
+        get { AnimatablePair(grown, pill) }
+        set {
+            grown = newValue.first
+            pill = newValue.second
         }
     }
 
-    private var tabs: some View {
-        HStack(spacing: 0) {
-            ForEach(AppTab.allCases, id: \.self) { item in
-                Button {
-                    if item == tab {
-                        reselect(item)
-                    } else {
-                        withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) { tab = item }
-                    }
-                } label: {
-                    ZStack {
-                        if item == tab {
-                            Capsule()
-                                .fill(.black.opacity(0.72))
-                                .frame(width: 62, height: 44)
-                                .matchedGeometryEffect(id: "selected", in: pill)
+    var body: some View {
+        let height = ShellMeasures.barHeight
+        let full = max(height, width - height - ShellMeasures.barGap)
+        let tray = full + (height - full) * grown
+        GlassEffectContainer(spacing: ShellMeasures.barGap) {
+            ZStack(alignment: .topLeading) {
+                TabTray(fullWidth: full, folded: grown, isFolded: folded, pill: pill, tab: tab, select: select)
+                    .frame(width: max(0, tray), height: height, alignment: .leading)
+                    .clipShape(Capsule())
+                    .octoGlass(Capsule(), film: film, interactive: true)
+                    .background { BarShadow() }
+                    .overlay {
+                        if folded {
+                            Color.clear
+                                .contentShape(Capsule())
+                                .onTapGesture(perform: showTabs)
+                                .accessibilityElement()
+                                .accessibilityLabel("Show tabs")
+                                .accessibilityAddTraits(.isButton)
+                                .accessibilityAction { showTabs() }
                         }
-                        Image(systemName: item.icon)
-                            .symbolVariant(item == tab ? .fill : .none)
-                            .font(.system(size: 21, weight: item == tab ? .semibold : .regular))
-                            .foregroundStyle(item == tab ? OctoColor.accent : .white)
-                            .contentTransition(.symbolEffect(.replace.offUp))
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .contentShape(Rectangle())
+                NowPlayingGlass(fullWidth: full, grown: grown, shown: folded, hasSong: hasSong,
+                                roundButton: roundButton, openPlayer: openPlayer)
+                    .frame(width: max(0, width - tray - ShellMeasures.barGap), height: height, alignment: .trailing)
+                    .clipShape(Capsule())
+                    .octoGlass(Capsule(), film: film, interactive: true)
+                    .background { BarShadow() }
+                    .offset(x: tray + ShellMeasures.barGap)
+            }
+            .frame(width: width, height: height, alignment: .topLeading)
+        }
+    }
+}
+
+/// The shadow pooled under a piece of the bar, cast by the shape 12 points smaller all round.
+private struct BarShadow: View {
+    var body: some View {
+        Capsule()
+            .inset(by: 12)
+            .fill(Color.black.opacity(0.45))
+            .blur(radius: shadowRadius(24))
+            .offset(y: 8)
+            .mask {
+                Rectangle().padding(-48).overlay { Capsule().fill(Color.black).blendMode(.destinationOut) }.compositingGroup()
+            }
+            .allowsHitTesting(false)
+    }
+}
+
+/// The tabs in their glass, the selected one in a darker pill that glides between them.
+/// Folding, the tabs slide under the shrinking edge and fade, while the pill slides left and
+/// swells into the whole circle carrying the selected tab's icon, which turns from the accent to
+/// white.
+private struct TabTray: View {
+    let fullWidth: CGFloat
+    let folded: Double
+    let isFolded: Bool
+    let pill: Double
+    let tab: AppTab
+    let select: (AppTab) -> Void
+
+    private static let iconSize: CGFloat = 23
+    private static let pillWidth: CGFloat = 62
+
+    var body: some View {
+        let height = ShellMeasures.barHeight
+        let fold = min(1, max(0, folded))
+        let column = (fullWidth - 12) / CGFloat(AppTab.allCases.count)
+        let capsuleX = 6 + column * CGFloat(pill) + (column - Self.pillWidth) / 2
+        let pillX = capsuleX + (0 - capsuleX) * CGFloat(folded)
+        let pillW = Self.pillWidth + (height - Self.pillWidth) * CGFloat(folded)
+        let pillH = 44 + (height - 44) * CGFloat(folded)
+        ZStack(alignment: .leading) {
+            if folded < 1 {
+                GlazeSelected(shape: Capsule())
+                    .frame(width: pillW, height: pillH)
+                    .opacity(1 - fold)
+                    .offset(x: pillX)
+                HStack(spacing: 0) {
+                    ForEach(AppTab.allCases, id: \.self) { item in
+                        TabButton(item: item, selected: item == tab, showIcon: folded <= 0 || item != tab) {
+                            select(item)
+                        }
+                        .frame(width: column, height: height)
+                        .disabled(isFolded)
+                    }
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(item.title)
-                .accessibilityAddTraits(item == tab ? .isSelected : [])
+                .padding(.horizontal, 6)
+                .frame(width: fullWidth, height: height, alignment: .leading)
+                .opacity(1 - fold)
+            }
+            if folded > 0 {
+                IconView(tab.selectedIcon, size: Self.iconSize,
+                         color: OctoColor.accent.mix(with: .white, by: fold))
+                    .offset(x: pillX + (pillW - Self.iconSize) / 2)
+                    .accessibilityHidden(true)
             }
         }
-        .padding(.horizontal, 6)
+        .frame(width: fullWidth, height: height, alignment: .leading)
+    }
+}
+
+/// One tab: its icon only, white, or filled in the accent while selected. The whole column
+/// answers the finger, with no highlight.
+private struct TabButton: View {
+    let item: AppTab
+    let selected: Bool
+    let showIcon: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            IconView(selected ? item.selectedIcon : item.icon, size: 23, color: selected ? OctoColor.accent : .white)
+                .opacity(showIcon ? 1 : 0)
+                .animation(.octo(OctoSprings.state), value: selected)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(NoHighlight())
+        .accessibilityLabel(item.title)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+/// A press that shows nothing.
+struct NoHighlight: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View { configuration.label }
+}
+
+/// The right-hand glass: the round now-playing button, or the small player grown from it. Its
+/// contents lean with a swipe; sideways skips, up opens the player. With no song, no swipes.
+private struct NowPlayingGlass: View {
+    let fullWidth: CGFloat
+    let grown: Double
+    let shown: Bool
+    let hasSong: Bool
+    let roundButton: () -> Void
+    let openPlayer: () -> Void
+
+    var body: some View {
+        let fade = min(1, max(0, grown))
+        ZStack(alignment: .trailing) {
+            if grown < 1 {
+                NowPlayingFace(tap: roundButton)
+                    .frame(width: ShellMeasures.barHeight, height: ShellMeasures.barHeight)
+                    .opacity(1 - fade)
+                    .allowsHitTesting(!shown)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            if grown > 0 {
+                MiniPlayerPill(open: openPlayer)
+                    .frame(width: fullWidth, height: ShellMeasures.barHeight)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .clipShape(Capsule())
+                    .opacity(fade)
+                    .allowsHitTesting(shown)
+            }
+        }
+        .barSwipes(enabled: hasSong, openPlayer: openPlayer)
+    }
+}
+
+extension AppTab {
+    var index: Int { AppTab.allCases.firstIndex(of: self) ?? 0 }
+
+    var icon: OctoIcon {
+        switch self {
+        case .home: .home
+        case .search: .search
+        case .library: .library
+        case .settings: .settings
+        }
     }
 
-    /// The tabs, folded into one circle that shows the tab in use.
-    private var foldedTabs: some View {
-        Button {
-            playerMode = false
-        } label: {
-            Image(systemName: tab.icon)
-                .symbolVariant(.fill)
-                .font(.system(size: 21, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: Self.height, height: Self.height)
-                .contentShape(Circle())
+    var selectedIcon: OctoIcon {
+        switch self {
+        case .home: .homeSelected
+        case .search: .searchSelected
+        case .library: .librarySelected
+        case .settings: .settingsSelected
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Show tabs")
+    }
+}
+
+extension View {
+    /// The bar's swipes: sideways skips (left to the next song, right to the one before), and up
+    /// opens the player. The axis is taken once, at the first clear movement; then the drag is
+    /// the swipe's, and the tap under it does not fire. The contents lean with the finger and
+    /// spring back; one tick as the finger passes the point where letting go acts.
+    func barSwipes(enabled: Bool, openPlayer: @escaping () -> Void) -> some View {
+        modifier(BarSwipes(enabled: enabled, openPlayer: openPlayer))
+    }
+}
+
+private struct BarSwipes: ViewModifier {
+    let enabled: Bool
+    let openPlayer: () -> Void
+    @Environment(Player.self) private var player
+    @State private var axis: DragAxis = .undecided
+    @State private var lean: CGSize = .zero
+    @State private var armed = false
+    @State private var ticks = 0
+    @GestureState private var dragging = false
+
+    func body(content: Content) -> some View {
+        content
+            .offset(x: lean.width * BarSwipe.lean, y: lean.height * BarSwipe.lean)
+            .contentShape(Capsule())
+            .highPriorityGesture(swipe, including: enabled ? .all : .subviews)
+            .sensoryFeedback(.impact(flexibility: .rigid, intensity: 0.8), trigger: ticks)
+            .onChange(of: dragging) { _, now in
+                // A drag taken over by something else ends as if it went nowhere.
+                guard !now, axis != .undecided else { return }
+                axis = .undecided
+                armed = false
+                withAnimation(.octoSpring(0.8, 400)) { lean = .zero }
+            }
+    }
+
+    private var swipe: some Gesture {
+        DragGesture(minimumDistance: BarSwipe.slop)
+            .updating($dragging) { _, state, _ in state = true }
+            .onChanged { drag in
+                if axis == .undecided {
+                    axis = dragAxis(drag.translation.width, drag.translation.height, slop: BarSwipe.slop)
+                }
+                switch axis {
+                case .horizontal:
+                    lean = CGSize(width: drag.translation.width, height: 0)
+                    mark(abs(drag.translation.width) >= BarSwipe.skipAt)
+                case .vertical:
+                    lean = CGSize(width: 0, height: min(0, drag.translation.height))
+                    mark(drag.translation.height <= -BarSwipe.openAt)
+                case .undecided:
+                    break
+                }
+            }
+            .onEnded { drag in
+                let taken = axis
+                axis = .undecided
+                armed = false
+                switch taken {
+                case .horizontal:
+                    switch swipeSkip(offset: drag.translation.width, velocity: drag.velocity.width,
+                                     distance: BarSwipe.skipAt, fling: BarSwipe.fling) {
+                    case .next: player.next()
+                    case .previous: player.previous()
+                    case .stay: break
+                    }
+                    withAnimation(.octoSpring(0.8, 400)) { lean = .zero }
+                case .vertical:
+                    if swipeUp(offset: drag.translation.height, velocity: drag.velocity.height,
+                               distance: BarSwipe.openAt, fling: BarSwipe.fling) {
+                        lean = .zero
+                        openPlayer()
+                    } else {
+                        withAnimation(.octoSpring(0.8, 400)) { lean = .zero }
+                    }
+                case .undecided:
+                    withAnimation(.octoSpring(0.8, 400)) { lean = .zero }
+                }
+            }
+    }
+
+    /// A tick when the finger first passes the point where letting go acts.
+    private func mark(_ past: Bool) {
+        guard past != armed else { return }
+        armed = past
+        if past { ticks += 1 }
     }
 }
 
@@ -220,47 +435,8 @@ struct ProgressRing: View {
 }
 
 extension View {
-    /// Sideways swipes skip (left for next, right for previous); an upward swipe opens the
-    /// player. The content leans with the finger and springs back.
-    func swipeToSkip(open: @escaping () -> Void) -> some View {
-        modifier(SwipeToSkip(open: open))
-    }
-}
-
-private struct SwipeToSkip: ViewModifier {
-    let open: () -> Void
-    @Environment(Player.self) private var player
-    @State private var lean: CGSize = .zero
-    @State private var crossed = false
-
-    func body(content: Content) -> some View {
-        content
-            .offset(x: lean.width * 0.3, y: min(0, lean.height) * 0.3)
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 12)
-                    .onChanged { drag in
-                        let sideways = abs(drag.translation.width) > abs(drag.translation.height)
-                        lean = sideways ? CGSize(width: drag.translation.width, height: 0) : CGSize(width: 0, height: drag.translation.height)
-                        let past = sideways ? abs(drag.translation.width) > 56 : drag.translation.height < -28
-                        if past != crossed { crossed = past }
-                    }
-                    .onEnded { drag in
-                        let sideways = abs(drag.translation.width) > abs(drag.translation.height)
-                        let flingX = drag.predictedEndTranslation.width - drag.translation.width
-                        let flingY = drag.predictedEndTranslation.height - drag.translation.height
-                        if sideways, drag.translation.width < -56 || flingX < -120 {
-                            player.next()
-                        } else if sideways, drag.translation.width > 56 || flingX > 120 {
-                            player.previous()
-                        } else if !sideways, drag.translation.height < -28 || flingY < -120 {
-                            open()
-                        }
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { lean = .zero }
-                        crossed = false
-                    }
-            )
-            .sensoryFeedback(.impact(weight: .light), trigger: crossed) { _, now in now }
-    }
+    /// Kept for callers inside the bar; the bar's glass takes the swipes (see `barSwipes`).
+    func swipeToSkip(open: @escaping () -> Void) -> some View { self }
 }
 
 /// The explicit mark: a small rounded square with an E cut out of it.
