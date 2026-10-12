@@ -13,8 +13,18 @@ struct CoverWash: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 30, paused: reduceMotion)) { time in
-            let t = time.date.timeIntervalSinceReferenceDate
+        // Sized by the screen, never by the oversized covers inside it.
+        Color.clear.overlay {
+            TimelineView(.animation(minimumInterval: 1 / 30, paused: reduceMotion)) { time in
+                waves(time.date.timeIntervalSinceReferenceDate)
+            }
+        }
+        .clipped()
+        .ignoresSafeArea()
+        .animation(.easeInOut(duration: 0.5), value: coverArt)
+    }
+
+    private func waves(_ t: TimeInterval) -> some View {
             ZStack {
                 OctoColor.background
                 Cover(id: coverArt, size: 700, radius: 0)
@@ -31,9 +41,6 @@ struct CoverWash: View {
                 Color.black.opacity(tone.dim)
             }
             .saturation(1.6)
-        }
-        .ignoresSafeArea()
-        .animation(.easeInOut(duration: 0.5), value: coverArt)
     }
 }
 
@@ -188,34 +195,82 @@ struct QualityBadge: View {
     }
 }
 
-/// The system volume, as a slider between two speakers.
+/// The system volume, as Octo's line between two speakers. The line drives a hidden system
+/// volume view, which is the only way an app may set the volume; the hardware buttons move
+/// the line too.
 struct VolumeRow: View {
     let ink: Color
+    @State private var volume = SystemVolume()
+    @State private var dragging: Double?
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "speaker.fill").font(.system(size: 14)).foregroundStyle(ink.opacity(0.85))
-            SystemVolume(tint: UIColor(ink))
-                .frame(height: 30)
-            Image(systemName: "speaker.wave.3.fill").font(.system(size: 14)).foregroundStyle(ink.opacity(0.85))
+        HStack(spacing: 12) {
+            Image(systemName: "speaker.fill").font(.system(size: 15)).foregroundStyle(ink.opacity(0.85))
+                .frame(width: 20)
+            GeometryReader { box in
+                let fraction = dragging ?? Double(volume.level)
+                ZStack(alignment: .leading) {
+                    Capsule().fill(ink.opacity(0.24)).frame(height: dragging == nil ? 4 : 7)
+                    Capsule().fill(ink.opacity(0.85)).frame(width: box.size.width * fraction, height: dragging == nil ? 4 : 7)
+                }
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 0).onChanged { drag in
+                    let value = max(0, min(1, drag.location.x / box.size.width))
+                    dragging = value
+                    volume.set(Float(value))
+                }.onEnded { _ in dragging = nil })
+                .animation(.spring(response: 0.25, dampingFraction: 0.6), value: dragging == nil)
+            }
+            .frame(height: 30)
+            Image(systemName: "speaker.wave.3.fill").font(.system(size: 15)).foregroundStyle(ink.opacity(0.85))
+                .frame(width: 24)
         }
-        .accessibilityElement(children: .contain)
+        .background(HiddenVolumeView(volume: volume).frame(width: 1, height: 1).opacity(0.01))
+        .accessibilityElement()
         .accessibilityLabel("Volume")
+        .accessibilityValue("\(Int(volume.level * 100)) percent")
+        .accessibilityAdjustableAction { direction in
+            volume.set(max(0, min(1, volume.level + (direction == .increment ? 0.0625 : -0.0625))))
+        }
     }
 }
 
-private struct SystemVolume: UIViewRepresentable {
-    let tint: UIColor
+@MainActor
+@Observable
+final class SystemVolume {
+    private(set) var level: Float = AVAudioSession.sharedInstance().outputVolume
+    @ObservationIgnored weak var slider: UISlider?
+    @ObservationIgnored private var watch: NSKeyValueObservation?
+
+    init() {
+        watch = Self.watch { [weak self] level in Task { @MainActor in self?.level = level } }
+    }
+
+    nonisolated private static func watch(_ changed: @escaping @Sendable (Float) -> Void) -> NSKeyValueObservation {
+        AVAudioSession.sharedInstance().observe(\.outputVolume, options: [.new]) { _, change in
+            if let value = change.newValue { changed(value) }
+        }
+    }
+
+    func set(_ value: Float) {
+        level = value
+        slider?.setValue(value, animated: false)
+        slider?.sendActions(for: .valueChanged)
+    }
+}
+
+private struct HiddenVolumeView: UIViewRepresentable {
+    let volume: SystemVolume
 
     func makeUIView(context: Context) -> MPVolumeView {
-        let view = MPVolumeView(frame: .zero)
-        view.showsRouteButton = false
-        view.tintColor = tint
+        let view = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 100, height: 30))
+        volume.slider = view.subviews.compactMap { $0 as? UISlider }.first
         return view
     }
 
     func updateUIView(_ view: MPVolumeView, context: Context) {
-        view.tintColor = tint
+        if volume.slider == nil { volume.slider = view.subviews.compactMap { $0 as? UISlider }.first }
     }
 }
 

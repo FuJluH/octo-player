@@ -5,11 +5,16 @@ struct OctoApp: App {
     @State private var session: Session
     @State private var player: Player
     @State private var router = Router()
+    @State private var lyrics: LyricsStore
+    @State private var sound: SoundStore
 
     init() {
         let session = Session()
+        let sound = SoundStore()
         _session = State(initialValue: session)
-        _player = State(initialValue: Player(session: session))
+        _sound = State(initialValue: sound)
+        _player = State(initialValue: Player(session: session, sound: sound.processor))
+        _lyrics = State(initialValue: LyricsStore(session: session))
     }
 
     var body: some Scene {
@@ -18,6 +23,8 @@ struct OctoApp: App {
                 .environment(session)
                 .environment(player)
                 .environment(router)
+                .environment(lyrics)
+                .environment(sound)
                 .tint(OctoColor.accent)
                 .preferredColorScheme(.dark)
         }

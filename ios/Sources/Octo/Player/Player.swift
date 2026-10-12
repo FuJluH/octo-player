@@ -50,12 +50,16 @@ final class Player {
     @ObservationIgnored private var listen = Listen()
     @ObservationIgnored private var refilling = false
     @ObservationIgnored private let session: Session
+    @ObservationIgnored private let sound: SoundProcessor
     /// The queue as it was before shuffling, to go back to.
     @ObservationIgnored private var unshuffled: [Song]?
     @ObservationIgnored private weak var lastItem: AVPlayerItem?
+    /// When `elapsed` was last read from the engine, so the position can be told between reads.
+    @ObservationIgnored private var tickedAt = Date()
 
-    init(session: Session) {
+    init(session: Session, sound: SoundProcessor) {
         self.session = session
+        self.sound = sound
         engine.actionAtItemEnd = .advance
         observations = Self.watch(engine,
             itemChanged: { [weak self] in Task { @MainActor in self?.currentItemChanged() } },
@@ -328,8 +332,23 @@ final class Player {
         }
         let item = AVPlayerItem(asset: asset)
         item.audioTimePitchAlgorithm = keepsPitch ? .timeDomain : .varispeed
+        attachSound(to: item, asset: asset)
         itemIndex[ObjectIdentifier(item)] = position
         engine.insert(item, after: engine.items().last)
+    }
+
+    /// Every song plays through the sound processor (equalizer, ReplayGain, balance, limiter),
+    /// put on its audio track as soon as the track is known.
+    private func attachSound(to item: AVPlayerItem, asset: AVURLAsset) {
+        let processor = sound
+        Task {
+            guard let track = try? await asset.loadTracks(withMediaType: .audio).first, let tap = processor.makeTap() else { return }
+            let input = AVMutableAudioMixInputParameters(track: track)
+            input.audioTapProcessor = tap
+            let mix = AVMutableAudioMix()
+            mix.inputParameters = [input]
+            item.audioMix = mix
+        }
     }
 
     private func currentItemChanged() {
@@ -363,10 +382,22 @@ final class Player {
         publishNowPlaying()
     }
 
+    /// Where the song is at a moment between the engine's half-second reads, for anything that
+    /// has to move smoothly (the lyrics).
+    func position(at date: Date) -> TimeInterval {
+        guard engine.timeControlStatus == .playing else { return elapsed }
+        return elapsed + date.timeIntervalSince(tickedAt) * Double(speed)
+    }
+
     private func tick(_ seconds: TimeInterval) {
         guard seconds.isFinite else { return }
+        tickedAt = Date()
         if let item = engine.currentItem, item.duration.isNumeric, item.duration.seconds > 0 {
-            duration = item.duration.seconds
+            let measured = item.duration.seconds
+            let listed = Double(current?.duration ?? 0)
+            // iOS reads some AAC streams (HE-AAC) as twice their length; the server's length
+            // wins when the two differ by exactly that.
+            duration = listed > 0 && (1.9...2.1).contains(measured / listed) ? listed : measured
         }
         let step = seconds - elapsed
         elapsed = seconds
@@ -413,6 +444,7 @@ final class Player {
 
     private func songBegan() {
         listen = Listen(songId: current?.id)
+        if let song = current { sound.songStarted(id: song.id, albumId: song.albumId, replayGain: song.replayGain) }
         publishNowPlaying()
         loadArtwork()
     }

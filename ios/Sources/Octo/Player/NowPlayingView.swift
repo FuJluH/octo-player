@@ -19,40 +19,52 @@ struct NowPlayingView: View {
     @State private var appeared = false
     @State private var artDrag: CGFloat = 0
     @State private var artCrossed = false
+    @State private var showsLyricsMenu = false
 
     var body: some View {
-        GeometryReader { screen in
-            let cap = screen.size.height * 0.45
-            let travel = min(cap, max(0, pull))
-            let shrink = 1 - 0.06 * (travel / cap)
-            ZStack {
-                CoverWash(coverArt: player.current?.coverArt, tone: tone)
-                VStack(spacing: 0) {
-                    topLine
-                    if lyricsOpen {
-                        LyricsView(ink: tone.ink, muted: tone.muted)
-                            .transition(.opacity)
-                        LyricsBar(ink: tone.ink, close: { withAnimation(.easeInOut(duration: 0.36)) { lyricsOpen = false } })
-                            .padding(.top, 12)
-                            .padding(.bottom, 16)
-                    } else {
-                        art(in: screen.size)
-                        controls
-                            .offset(y: appeared ? 0 : 28)
-                            .opacity(appeared ? 1 : 0)
+        // The safe area is read here, then the player covers the whole screen: the wash runs to
+        // every edge and only the controls keep inside the safe area.
+        GeometryReader { safe in
+            let insets = safe.safeAreaInsets
+            GeometryReader { screen in
+                let cap = screen.size.height * 0.45
+                let travel = min(cap, max(0, pull))
+                let shrink = 1 - 0.06 * (travel / cap)
+                ZStack {
+                    CoverWash(coverArt: player.current?.coverArt, tone: tone)
+                    VStack(spacing: 0) {
+                        topLine
+                        if lyricsOpen {
+                            LyricsView(ink: tone.ink, muted: tone.muted)
+                                .transition(.opacity)
+                            LyricsBar(ink: tone.ink, close: { withAnimation(.easeInOut(duration: 0.36)) { lyricsOpen = false } },
+                                      menu: { showsLyricsMenu = true })
+                                .padding(.top, 12)
+                                .padding(.bottom, 16)
+                        } else {
+                            art(in: screen.size)
+                            controls
+                                .offset(y: appeared ? 0 : 28)
+                                .opacity(appeared ? 1 : 0)
+                        }
                     }
+                    .padding(.top, insets.top)
+                    .padding(.bottom, max(insets.bottom, 12))
+                    .padding(.horizontal, 24)
+                    .foregroundStyle(tone.ink)
                 }
-                .padding(.horizontal, 24)
-                .foregroundStyle(tone.ink)
+                .frame(width: screen.size.width, height: screen.size.height)
+                .clipShape(RoundedRectangle(cornerRadius: travel > 0 ? min(28, travel / cap * 5 * 28) : 0, style: .continuous))
+                .scaleEffect(shrink)
+                .offset(y: travel)
+                .gesture(pullToClose(cap: cap))
             }
-            .clipShape(RoundedRectangle(cornerRadius: min(28, travel / cap * 5 * 28), style: .continuous))
-            .scaleEffect(shrink)
-            .offset(y: travel)
-            .gesture(pullToClose(cap: cap))
+            .ignoresSafeArea()
         }
-        .ignoresSafeArea(edges: .horizontal)
-        .preferredColorScheme(tone.isLight ? .light : .dark)
         .sheet(isPresented: $showsQueue) { QueueSheet() }
+        .sheet(isPresented: $showsLyricsMenu) {
+            if let song = player.current { LyricsMenu(song: song) }
+        }
         .task(id: player.current?.coverArt) { await readTone() }
         .onAppear {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.68).delay(0.08)) { appeared = true }
@@ -101,7 +113,7 @@ struct NowPlayingView: View {
     private func art(in size: CGSize) -> some View {
         GeometryReader { stage in
             let side = min(312, stage.size.width, stage.size.height - 16)
-            BadgedCover(id: player.current?.coverArt, size: side, radius: side * 0.03, external: player.current?.isExternal ?? false)
+            Cover(id: player.current?.coverArt, size: side, radius: side * 0.03)
                 .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
                 .shadow(color: .black.opacity(0.2), radius: 16, y: 8)
                 .shadow(color: .black.opacity(0.15), radius: 32, y: 16)

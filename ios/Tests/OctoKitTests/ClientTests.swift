@@ -121,3 +121,19 @@ import Testing
         #expect(PlayRules.countsAsPlay(played: 240, duration: 900))
     }
 }
+
+@Suite struct LyricsTests {
+    @Test func lrcLinesWithSeveralStamps() {
+        let lyrics = Lrc.parse("[ar:Someone]\n[00:01.50]one\n[00:03.00][00:05.25]two\n")
+        #expect(lyrics.synced)
+        #expect(lyrics.line.map(\.start) == [1500, 3000, 5250])
+        #expect(lyrics.line.map(\.value) == ["one", "two", "two"])
+        #expect(lyrics.lineIndex(at: 3.1) == 1)
+    }
+
+    @Test func aPositiveOffsetShowsTheWordsSooner() {
+        let lyrics = Lrc.parse("[offset:500]\n[00:02.00]late")
+        #expect(lyrics.lineIndex(at: 1.6) == 0)
+        #expect(lyrics.lineIndex(at: 1.4) == nil)
+    }
+}

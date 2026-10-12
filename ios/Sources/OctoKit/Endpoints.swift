@@ -311,7 +311,7 @@ public struct LyricsLine: Decodable, Sendable, Equatable {
 public struct StructuredLyrics: Decodable, Sendable, Equatable {
     public var lang: String?
     public var synced: Bool
-    /// Milliseconds to add to every line's start.
+    /// Milliseconds the words show sooner than their stamps say.
     public var offset: Int
     public var line: [LyricsLine]
 
@@ -328,7 +328,7 @@ public struct StructuredLyrics: Decodable, Sendable, Equatable {
     /// The line sung at `seconds`, for synced lyrics.
     public func lineIndex(at seconds: Double) -> Int? {
         guard synced else { return nil }
-        let ms = Int(seconds * 1000) - offset
+        let ms = Int(seconds * 1000) + offset
         return line.lastIndex { ($0.start ?? .max) <= ms }
     }
 }
