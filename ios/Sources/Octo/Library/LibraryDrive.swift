@@ -13,8 +13,7 @@ import SwiftUI
 ///   menu for the first such item (or the one named), beside nothing, in the middle;
 ///   `menu:song:PAGE` opens it on a page: rate, share, info, playlist, delete
 /// - `info:TITLE` opens the song info pop-up
-/// - `sort:LIST:OPTION:asc|desc` sets a list's order, like `sort:songs:Year:desc`;
-///   `sort:LIST` opens that list's sort pop-up
+/// - `sort:LIST:OPTION:asc|desc` sets a list's order, like `sort:songs:Year:desc`
 /// - `pick:COUNT` picks the first COUNT songs of the open page that can pick songs
 /// - `songs-search:TEXT` opens Songs with the search open and the words typed
 @MainActor
@@ -65,12 +64,8 @@ enum LibraryDrive {
             }
         case "sort":
             let parts = value.split(separator: ":").map(String.init)
-            guard let list = SortList.allCases.first(where: { $0.key == parts.first || $0.rawValue == parts.first }) else { return }
-            if parts.count == 3 {
-                actions.state.setOrder(list, list.decode("\(parts[1]):\(parts[2])"))
-            } else {
-                actions.openSort(list)
-            }
+            guard parts.count == 3, let list = SortList.allCases.first(where: { $0.key == parts[0] || $0.rawValue == parts[0] }) else { return }
+            actions.state.setOrder(list, list.decode("\(parts[1]):\(parts[2])"))
         case "pick":
             guard let target = actions.selectionBar?.targets.last else { return }
             for pick in target.list.prefix(max(1, Int(value) ?? 1)) {

@@ -111,14 +111,6 @@ final class LibraryActions {
         if menu === open { menu = nil }
     }
 
-    /// Opens the sort list for a list beside its button.
-    func openSort(_ list: SortList) {
-        let id = UUID()
-        overlays.showPopup(id, anchor: spots.takeRecentChoice() ?? spots.recent(), title: "Sort by", maxWidth: 260,
-                           content: AnyView(SortPopup(list: list) { [weak self] in self?.overlays.hidePopup(id) }),
-                           dismiss: { [weak self] in self?.overlays.hidePopup(id) })
-    }
-
     // MARK: Playing
 
     /// Plays library songs from one of them, by their library ids, so the player takes each one's

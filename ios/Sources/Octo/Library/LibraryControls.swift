@@ -249,16 +249,32 @@ struct TitleWithButtons<Buttons: View>: View {
 }
 
 /// The order a list is in, as a small glass capsule: the sort mark, what it goes by, and an
-/// arrow for which way it runs. A tap opens the sort list beside it: the two directions on top,
-/// then the options. Picking another option gives it in its own starting direction.
+/// arrow for which way it runs. A tap opens the system menu: the two directions on top, then the
+/// options. Picking another option gives it in its own starting direction.
 struct SortButton: View {
     let list: SortList
     @Environment(LibraryState.self) private var library
-    @Environment(LibraryActions.self) private var actions
 
     var body: some View {
         let order = library.order(list)
-        Button { actions.openSort(list) } label: {
+        Menu {
+            // The two directions, the option's own starting one first; another one reorders at once.
+            Picker("Direction", selection: Binding(get: { order.descending },
+                                                   set: { library.setOrder(list, ListOrder(order.by, descending: $0)) })) {
+                ForEach(directionChoices(order.by), id: \.descending) { choice in
+                    Label(choice.label, systemImage: choice.descending ? "arrow.down" : "arrow.up").tag(choice.descending)
+                }
+            }
+            .pickerStyle(.palette)
+            // Another option comes in its own starting direction.
+            Picker("Sort by", selection: Binding(get: { order.by.id }, set: { id in
+                guard let option = list.options.first(where: { $0.id == id }), option.id != order.by.id else { return }
+                library.setOrder(list, order.picking(option))
+            })) {
+                ForEach(list.options, id: \.id) { option in Text(option.label).tag(option.id) }
+            }
+            .pickerStyle(.inline)
+        } label: {
             HStack(spacing: 7) {
                 IconView(.sort, size: 16, color: .white.opacity(0.72))
                 Text(order.by.label)
@@ -276,79 +292,11 @@ struct SortButton: View {
             .frame(minHeight: 48)
             .contentShape(Capsule())
         }
-        .buttonStyle(SortPress())
-        .choiceAnchor()
+        .menuOrder(.fixed)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Sorted by \(order.by.label), \(sortScale(order.by).label(descending: order.descending))")
         .accessibilityHint("Change the order")
         .accessibilityAddTraits(.isButton)
-    }
-}
-
-/// The sort button pressed: it shrinks to 0.94 on a quick, bouncy spring.
-private struct SortPress: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.94 : 1)
-            .animation(.interpolatingSpring(stiffness: 600, damping: 2 * 0.45 * sqrt(600)), value: configuration.isPressed)
-    }
-}
-
-/// The sort list: the two directions side by side on top, then every option, the chosen one
-/// in the darker pill with a check. Another direction reorders at once and stays open; another
-/// option takes its own starting direction and closes.
-struct SortPopup: View {
-    let list: SortList
-    let close: () -> Void
-    @Environment(LibraryState.self) private var library
-    @Namespace private var pill
-
-    var body: some View {
-        let order = library.order(list)
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 0) {
-                ForEach(directionChoices(order.by), id: \.descending) { choice in
-                    let chosen = choice.descending == order.descending
-                    Button {
-                        guard !chosen else { return }
-                        withAnimation(.interpolatingSpring(stiffness: 350, damping: 2 * 0.8 * sqrt(350))) {
-                            library.setOrder(list, ListOrder(order.by, descending: choice.descending))
-                        }
-                    } label: {
-                        HStack(spacing: 6) {
-                            IconView(choice.descending ? .descending : .ascending, size: 16, color: chosen ? .white : .white.opacity(0.45))
-                                .shadow(color: chosen ? .white.opacity(0.6) : .clear, radius: 4)
-                            Text(choice.label)
-                                .font(.system(size: 13.5, weight: chosen ? .semibold : .medium))
-                                .foregroundStyle(chosen ? .white : .white.opacity(0.45))
-                                .lineLimit(1)
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background {
-                            if chosen { GlazeSelected(shape: Capsule()).matchedGeometryEffect(id: "pill", in: pill) }
-                        }
-                        .contentShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(chosen ? [.isSelected] : [])
-                }
-            }
-            .padding(4)
-            .frame(height: 44)
-            .octoGlass(Capsule())
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("Direction")
-            HuggingScroll {
-                GlassMenuOptions(options: list.options.map { Choice($0.label) },
-                                 selected: list.options.firstIndex { $0.id == order.by.id } ?? -1) { index in
-                    let option = list.options[index]
-                    if option.id != order.by.id { library.setOrder(list, order.picking(option)) }
-                    close()
-                }
-            }
-        }
-        .frame(width: 248)
-        .padding(6)
     }
 }
 
@@ -498,36 +446,16 @@ func chipLabel(_ text: String, on: Bool) -> some View {
         .background(on ? LibraryLook.accentSelected : Color.white.opacity(0.07), in: Capsule())
 }
 
-/// Segments in one glass, the chosen one in a gliding pill with its words in the accent.
+/// A few choices side by side, as the system's segmented control.
 struct GlassSegments<Value: Hashable>: View {
     let options: [(value: Value, label: String)]
     @Binding var selection: Value
-    @Namespace private var pill
 
     var body: some View {
-        HStack(spacing: 0) {
-            ForEach(options, id: \.value) { option in
-                let chosen = option.value == selection
-                Button {
-                    withAnimation(.interpolatingSpring(stiffness: 350, damping: 2 * 0.8 * sqrt(350))) { selection = option.value }
-                } label: {
-                    Text(option.label)
-                        .font(LibraryLook.label)
-                        .foregroundStyle(chosen ? OctoColor.accent : .white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 36)
-                        .background {
-                            if chosen {
-                                Capsule().fill(LibraryLook.accentSelected).matchedGeometryEffect(id: "pill", in: pill)
-                            }
-                        }
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(chosen ? .isSelected : [])
-            }
+        Picker("", selection: $selection) {
+            ForEach(options, id: \.value) { option in Text(option.label).tag(option.value) }
         }
-        .padding(4)
-        .glassEffect(.regular, in: .capsule)
+        .pickerStyle(.segmented)
+        .labelsHidden()
     }
 }
