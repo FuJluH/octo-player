@@ -34,44 +34,46 @@ extension View {
     /// Pops the answers up beside this view as a glass card: under it when there is room, over
     /// it otherwise. A tap outside closes it; picking an answer runs it and closes it at once.
     func choicePopover(isPresented: Binding<Bool>, question: SettingsQuestion) -> some View {
-        popover(isPresented: isPresented, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
-            ChoiceList(question: question) { isPresented.wrappedValue = false }
-                .presentationCompactAdaptation(.popover)
+        glassPopup(isPresented: isPresented) {
+            ChoiceList.request(question) { isPresented.wrappedValue = false }
         }
     }
 }
 
 /// The answers under the question, the current one in the darker pill with a white check.
-/// Hairlines part the answers, never touching the pill.
-struct ChoiceList: View {
+/// Hairlines part the answers, never touching the pill. The question stays at the top as a quiet
+/// heading while the answers scroll, when they have to.
+@MainActor
+enum ChoiceList {
+    /// The popup for a question: as wide as its widest answer within 220 to 320 points.
+    static func request(_ question: SettingsQuestion, close: @escaping () -> Void) -> PopupRequest {
+        PopupRequest(
+            title: question.title,
+            anchor: nil,
+            width: .fit(min: 220, max: 320),
+            padding: 6,
+            header: AnyView(
+                Text(question.title)
+                    .font(.settingsLabel)
+                    .foregroundStyle(OctoColor.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 10)
+                    .padding(.bottom, 6)
+                    .accessibilityAddTraits(.isHeader)
+            ),
+            body: AnyView(ChoiceAnswers(question: question, close: close))
+        )
+    }
+}
+
+/// The answers, one under another.
+struct ChoiceAnswers: View {
     let question: SettingsQuestion
     let close: () -> Void
 
     var body: some View {
         let looks = MenuRowLook.rows(count: question.answers.count, selected: question.selected)
-        VStack(alignment: .leading, spacing: 0) {
-            Text(question.title)
-                .font(.settingsLabel)
-                .foregroundStyle(OctoColor.textSecondary)
-                .padding(.horizontal, 14)
-                .padding(.top, 10)
-                .padding(.bottom, 6)
-                .accessibilityAddTraits(.isHeader)
-            // The answers scroll only when they are taller than the card may be.
-            ViewThatFits(in: .vertical) {
-                answers(looks)
-                ScrollView { answers(looks) }.scrollBounceBehavior(.basedOnSize)
-            }
-        }
-        .padding(6)
-        .frame(minWidth: 220, maxWidth: 320)
-        .fixedSize(horizontal: true, vertical: false)
-        .frame(maxHeight: screenHeight * 0.6)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(question.title)
-    }
-
-    private func answers(_ looks: [MenuRowLook]) -> some View {
         VStack(spacing: 0) {
             ForEach(Array(question.answers.enumerated()), id: \.offset) { index, answer in
                 if index > 0 {

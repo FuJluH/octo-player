@@ -28,7 +28,7 @@ struct PlaybackSettingsPage: View {
                     }
                 }
                 PopoverRow(SettingsIndex.speed, value: SettingsWords.paceLabel(prefs), isPresented: $speedOpen) {
-                    PaceCard().presentationCompactAdaptation(.popover)
+                    PopupRequest(title: "Speed", anchor: nil, width: .fixed(320), padding: 0, header: nil, body: AnyView(PaceCard()))
                 }
                 ToggleRow(SettingsIndex.skipSilence, isOn: prefs.skipSilence, onChange: settings.setSkipSilence)
                 ToggleRow(SettingsIndex.autoplay, isOn: prefs.autoplay, helper: "When the queue ends, similar songs keep playing.",
@@ -84,13 +84,13 @@ struct PlaybackSettingsPage: View {
 }
 
 /// A row like a choice row that opens its own card beside it instead of a list.
-struct PopoverRow<Card: View>: View {
+struct PopoverRow: View {
     let entry: SettingEntry?
     let value: String
     @Binding var isPresented: Bool
-    @ViewBuilder let card: () -> Card
+    let card: () -> PopupRequest
 
-    init(_ entry: SettingEntry?, value: String, isPresented: Binding<Bool>, @ViewBuilder card: @escaping () -> Card) {
+    init(_ entry: SettingEntry?, value: String, isPresented: Binding<Bool>, card: @escaping () -> PopupRequest) {
         self.entry = entry
         self.value = value
         _isPresented = isPresented
@@ -100,24 +100,32 @@ struct PopoverRow<Card: View>: View {
     var body: some View {
         Button { isPresented = true } label: {
             RowFrame(entry: entry) {
-                Text(entry?.title ?? "").font(.octoBody).foregroundStyle(OctoColor.textPrimary).frame(maxWidth: .infinity, alignment: .leading)
-                Text(value)
-                    .font(.octoBodySmall)
-                    .foregroundStyle(OctoColor.textSecondary)
-                    .multilineTextAlignment(.trailing)
-                    .lineLimit(2)
-                    .layoutPriority(-1)
-                Image(systemName: SettingsIcon.chevron)
-                    .font(.system(size: 13, weight: .semibold))
-                    .frame(width: 18, height: 18)
-                    .foregroundStyle(OctoColor.textMuted)
-                    .accessibilityHidden(true)
+                TitleValueLayout {
+                    Text(entry?.title ?? "")
+                        .font(.octoBody)
+                        .foregroundStyle(OctoColor.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .layoutValue(key: RowShare.self, value: 1)
+                    Text(value)
+                        .font(.octoBodySmall)
+                        .foregroundStyle(OctoColor.textSecondary)
+                        .multilineTextAlignment(.trailing)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .layoutValue(key: RowShare.self, value: 0.8)
+                    Image(systemName: SettingsIcon.chevron)
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(width: 18, height: 18)
+                        .foregroundStyle(OctoColor.textMuted)
+                        .accessibilityHidden(true)
+                }
             }
         }
         .buttonStyle(SettingsRowPress())
         .accessibilityLabel(entry?.title ?? "")
         .accessibilityValue(value)
-        .popover(isPresented: $isPresented, attachmentAnchor: .rect(.bounds), arrowEdge: .top, content: card)
+        .glassPopup(isPresented: $isPresented, request: card)
     }
 }
 
@@ -127,18 +135,6 @@ struct PaceCard: View {
     @State private var settings = AppSettings.shared
 
     var body: some View {
-        // Scrolls only when it is taller than the card may be.
-        ViewThatFits(in: .vertical) {
-            controls
-            ScrollView { controls }.scrollBounceBehavior(.basedOnSize)
-        }
-        .frame(width: 320)
-        .frame(maxHeight: screenHeight * 0.6)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Speed")
-    }
-
-    private var controls: some View {
         let prefs = settings.player
         return VStack(alignment: .leading, spacing: 0) {
             HStack {

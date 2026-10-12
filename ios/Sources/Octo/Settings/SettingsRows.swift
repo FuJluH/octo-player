@@ -258,17 +258,62 @@ private struct RowLabel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.octoBody).foregroundStyle(enabled ? titleColor : OctoColor.textMuted)
+            Text(title).font(.octoBody).foregroundStyle(enabled ? titleColor : OctoColor.textMuted).fixedSize(horizontal: false, vertical: true)
             if let below {
-                Text(below).font(.octoCaption).foregroundStyle(belowColor)
+                Text(below).font(.octoCaption).foregroundStyle(belowColor).fixedSize(horizontal: false, vertical: true)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
+/// Which share of a row's spare width a part takes: the title 1, the value 0.8, and nothing set
+/// for parts that keep their own size (a chevron, a spinner).
+struct RowShare: LayoutValueKey {
+    static let defaultValue: CGFloat? = nil
+}
+
+/// A row's title and value side by side, sharing the room the fixed parts leave 1 to 0.8, as
+/// the other apps divide it. Each wraps within its share, so neither is ever cut short.
+struct TitleValueLayout: Layout {
+    var spacing: CGFloat = 12
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let widths = widths(proposal.width, subviews)
+        var height: CGFloat = 0
+        for (index, part) in subviews.enumerated() {
+            height = max(height, part.sizeThatFits(ProposedViewSize(width: widths[index], height: nil)).height)
+        }
+        let used = widths.reduce(0, +) + spacing * CGFloat(max(subviews.count - 1, 0))
+        return CGSize(width: proposal.width ?? used, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let widths = widths(bounds.width, subviews)
+        var x = bounds.minX
+        for (index, part) in subviews.enumerated() {
+            let size = part.sizeThatFits(ProposedViewSize(width: widths[index], height: nil))
+            part.place(at: CGPoint(x: x, y: bounds.midY), anchor: .leading, proposal: ProposedViewSize(width: widths[index], height: size.height))
+            x += widths[index] + spacing
+        }
+    }
+
+    private func widths(_ total: CGFloat?, _ subviews: Subviews) -> [CGFloat] {
+        let ideal = subviews.map { $0.sizeThatFits(.unspecified).width }
+        guard let total else { return ideal }
+        let shares = subviews.map { $0[RowShare.self] }
+        let fixed = zip(shares, ideal).reduce(CGFloat(0)) { $0 + ($1.0 == nil ? $1.1 : 0) }
+        let spare = max(0, total - fixed - spacing * CGFloat(max(subviews.count - 1, 0)))
+        let whole = shares.compactMap { $0 }.reduce(0, +)
+        return zip(shares, ideal).map { share, width in
+            guard let share else { return width }
+            return whole > 0 ? spare * share / whole : 0
+        }
+    }
+}
+
 /// A row's current value on its right: quieter than the title, kept to the end of the line,
-/// and never taking more than its share of the row.
+/// at most two lines, in its share of the row.
 private struct Reading: View {
     let value: String
     var enabled = true
@@ -280,7 +325,7 @@ private struct Reading: View {
             .multilineTextAlignment(.trailing)
             .lineLimit(2)
             .truncationMode(.tail)
-            .layoutPriority(-1)
+            .frame(maxWidth: .infinity, alignment: .trailing)
     }
 }
 
@@ -351,14 +396,16 @@ struct ChoiceRow: View {
     var body: some View {
         Button { open = true } label: {
             RowFrame(entry: entry) {
-                RowLabel(title: title ?? entry?.title ?? "", below: helper, enabled: enabled)
-                Reading(value: value, enabled: enabled)
-                Image(systemName: SettingsIcon.chevron)
-                    .font(.system(size: 13, weight: .semibold))
-                    .frame(width: 18, height: 18)
-                    .foregroundStyle(OctoColor.textMuted)
-                    .opacity(enabled ? 1 : 0.5)
-                    .accessibilityHidden(true)
+                TitleValueLayout {
+                    RowLabel(title: title ?? entry?.title ?? "", below: helper, enabled: enabled).layoutValue(key: RowShare.self, value: 1)
+                    Reading(value: value, enabled: enabled).layoutValue(key: RowShare.self, value: 0.8)
+                    Image(systemName: SettingsIcon.chevron)
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(width: 18, height: 18)
+                        .foregroundStyle(OctoColor.textMuted)
+                        .opacity(enabled ? 1 : 0.5)
+                        .accessibilityHidden(true)
+                }
             }
         }
         .buttonStyle(SettingsRowPress())
@@ -394,10 +441,13 @@ struct SliderRow: View {
     var body: some View {
         RowFrame(entry: entry) {
             VStack(spacing: 0) {
-                HStack {
-                    Text(title ?? entry?.title ?? "").font(.octoBody).foregroundStyle(OctoColor.textPrimary)
-                    Spacer(minLength: 8)
-                    Text(value).font(.octoBodySmall.monospacedDigit()).foregroundStyle(OctoColor.textSecondary)
+                HStack(alignment: .firstTextBaseline) {
+                    Text(title ?? entry?.title ?? "")
+                        .font(.octoBody)
+                        .foregroundStyle(OctoColor.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text(value).font(.octoBodySmall.monospacedDigit()).foregroundStyle(OctoColor.textSecondary).fixedSize()
                 }
                 JewelSlider(fraction: fraction, label: title ?? entry?.title ?? "", valueText: value, onSeek: onSeek)
             }
@@ -434,20 +484,23 @@ struct ActionRow: View {
     var body: some View {
         Button(action: action) {
             RowFrame(entry: entry) {
-                RowLabel(title: title ?? entry?.title ?? "", below: helper, enabled: enabled,
-                         titleColor: destructive ? OctoColor.error : OctoColor.textPrimary)
-                if busy {
-                    ProgressView().controlSize(.small).tint(OctoColor.accent).frame(width: 18, height: 18)
-                } else if let trailing {
-                    Reading(value: trailing, enabled: enabled)
-                }
-                if chevron && !busy {
-                    Image(systemName: SettingsIcon.chevron)
-                        .font(.system(size: 14, weight: .semibold))
-                        .frame(width: 20, height: 20)
-                        .foregroundStyle(OctoColor.textMuted)
-                        .opacity(enabled ? 1 : 0.5)
-                        .accessibilityHidden(true)
+                TitleValueLayout {
+                    RowLabel(title: title ?? entry?.title ?? "", below: helper, enabled: enabled,
+                             titleColor: destructive ? OctoColor.error : OctoColor.textPrimary)
+                        .layoutValue(key: RowShare.self, value: 1)
+                    if busy {
+                        ProgressView().controlSize(.small).tint(OctoColor.accent).frame(width: 18, height: 18)
+                    } else if let trailing {
+                        Reading(value: trailing, enabled: enabled).layoutValue(key: RowShare.self, value: 0.8)
+                    }
+                    if chevron && !busy {
+                        Image(systemName: SettingsIcon.chevron)
+                            .font(.system(size: 14, weight: .semibold))
+                            .frame(width: 20, height: 20)
+                            .foregroundStyle(OctoColor.textMuted)
+                            .opacity(enabled ? 1 : 0.5)
+                            .accessibilityHidden(true)
+                    }
                 }
             }
         }
@@ -472,8 +525,10 @@ struct InfoRow: View {
 
     var body: some View {
         RowFrame(entry: entry) {
-            RowLabel(title: title ?? entry?.title ?? "", below: helper)
-            Reading(value: value)
+            TitleValueLayout {
+                RowLabel(title: title ?? entry?.title ?? "", below: helper).layoutValue(key: RowShare.self, value: 1)
+                Reading(value: value).layoutValue(key: RowShare.self, value: 0.8)
+            }
         }
         .accessibilityElement(children: .combine)
     }
@@ -572,7 +627,7 @@ struct CategoryRow: View {
             RowFrame(entry: nil) {
                 IconTile(icon: icon)
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(title).font(.octoBody).foregroundStyle(OctoColor.textPrimary)
+                    Text(title).font(.octoBody).foregroundStyle(OctoColor.textPrimary).fixedSize(horizontal: false, vertical: true)
                     if !summary.isEmpty {
                         Text(summary).font(.octoCaption).foregroundStyle(OctoColor.textMuted).lineLimit(1).truncationMode(.tail)
                     }

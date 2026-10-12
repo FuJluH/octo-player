@@ -227,7 +227,7 @@ private struct AccountRow<Wrapped: View>: View {
         HStack(spacing: 16) {
             IconTile(icon: icon)
             VStack(alignment: .leading, spacing: 0) {
-                Text(title).font(.octoBody).foregroundStyle(OctoColor.textPrimary).lineLimit(1)
+                Text(title).font(.octoBody).foregroundStyle(OctoColor.textPrimary).fixedSize(horizontal: false, vertical: true)
                 ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
                     Text(line.0).font(.octoCaption).foregroundStyle(line.1).lineLimit(1)
                 }
