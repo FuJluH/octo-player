@@ -12,6 +12,8 @@ import OctoKit
 /// - `found:TEXT` plays the songs not in the library that a search for TEXT finds
 /// - `search:TEXT` plays the library songs a search for TEXT finds
 /// - `pause`
+/// - `settings:PAGE`, `settings:PAGE@ROW`, `settings-search:TEXT`, `popup:ROW`, `whatsnew`: see
+///   `SettingsNavigator.drive`
 @MainActor
 enum Drive {
     static func run(session: Session, player: Player, router: Router) async {
@@ -27,6 +29,7 @@ enum Drive {
             case "close": router.drive = .closePlayer
             case "lyrics": router.drive = .lyrics
             case "pause": player.pause()
+            case "settings", "settings-search", "popup", "whatsnew": await SettingsNavigator.shared.drive(name, value, router: router)
             case "list":
                 guard let client = session.client,
                       let list = try? await client.playlists().first(where: { $0.name.caseInsensitiveCompare(value) == .orderedSame }),

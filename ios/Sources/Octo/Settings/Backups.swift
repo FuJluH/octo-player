@@ -1,0 +1,211 @@
+import Foundation
+import OctoKit
+
+/// The library's part of a backup: phone playlists, likes, ratings, favorites, pins, sort orders
+/// and each song's lyrics timing, and putting them back through the same stores as when the
+/// listener makes them by hand. The part of the app that keeps the library supplies it.
+@MainActor
+protocol BackupLibrary: AnyObject {
+    func tracks() async -> [BackupTrack]
+    func albums() async -> [NamedItem]
+    func artists() async -> [NamedItem]
+    /// Every playlist here, phone and server, by name.
+    func playlistNames() async -> [String]
+    /// Playlists that exist only on the phone, oldest first.
+    func phonePlaylists() async -> [PlaylistBackup]
+    func likes() async -> [SongKey]
+    func ratings() async -> [RatedSong]
+    func favoriteAlbums() async -> [HeldKey]
+    func favoriteArtists() async -> [HeldKey]
+    func pins() async -> [PinBackup]
+    func sortOrders() async -> [String: String]
+    func lyricsOffsets() async -> [LyricsOffsetBackup]
+    /// Each playlist kept downloaded, by id, and every playlist's name by id.
+    func playlistNamesById() async -> [String: String]
+
+    func makePlaylist(_ name: String, trackIds: [String]) async -> String?
+    func isLiked(_ trackId: String) async -> Bool
+    func like(_ trackId: String) async
+    func rate(_ trackId: String, stars: Int) async
+    func favoriteAlbumIds() async -> Set<String>
+    func favoriteArtistIds() async -> Set<String>
+    func favorite(album id: String) async
+    func favorite(artist id: String) async
+    func pin(_ kind: PinKind, id: String) async
+    func restoreSortOrders(_ orders: [String: String]) async
+    func setLyricsOffset(_ trackId: String, ms: Int64) async
+}
+
+/// Saves the app's settings, playlists, likes, ratings, favorites and pins to a file the
+/// listener picks, and puts them back from one. Sign-in secrets are never written: only the
+/// server's address and user name, for reference, and no ListenBrainz token at all.
+@MainActor
+final class Backups {
+    static let shared = Backups()
+
+    /// The library's part, once the part of the app that keeps the library is in.
+    weak var library: BackupLibrary?
+
+    /// Where the sound settings and the listener's equalizer presets are kept.
+    private let soundKey = "sound.byOutput"
+    private let presetsKey = "sound.userPresets"
+    /// The server's queue sync and new playlists choices, as the Server page keeps them.
+    private let queueSyncStore = UserDefaults(suiteName: "server_queue") ?? .standard
+    private let playlistSyncStore = UserDefaults(suiteName: "playlist_sync") ?? .standard
+
+    private init() {}
+
+    /// Everything as it is now.
+    func make(session: Session, now: Date = Date()) async -> Backup {
+        let settings = AppSettings.shared
+        var b = Backup()
+        b.createdAt = Int64(now.timeIntervalSince1970 * 1000)
+        b.player = settings.player
+        b.streaming = settings.stream
+        b.sound = SoundBackup(perOutput: true, profiles: savedSound())
+        b.presets = savedPresets()
+        b.library = LibraryBackup(
+            excludedFolders: settings.excludedFolders.sorted(),
+            syncQueue: queueSyncStore.object(forKey: "sync_on") as? Bool ?? true,
+            newPlaylistsOnServer: playlistSyncStore.object(forKey: "new_on_server") as? Bool ?? false
+        )
+        if let active = session.active, session.client != nil {
+            b.server = ServerBackup(address: BackupFile.plainAddress(active.address.absoluteString), username: active.username)
+        }
+        let names = await library?.playlistNamesById() ?? [:]
+        if let library {
+            b.playlists = await library.phonePlaylists()
+            b.likes = await library.likes()
+            b.ratings = await library.ratings()
+            b.favoriteAlbums = await library.favoriteAlbums()
+            b.favoriteArtists = await library.favoriteArtists()
+            b.pins = await library.pins()
+            b.sortOrders = await library.sortOrders()
+        }
+        b.lyrics = LyricsBackup(
+            keepScreenOn: settings.keepScreenOn,
+            offsets: (await library?.lyricsOffsets() ?? []).sorted { $0.song.relinkKey < $1.song.relinkKey },
+            look: settings.lyricsLook,
+            outputOffsets: settings.outputTimings.mapValues(Int64.init)
+        )
+        var offline = settings.offline
+        offline.keptPlaylists = offline.keptPlaylists.compactMap { names[$0] }.sorted()
+        b.offline = offline
+        let lb = settings.listenBrainz
+        b.listenBrainz = ListenBrainzBackup(enabled: lb.enabled, sendPlays: lb.sendPlays, nowPlaying: lb.nowPlaying)
+        return b
+    }
+
+    /// The backup as the bytes of its file: UTF-8 JSON, no byte order mark.
+    func data(session: Session) async -> Data {
+        Data(BackupFile.encode(await make(session: session)).utf8)
+    }
+
+    /// Reads a picked file, at most 32 MiB of it.
+    nonisolated func read(_ url: URL) async -> BackupRead {
+        await Task.detached {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            guard let handle = try? FileHandle(forReadingFrom: url) else { return BackupRead.notABackup }
+            defer { try? handle.close() }
+            var bytes = Data()
+            while bytes.count < BackupFile.maxBytes {
+                guard let chunk = try? handle.read(upToCount: 64 * 1024), !chunk.isEmpty else { break }
+                bytes.append(chunk)
+            }
+            return BackupFile.decode(bytes)
+        }.value
+    }
+
+    /// What restoring would do with the library as it is now.
+    func plan(_ backup: Backup) async -> RestorePlan {
+        guard let library else { return BackupPlanner.plan(backup, library: [], existingPlaylists: []) }
+        return BackupPlanner.plan(backup, library: await library.tracks(), existingPlaylists: await library.playlistNames(),
+                                  albums: await library.albums(), artists: await library.artists())
+    }
+
+    /// Puts a backup's settings back, and makes its playlists, likes and ratings as planned.
+    func restore(_ backup: Backup, plan: RestorePlan, lyricsStore: LyricsStore?) async {
+        let settings = AppSettings.shared
+        if backup.player != nil || backup.streaming != nil {
+            settings.restore(player: backup.player ?? settings.player, stream: backup.streaming ?? settings.stream)
+            lyricsStore?.online = settings.player.lyricsOnline
+        }
+        if let sound = backup.sound { restoreSound(sound.profiles) }
+        restorePresets(backup.presets)
+        if let library = backup.library {
+            settings.setExcludedFolders(Set(library.excludedFolders))
+            queueSyncStore.set(library.syncQueue, forKey: "sync_on")
+            playlistSyncStore.set(library.newPlaylistsOnServer, forKey: "new_on_server")
+        }
+        if let lb = backup.listenBrainz {
+            ListenBrainzSync.shared.restoreChoices(enabled: lb.enabled, sendPlays: lb.sendPlays, nowPlaying: lb.nowPlaying)
+        }
+        await library?.restoreSortOrders(backup.sortOrders)
+        if let lyrics = backup.lyrics {
+            settings.setKeepScreenOn(lyrics.keepScreenOn)
+            if let look = lyrics.look {
+                settings.restoreLook(look)
+                lyricsStore?.look = look.style == .classic ? .classic : .flowing
+            }
+            for (output, ms) in lyrics.outputOffsets { settings.setOutputTiming(output, Int(ms)) }
+        }
+        for (id, ms) in plan.lyricsOffsets { await library?.setLyricsOffset(id, ms: min(max(ms, -10_000), 10_000)) }
+        // Playlists by name, with the ones made here, so pins and kept playlists can find them.
+        var playlistIds: [String: String] = [:]
+        for (id, name) in await library?.playlistNamesById() ?? [:] { playlistIds[name.trimmingCharacters(in: .whitespaces).lowercased()] = id }
+        for playlist in plan.playlists where !playlist.trackIds.isEmpty || playlist.total == 0 {
+            if let id = await library?.makePlaylist(playlist.name, trackIds: playlist.trackIds) {
+                playlistIds[playlist.name.trimmingCharacters(in: .whitespaces).lowercased()] = id
+            }
+        }
+        if let library {
+            for id in plan.likes where !(await library.isLiked(id)) { await library.like(id) }
+            for (id, stars) in plan.ratings { await library.rate(id, stars: stars) }
+            let albums = await library.favoriteAlbumIds()
+            for id in plan.favoriteAlbums where !albums.contains(id) { await library.favorite(album: id) }
+            let artists = await library.favoriteArtistIds()
+            for id in plan.favoriteArtists where !artists.contains(id) { await library.favorite(artist: id) }
+        }
+        // After the playlists, so the ones kept downloaded can be found by name.
+        if let offline = backup.offline {
+            settings.restoreOffline(offline, keptPlaylistIds: plan.keptPlaylists.compactMap { playlistIds[$0.lowercased()] })
+        }
+        // Added after the pins already here, in the backup's order.
+        for pin in plan.pins {
+            let id = pin.kind == .playlist ? playlistIds[pin.target.lowercased()] : pin.target
+            if let id { await library?.pin(pin.kind, id: id) }
+        }
+    }
+
+    // MARK: Sound
+
+    private func savedSound() -> [String: SoundSettings] {
+        UserDefaults.standard.data(forKey: soundKey).flatMap { try? JSONDecoder().decode([String: SoundSettings].self, from: $0) } ?? [:]
+    }
+
+    /// Each output named in the backup gets the backup's settings; outputs not named keep theirs.
+    private func restoreSound(_ profiles: [String: SoundSettings]) {
+        var saved = savedSound()
+        for (output, settings) in profiles { saved[output] = settings }
+        UserDefaults.standard.set(try? JSONEncoder().encode(saved), forKey: soundKey)
+    }
+
+    private func savedPresets() -> [PresetBackup] {
+        let saved = UserDefaults.standard.dictionary(forKey: presetsKey) as? [String: [Double]] ?? [:]
+        return saved.keys.sorted().map { PresetBackup($0, saved[$0] ?? []) }
+    }
+
+    /// Presets with a blank name or not ten gains are dropped; each other one replaces a preset of
+    /// the same name (case aside), and the rest are kept.
+    private func restorePresets(_ presets: [PresetBackup]) {
+        var saved = UserDefaults.standard.dictionary(forKey: presetsKey) as? [String: [Double]] ?? [:]
+        for preset in presets {
+            let name = preset.name.trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty, preset.gains.count == 10 else { continue }
+            for key in saved.keys where key.trimmingCharacters(in: .whitespaces).lowercased() == name.lowercased() { saved[key] = nil }
+            saved[name] = preset.gains
+        }
+        UserDefaults.standard.set(saved, forKey: presetsKey)
+    }
+}
