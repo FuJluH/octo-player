@@ -32,7 +32,7 @@ struct PrefetchQueue: Equatable {
 /// Songs found online are never fetched ahead, only saved as they play.
 @MainActor
 final class Prefetcher {
-    private let settings: OfflineSettings
+    private let settings: AppSettings
     private let connectivity: Connectivity
     private let cache: StreamCache
     private var queue = PrefetchQueue.empty
@@ -43,11 +43,11 @@ final class Prefetcher {
     /// The headers the server needs on every request, and the trusted session.
     var headers: @MainActor () -> [String: String] = { [:] }
 
-    init(settings: OfflineSettings, connectivity: Connectivity, cache: StreamCache = .shared) {
+    init(settings: AppSettings = .shared, connectivity: Connectivity, cache: StreamCache = .shared) {
         self.settings = settings
         self.connectivity = connectivity
         self.cache = cache
-        watch = Watch({ [weak settings] in settings?.prefs ?? OfflinePrefs() }) { [weak self] _ in self?.refresh() }
+        watch = Watch({ [weak settings] in settings?.offline ?? OfflinePrefs() }) { [weak self] _ in self?.refresh() }
         connectivity.onChange { [weak self] in self?.refresh() }
     }
 
@@ -86,7 +86,7 @@ final class Prefetcher {
     private func upcoming() async -> [PrefetchEntry] {
         guard !queue.casting else { return [] }
         let count = prefetchCount(cacheEnabled: await cache.enabled, onWifi: connectivity.onWifi, online: connectivity.online,
-                                  prefs: settings.prefs)
+                                  prefs: settings.offline)
         let entries = queue.entries
         let places = prefetchAhead(playOrder: queue.playOrder, current: queue.current, repeatMode: queue.repeatMode,
                                    playing: queue.playing, count: count) { place in

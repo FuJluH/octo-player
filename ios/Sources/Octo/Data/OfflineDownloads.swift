@@ -21,7 +21,7 @@ final class OfflineDownloads {
 
     @ObservationIgnored private let session: Session
     @ObservationIgnored private let library: Library
-    @ObservationIgnored let settings: OfflineSettings
+    @ObservationIgnored let settings: AppSettings
     @ObservationIgnored private let connectivity: Connectivity
     @ObservationIgnored private let announce: @MainActor (String) -> Void
     @ObservationIgnored private let bridge = TransferBridge()
@@ -48,7 +48,7 @@ final class OfflineDownloads {
         var format: String?
     }
 
-    init(session: Session, library: Library, settings: OfflineSettings, connectivity: Connectivity, sync: ServerSync,
+    init(session: Session, library: Library, settings: AppSettings = .shared, connectivity: Connectivity, sync: ServerSync,
          announce: @escaping @MainActor (String) -> Void) {
         self.session = session
         self.library = library
@@ -97,9 +97,9 @@ final class OfflineDownloads {
         // Rules follow likes, kept playlists and their songs, once they settle.
         watches.append(Watch({ [weak self] in
             guard let self else { return "" }
-            return "\(self.library.likesVersion)|\(self.library.playlistsVersion)|\(self.settings.prefs.keepLiked)|\(self.settings.prefs.keptPlaylists.sorted())"
+            return "\(self.library.likesVersion)|\(self.library.playlistsVersion)|\(self.settings.offline.keepLiked)|\(self.settings.offline.keptPlaylists.sorted())"
         }) { [weak self] _ in self?.rulesChanged() })
-        watches.append(Watch({ [weak self] in self?.settings.prefs.wifiOnly ?? true }) { [weak self] _ in
+        watches.append(Watch({ [weak self] in self?.settings.offline.wifiOnly ?? true }) { [weak self] _ in
             Task { await self?.pump() }
         })
         connectivity.onChange { [weak self] in self?.connectionChanged() }
@@ -214,7 +214,8 @@ final class OfflineDownloads {
 
     /// Stops keeping anything: the rules are switched off and every file goes.
     func removeAll() {
-        settings.clearRules()
+        settings.setKeepLiked(false)
+        for id in settings.offline.keptPlaylists { settings.setPlaylistKept(id, kept: false) }
         Task {
             for row in (try? await library.store.allDownloads()) ?? [] { await deleteRow(row) }
         }
@@ -239,7 +240,7 @@ final class OfflineDownloads {
 
     func setKeepLiked(_ on: Bool) { settings.setKeepLiked(on) }
 
-    func setPlaylistKept(_ playlistId: String, _ kept: Bool) { settings.setPlaylistKept(playlistId, kept) }
+    func setPlaylistKept(_ playlistId: String, _ kept: Bool) { settings.setPlaylistKept(playlistId, kept: kept) }
 
     /// The finished downloads of these library songs whose files are there. One whose file has
     /// gone waits to download again.
@@ -274,7 +275,7 @@ final class OfflineDownloads {
             try? await Task.sleep(for: .milliseconds(downloadRulesSettleMs))
             if Task.isCancelled { return }
             guard let self else { return }
-            let prefs = self.settings.prefs
+            let prefs = self.settings.offline
             let store = self.library.store
             let liked = prefs.keepLiked ? ((try? await store.likedIds()) ?? []) : []
             let members = prefs.keptPlaylists.isEmpty ? [] : ((try? await store.playlistMembers(Array(prefs.keptPlaylists))) ?? [])
@@ -324,7 +325,7 @@ final class OfflineDownloads {
     }
 
     private func connectionChanged() {
-        if let running, downloadLeftWifi(wifiOnly: settings.prefs.wifiOnly, onWifi: connectivity.onWifi) {
+        if let running, downloadLeftWifi(wifiOnly: settings.offline.wifiOnly, onWifi: connectivity.onWifi) {
             // Leaving Wi-Fi pauses a download that waits for it.
             running.task.cancel()
             self.running = nil
@@ -343,7 +344,7 @@ final class OfflineDownloads {
 
     private func pumpOnce() async {
         guard running == nil, let server = session.inUse else { return }
-        guard downloadMayRunNow(signedIn: true, wifiOnly: settings.prefs.wifiOnly, onWifi: connectivity.onWifi,
+        guard downloadMayRunNow(signedIn: true, wifiOnly: settings.offline.wifiOnly, onWifi: connectivity.onWifi,
                                 online: connectivity.online),
               let next = try? await library.store.nextQueuedDownload(server.sourceId), running == nil
         else { return }
@@ -353,7 +354,7 @@ final class OfflineDownloads {
             Task { await self.pump() }
             return
         }
-        let maxKbps = downloadMaxKbps(mimeType: copy.mimeType, bitrate: downloadBitrate(copy), quality: settings.prefs.downloadQuality)
+        let maxKbps = downloadMaxKbps(mimeType: copy.mimeType, bitrate: downloadBitrate(copy), quality: settings.offline.downloadQuality)
         let format = downloadFormat(serverMimeType: copy.mimeType, maxKbps: maxKbps)
         var params = [("id", next.serverId)]
         if let maxKbps {
@@ -363,8 +364,8 @@ final class OfflineDownloads {
         }
         var request = URLRequest(url: server.client.url("stream", params))
         for (name, value) in server.client.headers { request.setValue(value, forHTTPHeaderField: name) }
-        request.allowsCellularAccess = !settings.prefs.wifiOnly
-        request.allowsExpensiveNetworkAccess = !settings.prefs.wifiOnly
+        request.allowsCellularAccess = !settings.offline.wifiOnly
+        request.allowsExpensiveNetworkAccess = !settings.offline.wifiOnly
         let fileName = downloadFileName(artist: copy.artist, title: copy.title, sourceId: next.sourceId, serverId: next.serverId, format: format)
         let task = transfer.downloadTask(with: request)
         task.taskDescription = [downloadKey(next.sourceId, next.serverId), fileName, format ?? ""].joined(separator: "\n")
@@ -440,7 +441,7 @@ final class OfflineDownloads {
             let tried = (tries[key] ?? 0) + 1
             tries[key] = tried
             let noConnection = !connectivity.online || (error as? URLError).map { [.notConnectedToInternet, .networkConnectionLost].contains($0.code) } == true
-                || downloadLeftWifi(wifiOnly: settings.prefs.wifiOnly, onWifi: connectivity.onWifi)
+                || downloadLeftWifi(wifiOnly: settings.offline.wifiOnly, onWifi: connectivity.onWifi)
             switch downloadAfterFailure(noConnection: noConnection, serverRefused: refused, tried: tried) {
             case .waitForConnection:
                 tries[key] = nil

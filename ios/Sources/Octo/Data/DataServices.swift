@@ -23,16 +23,16 @@ final class DataServices {
     let plays: PlayStore
     let serverSwitch: ServerSwitch
     let device: DeviceLibrary
-    let offlineSettings: OfflineSettings
     let offline: OfflineDownloads
     let marks: OfflineMarkings
     let prefetcher: Prefetcher
-    let listenBrainz: ListenBrainzSync
     let controls: ServerControls
     let refresh: LibraryRefresh
 
     /// The saved songs, kept on the phone as they play.
     var streamCache: StreamCache { .shared }
+    private var watches: [AnyObject] = []
+    private var links: SettingsLinks?
 
     /// `announce` shows a line: the words, and whether it marks something done.
     init(session: Session, announce: @escaping @MainActor (String, Bool) -> Void) {
@@ -51,31 +51,31 @@ final class DataServices {
         pins = PinStore(library: library)
         plays = PlayStore(library: library, listening: listening)
         device = DeviceLibrary(library: library)
-        offlineSettings = OfflineSettings()
-        offline = OfflineDownloads(session: session, library: library, settings: offlineSettings, connectivity: connectivity,
-                                   sync: serverSync) { words in announce(words, false) }
+        offline = OfflineDownloads(session: session, library: library, connectivity: connectivity, sync: serverSync) { words in announce(words, false) }
         marks = OfflineMarkings(downloads: offline, connectivity: connectivity)
-        prefetcher = Prefetcher(settings: offlineSettings, connectivity: connectivity)
+        prefetcher = Prefetcher(connectivity: connectivity)
         prefetcher.headers = { [weak session] in session?.client?.headers ?? [:] }
-        listenBrainz = ListenBrainzSync(library: library, connectivity: connectivity, version: Session.appVersion)
         controls = ServerControls(session: session, library: library, sync: serverSync)
         refresh = LibraryRefresh(device: device, sync: serverSync, downloads: downloads, session: session)
         serverSwitch = ServerSwitch(session: session, library: library, sync: serverSync, listening: listening,
                                     favorites: favoriteSync, playlists: playlistSync)
         let offline = offline
         serverSwitch.onForgetDownloads { sourceId in await offline.forgetSource(sourceId) }
-        let listenBrainz = listenBrainz
-        plays.onStarted = { trackId in listenBrainz.nowPlaying(trackId) }
-        plays.onPlayed = { trackId, startedAt in listenBrainz.played(trackId, startedAt: startedAt) }
     }
 
     /// Starts the work that runs on its own: the phone's music, copying the server's library,
-    /// downloads, and ListenBrainz.
+    /// downloads, the cache of songs played lately at its chosen size, and what the settings pages
+    /// show of them.
     func start() {
+        links = SettingsLinks(device: device, sync: serverSync)
         device.start()
         serverSync.start()
         offline.start()
-        listenBrainz.start()
+        let settings = AppSettings.shared
+        Task { await StreamCache.shared.setSize(settings.offline.cacheSize) }
+        watches.append(Watch({ settings.offline.cacheSize }) { size in
+            Task { await StreamCache.shared.setSize(size) }
+        })
     }
 }
 
@@ -89,10 +89,8 @@ extension View {
             .environment(data.pins)
             .environment(data.serverSwitch)
             .environment(data.device)
-            .environment(data.offlineSettings)
             .environment(data.offline)
             .environment(data.marks)
-            .environment(data.listenBrainz)
             .environment(data.controls)
             .environment(data.connectivity)
             .environment(\.dataServices, data)

@@ -82,8 +82,8 @@ import Testing
             file(3, "WhatsApp/Audio/", fallback: FileTags(album: "Voice notes")),
         ]
         let scan = deviceScan(files, tags: [1: FileTags(title: "Nightcall", artist: "Kavinsky")], excluded: ["WhatsApp"])
-        #expect(scan.folders == [MusicFolder(name: "Music", songs: 2, included: true),
-                                 MusicFolder(name: "WhatsApp", songs: 1, included: false)])
+        #expect(scan.folders == [MusicFolder("Music", songs: 2, included: true),
+                                 MusicFolder("WhatsApp", songs: 1, included: false)])
         #expect(scan.catalog.tracks.map(\.id).sorted() == ["device:1", "device:2"])
         #expect(scan.catalog.albums.map(\.title) == ["Nightcall"])
         #expect(scan.catalog.tracks.first { $0.id == "device:1" }?.title == "Nightcall")

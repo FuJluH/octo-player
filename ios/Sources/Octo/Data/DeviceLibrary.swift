@@ -28,11 +28,13 @@ final class DeviceLibrary {
     private(set) var files: [Int64: String] = [:]
 
     @ObservationIgnored private let library: Library
-    @ObservationIgnored private let prefs = Prefs("library")
+    @ObservationIgnored private let settings = AppSettings.shared
     @ObservationIgnored private let lock = SerialWork()
     @ObservationIgnored private var quiet: Task<Void, Never>?
     @ObservationIgnored private var observer: NSObjectProtocol?
     @ObservationIgnored private var lastSignature: String?
+    @ObservationIgnored private var waiting: Task<Void, Never>?
+    @ObservationIgnored private var folderWatch: Watch<Set<String>>?
 
     /// The name the media library's songs are grouped under among the folders.
     nonisolated static let musicAppFolder = "Music app"
@@ -46,7 +48,7 @@ final class DeviceLibrary {
     }
 
     /// The folders switched off, by name.
-    var excluded: Set<String> { prefs.strings(excludedFoldersKey) }
+    var excluded: Set<String> { settings.excludedFolders }
 
     /// The folder Files puts music in for Octo.
     nonisolated static var filesFolder: URL { FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0] }
@@ -54,6 +56,9 @@ final class DeviceLibrary {
     /// Starts watching the media library, and scans once.
     func start() {
         if access == .granted { watchMediaLibrary() }
+        folderWatch = Watch({ [weak self] in self?.excluded ?? [] }) { [weak self] _ in
+            Task { await self?.rescan() }
+        }
         foreground = NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil,
                                                             queue: .main) { [weak self] _ in
             Task { @MainActor in self?.returned() }
@@ -93,21 +98,29 @@ final class DeviceLibrary {
         }
     }
 
-    /// Switches a folder on or off, and scans at once.
+    /// Switches a folder on or off; the scan follows the setting.
     func setFolder(_ name: String, included: Bool) {
-        prefs.set(strings: excludedFolders(excluded, switching: name, included: included), excludedFoldersKey)
-        Task { await rescan() }
+        settings.setFolderIncluded(name, included)
     }
 
-    /// Puts back the switched-off folders from a backup, replacing them whole.
+    /// Puts back the switched-off folders from a backup, replacing them whole; the scan follows.
     func restoreExcluded(_ names: Set<String>) {
-        prefs.set(strings: names, excludedFoldersKey)
-        Task { await rescan() }
+        settings.setExcludedFolders(names)
     }
 
-    /// Scans the phone's music once. Scans never overlap.
+    /// Scans the phone's music once. Scans never overlap, and asking again while one waits to
+    /// start joins that one.
     func rescan() async {
-        await lock.run { [weak self] in await self?.scan() }
+        if let waiting { return await waiting.value }
+        let next = Task { @MainActor [weak self] in
+            guard let lock = self?.lock else { return }
+            await lock.run { [weak self] in
+                self?.waiting = nil
+                await self?.scan()
+            }
+        }
+        waiting = next
+        await next.value
     }
 
     private func scan() async {

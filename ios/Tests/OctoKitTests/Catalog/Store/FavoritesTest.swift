@@ -138,7 +138,7 @@ import Testing
     }
 
     @Test func pinKindsReadBackFromWhatIsSaved() {
-        for kind in PinKind.allCases { #expect(PinKind(rawValue: kind.rawValue) == kind) }
+        for kind in [PinKind.album, .artist, .playlist] { #expect(PinKind.of(kind.rawValue) == kind) }
         #expect(PinKind(rawValue: "song") == nil)
     }
 }

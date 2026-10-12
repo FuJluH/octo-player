@@ -312,9 +312,8 @@ final class PinStore {
 final class PlayStore {
     private let library: Library
     private let listening: ListeningSync
-    /// Hears every song that starts and every play that counts, for ListenBrainz.
-    var onStarted: (@MainActor (String) -> Void)?
-    var onPlayed: (@MainActor (String, Int64) -> Void)?
+    /// The real length of a song once playing it found its listing wrong.
+    var realLength: (@MainActor (_ trackId: String, _ listedMs: Int64) -> Int64)?
 
     init(library: Library, listening: ListeningSync) {
         self.library = library
@@ -324,7 +323,9 @@ final class PlayStore {
     /// A song began to play.
     func started(_ trackId: String) {
         listening.nowPlaying(trackId)
-        onStarted?(trackId)
+        Task {
+            if let song = await playedSong(trackId) { ListenBrainzSync.shared.nowPlaying(song) }
+        }
     }
 
     /// A song stopped or ended after `playedMs` heard of `durationMs`: kept when it counts as a play.
@@ -336,6 +337,31 @@ final class PlayStore {
             try? await store.addPlay(PlayEvent(trackId: trackId, relinkKey: key, startedAt: startedAt, playedMs: playedMs, durationMs: durationMs))
         }
         listening.played(trackId, startedAt: startedAt)
-        onPlayed?(trackId, startedAt)
+        Task {
+            if let song = await playedSong(trackId) {
+                ListenBrainzSync.shared.played(song, startedAt: Date(timeIntervalSince1970: Double(startedAt) / 1000))
+            }
+        }
+    }
+
+    /// What the library knows about a song that played, for ListenBrainz: its details from every
+    /// copy, and whether the server hears the play. Nil for anything not in the library or the
+    /// finds (radio streams, opened files).
+    func playedSong(_ trackId: String) async -> PlayedSong? {
+        var song: PlayedSong
+        if isFind(trackId) {
+            guard let find = await library.finds([trackId]).first else { return nil }
+            song = PlayedSong(find.title, find.artist, find.album, durationMs: find.durationMs, trackNumber: nil, reachesServer: true)
+        } else {
+            guard let track = await library.track(trackId) else { return nil }
+            let copies = await library.copies(trackId)
+            let details = songDetails(copies)
+            song = PlayedSong(track.title, track.artist, track.album, durationMs: track.durationMs, trackNumber: track.trackNo,
+                              reachesServer: playReachesServer(isFind: false, copySources: copies.map(\.sourceId)),
+                              recordingMbid: details.mbRecordingId, releaseMbid: details.mbAlbumId,
+                              releaseGroupMbid: details.mbReleaseGroupId, artistMbids: details.mbArtistIds)
+        }
+        if let realLength { song.durationMs = realLength(trackId, song.durationMs) }
+        return song
     }
 }

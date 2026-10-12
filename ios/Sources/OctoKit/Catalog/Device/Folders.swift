@@ -1,18 +1,5 @@
 import Foundation
 
-/// A folder music comes from, with how many songs are in it.
-public struct MusicFolder: Sendable, Hashable {
-    public var name: String
-    public var songs: Int
-    public var included: Bool
-
-    public init(name: String, songs: Int, included: Bool) {
-        self.name = name
-        self.songs = songs
-        self.included = included
-    }
-}
-
 /// Folders are grouped by their top level, like "Music" or "Download", so a big library of artist
 /// and album folders still shows as a short list.
 public func topFolder(_ relativePath: String?) -> String {
@@ -68,7 +55,7 @@ extension Array where Element == DeviceFile {
     /// back on. Most songs first.
     public func folders(_ excluded: Set<String>) -> [MusicFolder] {
         groupInOrder(self) { topFolder($0.folder) }
-            .map { name, files in MusicFolder(name: name, songs: files.count, included: !excluded.contains(name)) }
+            .map { name, files in MusicFolder(name, songs: files.count, included: !excluded.contains(name)) }
             .enumerated()
             .sorted { $0.element.songs != $1.element.songs ? $0.element.songs > $1.element.songs : $0.offset < $1.offset }
             .map(\.element)

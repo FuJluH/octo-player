@@ -25,7 +25,7 @@ actor StreamCache {
     private var dirty = false
 
     init() {
-        folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("saved-songs")
+        folder = SettingsFeeds.cacheFolder
         indexFile = folder.appendingPathComponent("index.json")
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         if let data = try? Data(contentsOf: indexFile), let saved = try? JSONDecoder().decode([String: Entry].self, from: data) {
@@ -62,14 +62,19 @@ actor StreamCache {
 
     /// Whether the whole song is saved.
     func isFullySaved(_ key: String) -> Bool {
-        streamCacheIsFullySaved(enabled: enabled, contentLength: entries[key]?.contentLength, spans: spans(key))
+        dropIfGone(key)
+        return streamCacheIsFullySaved(enabled: enabled, contentLength: entries[key]?.contentLength, spans: spans(key))
     }
 
     /// Whether any of the song is saved.
-    func isPartlySaved(_ key: String) -> Bool { streamCacheIsPartlySaved(enabled: enabled, spans: spans(key)) }
+    func isPartlySaved(_ key: String) -> Bool {
+        dropIfGone(key)
+        return streamCacheIsPartlySaved(enabled: enabled, spans: spans(key))
+    }
 
     /// The songs saved whole, as "<server>|<song id there>", for the offline marks.
     func fullySavedSongs() -> Set<String> {
+        for key in Array(entries.keys) { dropIfGone(key) }
         var lengths: [String: Int64] = [:]
         for (key, entry) in entries { if let length = entry.contentLength { lengths[key] = length } }
         return Set(streamCacheFullySavedKeys(enabled: enabled, lengths: lengths, spans: spans()).map(savedSongOf))
@@ -77,12 +82,14 @@ actor StreamCache {
 
     /// What is known of a saved song: its whole length and type.
     func info(_ key: String) -> (length: Int64?, mimeType: String?)? {
-        entries[key].map { ($0.contentLength, $0.mimeType) }
+        dropIfGone(key)
+        return entries[key].map { ($0.contentLength, $0.mimeType) }
     }
 
     /// How many bytes from `offset` on are saved without a gap.
     func savedRun(_ key: String, from offset: Int64) -> Int64 {
         guard enabled else { return 0 }
+        dropIfGone(key)
         return streamCacheSavedRun(spans(key), from: offset)
     }
 
@@ -119,7 +126,11 @@ actor StreamCache {
         guard enabled, !data.isEmpty else { return }
         evict(incoming: Int64(data.count), keeping: key)
         let url = file(key)
-        if !FileManager.default.fileExists(atPath: url.path) { FileManager.default.createFile(atPath: url.path, contents: nil) }
+        if !FileManager.default.fileExists(atPath: url.path) {
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            FileManager.default.createFile(atPath: url.path, contents: nil)
+            entries[key]?.pieces = []
+        }
         guard let handle = try? FileHandle(forWritingTo: url) else { return }
         defer { try? handle.close() }
         try? handle.seek(toOffset: UInt64(offset))
@@ -142,6 +153,7 @@ actor StreamCache {
     /// Writes the list of saved pieces, when it changed.
     func save() {
         guard dirty, let data = try? JSONEncoder().encode(entries) else { return }
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try? data.write(to: indexFile, options: .atomic)
         dirty = false
     }
@@ -160,6 +172,13 @@ actor StreamCache {
     }
 
     private func file(_ key: String) -> URL { folder.appendingPathComponent(Hashes.sha1Hex(key)) }
+
+    /// Forgets a song whose file is no longer there, as after the whole cache was cleared.
+    private func dropIfGone(_ key: String) {
+        guard entries[key] != nil, !FileManager.default.fileExists(atPath: file(key).path) else { return }
+        entries[key] = nil
+        dirty = true
+    }
 
     private func merged(_ pieces: [[Int64]]) -> [[Int64]] {
         var out: [[Int64]] = []

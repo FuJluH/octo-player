@@ -108,3 +108,8 @@ public func starredTimes(_ copies: [ServerCopy], _ starredAt: [String: Int64?]) 
     }
     return times
 }
+
+/// Waits `ms` milliseconds; stopped work ends the wait early.
+public func listeningPauseMs(_ ms: Int64) async throws {
+    try await Task.sleep(nanoseconds: UInt64(max(ms, 0)) * 1_000_000)
+}
