@@ -268,7 +268,7 @@ struct NowPlayingView: View {
             let side = max(0, min(maxSide, box.size.width, box.size.height))
             let folded = folds ? fold : 0
             let swiped = 1 - 0.5 * min(abs(card) / max(box.size.width / 2, 1), 1)
-            Cover(id: player.current?.coverArt, size: side, radius: side * corner / 100)
+            Cover(id: player.current?.coverArt, size: side, radius: side * corner / 100, online: player.current?.isExternal ?? false)
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { flight.cardPlaced($0) }
                 .elevation3()
                 .opacity(flight.hidesCard ? 0 : 1)

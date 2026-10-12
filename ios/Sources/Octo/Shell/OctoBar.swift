@@ -350,7 +350,7 @@ struct NowPlayingFace: View {
         Button(action: tap) {
             ZStack {
                 if let song = player.current {
-                    Cover(id: song.coverArt, size: OctoBar.height - 12, radius: (OctoBar.height - 12) / 2)
+                    Cover(id: song.coverArt, size: OctoBar.height - 12, radius: (OctoBar.height - 12) / 2, online: song.isExternal)
                         .overlay(Circle().fill(.black.opacity(0.35)))
                 }
                 if player.isPlaying {
