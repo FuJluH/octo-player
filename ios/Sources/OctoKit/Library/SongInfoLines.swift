@@ -187,10 +187,5 @@ public func dateText(_ epochMs: Int64, zone: TimeZone = .current, locale: Locale
     return format.string(from: Date(timeIntervalSince1970: Double(epochMs) / 1_000))
 }
 
-/// The MIME types counted as lossless.
-public let losslessMimeTypes: Set<String> = [
-    "audio/flac", "audio/x-flac", "audio/alac", "audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave",
-    "audio/aiff", "audio/x-aiff", "audio/ape", "audio/x-ape", "audio/wavpack", "audio/x-wavpack",
-]
-
-public func isLosslessMime(_ mimeType: String?) -> Bool { losslessMimeTypes.contains(mimeType?.lowercased() ?? "") }
+/// Whether a type of audio is lossless.
+public func isLosslessMime(_ mimeType: String?) -> Bool { downloadIsLossless(mimeType) }

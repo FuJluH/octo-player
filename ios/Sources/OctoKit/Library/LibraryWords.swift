@@ -3,19 +3,11 @@ import Foundation
 // The words and small rules the library pages share.
 
 /// "1,234" whatever the phone's language: the comma grouping the other apps write.
-public func grouped(_ count: Int) -> String {
-    let digits = String(abs(count))
-    var out = ""
-    for (index, char) in digits.enumerated() {
-        if index > 0, (digits.count - index) % 3 == 0 { out.append(",") }
-        out.append(char)
-    }
-    return count < 0 ? "-" + out : out
-}
+public func grouped(_ count: Int) -> String { SettingsSummaries.grouped(count) }
 
 /// "1 song" or "1,234 songs".
 public func countText(_ count: Int, _ one: String, _ many: String) -> String {
-    count == 1 ? "1 \(one)" : "\(grouped(count)) \(many)"
+    SettingsSummaries.count(count, one: one, many: many)
 }
 
 /// A song's length as a row shows it, like 3:45. Nothing when it is not known, rather than 0:00.
@@ -202,11 +194,7 @@ public func firstSegment(songs: Int, albums: Int, artists: Int) -> FavoriteSegme
 // MARK: Downloads on the phone
 
 /// A size in the units people read: "850 KB", "12.4 MB", "3.1 GB".
-public func sizeLabel(_ bytes: Int64) -> String {
-    if bytes >= 1 << 30 { return String(format: "%.1f GB", Double(bytes) / Double(1 << 30)) }
-    if bytes >= 1 << 20 { return String(format: "%.1f MB", Double(bytes) / Double(1 << 20)) }
-    return "\((bytes + 1023) / 1024) KB"
-}
+public func sizeLabel(_ bytes: Int64) -> String { SettingsWords.sizeLabel(bytes) }
 
 /// Which rule keeps a download that was not asked for by hand, if one does. Reasons are
 /// "manual", "liked" and "playlist:<id>".

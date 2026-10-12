@@ -14,8 +14,6 @@ final class LibraryState {
     private(set) var recentPlaylists: [String] = []
     /// What the server lets this user do to the library's files; nil when it offers nothing.
     private(set) var fileActions: FileActions?
-    /// Servers that turned sharing down, by kept server id.
-    private var sharingRefused = Set<String>()
     /// Ratings set here, shown at once until the library has them.
     private(set) var ratings: [String: Int] = [:]
     /// The playlists to add to, as the library last listed them.
@@ -61,11 +59,7 @@ final class LibraryState {
     private var recentKey: String { "playlists.recent.\(session.activeId ?? "phone")" }
 
     /// Whether the server in use can make shared links.
-    var canShare: Bool { session.client != nil && !sharingRefused.contains(session.activeId ?? "") }
-
-    func sharingTurnedDown() {
-        if let id = session.activeId { sharingRefused.insert(id) }
-    }
+    var canShare: Bool { data.controls.sharing }
 
     /// Reads again what the server lets this user do to its files, as an admin may have changed it.
     func readFileActions() async {
@@ -236,7 +230,7 @@ final class LibraryState {
     func serverId(_ track: LibraryTrack) async -> String? {
         if let id = track.serverSongId { return id }
         guard let server = library.serverInUse else { return nil }
-        return await library.copies(track.id).filter { $0.sourceId == server }.map(\.nativeId).min()
+        return serverSongId(copies: await library.copies(track.id), serverInUse: server)
     }
 
     /// Plain songs for library songs, by their server copies; songs with no copy there are left out.

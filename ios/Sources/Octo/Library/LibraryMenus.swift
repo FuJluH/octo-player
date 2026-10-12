@@ -32,8 +32,8 @@ enum MenuSubject {
     case playlistOptions(PlaylistSummary, serverOnly: Bool, deleted: (@MainActor () -> Void)?)
     case addToPlaylist(AddSource, startAt: String? = nil)
     case newPlaylist([LibraryTrack])
-    /// A page's Share: a link to these server ids, named by the title.
-    case share(ids: [String], title: String)
+    /// A page's Share: a link to it, named by the title.
+    case share(ShareTarget, title: String)
     case songInfo(SongSubject)
 
     var firstPage: MenuPage {
@@ -115,7 +115,7 @@ private struct MenuPageView: View {
         case (.song(let subject), .rate):
             RatePage(session: session, subject: subject)
         case (.song(let subject), .share):
-            SharePage(session: session, ids: [subject.track.serverSongId ?? subject.song.id], title: subject.track.title, fromMenu: true)
+            SharePage(session: session, target: .song(subject.track.id), title: subject.track.title, fromMenu: true)
         case (.song(let subject), .info), (.songInfo(let subject), .info):
             SongInfoPage(subject: subject, canGoBack: canGoBack) { session.pages.back() }
         case (.song(let subject), .deleteFromDisk):
@@ -164,8 +164,8 @@ private struct MenuPageView: View {
                 actions.createPlaylist(name: name, tracks: [])
                 actions.closeMenu(session)
             }
-        case (.share(let ids, let title), .share):
-            SharePage(session: session, ids: ids, title: title, fromMenu: canGoBack)
+        case (.share(let target, let title), .share):
+            SharePage(session: session, target: target, title: title, fromMenu: canGoBack)
         default:
             GlassMenuPage { GlassMenuNote("Nothing to show") }
         }
@@ -364,11 +364,11 @@ private struct RatePage: View {
 /// makes the link, then hands it to the phone's share sheet.
 private struct SharePage: View {
     let session: MenuSession
-    let ids: [String]
+    let target: ShareTarget
     let title: String
     let fromMenu: Bool
     @Environment(LibraryActions.self) private var actions
-    @State private var making: LibraryActions.Expiry?
+    @State private var making: ShareExpiry?
     @State private var failure: String?
 
     var body: some View {
@@ -381,7 +381,7 @@ private struct SharePage: View {
         } content: {
             GlassMenuNote("Anyone with the link can listen.")
             GlassMenuTitle("Link expires")
-            ForEach(LibraryActions.Expiry.allCases, id: \.self) { expiry in
+            ForEach(ShareExpiry.allCases, id: \.self) { expiry in
                 Button { make(expiry) } label: {
                     HStack {
                         Text(expiry.label)
@@ -401,11 +401,11 @@ private struct SharePage: View {
         }
     }
 
-    private func make(_ expiry: LibraryActions.Expiry) {
+    private func make(_ expiry: ShareExpiry) {
         making = expiry
         failure = nil
         Task {
-            let words = await actions.share(ids: ids, title: title, expiry: expiry)
+            let words = await actions.share(target, title: title, expiry: expiry)
             making = nil
             if let words { failure = words } else { actions.closeMenu(session) }
         }

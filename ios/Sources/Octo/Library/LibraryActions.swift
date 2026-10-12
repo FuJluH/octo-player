@@ -81,6 +81,8 @@ final class LibraryActions {
             return state.tracks(for: songs).filter(self.canDeleteFromDisk).map { $0.asSong.id }
         }
         selection.askDeleteFromDisk = { [weak self] songs in self?.askDeleteFromDisk(state.tracks(for: songs)) }
+        selection.setLiked = { [weak self] songs, on in self?.setLiked(state.tracks(for: songs), on) }
+        selection.isLiked = { song in state.tracks(for: [song]).first.map { state.likedIds.contains($0.id) } ?? false }
     }
 
     // MARK: Menus
@@ -353,57 +355,23 @@ final class LibraryActions {
 
     // MARK: Links
 
-    /// How long a shared link lasts.
-    enum Expiry: CaseIterable {
-        case never, day, week, month
-
-        var label: String {
-            switch self {
-            case .never: "Never"
-            case .day: "1 day"
-            case .week: "1 week"
-            case .month: "1 month"
-            }
-        }
-
-        var lengthMs: Int64? {
-            switch self {
-            case .never: nil
-            case .day: 86_400_000
-            case .week: 7 * 86_400_000
-            case .month: 30 * 86_400_000
-            }
-        }
-    }
-
     /// Makes a shared link and opens the phone's share sheet with it. Answers the words of a
     /// failure, or nil once the sheet is on its way.
-    func share(ids: [String], title: String, expiry: Expiry) async -> String? {
-        guard let client = session.client else { return "Sharing is switched off on this server." }
+    func share(_ target: ShareTarget, title: String, expiry: ShareExpiry) async -> String? {
+        let controls = data.controls
+        let id: String? = switch target {
+        case .song(let trackId): await controls.shareableSongId(trackId)
+        case .album(let albumId): await controls.shareableAlbumId(albumId)
+        }
+        guard let id else { return "This server has no copy of it to share." }
         do {
-            let now = Int64(Date().timeIntervalSince1970 * 1_000)
-            let link = try await client.makeShareLink(ids: ids, description: title, expiresAtMs: expiry.lengthMs.map { now + $0 })
-            if link.url.trimmingCharacters(in: .whitespaces).isEmpty {
-                return "The server made the link but did not say where it is."
-            }
+            guard let link = try await controls.createShare([id], description: title, expiry: expiry),
+                  !link.url.trimmingCharacters(in: .whitespaces).isEmpty
+            else { return "The server made the link but did not say where it is." }
             shareItem = ShareItem(items: [link.url], subject: title)
             return nil
         } catch {
-            if Self.sharingUnavailable(error) {
-                state.sharingTurnedDown()
-                return "Sharing is switched off on this server."
-            }
-            return userMessage(error)
-        }
-    }
-
-    /// Sharing is switched off (error 50 or 70), or the call is not there (HTTP 501).
-    static func sharingUnavailable(_ error: Error) -> Bool {
-        switch error as? OctoError {
-        case .notFound: true
-        case .server(let code, _): code == 50 || code == 70
-        case .http(let status): status == 501
-        default: false
+            return sharingUnavailable(error) ? "Sharing is switched off on this server." : userMessage(error)
         }
     }
 
@@ -546,6 +514,12 @@ final class LibraryActions {
             }
         }
     }
+}
+
+/// What a link is made to: a library song or a library album, by library id.
+enum ShareTarget: Hashable {
+    case song(String)
+    case album(String)
 }
 
 /// A playlist to write to a file the person picks.

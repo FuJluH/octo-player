@@ -1,7 +1,7 @@
 import Foundation
 
-// The server calls behind the library pages' menus and extras: likes, ratings, playlists,
-// links, folders, artist biographies and the actions an Octo server takes on its files.
+// The server calls behind the library pages' extras: folders, artist biographies and the actions
+// an Octo server takes on its files.
 
 /// What the server says about an artist: the biography and artists like them.
 public struct ArtistAbout: Decodable, Sendable {
@@ -29,20 +29,6 @@ public struct ArtistAbout: Decodable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         biography = c.string(.biography)
         similarArtist = (try? c.decodeIfPresent([Similar].self, forKey: .similarArtist)) ?? []
-    }
-}
-
-/// A shared link the server made.
-public struct ShareLink: Decodable, Sendable {
-    public var id: String
-    public var url: String
-
-    enum CodingKeys: String, CodingKey { case id, url }
-
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        id = c.string(.id) ?? ""
-        url = c.string(.url) ?? ""
     }
 }
 
@@ -137,23 +123,6 @@ public struct FileActionResult: Decodable, Sendable {
 /// The extension an Octo server lists when it can act on the library's files.
 public let fileActionsExtension = "octoLibraryActions"
 
-private struct CreatedPlaylist: Decodable {
-    let id: String?
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: AnyKey.self)
-        let playlist = try? c.nestedContainer(keyedBy: AnyKey.self, forKey: AnyKey("playlist"))
-        id = playlist?.string(AnyKey("id"))
-    }
-}
-
-private struct Shares: Decodable {
-    let share: [ShareLink]
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: AnyKey.self)
-        share = (try? c.decodeIfPresent([ShareLink].self, forKey: AnyKey("share"))) ?? []
-    }
-}
-
 /// A folder listing's children, split into folders and songs.
 private struct DirectoryBody: Decodable {
     let folders: [ServerFolderRef]
@@ -220,62 +189,6 @@ extension SubsonicClient {
     /// An artist's biography and artists like them.
     public func artistAbout(_ id: String, similar: Int = 20) async throws -> ArtistAbout {
         try await get("getArtistInfo2", [("id", id), ("count", "\(similar)")], key: "artistInfo2")
-    }
-
-    /// Stars songs, albums or artists for the signed-in user. Several go in one call.
-    public func setStarred(_ on: Bool, songIds: [String] = [], albumIds: [String] = [], artistIds: [String] = []) async throws {
-        let params = songIds.map { ("id", $0) } + albumIds.map { ("albumId", $0) } + artistIds.map { ("artistId", $0) }
-        guard !params.isEmpty else { return }
-        try await call(on ? "star" : "unstar", params)
-    }
-
-    /// Rates a song for the signed-in user, 1 to 5 stars; 0 takes the rating off.
-    public func rate(songId: String, rating: Int) async throws {
-        try await call("setRating", [("id", songId), ("rating", "\(min(max(rating, 0), 5))")])
-    }
-
-    /// Makes a playlist with these songs in this order, and answers with its id when the server
-    /// says it.
-    public func makePlaylist(name: String, songIds: [String], batch: Int = 200) async throws -> String? {
-        let body: CreatedPlaylist = try await get("createPlaylist", [("name", name)] + songIds.prefix(batch).map { ("songId", $0) }, key: nil)
-        if songIds.count > batch, let id = body.id { try await changePlaylist(id, add: Array(songIds.dropFirst(batch)), batch: batch) }
-        return body.id
-    }
-
-    /// Makes a playlist's songs exactly these, in this order. A long list goes in batches, so no
-    /// address grows too long: the first batch replaces the list, the rest are added after it.
-    public func replacePlaylistSongs(_ id: String, songIds: [String], batch: Int = 200) async throws {
-        try await call("createPlaylist", [("playlistId", id)] + songIds.prefix(batch).map { ("songId", $0) })
-        if songIds.count > batch { try await changePlaylist(id, add: Array(songIds.dropFirst(batch)), batch: batch) }
-    }
-
-    /// Changes a playlist's name, takes songs out by their place and adds songs to the end. Long
-    /// lists of songs to add go in batches.
-    public func changePlaylist(_ id: String, name: String? = nil, add: [String] = [], removeAt: [Int] = [], batch: Int = 200) async throws {
-        var params: [(String, String)] = [("playlistId", id)]
-        if let name { params.append(("name", name)) }
-        params += removeAt.map { ("songIndexToRemove", "\($0)") }
-        params += add.prefix(batch).map { ("songIdToAdd", $0) }
-        try await call("updatePlaylist", params)
-        var rest = Array(add.dropFirst(batch))
-        while !rest.isEmpty {
-            try await call("updatePlaylist", [("playlistId", id)] + rest.prefix(batch).map { ("songIdToAdd", $0) })
-            rest = Array(rest.dropFirst(batch))
-        }
-    }
-
-    public func removePlaylist(_ id: String) async throws {
-        try await call("deletePlaylist", [("id", id)])
-    }
-
-    /// Makes a public link to songs or an album. `expiresAtMs` nil never expires.
-    public func makeShareLink(ids: [String], description: String?, expiresAtMs: Int64?) async throws -> ShareLink {
-        var params = ids.map { ("id", $0) }
-        if let description { params.append(("description", description)) }
-        if let expiresAtMs { params.append(("expires", "\(expiresAtMs)")) }
-        let body: Shares = try await get("createShare", params, key: "shares")
-        guard let share = body.share.first else { throw OctoError.server(code: 0, message: "The server made no share") }
-        return share
     }
 
     /// The server's folders from the top: its music folders' indexes, then loose songs.

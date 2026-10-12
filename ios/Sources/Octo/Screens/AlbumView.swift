@@ -176,7 +176,7 @@ struct AlbumView: View {
             HStack(spacing: 0) {
                 if canShare {
                     QuietAction(icon: .share, text: "Share") {
-                        actions.openMenu(.share(ids: [album.nativeId], title: album.title))
+                        actions.openMenu(.share(.album(album.id), title: album.title))
                     }
                     .pressAnchor()
                 }

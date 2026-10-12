@@ -32,12 +32,12 @@ extension LibraryTrack {
     }
 
     /// The album's id on the server, from the library's "<source>:<id>".
-    var serverAlbumId: String? { serverPart(albumId) }
-    var serverArtistId: String? { serverPart(artistId) }
+    var serverAlbumId: String? { isServerSource(sourceId) ? serverAlbumIdOf(sourceId, albumId) : nil }
 
-    private func serverPart(_ libraryId: String) -> String? {
-        guard isServerSource(sourceId), libraryId.hasPrefix(sourceId + ":") else { return nil }
-        let rest = String(libraryId.dropFirst(sourceId.count + 1))
+    /// The artist's id on the server, from the library's "<source>:<id>".
+    var serverArtistId: String? {
+        guard isServerSource(sourceId), artistId.hasPrefix(sourceId + ":") else { return nil }
+        let rest = String(artistId.dropFirst(sourceId.count + 1))
         return rest.isEmpty || rest.hasPrefix("album:") ? nil : rest
     }
 
