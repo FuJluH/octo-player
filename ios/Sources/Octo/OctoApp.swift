@@ -47,7 +47,8 @@ struct OctoApp: App {
         _artistExtras = State(initialValue: ArtistExtrasSource(session: session, library: data.library, discovery: discovery))
         _session = State(initialValue: session)
         _sound = State(initialValue: sound)
-        let player = Player(session: session, sound: sound.processor)
+        let player = Player(session: session, sound: sound.processor, data: data)
+        player.announce = { router.show($0) }
         _player = State(initialValue: player)
         _lyrics = State(initialValue: LyricsStore(session: session))
         _artworkColors = State(initialValue: ArtworkColorStore(session: session))
@@ -96,7 +97,8 @@ struct OctoApp: App {
                 .tint(OctoColor.accent)
                 .preferredColorScheme(.dark)
                 #if DEBUG
-                .task { await Drive.run(session: session, player: player, router: router, prompts: prompts, motion: motion,
+                .task { PlaybackDrive.install(player: player, router: router, overlays: overlays)
+                        await Drive.run(session: session, player: player, router: router, prompts: prompts, motion: motion,
                                          overlays: overlays, ambience: ambience, selectionBar: selectionBar) }
                 #endif
         }

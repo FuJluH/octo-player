@@ -8,23 +8,8 @@ import Foundation
 //
 // Encoding turns every ':' into %3A, so the parts split cleanly.
 
-public let radioPrefix = "radio:"
-public let openedFilePrefix = "file:"
-
-public func isRadio(_ id: String) -> Bool { id.hasPrefix(radioPrefix) }
-
-public func radioId(streamUrl: String, name: String = "") -> String {
-    radioPrefix + formEncoded(streamUrl.trimmingCharacters(in: .whitespacesAndNewlines)) + ":"
-        + formEncoded(name.trimmingCharacters(in: .whitespacesAndNewlines))
-}
-
-/// The station's stream address and name, or nil when the id is not one.
-public func radioOf(_ id: String) -> (stream: String, name: String)? {
-    guard isRadio(id) else { return nil }
-    let parts = id.dropFirst(radioPrefix.count).split(separator: ":", omittingEmptySubsequences: false).map(String.init)
-    guard let stream = parts.first.map(formDecoded), !stream.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-    return (stream, parts.count > 1 ? formDecoded(parts[1]) : "")
-}
+/// A station's id from its stream address and name.
+public func radioId(streamUrl: String, name: String = "") -> String { radioId(streamUrl, name) }
 
 /// A station as a song for the queue: titled by its name (its address when it has none), by "Radio".
 public func radioSong(_ id: String) -> Song? {
@@ -32,28 +17,8 @@ public func radioSong(_ id: String) -> Song? {
     return Song(id: id, title: name.isEmpty ? stream : name, artist: "Radio")
 }
 
-public func isOpenedFile(_ id: String) -> Bool { id.hasPrefix(openedFilePrefix) }
-
-/// What an opened file's id holds.
-public struct OpenedFile: Sendable, Equatable {
-    public var uri: String
-    public var title: String
-    public var artist: String
-}
-
-public func openedFileId(uri: String, title: String = "", artist: String = "") -> String {
-    openedFilePrefix + formEncoded(uri.trimmingCharacters(in: .whitespacesAndNewlines)) + ":"
-        + formEncoded(title.trimmingCharacters(in: .whitespacesAndNewlines)) + ":"
-        + formEncoded(artist.trimmingCharacters(in: .whitespacesAndNewlines))
-}
-
-/// The file's address, title and artist, or nil when the id is not one.
-public func openedFileOf(_ id: String) -> OpenedFile? {
-    guard isOpenedFile(id) else { return nil }
-    let parts = id.dropFirst(openedFilePrefix.count).split(separator: ":", omittingEmptySubsequences: false).map(String.init)
-    guard let uri = parts.first.map(formDecoded), !uri.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-    return OpenedFile(uri: uri, title: parts.count > 1 ? formDecoded(parts[1]) : "", artist: parts.count > 2 ? formDecoded(parts[2]) : "")
-}
+/// An opened file's id from its address, title and artist.
+public func openedFileId(uri: String, title: String = "", artist: String = "") -> String { openedFileId(uri, title, artist) }
 
 /// An opened file as a song for the queue: its title, else the address's last part, else "Audio file".
 public func openedFileSong(_ id: String) -> Song? {
