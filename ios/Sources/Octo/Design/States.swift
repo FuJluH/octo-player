@@ -131,3 +131,34 @@ struct FlowRow: Layout {
         }
     }
 }
+
+extension EnvironmentValues {
+    /// The library's own refresh: rescans the phone, copies the server's library afresh when
+    /// signed in, and asks how downloads on their way are going. It answers words to show when
+    /// the server copy failed.
+    @Entry var refreshLibrary: (@MainActor () async -> String?)? = nil
+}
+
+extension View {
+    /// Pull down on a library page to refresh it: the page's own reload and the library's
+    /// refresh run together, the spinner showing until both are done. A failed server copy is
+    /// said in a message.
+    func libraryRefreshable(_ own: @escaping @Sendable () async -> Void) -> some View {
+        modifier(LibraryRefreshable(own: own))
+    }
+}
+
+private struct LibraryRefreshable: ViewModifier {
+    let own: @Sendable () async -> Void
+    @Environment(\.refreshLibrary) private var library
+    @Environment(Router.self) private var router
+
+    func body(content: Content) -> some View {
+        content.refreshable {
+            async let mine: Void = own()
+            let words = await library?()
+            await mine
+            if let words { router.show(words) }
+        }
+    }
+}

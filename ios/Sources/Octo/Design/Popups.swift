@@ -18,8 +18,10 @@ struct GlassPopupFrame: View {
 
     var body: some View {
         GeometryReader { box in
-            let window = box.size
             let insets = box.safeAreaInsets
+            // The whole screen, with the bars and the keyboard as edges to keep clear of.
+            let window = CGSize(width: box.size.width + insets.leading + insets.trailing,
+                                height: box.size.height + insets.top + insets.bottom)
             let margin = CGFloat(PopupMeasures.edgeMargin)
             let widest = max(0, min(popup.maxWidth, window.width - margin * 2))
             let room = window.height - insets.top - insets.bottom - margin * 2

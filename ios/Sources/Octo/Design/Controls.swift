@@ -266,7 +266,8 @@ enum SliderLook { case glow, jewel }
 /// A line slider. Glow: the played part lit, thickening and showing a thumb while dragged.
 /// Jewel: a recessed track, an accent fill, a white jewel thumb with an accent dot, a ring and a
 /// glow while dragged, and the value in a bubble above. A tap seeks; a drag shows its own value
-/// and sends it when the finger lifts, unless `live`. `steps` snaps to that many steps.
+/// and sends it when the finger lifts, unless `live`; a drag taken away sends nothing. `steps`
+/// snaps to that many steps.
 struct OctoSlider: View {
     let value: Double
     let onChange: (Double) -> Void
@@ -280,6 +281,12 @@ struct OctoSlider: View {
     @State private var dragging = false
     @State private var dragValue = 0.0
     @State private var shown = 0.0
+    @State private var line = 0.0
+    @State private var glow = 0.0
+    @State private var thumb = 0.0
+    @State private var ring = 0.0
+    @State private var bubble = 0.0
+    @GestureState private var touching = false
     @Environment(\.motionScale) private var motion
 
     var body: some View {
@@ -288,26 +295,29 @@ struct OctoSlider: View {
             let current = dragging ? dragValue : (look == .jewel ? shown : min(1, max(0, value)))
             Group {
                 switch look {
-                case .glow: GlowLine(fraction: current, held: dragging, color: color, trackColor: trackColor)
-                case .jewel: JewelLine(fraction: current, held: dragging, fill: fill, steps: steps, label: valueLabel?(current))
+                case .glow:
+                    GlowLine(fraction: current, line: line, glow: glow, color: color, trackColor: trackColor)
+                case .jewel:
+                    JewelLine(fraction: current, thumb: thumb, ring: ring, bubble: bubble, fill: fill, steps: steps,
+                              label: valueLabel?(current))
                 }
             }
             .frame(width: width, height: box.size.height)
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 0)
+                    .updating($touching) { _, state, _ in state = true }
                     .onChanged { drag in
                         let f = snapToSteps(drag.location.x / width, steps)
-                        if !dragging, abs(drag.translation.width) < 4 { dragValue = f }
-                        if abs(drag.translation.width) >= 4 || dragging {
-                            dragging = true
+                        if dragging || abs(drag.translation.width) >= 4 {
+                            if !dragging { held(true) }
                             dragValue = f
                             if live { onChange(f) }
                         }
                     }
                     .onEnded { drag in
                         let f = snapToSteps(drag.location.x / width, steps)
-                        dragging = false
+                        held(false)
                         onChange(f)
                         shown = f
                     }
@@ -318,6 +328,10 @@ struct OctoSlider: View {
         .onChange(of: value) { _, new in
             if dragging { return }
             withAnimation(.linear(duration: motion.seconds(80))) { shown = min(1, max(0, new)) }
+        }
+        .onChange(of: touching) { _, now in
+            // A drag taken away by something else sends nothing.
+            if !now && dragging { held(false) }
         }
         .accessibilityElement()
         .accessibilityValue(valueLabel?(value) ?? "\(Int((value * 100).rounded())) percent")
@@ -330,55 +344,90 @@ struct OctoSlider: View {
             }
         }
     }
+
+    private func held(_ on: Bool) {
+        dragging = on
+        let target: Double = on ? 1 : 0
+        withAnimation(.octoSpring(0.5, 200)) { line = target }
+        withAnimation(.octoSpring(1, 200)) { glow = target }
+        withAnimation(.octoTween(OctoDuration.hover, scale: motion)) { thumb = target }
+        withAnimation(.octoTween(OctoDuration.card, scale: motion)) { ring = target }
+        withAnimation(.octoTween(OctoDuration.swap, scale: motion)) { bubble = target }
+    }
 }
 
-private struct GlowLine: View {
+/// The glowing line: 3.5 thick, 8 while held, with a thumb of radius 9 while held (`line`), and
+/// three soft passes of glow that widen and brighten while held (`glow`).
+private struct GlowLine: View, Animatable {
     let fraction: Double
-    let held: Bool
+    var line: Double
+    var glow: Double
     let color: Color
     let trackColor: Color
+
+    nonisolated var animatableData: AnimatablePair<Double, Double> {
+        get { AnimatablePair(line, glow) }
+        set {
+            line = newValue.first
+            glow = newValue.second
+        }
+    }
 
     var body: some View {
         Canvas { context, size in
             let y = size.height / 2
-            let stroke = held ? 8.0 : 3.5
+            let stroke = 3.5 + (8 - 3.5) * line
             let end = size.width * fraction
             var track = Path()
             track.move(to: CGPoint(x: 0, y: y))
             track.addLine(to: CGPoint(x: size.width, y: y))
             context.stroke(track, with: .color(trackColor), style: StrokeStyle(lineWidth: stroke, lineCap: .round))
             guard end > 0 else { return }
-            var line = Path()
-            line.move(to: CGPoint(x: 0, y: y))
-            line.addLine(to: CGPoint(x: end, y: y))
-            let glowRadius = (held ? 24.0 : 12.0) / 3
-            let glowAlpha = held ? 0.8 : 0.4
+            var lit = Path()
+            lit.move(to: CGPoint(x: 0, y: y))
+            lit.addLine(to: CGPoint(x: end, y: y))
+            // Glow radius 12 at rest and 24 held, in pixels; alpha 0.4 at rest and 0.8 held.
+            let radius = (12 + 12 * glow) / 3
+            let alpha = 0.4 + 0.4 * glow
             for spread in [2.5, 1.0, 0.3] {
-                var glow = context
-                glow.addFilter(.blur(radius: glowRadius * spread))
-                glow.stroke(line, with: .color(color.opacity(glowAlpha / 3)), style: StrokeStyle(lineWidth: stroke, lineCap: .round))
+                var pass = context
+                pass.addFilter(.blur(radius: radius * spread))
+                pass.stroke(lit, with: .color(color.opacity(alpha / 3)), style: StrokeStyle(lineWidth: stroke, lineCap: .round))
             }
-            context.stroke(line, with: .color(color), style: StrokeStyle(lineWidth: stroke, lineCap: .round))
-            if held {
-                context.fill(Path(ellipseIn: CGRect(x: end - 9, y: y - 9, width: 18, height: 18)), with: .color(color))
+            context.stroke(lit, with: .color(color), style: StrokeStyle(lineWidth: stroke, lineCap: .round))
+            let thumb = 9 * max(0, line)
+            if thumb > 0 {
+                context.fill(Path(ellipseIn: CGRect(x: end - thumb, y: y - thumb, width: thumb * 2, height: thumb * 2)), with: .color(color))
             }
         }
-        .animation(.octoSpring(0.5, 200), value: held)
     }
 }
 
-private struct JewelLine: View {
+/// The jewel slider: the recessed track, the accent fill, ticks for its steps, the thumb, and
+/// while dragged its ring, glow and value bubble.
+private struct JewelLine: View, Animatable {
     let fraction: Double
-    let held: Bool
+    var thumb: Double
+    var ring: Double
+    var bubble: Double
     let fill: Color
     let steps: Int
     let label: String?
+
+    nonisolated var animatableData: AnimatablePair<AnimatablePair<Double, Double>, Double> {
+        get { AnimatablePair(AnimatablePair(thumb, ring), bubble) }
+        set {
+            thumb = newValue.first.first
+            ring = newValue.first.second
+            bubble = newValue.second
+        }
+    }
 
     var body: some View {
         Canvas { context, size in
             let y = size.height / 2
             let track: CGFloat = 4
-            let radius: CGFloat = (held ? 16 : 14) / 2
+            let radius = CGFloat(14 + 2 * thumb) / 2
             let start = radius
             let end = size.width - radius
             let x = start + (end - start) * fraction
@@ -399,20 +448,23 @@ private struct JewelLine: View {
                     context.fill(Path(ellipseIn: CGRect(x: tx - 1, y: y - 1, width: 2, height: 2)), with: .color(color))
                 }
             }
-            if held {
+            if ring > 0 {
                 let glow = radius + 18
                 context.fill(Path(ellipseIn: CGRect(x: x - glow, y: y - glow, width: glow * 2, height: glow * 2)),
-                             with: .radialGradient(Gradient(colors: [fill.opacity(0.35), .clear]), center: CGPoint(x: x, y: y), startRadius: 0, endRadius: glow))
-                let ring = radius + 2
-                context.stroke(Path(ellipseIn: CGRect(x: x - ring, y: y - ring, width: ring * 2, height: ring * 2)), with: .color(fill.opacity(0.45)), lineWidth: 4)
+                             with: .radialGradient(Gradient(colors: [fill.opacity(0.35 * ring), .clear]), center: CGPoint(x: x, y: y),
+                                                   startRadius: 0, endRadius: glow))
+                let edge = radius + 2
+                context.stroke(Path(ellipseIn: CGRect(x: x - edge, y: y - edge, width: edge * 2, height: edge * 2)),
+                               with: .color(fill.opacity(0.45 * ring)), lineWidth: 4)
             }
-            context.fill(Path(ellipseIn: CGRect(x: x - radius - 0.5, y: y + 1 - radius - 0.5, width: radius * 2 + 1, height: radius * 2 + 1)), with: .color(.black.opacity(0.35)))
+            context.fill(Path(ellipseIn: CGRect(x: x - radius - 0.5, y: y + 1 - radius - 0.5, width: radius * 2 + 1, height: radius * 2 + 1)),
+                         with: .color(.black.opacity(0.35)))
             context.fill(Path(ellipseIn: CGRect(x: x - radius, y: y - radius, width: radius * 2, height: radius * 2)),
                          with: .radialGradient(Gradient(colors: [.white, Color(hex: 0xE4E6E8)]),
                                                center: CGPoint(x: x - radius * 0.35, y: y - radius * 0.35), startRadius: 0, endRadius: radius * 1.6))
-            let dot = radius * (held ? 0.42 : 0.35)
+            let dot = radius * CGFloat(0.35 + 0.07 * thumb)
             context.fill(Path(ellipseIn: CGRect(x: x - dot, y: y - dot, width: dot * 2, height: dot * 2)), with: .color(fill))
-            if held, let label {
+            if bubble > 0, let label {
                 let text = context.resolve(Text(label).font(.system(size: 11, weight: .semibold)).foregroundStyle(.white))
                 let measured = text.measure(in: CGSize(width: 200, height: 40))
                 let w = measured.width + 12
@@ -420,15 +472,17 @@ private struct JewelLine: View {
                 let arrow: CGFloat = 4
                 let bottom = y - radius - 14 + arrow
                 let left = min(max(0, x - w / 2), max(0, size.width - w))
-                let bubble = Color.black.opacity(0.85)
-                context.fill(Path(roundedRect: CGRect(x: left, y: bottom - arrow - h, width: w, height: h), cornerRadius: 8), with: .color(bubble))
+                let shade = Color.black.opacity(0.85 * bubble)
+                context.fill(Path(roundedRect: CGRect(x: left, y: bottom - arrow - h, width: w, height: h), cornerRadius: 8), with: .color(shade))
                 var tip = Path()
                 tip.move(to: CGPoint(x: x - arrow, y: bottom - arrow))
                 tip.addLine(to: CGPoint(x: x + arrow, y: bottom - arrow))
                 tip.addLine(to: CGPoint(x: x, y: bottom))
                 tip.closeSubpath()
-                context.fill(tip, with: .color(bubble))
-                context.draw(text, at: CGPoint(x: left + 6, y: bottom - arrow - h + 3), anchor: .topLeading)
+                context.fill(tip, with: .color(shade))
+                var faded = context
+                faded.opacity = bubble
+                faded.draw(text, at: CGPoint(x: left + 6, y: bottom - arrow - h + 3), anchor: .topLeading)
             }
         }
     }

@@ -209,13 +209,13 @@ private struct NowPlayingGlass: View {
 
     var body: some View {
         let fade = min(1, max(0, grown))
-        ZStack(alignment: .trailing) {
+        ZStack(alignment: .leading) {
             if grown < 1 {
                 NowPlayingFace(tap: roundButton)
                     .frame(width: ShellMeasures.barHeight, height: ShellMeasures.barHeight)
                     .opacity(1 - fade)
                     .allowsHitTesting(!shown)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             if grown > 0 {
                 MiniPlayerPill(open: openPlayer)

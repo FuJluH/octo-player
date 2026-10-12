@@ -48,7 +48,7 @@ struct GlassSheetFrame<Content: View>: View {
                 panel(most: most, bottomInset: box.safeAreaInsets.bottom)
                     .offset(y: shown ? pull : max(panelHeight, 1) + 40)
             }
-            .ignoresSafeArea(.container, edges: .bottom)
+            .ignoresSafeArea(.container)
         }
         .onChange(of: visible) { _, now in now ? appear() : leave() }
     }
