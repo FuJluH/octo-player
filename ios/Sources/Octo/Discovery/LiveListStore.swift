@@ -19,7 +19,15 @@ final class LiveListStore {
     init(session: Session) {
         self.session = session
         accountChanged()
+        #if DEBUG
+        Self.current = self
+        #endif
     }
+
+    #if DEBUG
+    /// The store in use, for launch steps.
+    static weak var current: LiveListStore?
+    #endif
 
     /// Whose lists these are: the signed-in account's, or the phone's own when no server is signed in.
     private var accountInUse: String {

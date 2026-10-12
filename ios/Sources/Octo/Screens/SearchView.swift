@@ -50,6 +50,9 @@ struct SearchView: View {
         .onReceive(NotificationCenter.default.publisher(for: .driveSearch)) { note in
             if let text = note.object as? String { model.text = text }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .driveSearchKind)) { note in
+            if let raw = note.object as? Int, let kind = SearchFilter(rawValue: raw) { model.filter = kind }
+        }
         #endif
     }
 
@@ -430,5 +433,7 @@ private extension DiscoverState {
 extension Notification.Name {
     /// Sets Search's field, from a launch step.
     static let driveSearch = Notification.Name("octo.drive.search")
+    /// Picks what Search shows, from a launch step.
+    static let driveSearchKind = Notification.Name("octo.drive.search.kind")
 }
 #endif
