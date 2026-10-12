@@ -758,6 +758,8 @@ final class Player {
         shuffled = queueState.shuffle
         upNextSlots = queueState.upNext()
         playedSlots = queueState.played()
+        Covers.shared.coming(([current?.coverArt] + upNext.prefix(2).map(\.coverArt)).compactMap { $0 },
+                             client: session.client)
     }
 
     private func publishState() {
