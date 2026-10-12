@@ -44,6 +44,9 @@ final class LyricsStore {
     /// How long to wait for the saved sign-in to come back as the app starts.
     static let sessionWait: Duration = .seconds(3)
 
+    /// The library, for a song's id on the server: the player knows songs by their library id.
+    @ObservationIgnored var library: Library?
+
     init(session: Session) {
         self.session = session
         let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("lyrics")
@@ -266,8 +269,9 @@ final class LyricsStore {
     /// once. Throws when the server cannot take it.
     func chooseOnServer(_ songId: String, _ choice: String, showAgain: Bool = false) async throws {
         guard let client = session.client else { throw URLError(.notConnectedToInternet) }
+        guard let serverId = await serverSongId(songId) else { throw OctoError.notFound("") }
         try await sendServerChoice(songId, choice, choices, send: { [weak self] wanted in
-            let now = try await client.setLyricsChoice(songId, candidate: wanted)
+            let now = try await client.setLyricsChoice(serverId, candidate: wanted)
             self?.notePin(songId, now)
         }, forget: { [answers] in answers.forget(songId) }, showAgain: showAgain)
         refresh(songId)
@@ -321,8 +325,9 @@ final class LyricsStore {
         guard let client = session.client else { return nil }
         var missed = Set<LyricsSource>()
         var listed: LyricsCandidates?
+        guard let serverId = await serverSongId(songId) else { return nil }
         do {
-            listed = try await client.lyricsCandidates(songId)
+            listed = try await client.lyricsCandidates(serverId)
         } catch is URLError {
             missed.insert(.server)
         } catch OctoError.server {
@@ -411,11 +416,22 @@ final class LyricsStore {
     func searchOnServer(_ songId: String, _ query: String) async throws -> [LyricsCandidate] {
         guard let client = session.client else { throw URLError(.notConnectedToInternet) }
         let (title, artist) = splitLyricsSearch(query)
-        let found = try await client.lyricsCandidates(songId, title: title, artist: artist)
+        guard let serverId = await serverSongId(songId) else { return [] }
+        let found = try await client.lyricsCandidates(serverId, title: title, artist: artist)
         return found.candidate.filter { !$0.id.isBlank }.map { $0.asCandidate() }
     }
 
     // MARK: Sources
+
+    /// The song's id on the server in use: a find's own, the server copy of a library song, or
+    /// the id as it is when it already is the server's. Nil for a song the server does not have.
+    private func serverSongId(_ id: String) async -> String? {
+        if isFind(id) { return String(id.dropFirst(findPrefix.count)) }
+        // Server ids never hold a ":"; library ids always do ("server:<source>:<id>", phone ones).
+        guard id.contains(":") else { return id }
+        guard let library, let sourceId = session.active?.sourceId else { return nil }
+        return await library.copies(id).filter { $0.sourceId == sourceId }.map(\.nativeId).min()
+    }
 
     /// The server's lyrics for the song. A server with the songLyrics extension is asked by song
     /// id (version 2 adds word timings); an older one by artist and title. Lyrics from a copy the
@@ -429,7 +445,8 @@ final class LyricsStore {
             case .byName:
                 found = try await client.lyrics(artist: song.artist, title: song.title).flatMap { parseLyricsText($0, source: .server) }
             case let call:
-                let all = try await client.lyricsBySongId(song.id, enhanced: call == .withWords)
+                guard let serverId = await serverSongId(song.id) else { return nil }
+                let all = try await client.lyricsBySongId(serverId, enhanced: call == .withWords)
                 found = serverLyrics(all, language: Locale.current.language.languageCode?.identifier)
             }
         } catch OctoError.notFound {
