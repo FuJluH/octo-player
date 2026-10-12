@@ -114,6 +114,17 @@ import Testing
         #expect(abs(replayGainFactor(settings, SongLoudness(chosen, followsSameAlbum: false)) - 0.380) < 0.001)
     }
 
+    @Test func theCopyPlayingGivesItsValuesAndOthersFillIn() {
+        let phone = SongCopy(id: "p", sourceId: "device", nativeId: "p", durationMs: 258_000)
+        let server = SongCopy(id: "s", sourceId: "server:music.example", nativeId: "s", durationMs: 258_000, trackGain: -8.4, trackPeak: 0.98)
+        let other = SongCopy(id: "o", sourceId: "server:music.example", nativeId: "o", durationMs: 258_000, trackGain: -2)
+        #expect(storedLoudness(server, [phone, server, other])?.trackGain == -8.4)
+        // A phone file with no stored values borrows the server copy's.
+        #expect(storedLoudness(phone, [phone, server, other])?.trackGain == -8.4)
+        #expect(storedLoudness(phone, [phone]) == nil)
+        #expect(storedLoudness(nil, []) == nil)
+    }
+
     @Test func storedValuesAreCheckedLikeTags() {
         #expect(ReplayGainTags.stored(trackGain: nil, trackPeak: 0.9, albumGain: nil, albumPeak: 1) == nil)
         #expect(ReplayGainTags.stored(trackGain: .nan, trackPeak: nil, albumGain: 99, albumPeak: nil) == nil)

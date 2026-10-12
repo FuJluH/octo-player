@@ -152,7 +152,7 @@ final class DeckRender: @unchecked Sendable {
                 started = true
             }
             if needsFlush {
-                if newSong, let setUp = source.setUp { stream?.setNextSong(setUp) }
+                if newSong, let setUp = source.setUp { stream?.setNextSong(setUp, tags: source.loudness) }
                 // Each stream decides again whether the sound is shaped, by the settings now.
                 processor.configure(sampleRate: Int(deckRate), channels: 2)
                 newSong = false

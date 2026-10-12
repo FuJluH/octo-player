@@ -62,6 +62,7 @@ final class DeckSource: @unchecked Sendable {
     private var _failure: PlayError?
     private var _measuredMs: Int?
     private var _quality: (codecMime: String?, bitDepth: Int?, sampleRate: Int?, bitrate: Int?) = (nil, nil, nil, nil)
+    private var _loudness: ReplayGainInfo?
     private var _opened = false
 
     /// The decode thread reached the song's end in the current jump.
@@ -91,6 +92,8 @@ final class DeckSource: @unchecked Sendable {
     var measuredMs: Int? { condition.withLock { _measuredMs } }
     var opened: Bool { condition.withLock { _opened } }
     var quality: (codecMime: String?, bitDepth: Int?, sampleRate: Int?, bitrate: Int?) { condition.withLock { _quality } }
+    /// The loudness tags in the song's own bytes, once it has opened.
+    var loudness: ReplayGainInfo? { condition.withLock { _loudness } }
 
     /// Jumps to `ms` in the song; what was waiting is let go.
     func seek(toMs ms: Int) {
@@ -125,7 +128,9 @@ final class DeckSource: @unchecked Sendable {
         let decoder = song.decoder
         defer { decoder.close() }
         if condition.withLock({ closed }) { return }
+        let tags = Self.loudness(of: song.bytes)
         condition.withLock {
+            _loudness = tags
             _opened = true
             _measuredMs = decoder.durationMs
             _quality = (decoder.codecMime, decoder.bitDepth, Int(decoder.fileSampleRate), decoder.bitrate)
@@ -198,6 +203,22 @@ final class DeckSource: @unchecked Sendable {
                 ring.publish(frames: range.count, songFrame: songFrame + Int64(range.lowerBound), end: false, gen: gen)
             }
             songFrame += Int64(read)
+        }
+    }
+
+    /// The loudness tags the song's file carries in its own bytes, read as the sound opens.
+    private static func loudness(of bytes: ByteSource?) -> ReplayGainInfo? {
+        guard let bytes, let length = try? bytes.length(), length > 0 else { return nil }
+        return LoudnessTagReader.loudness(length: length) { offset, count in
+            guard offset >= 0, offset <= length, count > 0 else { return nil }
+            var buffer = [UInt8](repeating: 0, count: Int(min(Int64(count), length - offset)))
+            if buffer.isEmpty { return [] }
+            let got = buffer.withUnsafeMutableBytes { raw -> Int? in
+                guard let base = raw.baseAddress else { return nil }
+                return try? bytes.read(at: offset, into: base, count: raw.count)
+            }
+            guard let got else { return nil }
+            return Array(buffer.prefix(got))
         }
     }
 
