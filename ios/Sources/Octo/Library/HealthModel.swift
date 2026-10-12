@@ -2,7 +2,7 @@ import Foundation
 import Observation
 import OctoKit
 
-/// What a check page's pop-up shows. Each fix is planned as it opens, so what it shows is what it
+/// What a check page's sheet shows. Each fix is planned as it opens, so what it shows is what it
 /// does, even if the library changes meanwhile.
 enum HealthSheet {
     /// One set of copies put right, keeping `keep` (nil for the best).
@@ -59,7 +59,7 @@ final class HealthModel {
     /// Each library song's id on the server, for those it has.
     private(set) var serverIds: [String: String] = [:]
     private(set) var sheet: HealthSheet?
-    /// Bumped each time the pop-up shows something new.
+    /// Bumped each time the sheet shows something new.
     private(set) var sheetRevision = 0
     private(set) var lookups = Lookups()
 

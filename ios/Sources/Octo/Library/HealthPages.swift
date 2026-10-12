@@ -47,7 +47,6 @@ struct HealthPage: View {
                             FindingRow(title: undoLastChangeWords, count: "Puts back what the last fix or delete changed", chevron: false)
                         }
                         .buttonStyle(SqueezeStyle())
-                        .pressAnchor()
                     }
                 } else {
                     LibrarySpinner()
@@ -107,7 +106,6 @@ struct HealthCheckPage: View {
         HealthWords(fixAll.count > 0 ? check.fixMeaning : check.advice)
         if fixAll.count > 0 {
             AccentButton(check.fixAllLabel(fixAll.count), size: .medium, action: fixAll.open)
-                .pressAnchor()
                 .padding(.horizontal, 20)
                 .padding(.vertical, 8)
         }
@@ -361,7 +359,6 @@ struct HealthRowButton: View {
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .pressAnchor()
         .accessibilityLabel(label)
     }
 }

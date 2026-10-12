@@ -1,23 +1,23 @@
 import OctoKit
 import SwiftUI
 
-// The pop-up over a Library health page that shows a fix before it runs, how far it has got, and
+// The sheet over a Library health page that shows a fix before it runs, how far it has got, and
 // how it went, with its Undo.
 
 /// How long a preview list gets before the rest is only counted.
 private let previewLines = 100
 
 extension View {
-    /// The health page's pop-up, beside what opened it, up to 80% of the screen tall.
+    /// The health page's sheet, half the screen tall to begin with; a swipe down closes it.
     func healthSheet(_ model: HealthModel) -> some View {
-        glassPopup(isPresented: Binding(get: { model.sheet != nil }, set: { if !$0 { model.close() } }),
-                   title: "Library health", revision: model.sheetRevision, maxWidth: 328, heightShare: 0.8) {
+        sheet(isPresented: Binding(get: { model.sheet != nil }, set: { if !$0 { model.close() } })) {
             HealthSheetView(model: model)
+                .presentationDetents([.medium, .large])
         }
     }
 }
 
-/// The pop-up's current page, kept while it fades after it was closed.
+/// The sheet's current page, kept while it slides away after it was closed.
 private struct HealthSheetView: View {
     let model: HealthModel
     @State private var last: HealthSheet?
@@ -217,25 +217,30 @@ private struct RunningSheet: View {
 
 // MARK: Pieces
 
-/// A sheet: its heading, then what it shows, which scrolls, then its buttons, which stay in view.
+/// A sheet page: its title in the bar, then what it shows, which scrolls, then its buttons, which
+/// stay in view at the bottom.
 private struct SheetPage<Buttons: View, Content: View>: View {
     let title: String
     @ViewBuilder var buttons: Buttons
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(title).font(.octoBody).foregroundStyle(.white).accessibilityAddTraits(.isHeader)
-            HuggingScroll {
+        NavigationStack {
+            ScrollView {
                 VStack(alignment: .leading, spacing: 0) { content }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 4)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 12)
             }
-            HStack(spacing: 10) { buttons }.padding(.top, 16)
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .safeAreaInset(edge: .bottom) {
+                HStack(spacing: 10) { buttons }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+            }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 18)
-        .frame(width: 328, alignment: .leading)
     }
 }
 
@@ -265,8 +270,7 @@ private struct SheetHeading: View {
 
     var body: some View {
         Text(text)
-            .font(.octoLabel)
-            .foregroundStyle(.white)
+            .font(.headline)
             .padding(.top, 14)
             .padding(.bottom, 2)
             .accessibilityAddTraits(.isHeader)
@@ -286,8 +290,8 @@ private struct SheetWords: View {
 
     var body: some View {
         Text(text)
-            .font(.octoBodySmall)
-            .foregroundStyle(muted ? OctoColor.textMuted : OctoColor.textSecondary)
+            .font(.subheadline)
+            .foregroundStyle(muted ? .secondary : .primary)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.top, 6)
             .accessibilityAddTraits(live ? .updatesFrequently : [])
@@ -301,8 +305,8 @@ private struct SheetLine: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(title).font(.octoBodySmall).foregroundStyle(.white).fixedSize(horizontal: false, vertical: true)
-            if let detail { Text(detail).font(.octoCaption).foregroundStyle(OctoColor.textMuted).fixedSize(horizontal: false, vertical: true) }
+            Text(title).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+            if let detail { Text(detail).font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
         }
         .padding(.vertical, 4)
     }
@@ -327,7 +331,7 @@ private struct CheckRow: View {
         Button { change(!checked) } label: {
             HStack(spacing: 12) {
                 Mark(on: checked, round: false)
-                Text(text).font(.octoBodySmall).foregroundStyle(.white).frame(maxWidth: .infinity, alignment: .leading)
+                Text(text).font(.subheadline).foregroundStyle(.primary).frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(minHeight: 44)
             .contentShape(RoundedRectangle(cornerRadius: 10))
@@ -347,7 +351,7 @@ private struct PickRow: View {
         Button(action: pick) {
             HStack(spacing: 12) {
                 Mark(on: picked, round: true)
-                Text(text).font(.octoBodySmall).foregroundStyle(.white).frame(maxWidth: .infinity, alignment: .leading)
+                Text(text).font(.subheadline).foregroundStyle(.primary).frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(minHeight: 44)
             .contentShape(RoundedRectangle(cornerRadius: 10))
@@ -357,38 +361,28 @@ private struct PickRow: View {
     }
 }
 
+/// A tick in a box for a change that is in, or a filled circle for the value kept.
 private struct Mark: View {
     let on: Bool
     let round: Bool
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: round ? 10 : 5, style: .continuous)
-        ZStack {
-            if on {
-                shape.fill(OctoColor.accent)
-                IconView(.check, size: 14, color: OctoColor.background)
-            } else {
-                shape.strokeBorder(OctoColor.textMuted, lineWidth: 1.5)
-            }
-        }
-        .frame(width: 20, height: 20)
+        let symbol = round ? (on ? "checkmark.circle.fill" : "circle") : (on ? "checkmark.square.fill" : "square")
+        Image(systemName: symbol)
+            .font(.title3)
+            .foregroundStyle(on ? OctoColor.accent : Color.secondary)
+            .frame(width: 24, height: 24)
     }
 }
 
-/// How far along, as a thin bar.
+/// How far along, as the system's progress bar.
 private struct ProgressLine: View {
     let done: Int
     let total: Int
 
     var body: some View {
-        let share = total <= 0 ? 0 : min(max(Double(done) / Double(total), 0), 1)
-        Capsule()
-            .fill(Color.white.opacity(0.1))
-            .overlay(alignment: .leading) {
-                GeometryReader { box in Capsule().fill(OctoColor.accent).frame(width: box.size.width * share) }
-            }
-            .clipShape(Capsule())
-            .frame(height: 4)
+        ProgressView(value: Double(min(max(done, 0), max(total, 1))), total: Double(max(total, 1)))
+            .tint(OctoColor.accent)
             .padding(.top, 8)
             .padding(.bottom, 4)
             .accessibilityHidden(true)
