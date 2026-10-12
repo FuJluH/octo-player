@@ -2,6 +2,7 @@ import Foundation
 import Network
 import Observation
 import OctoKit
+import UIKit
 
 /// Every setting the Settings pages keep, in one place. Each group lives in its own preferences
 /// suite, under the same names the other Octo apps use ("player", "offline", "lyrics",
@@ -141,6 +142,10 @@ final class AppSettings {
     func setCastKeepPlaying(_ on: Bool) { update { $0.castKeepPlaying = on } }
     func setLiveBackground(_ on: Bool) { update { $0.liveBackground = on } }
     func setReduceMotion(_ on: Bool) { update { $0.reduceMotion = on } }
+
+    /// Whether what moves only for show holds still: Octo's own switch, or the phone's Reduce
+    /// Motion. Read wherever motion is drawn.
+    var motionReduced: Bool { player.reduceMotion || UIAccessibility.isReduceMotionEnabled }
     func setLibraryOnly(_ on: Bool) { update { $0.libraryOnly = on } }
     func setAmbientStrength(_ strength: AmbientStrength) { update { $0.ambient.strength = strength } }
 

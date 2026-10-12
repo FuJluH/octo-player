@@ -29,6 +29,8 @@
     </dict>
     <key>NSLocalNetworkUsageDescription</key>
     <string>Octo connects to your music server on your home network.</string>
+    <key>NSAppleMusicUsageDescription</key>
+    <string>Octo adds the music on this phone to your library.</string>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
 </dict>

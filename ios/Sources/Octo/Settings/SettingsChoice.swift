@@ -57,23 +57,11 @@ struct ChoiceList: View {
                 .padding(.top, 10)
                 .padding(.bottom, 6)
                 .accessibilityAddTraits(.isHeader)
-            ScrollView {
-                VStack(spacing: 0) {
-                    ForEach(Array(question.answers.enumerated()), id: \.offset) { index, answer in
-                        if index > 0 {
-                            Rectangle()
-                                .fill(looks[index].lineAbove ? Color.white.opacity(0.08) : .clear)
-                                .frame(height: 1)
-                                .padding(.horizontal, 14)
-                        }
-                        ChoiceAnswerRow(answer: answer, selected: looks[index].selected, pickable: question.selected >= 0) {
-                            question.onPick(index)
-                            close()
-                        }
-                    }
-                }
+            // The answers scroll only when they are taller than the card may be.
+            ViewThatFits(in: .vertical) {
+                answers(looks)
+                ScrollView { answers(looks) }.scrollBounceBehavior(.basedOnSize)
             }
-            .scrollBounceBehavior(.basedOnSize)
         }
         .padding(6)
         .frame(minWidth: 220, maxWidth: 320)
@@ -81,6 +69,23 @@ struct ChoiceList: View {
         .frame(maxHeight: screenHeight * 0.6)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(question.title)
+    }
+
+    private func answers(_ looks: [MenuRowLook]) -> some View {
+        VStack(spacing: 0) {
+            ForEach(Array(question.answers.enumerated()), id: \.offset) { index, answer in
+                if index > 0 {
+                    Rectangle()
+                        .fill(looks[index].lineAbove ? Color.white.opacity(0.08) : .clear)
+                        .frame(height: 1)
+                        .padding(.horizontal, 14)
+                }
+                ChoiceAnswerRow(answer: answer, selected: looks[index].selected, pickable: question.selected >= 0) {
+                    question.onPick(index)
+                    close()
+                }
+            }
+        }
     }
 }
 

@@ -310,6 +310,8 @@ struct ToggleRow: View {
                 .labelsHidden()
                 .tint(OctoColor.accent)
                 .disabled(!enabled)
+                // The row takes every tap, so one tap flips it once.
+                .allowsHitTesting(false)
                 .accessibilityHidden(true)
         }
         .onTapGesture { if enabled { onChange(!isOn) } }
@@ -361,7 +363,9 @@ struct ChoiceRow: View {
         }
         .buttonStyle(SettingsRowPress())
         .disabled(!enabled)
+        .accessibilityLabel(title ?? entry?.title ?? "")
         .accessibilityValue(value)
+        .accessibilityHint(helper ?? "")
         .choicePopover(isPresented: $open, question: question)
         .onChange(of: navigator.popup, initial: true) { _, popup in
             guard let popup, popup == entry?.id else { return }

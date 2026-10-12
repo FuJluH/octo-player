@@ -115,6 +115,7 @@ struct PopoverRow<Card: View>: View {
             }
         }
         .buttonStyle(SettingsRowPress())
+        .accessibilityLabel(entry?.title ?? "")
         .accessibilityValue(value)
         .popover(isPresented: $isPresented, attachmentAnchor: .rect(.bounds), arrowEdge: .top, content: card)
     }
@@ -126,67 +127,73 @@ struct PaceCard: View {
     @State private var settings = AppSettings.shared
 
     var body: some View {
-        let prefs = settings.player
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    Text("Speed").font(.octoBody).foregroundStyle(OctoColor.textPrimary).frame(maxWidth: .infinity, alignment: .leading)
-                    if !prefs.paceIsDefault {
-                        Button("Reset") { settings.resetPace() }
-                            .buttonStyle(.glass)
-                            .font(.octoBodySmall)
-                    }
-                }
-                .frame(height: 48)
-                Text(Pace.speedLabel(prefs.speed))
-                    .font(.octoDisplay.monospacedDigit())
-                    .tracking(-0.5)
-                    .foregroundStyle(OctoColor.textPrimary)
-                    .padding(.top, 8)
-                GlowSlider(fraction: Double(Pace.speedFraction(prefs.speed)), label: "Playback speed",
-                           valueText: Pace.speedLabel(prefs.speed), step: 0.05 / 1.5) { fraction in
-                    let picked = Pace.speedAt(Float(fraction))
-                    if picked != prefs.speed { settings.setSpeed(picked) }
-                }
-                DetentLabels(speed: prefs.speed) { settings.setSpeed($0) }
-
-                HStack(alignment: .center) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("Keep pitch").font(.octoBodySmall).foregroundStyle(OctoColor.textPrimary)
-                        Text(prefs.keepPitch ? "Voices sound as usual at any speed." : "Pitch rises and falls with the speed, like a record.")
-                            .font(.octoCaption)
-                            .foregroundStyle(OctoColor.textMuted)
-                    }
-                    .padding(.trailing, 12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    Toggle("Keep pitch", isOn: Binding(get: { prefs.keepPitch }, set: { settings.setKeepPitch($0) }))
-                        .labelsHidden()
-                        .tint(OctoColor.accent)
-                }
-                .padding(.vertical, 4)
-                .padding(.top, 16)
-
-                HStack {
-                    Text("Pitch").font(.octoBodySmall).foregroundStyle(OctoColor.textPrimary).frame(maxWidth: .infinity, alignment: .leading)
-                    Text(Pace.semitonesLabel(prefs.pitchSemitones))
-                        .font(.octoBodySmall.monospacedDigit())
-                        .foregroundStyle(prefs.pitchSemitones == 0 ? OctoColor.textMuted : OctoColor.textPrimary)
-                }
-                .padding(.top, 12)
-                GlowSlider(fraction: Double(Pace.semitonesFraction(prefs.pitchSemitones)), label: "Pitch",
-                           valueText: Pace.semitonesLabel(prefs.pitchSemitones), step: 1.0 / 12) { fraction in
-                    let picked = Pace.semitonesAt(Float(fraction))
-                    if picked != prefs.pitchSemitones { settings.setPitchSemitones(picked) }
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 8)
-            .padding(.bottom, 18)
+        // Scrolls only when it is taller than the card may be.
+        ViewThatFits(in: .vertical) {
+            controls
+            ScrollView { controls }.scrollBounceBehavior(.basedOnSize)
         }
-        .scrollBounceBehavior(.basedOnSize)
         .frame(width: 320)
         .frame(maxHeight: screenHeight * 0.6)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("Speed")
+    }
+
+    private var controls: some View {
+        let prefs = settings.player
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Speed").font(.octoBody).foregroundStyle(OctoColor.textPrimary).frame(maxWidth: .infinity, alignment: .leading)
+                if !prefs.paceIsDefault {
+                    Button("Reset") { settings.resetPace() }
+                        .buttonStyle(.glass)
+                        .font(.octoBodySmall)
+                }
+            }
+            .frame(height: 48)
+            Text(Pace.speedLabel(prefs.speed))
+                .font(.octoDisplay.monospacedDigit())
+                .tracking(-0.5)
+                .foregroundStyle(OctoColor.textPrimary)
+                .padding(.top, 8)
+            GlowSlider(fraction: Double(Pace.speedFraction(prefs.speed)), label: "Playback speed",
+                       valueText: Pace.speedLabel(prefs.speed), step: 0.05 / 1.5) { fraction in
+                let picked = Pace.speedAt(Float(fraction))
+                if picked != prefs.speed { settings.setSpeed(picked) }
+            }
+            DetentLabels(speed: prefs.speed) { settings.setSpeed($0) }
+
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Keep pitch").font(.octoBodySmall).foregroundStyle(OctoColor.textPrimary)
+                    Text(prefs.keepPitch ? "Voices sound as usual at any speed." : "Pitch rises and falls with the speed, like a record.")
+                        .font(.octoCaption)
+                        .foregroundStyle(OctoColor.textMuted)
+                }
+                .padding(.trailing, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Toggle("Keep pitch", isOn: Binding(get: { prefs.keepPitch }, set: { settings.setKeepPitch($0) }))
+                    .labelsHidden()
+                    .tint(OctoColor.accent)
+            }
+            .padding(.vertical, 4)
+            .padding(.top, 16)
+
+            HStack {
+                Text("Pitch").font(.octoBodySmall).foregroundStyle(OctoColor.textPrimary).frame(maxWidth: .infinity, alignment: .leading)
+                Text(Pace.semitonesLabel(prefs.pitchSemitones))
+                    .font(.octoBodySmall.monospacedDigit())
+                    .foregroundStyle(prefs.pitchSemitones == 0 ? OctoColor.textMuted : OctoColor.textPrimary)
+            }
+            .padding(.top, 12)
+            GlowSlider(fraction: Double(Pace.semitonesFraction(prefs.pitchSemitones)), label: "Pitch",
+                       valueText: Pace.semitonesLabel(prefs.pitchSemitones), step: 1.0 / 12) { fraction in
+                let picked = Pace.semitonesAt(Float(fraction))
+                if picked != prefs.pitchSemitones { settings.setPitchSemitones(picked) }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 8)
+        .padding(.bottom, 18)
     }
 }
 
