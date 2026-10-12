@@ -46,6 +46,8 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
 
     init(sound: SoundProcessor?, scout: Scout?, profiles: ServerProfiles?, lengths: RealLengths,
          keepActive: @escaping @Sendable () -> Bool, streamContext: @escaping @MainActor () -> StreamContext) {
+        // Songs streamed last time the app ran are let go.
+        try? FileManager.default.removeItem(at: FileManager.default.temporaryDirectory.appendingPathComponent("playing", isDirectory: true))
         let first = Deck(name: "A", sound: sound, keepActive: keepActive)
         let second = Deck(name: "B", sound: sound, keepActive: keepActive)
         second.volume = 0
@@ -108,10 +110,7 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
 
     var pauseAtEndOfSong: Bool {
         get { deck.pauseAtEndOfSong }
-        set {
-            deck.pauseAtEndOfSong = newValue
-            crossfader.interrupt()
-        }
+        set { deck.pauseAtEndOfSong = newValue }
     }
 
     var currentKey: String? { queue.currentItem?.entryId }

@@ -100,6 +100,8 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
     private var taskStart: Int64 = 0
     private var writeAt: Int64 = 0
     private var errorsInARow = 0
+    /// Whether the server sends a part of the song when asked, once an answer showed it.
+    private var sendsParts: Bool?
 
     private let file: URL
     private let handle: FileHandle
@@ -171,8 +173,20 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
                 return readHeld(offset, Int(end - offset), buffer)
             }
             if let failure { throw failure }
-            let reaching = task != nil && offset >= taskStart && offset <= writeAt + Self.jumpAhead
-            if !reaching { try start(from: offset) }
+            if sendsParts == false {
+                // A server that only sends the whole song: a look at its last bytes (for a tag)
+                // finds none rather than waiting for all of it; anything else waits for the
+                // download to get there.
+                if let total, offset >= total - 128, offset > writeAt + Self.jumpAhead {
+                    let length = Int(min(Int64(count), total - offset))
+                    buffer.initializeMemory(as: UInt8.self, repeating: 0, count: length)
+                    return length
+                }
+                if task == nil { try start(from: 0) }
+            } else {
+                let reaching = task != nil && offset >= taskStart && offset <= writeAt + Self.jumpAhead
+                if !reaching { try start(from: offset) }
+            }
             condition.wait(until: Date().addingTimeInterval(0.5))
         }
     }
@@ -284,8 +298,10 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
         if http.statusCode == 206, let range = http.value(forHTTPHeaderField: "Content-Range"),
            let whole = range.split(separator: "/").last.flatMap({ Int64($0) }) {
             if total == nil { total = whole }
+            sendsParts = true
         } else {
             // The whole song came back from its start, whatever was asked.
+            sendsParts = false
             writeAt = 0
             taskStart = 0
             if total == nil, http.expectedContentLength > 0 { total = http.expectedContentLength }

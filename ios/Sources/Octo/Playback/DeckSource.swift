@@ -41,6 +41,10 @@ final class OpenToken: @unchecked Sendable {
 /// sound that the deck plays from. A jump to another place in the song is taken by the decode
 /// thread; the song's length, format and any failure are kept for the deck to read.
 final class DeckSource: @unchecked Sendable {
+    private static let made = Atomic<Int>(0)
+
+    /// Tells this song load apart from every other.
+    let serial = DeckSource.made.add(1, ordering: .relaxed).newValue
     let item: QueueItem
     /// How the song's loudness is judged, decided as it was queued.
     let setUp: SongSetUp?

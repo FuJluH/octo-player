@@ -179,10 +179,8 @@ final class Player {
     private func load(_ items: [QueueItem], startIndex: Int, shuffled: Bool) {
         failuresInARow = 0
         headset.forgetLoss()
-        engine.setQueue(items, startIndex: max(startIndex, 0), shuffled: shuffled, play: true)
-        if shuffled, let first = engine.queue.firstIndex, first != engine.queue.current {
-            engine.seek(to: first)
-        }
+        // Shuffled, the queue starts at the first song of its random order.
+        engine.setQueue(items, startIndex: shuffled ? -1 : startIndex, shuffled: shuffled, play: true)
     }
 
     func shuffle(_ songs: [Song]) {
@@ -718,8 +716,10 @@ final class Player {
             return
         }
         let found = engine.playingQuality
+        // The phone's output rate, when the song is resampled to play.
         quality = audioQuality(codecMime: found?.codecMime, fileMime: item.mimeType ?? item.fileMime, bitDepth: found?.bitDepth,
                                sampleRate: found?.sampleRate, bitrate: found?.bitrate)
+            .map { $0.playingAt(Int(AVAudioSession.sharedInstance().sampleRate)) }
     }
 
     /// Reads the position four times a second while there is a song, and saves the queue every
@@ -843,9 +843,11 @@ final class Player {
             publishQueue()
             return
         }
+        // Bringing the queue back is not a change for the server's copy of it.
+        serverQueue.restored(OctoKit.QueueSnapshot(trackIds: kept.map(\.trackId), shuffleOrder: order ?? [], index: point.index,
+                                                   positionMs: point.positionMs, repeatMode: saved.repeatMode, shuffle: saved.shuffle))
         engine.restoreQueue(kept, order: order, index: point.index, positionMs: point.positionMs,
                             repeatMode: RepeatMode(rawValue: saved.repeatMode) ?? .off, shuffle: saved.shuffle)
-        serverQueue.restored(queueSnapshot())
         publishQueue()
         publishPosition()
         nowPlaying.publish()

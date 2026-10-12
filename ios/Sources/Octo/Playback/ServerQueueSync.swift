@@ -58,6 +58,13 @@ final class ServerQueueSync {
         enabled = (UserDefaults(suiteName: "server_queue") ?? .standard).object(forKey: "sync_on") as? Bool ?? true
     }
 
+    #if DEBUG
+    /// Shows an offer made up on the phone, to see the card.
+    func showSample(_ sample: ResumeOffer) {
+        offer = sample
+    }
+    #endif
+
     func setEnabled(_ on: Bool) {
         enabled = on
         store.set(on, forKey: "sync_on")

@@ -11,6 +11,8 @@ final class NowPlayingCenter {
     private var artwork: MPMediaItemArtwork?
     private var artworkFor: String?
     private var heart: NotificationHeart = .none
+    /// Closed from the lock screen: nothing shows there until music plays again.
+    private var closed = false
 
     init(player: Player) {
         self.player = player
@@ -25,7 +27,8 @@ final class NowPlayingCenter {
     /// Puts the song on now, where it is and whether it plays, on the lock screen.
     func publish() {
         let center = MPNowPlayingInfoCenter.default()
-        guard let item = player.engine.currentItem else {
+        if player.isPlaying { closed = false }
+        guard !closed, let item = player.engine.currentItem else {
             center.nowPlayingInfo = nil
             center.playbackState = .stopped
             updateHeart(nil)
@@ -56,6 +59,7 @@ final class NowPlayingCenter {
 
     /// Takes everything off the lock screen, as Close does.
     func clear() {
+        closed = true
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         MPNowPlayingInfoCenter.default().playbackState = .stopped
     }

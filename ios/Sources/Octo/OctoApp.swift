@@ -65,7 +65,8 @@ struct OctoApp: App {
                 .tint(OctoColor.accent)
                 .preferredColorScheme(.dark)
                 #if DEBUG
-                .task { await Drive.run(session: session, player: player, router: router, prompts: prompts, motion: motion,
+                .task { PlaybackDrive.install(player: player, router: router, overlays: overlays)
+                        await Drive.run(session: session, player: player, router: router, prompts: prompts, motion: motion,
                                          overlays: overlays, ambience: ambience, selectionBar: selectionBar) }
                 #endif
         }

@@ -36,6 +36,9 @@ final class DeckRender: @unchecked Sendable {
     let songMsBits = Atomic<UInt64>(0)
     let phaseCode = Atomic<Int>(DeckState.idle.code)
     let rendered = Atomic<Int>(0)
+    /// The song and the jump the audio thread last handed out sound of.
+    let renderedSerial = Atomic<Int>(0)
+    let renderedGeneration = Atomic<Int>(-1)
 
     private var held = DeckOrders()
     private var source: DeckSource?
@@ -169,6 +172,8 @@ final class DeckRender: @unchecked Sendable {
                 outAt[0] = outs[0] + written
                 outAt[1] = outs[1] + written
                 written += processor.process(scratch, frames: pull.frames, output: outAt)
+                renderedSerial.store(source.serial, ordering: .relaxed)
+                renderedGeneration.store(gen, ordering: .relaxed)
                 phaseCode.store(DeckState.ready.code, ordering: .relaxed)
                 songMsBits.store(processor.songMs.bitPattern, ordering: .relaxed)
             }
@@ -417,8 +422,18 @@ final class Deck {
     }
 
     var state: DeckState {
-        guard current != nil else { return .idle }
+        guard let current else { return .idle }
+        if current.failure != nil { return .ended }
+        // Sound of an earlier song or from before a jump says nothing of this one yet.
+        guard soundIsCurrent else { return .buffering }
         return DeckState(code: render.phaseCode.load(ordering: .relaxed))
+    }
+
+    /// Whether the last sound handed out was of this song, since its latest jump.
+    private var soundIsCurrent: Bool {
+        guard let current else { return false }
+        return render.renderedSerial.load(ordering: .relaxed) == current.serial
+            && render.renderedGeneration.load(ordering: .relaxed) == current.ring.generation.load(ordering: .relaxed)
     }
 
     var isPlaying: Bool { playWhenReady && state == .ready }
@@ -438,7 +453,7 @@ final class Deck {
     /// Where the song is, as heard.
     var positionMs: Int {
         guard let current else { return 0 }
-        if state != .ready { return current.jumpMs.load(ordering: .relaxed) }
+        guard soundIsCurrent else { return current.jumpMs.load(ordering: .relaxed) }
         let ms = Double(bitPattern: render.songMsBits.load(ordering: .relaxed))
         let latency = Double(processor.latency) * 1000 / deckRate + outputDelayMs * Double(pace.speed)
         return max(0, Int(ms - latency))
@@ -452,12 +467,14 @@ final class Deck {
     /// What happened since the last look.
     func poll() -> [DeckEvent] {
         var events: [DeckEvent] = []
-        let (renderCurrent, advances, endings, paused) = render.orders.withLock { ($0.current, $0.advances, $0.endings, !$0.playing) }
+        let (renderCurrent, renderFollowing, advances, endings, paused) = render.orders.withLock {
+            ($0.current, $0.following, $0.advances, $0.endings, !$0.playing)
+        }
         if advances != seenAdvances {
             seenAdvances = advances
             if let from = current, let to = renderCurrent, to !== from {
                 current = to
-                following = nil
+                following = renderFollowing
                 retire(from)
                 reportedFailure = nil
                 events.append(.advanced(from: from.item, to: to.item))
