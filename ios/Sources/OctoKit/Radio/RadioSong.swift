@@ -53,6 +53,36 @@ func artistKey(_ name: String) -> String? {
     return key.isEmpty ? nil : key
 }
 
+/// A server's song as the radio sees it: its artists from the artist list, else its artist or
+/// display artist, else the artist id; its album id, else the album name; its genre list, else
+/// its genre; its composers split on `,` `;` `/`; liked when starred; its plays and last play
+/// from the server. `rating` is the one on screen, which can be newer than the server's.
+public func radioSong(_ song: ServerSong, rating: Int? = nil) -> RadioSong {
+    var artists = song.artists.map(\.name).filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    if artists.isEmpty { artists = [song.artist ?? song.displayArtist].compactMap { $0 } }
+    if artists.isEmpty { artists = [song.artistId].compactMap { $0 } }
+    let genre = song.genre?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let composers = (song.displayComposer ?? "").split(whereSeparator: { ",;/".contains($0) })
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    return RadioSong(
+        id: song.id, title: song.title, artists: artists, album: song.albumId ?? song.album,
+        genres: song.genres.isEmpty ? [genre].compactMap { $0 }.filter { !$0.isEmpty } : song.genres,
+        year: song.year, durationMs: Int(knownLengthMs(Song(id: song.id, title: song.title, duration: song.duration))),
+        composers: composers, liked: song.starred != nil, rating: rating ?? song.userRating ?? 0,
+        plays: Int(song.playCount ?? 0), lastPlayedAt: serverTime(song.played))
+}
+
+/// A phone song as the radio sees it: its artist, else its artist id; its album id; its genre
+/// when it has one; liked when among `liked`; its plays and last play from `played`.
+public func radioSong(_ track: LibraryTrack, liked: Set<String>, played: PlayedTrack?) -> RadioSong {
+    let artists = [track.artist].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    return RadioSong(
+        id: track.id, title: track.title, artists: artists.isEmpty ? [track.artistId] : artists, album: track.albumId,
+        genres: track.genre.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? [] : [track.genre], year: track.year,
+        durationMs: Int(track.durationMs), liked: liked.contains(track.id), rating: track.rating,
+        plays: played?.plays ?? 0, lastPlayedAt: played.map { Int($0.lastPlayedAt) })
+}
+
 /// A server's song as the radio sees it. `rating` is the one on screen, which can be newer than
 /// the server's; `plays` and `lastPlayedAt` what the library knows of its listening.
 public func radioSong(_ song: Song, rating: Int = 0, plays: Int = 0, lastPlayedAt: Int? = nil, composers: [String] = []) -> RadioSong {

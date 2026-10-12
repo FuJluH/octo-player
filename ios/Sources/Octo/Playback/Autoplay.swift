@@ -28,7 +28,7 @@ final class Autoplay {
         let key = item?.entryId
         let last = enabled && key != nil && key != doneFor && !(item?.isRadioStation ?? true)
             && engine.repeatMode == .off && engine.queue.nextOnEnd == nil
-            && (engine.isPlaying || engine.state == .ended || engine.playWhenReady)
+            && (engine.isPlaying || engine.state == .ended)
         guard last, let key, let item else {
             // Paused, repeat on, songs added, or switched off: stand down.
             stop()
@@ -60,10 +60,15 @@ final class Autoplay {
         let anchors = Array(entries.suffix(30).filter { $0.source != .autoplay }.map(\.trackId).filter { $0 != seedId }.suffix(10).reversed())
         let ids = await picksAfter(seedId, queued: queued, anchors: anchors)
         let items = await player.playable.items(ids: ids, source: .autoplay).compactMap { $0 }
+        // Stood down meanwhile (paused, repeat on, songs added, switched off): nothing is marked
+        // or added.
+        if Task.isCancelled { return }
         // Tried once for this song, whatever came of it.
         doneFor = key
-        watch = nil
-        watching = nil
+        if watching == key {
+            watch = nil
+            watching = nil
+        }
         if items.isEmpty {
             playbackLog.info("autoplay: nothing to add")
             return

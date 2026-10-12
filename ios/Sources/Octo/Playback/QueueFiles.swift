@@ -14,7 +14,7 @@ struct QueueFile: QueueRows {
 
     func read() async -> QueueSnapshot? {
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
-        return decodeQueue(text)
+        return savedQueueRead(text)
     }
 
     func write(_ snapshot: QueueSnapshot) async {

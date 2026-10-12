@@ -331,6 +331,66 @@ import Testing
 }
 
 @Suite struct LibraryRadioTest {
+    private func track(_ id: String, artist: String = "Artist", genre: String = "Rock", rating: Int = 0) -> LibraryTrack {
+        LibraryTrack(id: id, sourceId: "device", nativeId: id, title: "Title \(id)", searchKey: id, sortKey: id, artist: artist,
+                     artistId: "ar-\(id)", album: "Album", albumId: "al-1", year: 1995, durationMs: 200_000, addedAt: 0,
+                     genre: genre, rating: rating)
+    }
+
+    @Test func aPhoneSongCarriesWhatTheRadioWeighs() {
+        let song = track("t1", rating: 1)
+        let radio = radioSong(song, liked: ["t1"], played: PlayedTrack(track: song, plays: 7, lastPlayedAt: 1_000))
+        #expect(radio.artists == ["Artist"])
+        #expect(radio.album == "al-1")
+        #expect(radio.genres == ["Rock"])
+        #expect(radio.year == 1995)
+        #expect(radio.durationMs == 200_000)
+        #expect(radio.liked)
+        #expect(radio.rating == 1)
+        #expect(radio.plays == 7)
+        #expect(radio.lastPlayedAt == 1_000)
+    }
+
+    @Test func aPhoneSongWithNoNameOrGenreStillHasAnArtist() {
+        let radio = radioSong(track("t2", artist: "", genre: ""), liked: [], played: nil)
+        #expect(radio.artists == ["ar-t2"])
+        #expect(radio.genres.isEmpty)
+        #expect(!radio.liked)
+        #expect(radio.plays == 0)
+        #expect(radio.lastPlayedAt == nil)
+    }
+
+    @Test func aServerSongTakesItsListsAndListening() {
+        var song = ServerSong(id: "s1")
+        song.title = "Song"
+        song.artists = [ArtistRef(id: "a1", name: "One"), ArtistRef(id: "a2", name: " ")]
+        song.artist = "Ignored"
+        song.genres = ["Jazz", "Soul"]
+        song.genre = "Ignored"
+        song.displayComposer = "Ann; Bo / Cy,"
+        song.playCount = 4
+        song.played = "2026-01-01T00:00:00Z"
+        song.userRating = 3
+        song.duration = 180
+        let radio = radioSong(song)
+        #expect(radio.artists == ["One"])
+        #expect(radio.genres == ["Jazz", "Soul"])
+        #expect(radio.composers == ["Ann", "Bo", "Cy"])
+        #expect(radio.plays == 4)
+        #expect(radio.lastPlayedAt == serverTime("2026-01-01T00:00:00Z"))
+        #expect(radio.rating == 3)
+        #expect(radioSong(song, rating: 5).rating == 5)
+        // Three minutes exactly is a length the server only guessed.
+        #expect(radio.durationMs == 0)
+        var bare = ServerSong(id: "s2")
+        bare.artistId = "ar-2"
+        bare.genre = " Rock "
+        let plain = radioSong(bare)
+        #expect(plain.artists == ["ar-2"])
+        #expect(plain.genres == ["Rock"])
+        #expect(plain.album == nil)
+    }
+
     @Test func aServerSongCarriesWhatTheRadioWeighs() {
         var song = Song(id: "t1", title: "Title t1", artist: "Artist", albumId: "al-1", duration: 200)
         song.genre = "Rock"

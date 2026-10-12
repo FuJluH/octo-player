@@ -158,7 +158,7 @@ enum SongOpener {
                     return OpenedSong(decoder: decoder, bytes: file)
                 }
                 return OpenedSong(decoder: try AssetDecoder(url: url, outputRate: outputRate), bytes: file)
-            case "http", "https" where isRadio(trackId):
+            case "http" where isRadio(trackId), "https" where isRadio(trackId):
                 // A live station: read as it comes, with no length and no end.
                 guard OnlineWatch.shared.online else { throw PlayError(.ioUnspecified, detail: "No connection") }
                 let live = LiveBytes(request: URLRequest(url: url))

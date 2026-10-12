@@ -228,6 +228,15 @@ struct SeededRandom: RandomNumberGenerator {
 
     @Test func emptyQueueRestoresAsNothing() { #expect(queueFromRows([], nil) == nil) }
 
+    @Test func aSavedQueueReadsBackHeldInsideItself() {
+        let saved = QueueSnapshot(trackIds: ["device:1", "device:2"], shuffleOrder: [], index: 7, positionMs: -5, repeatMode: 0, shuffle: false)
+        let read = savedQueueRead(encodeQueue(saved))
+        #expect(read?.index == 1)
+        #expect(read?.positionMs == 0)
+        #expect(savedQueueRead(encodeQueue(QueueSnapshot.empty)) == nil)
+        #expect(savedQueueRead("not a queue") == nil)
+    }
+
     @Test func relinkKeyIgnoresCaseAndAccentsButNotLength() {
         let a = relinkKey(albumArtist: "Beyoncé", album: "Lemonade", disc: 1, track: 3, title: "Hold Up", durationMs: 221_400)
         let b = relinkKey(albumArtist: "beyonce", album: "lemonade", disc: 1, track: 3, title: "hold up", durationMs: 221_900)

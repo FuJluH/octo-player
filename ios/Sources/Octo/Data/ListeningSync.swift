@@ -207,7 +207,8 @@ final class ListeningSync {
     private func sendPending(_ server: ServerInUse) async {
         for play in store.pending(server.account) {
             let failure = await failureOf { try await server.client.scrobble(play.serverId, timeMs: play.startedAt, submission: true) }
-            if let failure, worthRetrying(failure) { break }
+            // Cut short (the work was stopped): the play waits for the next send.
+            if let failure, isCancellation(failure) || worthRetrying(failure) { break }
             store.finishPending(server.account, play, sent: failure == nil)
         }
         if session.inUse?.account == server.account { refreshSent() }

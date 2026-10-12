@@ -139,7 +139,7 @@ extension Array where Element == Listen {
             return next
         }
         let sorted = zip(self, dropFirst()).allSatisfy { $0.listenedAt <= $1.listenedAt }
-        if !sorted { return Self.ordered(self + [listen]) }
+        if !sorted { return Array(Self.ordered(self + [listen]).suffix(maxQueuedListens)) }
         let kept = Self.ordered(self)
         if kept.contains(where: { $0.listenedAt == listen.listenedAt && $0.track == listen.track && $0.artist == listen.artist }) {
             return Array(kept.suffix(maxQueuedListens))

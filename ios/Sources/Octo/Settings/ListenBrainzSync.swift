@@ -20,6 +20,8 @@ final class ListenBrainzSync {
     @ObservationIgnored private var started = false
     @ObservationIgnored private var sending = false
     @ObservationIgnored private var sendAgain = false
+    /// Whether a send asked for while another ran was one that goes at once.
+    @ObservationIgnored private var sendAgainNow = false
     /// Failures in a row, and when the next try is due after them.
     @ObservationIgnored private var failures = 0
     @ObservationIgnored private var nextTryAt = Date.distantPast
@@ -162,6 +164,7 @@ final class ListenBrainzSync {
         if !now, Date() < nextTryAt { return }
         guard !sending else {
             sendAgain = true
+            sendAgainNow = sendAgainNow || now
             return
         }
         guard settings.listenBrainz.sends else { return }
@@ -174,8 +177,11 @@ final class ListenBrainzSync {
         defer {
             sending = false
             if sendAgain {
+                // The send asked for meanwhile runs next, as it was asked: at once when it was.
+                let now = sendAgainNow
                 sendAgain = false
-                Task { await send(now: false) }
+                sendAgainNow = false
+                Task { await send(now: now) }
             }
         }
         while true {

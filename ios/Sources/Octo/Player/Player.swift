@@ -885,8 +885,10 @@ final class Player {
                                          filterSweeps: prefs.filterSweeps, beatMatch: prefs.matchTempo)
         shared.crossfadeOn.store(prefs.crossfadeMs > 0, ordering: .relaxed)
         let inUse = session.inUse
+        let probed = session.active?.isOcto ?? false
         shared.profileSession.withLock {
-            $0 = inUse.map { ProfileSession(sourceId: $0.sourceId, isOcto: $0.isOcto, extensions: $0.extensions, client: $0.client) }
+            // Profiles are asked only of a server whose Octo page answered at sign-in (at home).
+            $0 = inUse.map { ProfileSession(sourceId: $0.sourceId, isOcto: probed, extensions: $0.extensions, client: $0.client) }
         }
         autoplay?.check()
     }
