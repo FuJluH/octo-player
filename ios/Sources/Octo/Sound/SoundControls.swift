@@ -142,21 +142,31 @@ struct SoundHairline: View {
     }
 }
 
-/// A quiet action in words, with no button around it.
+/// A quiet action in words, with no button around it. `spotAction` hears where the finger
+/// tapped, in screen points (none when asked another way).
 struct SoundTextAction: View {
     let text: String
-    let action: () -> Void
+    let spotAction: (CGPoint?) -> Void
 
     init(_ text: String, action: @escaping () -> Void) {
         self.text = text
-        self.action = action
+        spotAction = { _ in action() }
+    }
+
+    init(_ text: String, spotAction: @escaping (CGPoint?) -> Void) {
+        self.text = text
+        self.spotAction = spotAction
     }
 
     var body: some View {
-        Button(action: action) {
-            Text(text).font(SoundStyle.label).foregroundStyle(OctoColor.accent).padding(.vertical, 6)
-        }
-        .buttonStyle(SoundStillStyle())
+        Text(text)
+            .font(SoundStyle.label)
+            .foregroundStyle(OctoColor.accent)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+            .onTapGesture(coordinateSpace: .global) { spotAction($0) }
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { spotAction(nil) }
     }
 }
 
@@ -239,14 +249,14 @@ struct SoundSegmented: View {
 }
 
 /// The presets in one glass strip that scrolls sideways. The chosen one sits in the darker
-/// pill; a long press on one of the listener's own asks to delete it.
+/// pill; a long press on one of the listener's own asks to delete it, with the spot the finger
+/// held, in screen points (none when asked another way).
 struct SoundPresetBar: View {
     let choices: [PresetChoice]
     let selected: String
     let onPick: (PresetChoice) -> Void
-    let onLongPress: (PresetChoice, CGRect) -> Void
+    let onLongPress: (PresetChoice, CGPoint?) -> Void
     @State private var position: String?
-    @State private var frames = FrameBook()
     /// The preset just held down, so the release that follows does not also pick it.
     @State private var heldDown: (key: String, at: Date)?
 
@@ -289,24 +299,39 @@ struct SoundPresetBar: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(SoundStillStyle())
-        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frames.rects[choice.key] = $0 }
-        .simultaneousGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-            guard choice.own else { return }
+        // Only the listener's own presets have a long press; on a built-in one a long hold is a tap.
+        .gesture(SoundLongPress(enabled: choice.own) { spot in
             heldDown = (choice.key, Date())
-            onLongPress(choice, frames.rects[choice.key] ?? .zero)
-        }, including: choice.own ? .all : .subviews)
+            onLongPress(choice, spot)
+        })
         .accessibilityAddTraits(chosen ? [.isSelected] : [])
         .accessibilityActions {
             if choice.own {
-                Button("Delete") { onLongPress(choice, frames.rects[choice.key] ?? .zero) }
+                Button("Delete") { onLongPress(choice, nil) }
             }
         }
     }
 }
 
-/// Where things were last laid out, kept without asking the page to redraw.
-final class FrameBook {
-    var rects: [String: CGRect] = [:]
+/// A long press that tells where the finger held, in screen points.
+struct SoundLongPress: UIGestureRecognizerRepresentable {
+    let enabled: Bool
+    let onPress: (CGPoint) -> Void
+
+    func makeUIGestureRecognizer(context: Context) -> UILongPressGestureRecognizer {
+        let press = UILongPressGestureRecognizer()
+        press.minimumPressDuration = 0.5
+        press.isEnabled = enabled
+        return press
+    }
+
+    func updateUIGestureRecognizer(_ recognizer: UILongPressGestureRecognizer, context: Context) {
+        recognizer.isEnabled = enabled
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: UILongPressGestureRecognizer, context: Context) {
+        if recognizer.state == .began { onPress(context.converter.location(in: .global)) }
+    }
 }
 
 /// A button that works only while it is held down, its glass lifting under the finger.
@@ -354,6 +379,7 @@ struct SoundValueSlider: View {
     let range: ClosedRange<Double>
     let reading: String
     var step = 0.5
+    var enabled = true
     var toFraction: ((Double) -> Double)?
     var fromFraction: ((Double) -> Double)?
     let onChange: (Double) -> Void
@@ -365,9 +391,11 @@ struct SoundValueSlider: View {
                 .foregroundStyle(OctoColor.textSecondary)
                 .frame(width: 76, alignment: .leading)
             SoundLineSlider(fraction: min(1, max(0, place(value)))) { fraction in
+                guard enabled else { return }
                 let clean = SoundSliders.value(fraction: fraction, step: step, range: range, fromFraction: valueAt)
                 if clean != value { onChange(clean) }
             }
+            .allowsHitTesting(enabled)
             .accessibilityElement()
             .accessibilityLabel(label)
             .accessibilityValue(reading)
@@ -384,6 +412,7 @@ struct SoundValueSlider: View {
                 .padding(.leading, 12)
                 .accessibilityHidden(true)
         }
+        .opacity(enabled ? 1 : 0.5)
     }
 
     private func place(_ value: Double) -> Double { toFraction?(value) ?? SoundSliders.linearFraction(value, range: range) }

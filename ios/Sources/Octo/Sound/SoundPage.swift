@@ -43,7 +43,6 @@ private struct SoundPageContent: View {
     @State private var importing = false
     @State private var exporting = false
     @State private var exportFile = SoundTextFile(text: "")
-    @State private var frames = FrameBook()
 
     private var store: SoundStore { model.store }
 
@@ -142,10 +141,9 @@ private struct SoundPageContent: View {
                 filterEditor(settings, selected: selected).id("editor")
             }
             SoundPresetBar(choices: PresetChoice.row(label: label, own: store.presets), selected: label,
-                           onPick: pick, onLongPress: { choice, frame in open(.deletePreset(choice.name), from: frame) })
+                           onPick: pick, onLongPress: { choice, spot in open(.deletePreset(choice.name), from: spot) })
             if !parametric {
-                SoundTextAction("Save as preset\u{2026}") { open(.savePreset, from: frames.rects["save"]) }
-                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frames.rects["save"] = $0 }
+                SoundTextAction("Save as preset\u{2026}") { spot in open(.savePreset, from: spot) }
                     .padding(.horizontal, 4)
             }
             SoundHairline()
@@ -273,7 +271,6 @@ private struct SoundPageContent: View {
                 Spacer(minLength: 0)
                 Text(SoundEdits.readBalance(settings.balance)).font(.octoBodySmall).foregroundStyle(OctoColor.textPrimary)
             }
-            .accessibilityHidden(true)
             SoundBalanceSlider(value: settings.balance) { value in
                 model.preview { var s = $0; s.balance = value; return s }
             }
@@ -316,9 +313,9 @@ private struct SoundPageContent: View {
 
     // MARK: The glass card
 
-    /// Opens a card beside what was pressed, or in the middle when nothing was pressed just now.
-    private func open(_ next: SoundSheet, from frame: CGRect?) {
-        anchor = frame.flatMap { $0 == .zero ? nil : $0 }
+    /// Opens a card beside the spot just pressed, or in the middle when nothing was pressed.
+    private func open(_ next: SoundSheet, from spot: CGPoint?) {
+        anchor = spot.map { CGRect(origin: $0, size: .zero) }
         lastSheet = next
         sheet = next
         var still = Transaction()
