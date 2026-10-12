@@ -102,8 +102,8 @@ public enum SubsonicError: Error, Equatable, Sendable, LocalizedError {
     }
 }
 
-/// What to tell someone when a request fails.
-public func userMessage(_ error: Error) -> String {
+/// What to tell someone when a request fails, whichever kind of error it ended with.
+public func failureWords(_ error: Error) -> String {
     guard error is SubsonicError || error is OctoError || error is URLError else { return "Something went wrong." }
     switch SubsonicError(error) {
     case .unreachable:

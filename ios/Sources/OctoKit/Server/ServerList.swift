@@ -105,7 +105,7 @@ public func offersOf(_ extensions: [String]) -> String? {
 /// How much it holds: "1,204 songs, 96 albums, 41 artists and 12 playlists". A count not known
 /// yet is left out.
 public func libraryCounts(songs: Int?, albums: Int?, artists: Int?, playlists: Int?) -> String? {
-    func counted(_ n: Int, _ one: String) -> String { "\(groupedCount(n, locale: englishLocale)) \(n == 1 ? one : one + "s")" }
+    func counted(_ n: Int, _ one: String) -> String { "\(groupedCount(n, locale: serverWordsLocale)) \(n == 1 ? one : one + "s")" }
     let parts = [songs.map { counted($0, "song") }, albums.map { counted($0, "album") },
                  artists.map { counted($0, "artist") }, playlists.map { counted($0, "playlist") }].compactMap { $0 }
     switch parts.count {
@@ -118,7 +118,7 @@ public func libraryCounts(songs: Int?, albums: Int?, artists: Int?, playlists: I
 /// How quickly it answered: "Answered in 42 ms", in seconds past one.
 public func answerWords(_ ms: Int64) -> String {
     if ms < 1_000 { return "Answered in \(ms) ms" }
-    return "Answered in \(String(format: "%.1f", locale: englishLocale, Double(ms) / 1_000)) s"
+    return "Answered in \(String(format: "%.1f", locale: serverWordsLocale, Double(ms) / 1_000)) s"
 }
 
 /// Whether the server is reading its folders now and how far it is, or when it last did. Nil
@@ -126,7 +126,7 @@ public func answerWords(_ ms: Int64) -> String {
 public func scanWords(_ status: ScanStatus?, nowMs: Int64, zone: TimeZone = .current) -> String? {
     guard let status else { return nil }
     if status.scanning {
-        return status.count > 0 ? "Reading its folders now, \(groupedCount(status.count, locale: englishLocale)) files so far." : "Reading its folders now."
+        return status.count > 0 ? "Reading its folders now, \(groupedCount(status.count, locale: serverWordsLocale)) files so far." : "Reading its folders now."
     }
     guard let last = serverTime(status.lastScan) else { return nil }
     return "Last read its folders \(agoWords(thenMs: last, nowMs: nowMs, zone: zone))."
@@ -149,7 +149,7 @@ public func agoWords(thenMs: Int64, nowMs: Int64, zone: TimeZone = .current) -> 
     let now = Date(timeIntervalSince1970: Double(nowMs) / 1_000)
     let sameYear = calendar.component(.year, from: then) == calendar.component(.year, from: now)
     let formatter = DateFormatter()
-    formatter.locale = englishLocale
+    formatter.locale = serverWordsLocale
     formatter.timeZone = zone
     formatter.dateFormat = sameYear ? "d MMMM" : "d MMMM yyyy"
     return "on " + formatter.string(from: then)
@@ -197,16 +197,7 @@ public func isOctoServer(probed: Bool, serverType: String?, extensions: [String]
     probed || serverType?.caseInsensitiveCompare("octo") == .orderedSame || extensions.contains { $0.hasPrefix("octo") }
 }
 
-/// The source a server's music is kept under: its host, and its port when that is not the
-/// usual one for the address. Always from the main address.
-public func librarySourceId(_ base: URL) -> String {
-    let scheme = base.scheme?.lowercased() ?? "http"
-    let usual = scheme == "https" ? 443 : 80
-    let port = base.port.flatMap { $0 == usual ? nil : ":\($0)" } ?? ""
-    return "server:\((base.host ?? "").lowercased())\(port)"
-}
-
-let englishLocale = Locale(identifier: "en_US")
+let serverWordsLocale = Locale(identifier: "en_US")
 
 /// A count with thousands separators: "1,204".
 public func groupedCount<T: BinaryInteger>(_ n: T, locale: Locale = .current) -> String {

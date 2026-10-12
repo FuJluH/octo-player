@@ -54,12 +54,6 @@ import Testing
         #expect(SHA256Digest.hash(Array("abc".utf8)).prefix(8).map { String(format: "%02x", $0) }.joined() == "ba7816bf8f01cfea")
     }
 
-    @Test func theSourceNamesThePortOnlyWhenItIsNotTheUsualOne() {
-        #expect(librarySourceId(URL(string: "http://10.0.0.5:4533/")!) == "server:10.0.0.5:4533")
-        #expect(librarySourceId(URL(string: "https://music.example.com/navidrome/")!) == "server:music.example.com")
-        #expect(librarySourceId(URL(string: "http://music.example.com:80/")!) == "server:music.example.com")
-        #expect(librarySourceId(URL(string: "https://music.example.com:80/")!) == "server:music.example.com:80")
-    }
 
     @Test func anAddressIsWrittenWithASlashAfterABareHost() {
         #expect(ServerAddress.written(URL(string: "https://music.test")!) == "https://music.test/")
