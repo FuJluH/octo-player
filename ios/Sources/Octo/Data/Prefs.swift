@@ -79,3 +79,32 @@ final class Watch<T: Equatable> {
 
 /// Milliseconds since 1970, now.
 func epochNowMs() -> Int64 { Int64(Date().timeIntervalSince1970 * 1000) }
+
+/// The values in their first order, each once.
+func distinct(_ values: [String]) -> [String] {
+    var seen = Set<String>()
+    return values.filter { seen.insert($0).inserted }
+}
+
+/// Work that runs one piece at a time, each after the one before it ends.
+@MainActor
+final class SerialWork {
+    private var last: Task<Void, Never>?
+
+    /// Runs `work` once everything handed in before has ended, and waits for it.
+    func run(_ work: @escaping @MainActor () async -> Void) async {
+        let before = last
+        let task = Task { @MainActor in
+            await before?.value
+            await work()
+        }
+        last = task
+        await task.value
+    }
+}
+
+/// A value handed across threads where its owner keeps it to one at a time.
+struct Unchecked<Value>: @unchecked Sendable {
+    let value: Value
+    init(_ value: Value) { self.value = value }
+}

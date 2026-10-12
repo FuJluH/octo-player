@@ -143,6 +143,53 @@ extension CatalogStore {
         try db.rows(SourceTrack.self, "SELECT * FROM source_track WHERE sourceId = ? AND nativeId = ? LIMIT 1", [sourceId, serverId]).first
     }
 
+    /// What applying the download rules did: the downloads let go (their files still to delete)
+    /// and how many new ones the family plan held back.
+    public struct RulesApplied: Sendable {
+        public var removed: [KeptDownload]
+        public var refused: Int
+    }
+
+    /// Brings the server in use's downloads in step with what the rules want, in one go, so a
+    /// library rebuild never falls in the middle: downloads follow their songs to new ids first.
+    public func applyDownloadRules(wanted: [String: Set<String>], serverInUse: String?, now: Int64,
+                                   refusedSource: String?) throws -> RulesApplied {
+        try batch {
+            try relinkDownloads()
+            let held = downloadsHeld(try allDownloads(), serverInUse: serverInUse)
+            let fresh = wanted.keys.filter { held[$0] == nil }
+            let downloadable = Set(try self.downloadable(fresh))
+            let plan = planDownloads(held: held, wanted: wanted, downloadable: downloadable)
+            if plan.isEmpty { return RulesApplied(removed: [], refused: 0) }
+            var removed: [KeptDownload] = []
+            for trackId in plan.remove.sorted() {
+                for row in try downloads(forTrack: trackId) {
+                    try deleteDownload(row.sourceId, row.serverId)
+                    removed.append(row)
+                }
+            }
+            for (trackId, reasons) in plan.change {
+                for row in try downloads(forTrack: trackId) {
+                    try setDownloadReason(row.sourceId, row.serverId, reason: DownloadReasons.join(reasons))
+                }
+            }
+            let refused = try queueDownloads(plan.add, now: now, refusedSource: refusedSource)
+            return RulesApplied(removed: removed, refused: refused)
+        }
+    }
+
+    /// Queues new downloads for these songs, each from the best copy on the server. Answers how
+    /// many the family plan held back.
+    @discardableResult
+    public func queueDownloads(_ wanted: [String: Set<String>], now: Int64, refusedSource: String?) throws -> Int {
+        guard !wanted.isEmpty else { return 0 }
+        let downloadable = Set(try self.downloadable(Array(wanted.keys)))
+        let copies = try serverCopies(of: Array(downloadable))
+        let rows = newDownloads(wanted: wanted, downloadable: downloadable, copies: copies, now: now, refusedSource: refusedSource)
+        try upsertDownloads(rows.kept)
+        return rows.refused.count
+    }
+
     /// Which of these library songs can be downloaded: on a server and not on the phone.
     public func downloadable(_ trackIds: [String]) throws -> [String] {
         try trackIds.catalogChunks(lookupChunk).flatMap { chunk in

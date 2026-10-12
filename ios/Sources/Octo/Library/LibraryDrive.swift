@@ -5,34 +5,46 @@ import SwiftUI
 
 /// The library's OCTO_DRIVE steps:
 ///
-/// - `page:NAME` opens a library page: library, playlists, favorites, liked, favorite-albums,
-///   artists, albums, songs, genres, folders, history, mostplayed, downloads, health, removed
+/// - `page:NAME` opens a library page: playlists, favorites, liked, favorite-albums,
+///   favorite-artists, artists, albums, songs, genres, folders, history, mostplayed, downloads,
+///   health, removed, or a health check by name (`page:health-Duplicates`)
 /// - `album:NAME`, `artist:NAME`, `playlist:NAME`, `genre:NAME` open that page, by name
-/// - `menu:song`, `menu:album`, `menu:artist`, `menu:playlist` (or `menu:song=TITLE`) show the
-///   menu's items for the first such item (or the one named) in a sheet, with the same groups,
-///   words and states as the long-press menu
-/// - `info:TITLE` opens the song info sheet
-/// - `sort:LIST:OPTION:asc|desc` sets a list's order, like `sort:songs:Year:desc`
-/// - `select:COUNT` picks the first COUNT songs of the page in front that can pick songs
+/// - `menu:song`, `menu:album`, `menu:artist`, `menu:playlist` (or `menu:song=TITLE`) open that
+///   menu for the first such item (or the one named), beside nothing, in the middle;
+///   `menu:song:PAGE` opens it on a page: rate, share, info, playlist, delete
+/// - `info:TITLE` opens the song info pop-up
+/// - `sort:LIST:OPTION:asc|desc` sets a list's order, like `sort:songs:Year:desc`;
+///   `sort:LIST` opens that list's sort pop-up
+/// - `pick:COUNT` picks the first COUNT songs of the open page that can pick songs
 /// - `songs-search:TEXT` opens Songs with the search open and the words typed
 @MainActor
 enum LibraryDrive {
-    /// Asks the page in front to pick songs.
-    static var pendingSelect = 0
     /// Words for the Songs page's search when it opens.
     static var pendingSearch: String?
+
+    /// Adds the library's steps to the drive.
+    static func install(router: Router) {
+        Drive.steps.append { name, value in
+            guard ["page", "album", "artist", "playlist", "genre", "menu", "info", "sort", "pick", "songs-search"].contains(name) else {
+                return false
+            }
+            await step(name, value, router: router)
+            return true
+        }
+    }
 
     static func step(_ name: String, _ value: String, router: Router) async {
         guard let actions = LibraryActions.current else { return }
         let library = actions.state.library
-        router.drive = .tab(.library)
-        try? await Task.sleep(for: .milliseconds(300))
+        if name != "menu" && name != "info" && name != "pick" && name != "sort" {
+            router.drive = .tab(.library)
+            try? await Task.sleep(for: .milliseconds(300))
+        }
         switch name {
         case "page":
             if let route = route(value) { router.go(route) }
         case "album":
-            let found = await library.search(value, artists: 0, albums: 5, songs: 0).albums.first
-            if let album = found { router.go(.album(album.asAlbum)) }
+            if let album = await library.search(value, artists: 0, albums: 5, songs: 0).albums.first { router.go(.album(album.asAlbum)) }
         case "artist":
             if let artist = await library.search(value, artists: 5, albums: 0, songs: 0).artists.first {
                 router.go(.artist(id: artist.id, name: artist.name))
@@ -44,18 +56,26 @@ enum LibraryDrive {
         case "genre":
             router.go(.library(.genre(value)))
         case "menu":
-            actions.drivenMenu = await menu(value, library: library, state: actions.state)
+            let parts = value.split(separator: ":", maxSplits: 1).map(String.init)
+            guard let subject = await menu(parts.first ?? "song", library: library, state: actions.state) else { return }
+            actions.openMenu(subject, page: parts.count > 1 ? page(parts[1]) : nil)
         case "info":
             if let track = await library.search(value, artists: 0, albums: 0, songs: 5).tracks.first {
-                actions.songInfo = LibraryActions.InfoTarget(track: track, song: track.asSong)
+                actions.openMenu(.songInfo(SongSubject(track: track, song: track.asSong)))
             }
         case "sort":
             let parts = value.split(separator: ":").map(String.init)
-            if parts.count == 3, let list = SortList.allCases.first(where: { $0.key == parts[0] || $0.rawValue == parts[0] }) {
+            guard let list = SortList.allCases.first(where: { $0.key == parts.first || $0.rawValue == parts.first }) else { return }
+            if parts.count == 3 {
                 actions.state.setOrder(list, list.decode("\(parts[1]):\(parts[2])"))
+            } else {
+                actions.openSort(list)
             }
-        case "select":
-            pendingSelect = Int(value) ?? 1
+        case "pick":
+            guard let target = actions.selectionBar?.targets.last else { return }
+            for pick in target.list.prefix(max(1, Int(value) ?? 1)) {
+                if target.selection.active { target.selection.toggle(pick.key) } else { target.selection.start(pick.key) }
+            }
         case "songs-search":
             pendingSearch = value
             router.go(.library(.songs))
@@ -65,27 +85,41 @@ enum LibraryDrive {
     }
 
     private static func route(_ name: String) -> Route? {
-        switch name.lowercased() {
-        case "playlists": .playlists
-        case "favorites": .favorites
-        case "liked": .library(.favorites(.songs))
-        case "favorite-albums": .library(.favorites(.albums))
-        case "favorite-artists": .library(.favorites(.artists))
-        case "artists": .artists
-        case "albums": .albums
-        case "songs": .library(.songs)
-        case "genres": .library(.genres)
-        case "folders": .library(.folders)
-        case "history": .library(.history(mostPlayed: false))
-        case "mostplayed": .library(.history(mostPlayed: true))
-        case "downloads": .library(.downloads)
-        case "health": .library(.health)
-        case "removed": .library(.recentlyRemoved)
+        let lower = name.lowercased()
+        if lower.hasPrefix("health-") { return .library(.healthCheck(String(name.dropFirst("health-".count)))) }
+        switch lower {
+        case "playlists": return .playlists
+        case "favorites": return .favorites
+        case "liked": return .library(.favorites(.songs))
+        case "favorite-albums": return .library(.favorites(.albums))
+        case "favorite-artists": return .library(.favorites(.artists))
+        case "artists": return .artists
+        case "albums": return .albums
+        case "songs": return .library(.songs)
+        case "genres": return .library(.genres)
+        case "folders": return .library(.folders)
+        case "history": return .library(.history(mostPlayed: false))
+        case "mostplayed": return .library(.history(mostPlayed: true))
+        case "downloads": return .library(.downloads)
+        case "health": return .library(.health)
+        case "removed": return .library(.recentlyRemoved)
+        default: return nil
+        }
+    }
+
+    private static func page(_ name: String) -> MenuPage? {
+        switch name {
+        case "rate": .rate
+        case "share": .share
+        case "info": .info
+        case "playlist": .addToPlaylist(startAt: nil)
+        case "delete": .deleteFromDisk
+        case "rename": .rename
         default: nil
         }
     }
 
-    private static func menu(_ value: String, library: Library, state: LibraryState) async -> DrivenMenu? {
+    private static func menu(_ value: String, library: Library, state: LibraryState) async -> MenuSubject? {
         let parts = value.split(separator: "=", maxSplits: 1).map(String.init)
         let kind = parts.first ?? "song"
         let named = parts.count > 1 ? parts[1] : nil
@@ -94,7 +128,7 @@ enum LibraryDrive {
             let track = if let named { await library.search(named, artists: 0, albums: 0, songs: 5).tracks.first } else {
                 await library.tracks().first
             }
-            return track.map { .song($0) }
+            return track.map { .song(SongSubject(track: $0, song: $0.asSong)) }
         case "album":
             let album = if let named { await library.search(named, artists: 0, albums: 5, songs: 0).albums.first } else {
                 await library.albums().first
@@ -115,48 +149,3 @@ enum LibraryDrive {
     }
 }
 #endif
-
-/// A menu shown as a sheet for checking from outside: the same items as its long-press menu.
-enum DrivenMenu: Identifiable {
-    case song(LibraryTrack)
-    case album(LibraryAlbum)
-    case artist(LibraryArtist)
-    case playlist(PlaylistSummary)
-
-    var id: String {
-        switch self {
-        case .song(let t): "song.\(t.id)"
-        case .album(let a): "album.\(a.id)"
-        case .artist(let a): "artist.\(a.id)"
-        case .playlist(let p): "playlist.\(p.id)"
-        }
-    }
-}
-
-/// The items of a menu as a list, with its header on top.
-struct DrivenMenuSheet: View {
-    let menu: DrivenMenu
-
-    var body: some View {
-        List {
-            switch menu {
-            case .song(let track):
-                MenuHeader(artwork: track.artwork, title: track.title, line: track.artist).listRowInsets(EdgeInsets())
-                SongActions(track: track)
-            case .album(let album):
-                MenuHeader(artwork: album.artwork, title: album.title, line: album.artist).listRowInsets(EdgeInsets())
-                CollectionActions(target: .album(album.id), album: album)
-            case .artist(let artist):
-                MenuHeader(artwork: artist.artwork, title: artist.name, line: albumsCount(artist.albumCount), round: true)
-                    .listRowInsets(EdgeInsets())
-                CollectionActions(target: .artist(artist.id), artist: artist)
-            case .playlist(let playlist):
-                MenuHeader(artwork: playlist.covers.first, title: playlist.name, line: songsCount(playlist.songCount))
-                    .listRowInsets(EdgeInsets())
-                CollectionActions(target: .playlist(playlist.id), playlist: playlist)
-            }
-        }
-        .presentationDetents([.large])
-        .presentationDragIndicator(.visible)
-    }
-}

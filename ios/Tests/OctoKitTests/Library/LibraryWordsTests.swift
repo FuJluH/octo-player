@@ -147,26 +147,6 @@ import Testing
     }
 }
 
-@Suite struct PicksTests {
-    @Test func takingTheLastOneOffEndsSelecting() {
-        var picks = Picks().start("a")
-        #expect(picks.active)
-        picks = picks.toggle("b").toggle("a")
-        #expect(picks.keys == ["b"])
-        #expect(!picks.toggle("b").active)
-    }
-
-    @Test func songsGoneFromTheListAreDropped() {
-        let picks = Picks(["a", "b"])
-        #expect(picks.keepOnly(["a", "c"]) == Picks(["a"]))
-        #expect(picks.keepOnly(["a", "b", "c"]) == picks)
-    }
-
-    @Test func pickedSongsActInTheListsOrder() {
-        #expect(Picks(["c", "a"]).inOrder(["a", "b", "c"], key: { $0 }) == ["a", "c"])
-    }
-}
-
 @Suite struct SongInfoTests {
     private let utc = TimeZone(identifier: "UTC")!
     private let us = Locale(identifier: "en_US_POSIX")

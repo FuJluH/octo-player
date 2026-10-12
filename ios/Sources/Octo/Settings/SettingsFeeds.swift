@@ -74,12 +74,30 @@ final class PhoneMusic {
     @ObservationIgnored private var started = false
     @ObservationIgnored private var settle: Task<Void, Never>?
 
+    /// What does the work once the app's own music library runs: asking for access and looking
+    /// for music go to it, and it reports back through `show`.
+    struct Work {
+        var requestAccess: @MainActor () -> Void
+        var rescan: @MainActor () async -> Void
+    }
+
+    @ObservationIgnored var work: Work?
+
+    /// What the app's music library found, for the pages to show.
+    func show(access: PhoneAccess, songCount: Int, scanning: Bool, folders: [MusicFolder]) {
+        if self.access != access { self.access = access }
+        if self.songCount != songCount { self.songCount = songCount }
+        if self.scanning != scanning { self.scanning = scanning }
+        if self.folders != folders { self.folders = folders }
+    }
+
     private init() {}
 
     /// Reads the access at start, scans once when allowed, and watches the library for changes.
     func start() {
         guard !started else { return }
         started = true
+        if work != nil { return }
         access = Self.currentAccess()
         if access == .granted {
             watchLibrary()
@@ -93,6 +111,7 @@ final class PhoneMusic {
     /// Asks for access when the phone still can; once refused, opens the app's page in the
     /// phone's Settings instead.
     func requestAccess() {
+        if let work { return work.requestAccess() }
         switch access {
         case .granted: return
         case .deniedForever:
@@ -113,6 +132,7 @@ final class PhoneMusic {
 
     /// Counts the phone's songs again. Nothing happens without access; scans never overlap.
     func rescan() async {
+        if let work { return await work.rescan() }
         guard access == .granted, !scanning else { return }
         scanning = true
         defer { scanning = false }

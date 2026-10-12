@@ -9,6 +9,7 @@ struct NowPlayingView: View {
     @Environment(Player.self) private var player
     @Environment(Session.self) private var session
     @Environment(Router.self) private var router
+    @Environment(LibraryActions.self) private var libraryActions
     @State private var tone = CoverTone()
     @State private var scrubbing: Double?
     @State private var pull: CGFloat = 0
@@ -197,14 +198,16 @@ struct NowPlayingView: View {
                     .accessibilityLabel("Like")
                     .accessibilityValue(isStarred(song) ? "In Liked songs" : "Not in Liked songs")
                 }
-                Menu {
-                    SongActions(song: song)
+                Button {
+                    libraryActions.openMenu(.song(SongSubject(track: libraryActions.state.provisional(song), song: song)))
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 20, weight: .semibold))
                         .foregroundStyle(tone.ink.opacity(0.6))
                         .frame(width: 44, height: 44)
                 }
+                .buttonStyle(.plain)
+                .pressAnchor()
                 .accessibilityLabel("More")
             }
         }

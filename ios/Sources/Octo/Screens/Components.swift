@@ -3,26 +3,22 @@ import SwiftUI
 
 // Octo's rows and cards, the same sizes as the other apps'.
 
-/// The mark on the artwork of something not in the library: a small glass disc with a plus,
-/// at the bottom right.
+/// The mark on the artwork of something not in the library: a small glass disc with a thin
+/// plus at the bottom right, an eighth of the artwork's side (12 to 20 points). On a round
+/// picture it sits along the diagonal, far enough in that the whole disc stays inside.
 struct NotInLibraryMark: View {
     let artSize: CGFloat
     var round = false
 
     var body: some View {
-        let size = min(20, max(12, artSize * 0.125))
-        let inset = max(3, artSize * 0.04)
-        Circle()
-            .fill(.black.opacity(0.42))
+        let size = CGFloat(notInLibraryMarkSize(Double(artSize)))
+        let inset = CGFloat(notInLibraryMarkInset(Double(artSize), mark: Double(size), round: round))
+        IconView(.notInLibrary, size: size * 0.68, color: .white.opacity(0.9))
             .frame(width: size, height: size)
-            .overlay {
-                Image(systemName: "plus")
-                    .font(.system(size: size * 0.6, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.9))
-            }
-            .glassEffect(.regular, in: .circle)
-            .padding(round ? artSize * 0.1 : inset)
-            .accessibilityLabel("Not in your library")
+            .octoGlass(Circle(), film: .black.opacity(0.42))
+            .padding(.trailing, inset)
+            .padding(.bottom, inset)
+            .accessibilityLabel(notInLibraryText)
     }
 }
 
@@ -41,29 +37,46 @@ struct BadgedCover: View {
     }
 }
 
-/// Three bars that dance while a song plays and rest when it is paused.
+/// Three small bars that mark the song playing now: moving and softly lit while it plays,
+/// still and quiet while it is paused. With Reduce motion a playing song's bars rest, still lit.
 struct NowPlayingBars: View {
     let playing: Bool
     var size: CGFloat = 16
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motionScale) private var motion
+
+    private static let rest: [Double] = [0.45, 0.8, 0.6]
+    private static let speeds: [Double] = [2, 3, 4]
+    private static let offsets: [Double] = [0, 0.3, 0.65]
 
     var body: some View {
-        TimelineView(.animation(paused: !playing || reduceMotion)) { time in
-            let phase = time.date.timeIntervalSinceReferenceDate / 2.4
-            HStack(alignment: .bottom, spacing: size / 7 / 3) {
-                ForEach(0..<3, id: \.self) { i in
-                    let rest = [0.45, 0.8, 0.6][i]
-                    let speed = [2.0, 3.0, 4.0][i]
-                    let offset = [0, 0.3, 0.65][i]
-                    let height = playing && !reduceMotion ? 0.25 + 0.75 * abs(sin((phase * speed + offset) * .pi)) : rest
-                    Capsule().frame(width: size / 4, height: size * height)
+        Group {
+            if playing && !motion.still {
+                TimelineView(.animation) { time in
+                    let phase = time.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2.4) / 2.4
+                    ZStack {
+                        bars(phase: phase, color: .white).blur(radius: 4).opacity(0.7)
+                        bars(phase: phase, color: .white)
+                    }
                 }
+            } else {
+                bars(phase: nil, color: playing ? .white : OctoColor.textMuted)
             }
-            .frame(width: size, height: size, alignment: .bottom)
-            .foregroundStyle(playing ? .white : OctoColor.textMuted)
-            .shadow(color: playing ? .white.opacity(0.7) : .clear, radius: 2)
         }
+        .frame(width: size, height: size)
         .accessibilityHidden(true)
+    }
+
+    private func bars(phase: Double?, color: Color) -> some View {
+        Canvas { context, canvas in
+            let gap = canvas.width / 7
+            let width = (canvas.width - gap * 2) / 3
+            for i in 0..<3 {
+                let share = phase.map { 0.25 + 0.75 * abs(sin(($0 * Self.speeds[i] + Self.offsets[i]) * .pi)) } ?? Self.rest[i]
+                let height = canvas.height * share
+                let rect = CGRect(x: CGFloat(i) * (width + gap), y: canvas.height - height, width: width, height: height)
+                context.fill(Path(roundedRect: rect, cornerRadius: width / 2), with: .color(color))
+            }
+        }
     }
 }
 
@@ -84,7 +97,6 @@ struct TrackRow: View {
     /// Words under the title in place of "Artist • Album"; empty leaves the line out.
     var subtitle: String?
     var context = SongMenuContext()
-    var selection: SongSelection?
     /// The row's key for picking: its id, or its playlist row on a playlist page.
     var selectKey: String?
     var swipe: SwipeKind = .playNext
@@ -107,6 +119,7 @@ struct TrackRow: View {
 
     @Environment(Player.self) private var player
     @Environment(LibraryActions.self) private var actions
+    @Environment(\.songSelection) private var selection
 
     private var key: String { selectKey ?? track.id }
     private var song: Song { track.asSong }
@@ -125,7 +138,7 @@ struct TrackRow: View {
                 .contentShape(Rectangle())
                 .opacity(outOfReach ? 0.4 : 1)
         }
-        .buttonStyle(PressSqueeze())
+        .buttonStyle(SqueezeStyle())
         .background {
             if picked {
                 RoundedRectangle(cornerRadius: OctoRadius.row)
@@ -139,15 +152,17 @@ struct TrackRow: View {
                     .padding(.vertical, 2)
             }
         }
-        .contextMenu {
-            SongActions(track: track, context: context, selection: selection)
-        } preview: {
-            MenuHeader(artwork: track.artwork, title: track.title, line: track.artist)
-        }
+        .longPressMenu { openMenu() }
         .rowSwipe(rowSwipe, enabled: !selecting)
         .accessibilityAddTraits(selecting && picked ? .isSelected : [])
         .accessibilityAction(named: "Play next") { actions.playNextUndoable(song) }
         .accessibilityAction(named: "Add to queue") { player.append([song]) }
+    }
+
+    private func openMenu() {
+        var context = context
+        if context.selectKey == nil, selection != nil { context.selectKey = key }
+        actions.openMenu(.song(SongSubject(track: track, song: song, context: context, selection: selection)))
     }
 
     private var rowSwipe: RowSwipe {
@@ -159,9 +174,7 @@ struct TrackRow: View {
     }
 
     /// With no connection, a song that cannot play is drawn faint.
-    private var outOfReach: Bool {
-        !actions.state.online && !track.onPhone && actions.state.kept.status(track.id)?.status != .done
-    }
+    private var outOfReach: Bool { !track.isFound && actions.state.isOutOfReach(track) }
 
     private var shownSubtitle: String {
         subtitle ?? songSubtitle(title: track.title, artist: track.artist, album: track.album, find: track.isFound)
@@ -174,10 +187,7 @@ struct TrackRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 0) {
                     if highlighted {
-                        Image(systemName: MenuIcon.starFilled)
-                            .font(.system(size: 11))
-                            .foregroundStyle(OctoColor.accent)
-                            .frame(width: 14, height: 14)
+                        IconView(.starFilled, size: 14, color: OctoColor.accent)
                             .padding(.trailing, 6)
                             .accessibilityLabel("Most popular")
                     }
@@ -221,7 +231,7 @@ struct TrackRow: View {
         case .number(let number):
             ZStack(alignment: .trailing) {
                 if picked {
-                    Image(systemName: "checkmark.circle.fill").font(.system(size: 19)).foregroundStyle(.white)
+                    IconView(.check, size: 18, color: .white)
                 } else if isNow {
                     NowPlayingBars(playing: player.isPlaying, size: 14)
                 } else {
@@ -243,7 +253,7 @@ struct TrackRow: View {
                 if picked || isNow {
                     RoundedRectangle(cornerRadius: OctoRadius.artS).fill(.black.opacity(0.5))
                     if picked {
-                        Image(systemName: "checkmark.circle.fill").font(.system(size: 19)).foregroundStyle(.white)
+                        IconView(.check, size: 20, color: .white)
                     } else {
                         NowPlayingBars(playing: player.isPlaying)
                     }
@@ -258,9 +268,7 @@ struct TrackRow: View {
             if track.isFound {
                 AddToLibraryButton(song: song, size: 32, iconSize: 20)
             } else {
-                Image(systemName: MenuIcon.check)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(OctoColor.accent)
+                IconView(.check, size: 18, color: OctoColor.accent)
                     .accessibilityLabel("In your library")
             }
         }
@@ -270,17 +278,11 @@ struct TrackRow: View {
     @ViewBuilder
     private var sourceMark: some View {
         if !track.isFound {
-            if actions.state.kept.status(track.id)?.status == .done {
-                Image(systemName: MenuIcon.downloaded)
-                    .font(.system(size: 11))
-                    .foregroundStyle(OctoColor.textMuted)
-                    .frame(width: 14, height: 14)
+            if !track.onPhone && actions.state.kept(track.id)?.status == .done {
+                IconView(.downloaded, size: 14, color: OctoColor.textMuted)
                     .accessibilityLabel("Downloaded")
             } else if !track.onPhone {
-                Image(systemName: MenuIcon.cloud)
-                    .font(.system(size: 11))
-                    .foregroundStyle(OctoColor.textMuted)
-                    .frame(width: 14, height: 14)
+                IconView(.cloud, size: 14, color: OctoColor.textMuted)
                     .accessibilityLabel("Streams from your server")
             }
         }
@@ -336,17 +338,6 @@ struct SongRow: View {
     }
 }
 
-/// Pressed rows and cards squeeze slightly.
-struct PressSqueeze: ButtonStyle {
-    var amount: CGFloat = 0.985
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? amount : 1)
-            .animation(.easeInOut(duration: 0.17), value: configuration.isPressed)
-    }
-}
-
 /// An album as a card: square cover, title and artist. A library album opens its menu on a long
 /// press; one found online carries the not-in-library mark and how much of it the library has.
 struct AlbumCard: View {
@@ -379,16 +370,9 @@ struct AlbumCard: View {
             }
             .frame(width: width, alignment: .leading)
         }
-        .buttonStyle(PressSqueeze(amount: 0.97))
-        if album.isExternal {
-            card
-        } else {
-            let shown = library ?? actions.state.provisionalAlbum(album)
-            card.contextMenu {
-                CollectionActions(target: .album(shown.id), album: shown)
-            } preview: {
-                MenuHeader(artwork: shown.artwork, title: shown.title, line: shown.artist)
-            }
+        .buttonStyle(PressScale(scale: 0.97))
+        card.longPressMenu(enabled: !album.isExternal) {
+            actions.openMenu(.album(library ?? actions.state.provisionalAlbum(album)))
         }
     }
 }
@@ -425,21 +409,17 @@ struct SongCard: View {
                     HStack(spacing: 4) {
                         Text(song.byline).font(.octoCaption).foregroundStyle(OctoColor.textMuted).lineLimit(1)
                         if !song.isExternal {
-                            Image(systemName: MenuIcon.cloud).font(.system(size: 10)).foregroundStyle(OctoColor.textMuted)
+                            IconView(.cloud, size: 12, color: OctoColor.textMuted)
                                 .accessibilityLabel("Streams from your server")
                         }
                     }
                 }
             }
             .frame(width: width, alignment: .leading)
-            .opacity(!actions.state.online && !song.isExternal ? 0.4 : 1)
+            .opacity(!song.isExternal && actions.state.isOutOfReach(track) ? 0.4 : 1)
         }
-        .buttonStyle(PressSqueeze(amount: 0.97))
-        .contextMenu {
-            SongActions(track: track)
-        } preview: {
-            MenuHeader(artwork: track.artwork, title: track.title, line: track.artist)
-        }
+        .buttonStyle(PressScale(scale: 0.97))
+        .longPressMenu { actions.openMenu(.song(SongSubject(track: track, song: song))) }
     }
 }
 
@@ -465,7 +445,7 @@ struct StationCard: View {
             .frame(width: 150, alignment: .leading)
             .opacity(loading ? 0.5 : 1)
         }
-        .buttonStyle(PressSqueeze(amount: 0.97))
+        .buttonStyle(PressScale(scale: 0.97))
     }
 }
 
@@ -478,30 +458,24 @@ struct ArtistCircle: View {
     var size: CGFloat = 96
     var external = false
     var library: LibraryArtist?
+    @Environment(LibraryActions.self) private var actions
 
     var body: some View {
-        let circle = NavigationLink(value: Route.artist(id: id, name: name)) {
+        NavigationLink(value: Route.artist(id: id, name: name)) {
             VStack(spacing: 8) {
                 BadgedCover(id: coverArt, size: size, radius: size / 2, external: external)
                 Text(name).font(.octoCaption).foregroundStyle(.white).lineLimit(1).frame(width: size)
             }
         }
-        .buttonStyle(PressSqueeze(amount: 0.97))
-        if let library {
-            circle.contextMenu {
-                CollectionActions(target: .artist(library.id), artist: library)
-            } preview: {
-                MenuHeader(artwork: library.artwork, title: library.name, line: albumsCount(library.albumCount), round: true)
-            }
-        } else {
-            circle
-        }
+        .buttonStyle(PressScale(scale: 0.97))
+        .longPressMenu(enabled: library != nil) { if let library { actions.openMenu(.artist(library)) } }
     }
 }
 
 /// An artist line: round picture, name, album count. A long press opens the artist's menu.
 struct ArtistRow: View {
     let artist: LibraryArtist
+    @Environment(LibraryActions.self) private var actions
 
     var body: some View {
         NavigationLink(value: Route.artist(id: artist.id, name: artist.name)) {
@@ -518,12 +492,8 @@ struct ArtistRow: View {
             .frame(minHeight: 64)
             .contentShape(Rectangle())
         }
-        .buttonStyle(PressSqueeze())
-        .contextMenu {
-            CollectionActions(target: .artist(artist.id), artist: artist)
-        } preview: {
-            MenuHeader(artwork: artist.artwork, title: artist.name, line: albumsCount(artist.albumCount), round: true)
-        }
+        .buttonStyle(SqueezeStyle())
+        .longPressMenu { actions.openMenu(.artist(artist)) }
     }
 }
 
@@ -546,7 +516,7 @@ struct PlaylistCover: View {
             }
             if let glyph = noticeGlyph {
                 Rectangle().fill(.black.opacity(0.35))
-                Image(systemName: glyph).font(.system(size: size * 0.32, weight: .semibold)).foregroundStyle(.white)
+                IconView(glyph, size: size * 0.36, color: .white)
             }
         }
         .frame(width: size, height: size)
@@ -561,17 +531,23 @@ struct PlaylistCover: View {
 
     /// Octo's own lists draw their kind: the review list a magnifier, the duplicates list two
     /// squares, a liked list a heart.
-    private var noticeGlyph: String? {
+    private var noticeGlyph: OctoIcon? {
         switch notice {
-        case "review": "magnifyingglass"
-        case "duplicates": "square.on.square"
-        case "liked": "heart.fill"
+        case "review": .search
+        case "duplicates": .copy
+        case "liked": .liked
         default: nil
         }
     }
 
     private func quarter(_ index: Int) -> some View {
         ArtCover(artwork: covers[index], size: size / 2, radius: 0)
+    }
+}
+
+extension PlaylistCover {
+    init(playlist: PlaylistSummary, size: CGFloat, radius: CGFloat = OctoRadius.artS) {
+        self.init(covers: playlist.covers, size: size, radius: radius, notice: playlist.octoNotice)
     }
 }
 
@@ -592,8 +568,7 @@ struct PlaylistLine<Picture: View>: View {
                     HStack(spacing: 4) {
                         if let subtitle { Text(subtitle).font(.octoCaption).foregroundStyle(OctoColor.textMuted).lineLimit(1) }
                         if onServer {
-                            Image(systemName: MenuIcon.cloud).font(.system(size: 11)).foregroundStyle(OctoColor.textMuted)
-                                .frame(width: 14, height: 14)
+                            IconView(.cloud, size: 14, color: OctoColor.textMuted)
                                 .accessibilityLabel("On your server")
                         }
                     }
@@ -622,9 +597,7 @@ struct Shelf<Content: View>: View {
                     NavigationLink(value: destination) {
                         HStack(spacing: 2) {
                             Text(title).font(.octoSection)
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(OctoColor.textMuted)
+                            IconView(.chevron, size: 20, color: OctoColor.textMuted)
                         }
                     }
                     .buttonStyle(.plain)
@@ -663,7 +636,7 @@ struct LoadFailed: View {
     let retry: () async -> Void
 
     var body: some View {
-        LibraryFailure(message: message, retry: retry)
+        FailedView(message: message) { Task { await retry() } }
     }
 }
 

@@ -3,22 +3,22 @@ import SwiftUI
 
 /// One way into the library, like Albums or Songs.
 private struct LibrarySection {
-    let icon: String
+    let icon: OctoIcon
     let label: String
     let route: Route
 }
 
 private let librarySections = [
-    LibrarySection(icon: "music.note.list", label: "Playlists", route: .playlists),
-    LibrarySection(icon: "heart", label: "Favorites", route: .favorites),
-    LibrarySection(icon: "music.microphone", label: "Artists", route: .artists),
-    LibrarySection(icon: "square.stack", label: "Albums", route: .albums),
-    LibrarySection(icon: "music.note", label: "Songs", route: .library(.songs)),
-    LibrarySection(icon: "guitars", label: "Genres", route: .library(.genres)),
-    LibrarySection(icon: "folder", label: "Folders", route: .library(.folders)),
-    LibrarySection(icon: "arrow.down.circle", label: "Downloads", route: .library(.downloads)),
-    LibrarySection(icon: "clock.arrow.circlepath", label: "History", route: .library(.history(mostPlayed: false))),
-    LibrarySection(icon: "checkmark.seal", label: "Library health", route: .library(.health)),
+    LibrarySection(icon: .playlists, label: "Playlists", route: .playlists),
+    LibrarySection(icon: .like, label: "Favorites", route: .favorites),
+    LibrarySection(icon: .artist, label: "Artists", route: .artists),
+    LibrarySection(icon: .album, label: "Albums", route: .albums),
+    LibrarySection(icon: .songs, label: "Songs", route: .library(.songs)),
+    LibrarySection(icon: .genres, label: "Genres", route: .library(.genres)),
+    LibrarySection(icon: .folder, label: "Folders", route: .library(.folders)),
+    LibrarySection(icon: .downloaded, label: "Downloads", route: .library(.downloads)),
+    LibrarySection(icon: .history, label: "History", route: .library(.history(mostPlayed: false))),
+    LibrarySection(icon: .check, label: "Library health", route: .library(.health)),
 ]
 
 /// The library's front page: a menu of ways in, then the newest albums, two covers to a row.
@@ -37,15 +37,15 @@ struct LibraryView: View {
                     NavigationLink(value: section.route) {
                         SectionRow(icon: section.icon, label: section.label)
                     }
-                    .buttonStyle(PressSqueeze())
+                    .buttonStyle(SqueezeStyle())
                 }
                 if downloads.keepsLog {
                     LibraryHairline()
                     Button { router.showServerDownloads() } label: {
-                        SectionRow(icon: MenuIcon.cloud, label: "Server downloads",
+                        SectionRow(icon: .cloud, label: "Server downloads",
                                    detail: downloads.asked.isEmpty ? nil : "\(downloads.asked.count) on the way")
                     }
-                    .buttonStyle(PressSqueeze())
+                    .buttonStyle(SqueezeStyle())
                 }
                 if !recent.isEmpty {
                     SectionTitle("Recently added").padding(.top, 24)
@@ -65,29 +65,23 @@ struct LibraryView: View {
             }
         }
         .barClearance()
-        .libraryRefreshable()
+        .libraryRefreshable {}
         .task(id: library.stamp(.library)) { recent = await library.recentAlbums(limit: 20) }
     }
 }
 
 /// One row of the front page's menu: an accent icon, the label, an optional detail and a chevron.
 private struct SectionRow: View {
-    let icon: String
+    let icon: OctoIcon
     let label: String
     var detail: String?
 
     var body: some View {
         HStack(spacing: 16) {
-            Image(systemName: icon)
-                .font(.system(size: 19))
-                .foregroundStyle(OctoColor.accent)
-                .frame(width: 24, height: 24)
+            IconView(icon, size: 24, color: OctoColor.accent)
             Text(label).font(.octoBody).foregroundStyle(.white).frame(maxWidth: .infinity, alignment: .leading)
             if let detail { Text(detail).font(.octoCaption).foregroundStyle(OctoColor.textMuted) }
-            Image(systemName: "chevron.right")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(OctoColor.textMuted)
-                .frame(width: 22, height: 22)
+            IconView(.chevron, size: 22, color: OctoColor.textMuted)
         }
         .padding(.horizontal, 20)
         .frame(height: 52)
@@ -102,35 +96,6 @@ struct LibraryHairline: View {
 
     var body: some View {
         Rectangle().fill(LibraryLook.hairline).frame(height: 1).padding(.leading, leading).padding(.trailing, trailing)
-    }
-}
-
-extension View {
-    /// Pull to refresh: syncs the server in use and reads the page again, together. A second
-    /// pull while one runs is ignored; the server's problem is said, since the pull asked for it.
-    func libraryRefreshable(_ reload: (@MainActor () async -> Void)? = nil) -> some View {
-        modifier(LibraryRefresh(reload: reload))
-    }
-}
-
-private struct LibraryRefresh: ViewModifier {
-    let reload: (@MainActor () async -> Void)?
-    @Environment(ServerSync.self) private var sync
-    @Environment(Downloads.self) private var downloads
-    @Environment(Router.self) private var router
-    @Environment(Session.self) private var session
-    @State private var running = false
-
-    func body(content: Content) -> some View {
-        content.refreshable {
-            guard !running else { return }
-            running = true
-            defer { running = false }
-            async let progress: Void = downloads.refreshProgress()
-            async let page: Void = reload?() ?? ()
-            if session.client != nil, let problem = await sync.syncNowAndWait() { router.show(problem) }
-            _ = await (progress, page)
-        }
     }
 }
 
@@ -269,7 +234,7 @@ struct AlbumsView: View {
             .onChange(of: order) { _, _ in if let first = sorted?.items.first { proxy.scrollTo(first.id, anchor: .top) } }
         }
         .barClearance()
-        .libraryRefreshable()
+        .libraryRefreshable {}
         .task(id: "\(library.stamp(.library, .plays))|\(order.by.id)|\(order.descending)") {
             sorted = await library.sortedAlbums(order)
         }
@@ -326,7 +291,7 @@ struct ArtistsView: View {
             .onChange(of: order) { _, _ in if let first = sorted?.items.first { proxy.scrollTo(first.id, anchor: .top) } }
         }
         .barClearance()
-        .libraryRefreshable()
+        .libraryRefreshable {}
         .task(id: "\(library.stamp(.library, .plays))|\(order.by.id)|\(order.descending)") {
             sorted = await library.sortedArtists(order)
         }
@@ -355,8 +320,6 @@ struct FavoritesView: View {
     @State private var songs: [LibraryTrack]?
     @State private var albums: [LikedAlbum]?
     @State private var artists: [LikedArtist]?
-    @State private var likedAt: [String: Int64] = [:]
-    @State private var selection = SongSelection()
 
     private let columns = [GridItem(.adaptive(minimum: 150), spacing: 14)]
 
@@ -390,8 +353,9 @@ struct FavoritesView: View {
             .onChange(of: state.order(.liked)) { _, _ in proxy.scrollTo("liked-top", anchor: .top) }
         }
         .barClearance()
-        .libraryRefreshable()
-        .selectable(selection, songs: (songs ?? []).map { Pickable(key: $0.id, track: $0) })
+        .backStopsPicking()
+        .selectableSongs(state.pickables(songs ?? []))
+        .libraryRefreshable {}
         .task(id: "\(library.stamp(.library, .likes, .favorites))|\(state.order(.liked).by.id)|\(state.order(.liked).descending)|\(state.order(.favorites).by.id)|\(state.order(.favorites).descending)") {
             await read()
         }
@@ -399,11 +363,6 @@ struct FavoritesView: View {
 
     private func read() async {
         let liked = await library.likedTracks()
-        var times: [String: Int64] = [:]
-        if let rows = try? await library.store.tracks(sql: "SELECT t.*, CAST(l.likedAt AS TEXT) AS heading FROM liked_track l JOIN track t ON t.id = l.trackId") {
-            for row in rows { times[row.track.id] = Int64(row.heading ?? "") ?? 0 }
-        }
-        likedAt = times
         let order = state.order(.liked)
         if let sorted = try? await library.store.tracks(sql: songQuery(order.by.song ?? .dateLiked, descending: order.descending, scope: .liked).sql) {
             songs = sorted.map(\.track)
@@ -432,8 +391,7 @@ struct FavoritesView: View {
                 .padding(.bottom, 6)
                 Color.clear.frame(height: 0).id("liked-top")
                 ForEach(Array(songs.enumerated()), id: \.element.id) { position, track in
-                    TrackRow(track: track, context: SongMenuContext(selecting: selection.active, selectKey: track.id),
-                             selection: selection, swipe: .remove { unlike(track) }) {
+                    TrackRow(track: track, swipe: .remove { unlike(track) }) {
                         actions.play(songs, from: position)
                     }
                 }
@@ -445,10 +403,8 @@ struct FavoritesView: View {
 
     /// Unlikes at once, with an Undo that likes it again at its own time, so it returns to its place.
     private func unlike(_ track: LibraryTrack) {
-        let when = likedAt[track.id]
         songs?.removeAll { $0.id == track.id }
-        actions.setLiked([track], false)
-        router.show("Removed from Liked songs", action: "Undo") { [actions] in actions.setLiked([track], true, at: when) }
+        actions.unlikeUndoable(track)
     }
 
     @ViewBuilder

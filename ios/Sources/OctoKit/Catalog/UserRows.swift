@@ -362,11 +362,6 @@ public struct LikedArtistRow: TableRow, Hashable {
     }
 }
 
-/// What can be pinned to Home. The id is what gets saved, so it never changes.
-public enum PinKind: String, Sendable, CaseIterable {
-    case album, artist, playlist
-}
-
 /// Something pinned to the front of Home, at its place in the row (0 first).
 public struct PinnedItem: TableRow, Hashable {
     public var kind: String

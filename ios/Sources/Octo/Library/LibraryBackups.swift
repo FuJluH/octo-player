@@ -92,50 +92,36 @@ final class LibraryBackups: BackupLibrary {
     }
 
     func makePlaylist(_ name: String, trackIds: [String]) async -> String? {
-        let tracks = await library.tracks(ids: trackIds)
-        return try? await state.writes.createPlaylist(name: name, tracks: tracks)
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return state.data.playlists.create(trimmed, trackIds: trackIds)
     }
 
     func isLiked(_ trackId: String) async -> Bool { (try? await library.store.isLiked(trackId)) ?? false }
 
     func like(_ trackId: String) async {
-        guard let track = await library.track(trackId) else { return }
-        state.noteLiked([trackId], true)
-        await state.writes.setLiked([track], true, at: nil)
+        guard !(await isLiked(trackId)), await library.track(trackId) != nil else { return }
+        state.data.likes.toggle(trackId)
     }
 
-    func rate(_ trackId: String, stars: Int) async {
-        guard let track = await library.track(trackId) else { return }
-        await state.writes.setRating(track, stars)
-    }
+    func rate(_ trackId: String, stars: Int) async { state.data.ratings.rate(trackId, stars) }
 
     func favoriteAlbumIds() async -> Set<String> { await library.likedAlbumIds() }
     func favoriteArtistIds() async -> Set<String> { await library.likedArtistIds() }
 
-    func favorite(album id: String) async {
-        guard let album = await library.album(id) else { return }
-        state.noteFavorite(album: id, true)
-        await state.writes.setFavorite(album: album, true)
-    }
+    func favorite(album id: String) async { state.data.favorites.set(.album, id, favorite: true) }
 
-    func favorite(artist id: String) async {
-        guard let artist = await library.artist(id) else { return }
-        state.noteFavorite(artist: id, true)
-        await state.writes.setFavorite(artist: artist, true)
-    }
+    func favorite(artist id: String) async { state.data.favorites.set(.artist, id, favorite: true) }
 
     func pin(_ kind: PinKind, id: String) async {
-        let name: String
         switch kind {
-        case .album: name = await library.album(id)?.title ?? ""
-        case .artist: name = await library.artist(id)?.name ?? ""
+        case .album, .artist:
+            _ = await state.data.pins.pin(kind, id)
         case .playlist:
             let playlist = await library.playlists().first { $0.name.caseInsensitiveCompare(id) == .orderedSame || $0.id == id }
             guard let playlist else { return }
-            _ = await state.writes.pin(kind: kind.rawValue, id: playlist.id, key: searchKey(playlist.name))
-            return
+            _ = await state.data.pins.pin(.playlist, playlist.id)
         }
-        _ = await state.writes.pin(kind: kind.rawValue, id: id, key: searchKey(name))
     }
 
     func restoreSortOrders(_ orders: [String: String]) async { state.restoreOrders(orders) }

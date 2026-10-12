@@ -166,8 +166,3 @@ struct AudioQualitySettingsPage: View {
         }, pick: pick)
     }
 }
-
-extension OctoColor {
-    /// The orange that marks a family limit.
-    static let signalOrange = Color(hex: 0xFF9500)
-}

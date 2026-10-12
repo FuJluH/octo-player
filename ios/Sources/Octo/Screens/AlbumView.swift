@@ -22,7 +22,6 @@ struct AlbumView: View {
     @State private var highlight: String?
     @State private var onlyMine = false
     @State private var online: Album?
-    @State private var selection = SongSelection()
 
     /// The songs the page lists: the whole album with its finds, unless only the library's are
     /// wanted.
@@ -58,8 +57,9 @@ struct AlbumView: View {
             }
         }
         .barClearance()
-        .libraryRefreshable { await read() }
-        .selectable(selection, songs: listed.map { Pickable(key: $0.id, track: $0) })
+        .backStopsPicking()
+        .selectableSongs(state.pickables(listed))
+        .libraryRefreshable {}
         .task(id: "\(album.id)|\(library.stamp(.library, .ratings, .finds))") { await read() }
         .onChange(of: downloads.arrived) { _, _ in
             guard !finds.isEmpty else { return }
@@ -151,7 +151,7 @@ struct AlbumView: View {
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 FavoriteHeart(on: state.favoriteAlbumIds.contains(album.id)) {
-                    actions.setFavorite(album: album, !state.favoriteAlbumIds.contains(album.id))
+                    actions.setFavorite(album: album.id, !state.favoriteAlbumIds.contains(album.id))
                 }
             }
             .padding(.top, 14)
@@ -172,28 +172,21 @@ struct AlbumView: View {
     private func quietActions(_ album: LibraryAlbum) -> some View {
         let serverOnly = tracks.filter { !$0.onPhone }
         let canShare = state.canShare && isServerSource(album.sourceId)
-        if canShare || (state.kept.available && !serverOnly.isEmpty) {
+        if canShare || !serverOnly.isEmpty {
             HStack(spacing: 0) {
                 if canShare {
-                    Menu {
-                        ShareLinkItems(ids: [album.nativeId], title: album.title)
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: MenuIcon.share).font(.system(size: 15)).frame(width: 18, height: 18)
-                            Text("Share").font(LibraryLook.label)
-                        }
-                        .foregroundStyle(OctoColor.textSecondary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 12)
+                    QuietAction(icon: .share, text: "Share") {
+                        actions.openMenu(.share(ids: [album.nativeId], title: album.title))
                     }
+                    .pressAnchor()
                 }
-                if state.kept.available, !serverOnly.isEmpty {
-                    let held = serverOnly.filter { state.kept.status($0.id) != nil }.count
-                    let done = serverOnly.filter { state.kept.status($0.id)?.status == .done }.count
-                    QuietAction(icon: held < serverOnly.count ? MenuIcon.download : (done < serverOnly.count ? MenuIcon.downloading : MenuIcon.downloaded),
+                if !serverOnly.isEmpty {
+                    let held = serverOnly.filter { state.kept($0.id) != nil }.count
+                    let done = serverOnly.filter { state.kept($0.id)?.status == .done }.count
+                    QuietAction(icon: held < serverOnly.count ? .download : (done < serverOnly.count ? .downloading : .downloaded),
                                 text: albumDownloadLabel(songs: serverOnly.count, held: held, done: done),
                                 enabled: held < serverOnly.count) {
-                        state.kept.download(serverOnly.map(\.id))
+                        state.offline.download(serverOnly.map(\.id))
                     }
                 }
                 Spacer(minLength: 0)
@@ -205,7 +198,7 @@ struct AlbumView: View {
             HStack(spacing: 0) {
                 addMissing
                 if !libraryOnly {
-                    QuietAction(icon: "music.note.house", text: "Only my songs", checked: onlyMine) { onlyMine.toggle() }
+                    QuietAction(icon: .library, text: "Only my songs", checked: onlyMine) { onlyMine.toggle() }
                 }
                 Spacer(minLength: 0)
                 if let note = albumLibraryNote(inLibrary: tracks.count, songs: (whole ?? tracks).count) {
@@ -221,11 +214,11 @@ struct AlbumView: View {
     private var addMissing: some View {
         let waiting = finds.filter { downloads.state($0.asSong.id) == .none }
         if !waiting.isEmpty {
-            QuietAction(icon: MenuIcon.addToLibrary, text: addMissingLabel(missing: waiting.count)) {
+            QuietAction(icon: .addToLibrary, text: addMissingLabel(missing: waiting.count)) {
                 Task { for song in waiting.map(\.asSong) { _ = await downloads.request(song) } }
             }
         } else if finds.contains(where: { downloads.state($0.asSong.id) == .requested }) {
-            QuietAction(icon: MenuIcon.downloading, text: downloads.keepsLog ? "Adding, show downloads" : "Adding",
+            QuietAction(icon: .downloading, text: downloads.keepsLog ? "Adding, show downloads" : "Adding",
                         enabled: downloads.keepsLog) { router.showServerDownloads() }
         }
     }
@@ -245,7 +238,7 @@ struct AlbumView: View {
                 }
                 if let average {
                     HStack(spacing: 4) {
-                        Image(systemName: MenuIcon.starFilled).font(.system(size: 10)).foregroundStyle(OctoColor.textMuted)
+                        IconView(.starFilled, size: 12, color: OctoColor.textMuted)
                         Text("\(starsText(average)) average").font(.octoCaption).foregroundStyle(OctoColor.textMuted)
                     }
                     .accessibilityElement(children: .ignore)
@@ -274,8 +267,7 @@ struct AlbumView: View {
             ForEach(disc.positions, id: \.self) { position in
                 let track = list[position]
                 TrackRow(track: track, lead: .number(track.trackNo), subtitle: track.artist == album.artist ? "" : track.artist,
-                         context: SongMenuContext(albumId: album.id, selecting: selection.active, selectKey: track.id),
-                         selection: selection, ownership: mixed, highlighted: track.id == highlight) {
+                         context: SongMenuContext(albumId: album.id), ownership: mixed, highlighted: track.id == highlight) {
                     actions.play(list, from: position)
                 }
             }
@@ -360,7 +352,9 @@ struct ArtistView: View {
             .onChange(of: order) { _, _ in proxy.scrollTo("albums", anchor: .top) }
         }
         .barClearance()
-        .libraryRefreshable { await readAll() }
+        .backStopsPicking()
+        .selectableSongs(state.pickables(songs))
+        .libraryRefreshable {}
         .task(id: "\(id)|\(library.stamp(.library, .plays))|\(order.by.id)|\(order.descending)") { await readAll() }
         .onChange(of: downloads.arrived) { _, _ in
             Task {
@@ -423,7 +417,7 @@ struct ArtistView: View {
             }
             HStack(spacing: 0) {
                 if !songs.isEmpty {
-                    QuietAction(icon: MenuIcon.radio, text: "Radio") {
+                    QuietAction(icon: .radio, text: "Radio") {
                         Task {
                             await actions.startRadio(await state.playable(Array(songs.prefix(1))))
                         }
@@ -433,7 +427,7 @@ struct ArtistView: View {
                 Spacer(minLength: 0)
                 if let artist {
                     FavoriteHeart(on: state.favoriteArtistIds.contains(artist.id)) {
-                        actions.setFavorite(artist: artist, !state.favoriteArtistIds.contains(artist.id))
+                        actions.setFavorite(artist: artist.id, !state.favoriteArtistIds.contains(artist.id))
                     }
                 }
             }
@@ -603,36 +597,33 @@ struct PlaylistsView: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     TitleWithButtons(title: "Playlists") { if playlists != nil { SortButton(list: .playlists) } }
                         .padding(.top, detailTopGap)
-                    Button { actions.newPlaylist(with: []) } label: {
-                        PlaylistLine(name: "New playlist") { LeadTile(icon: MenuIcon.addToLibrary) }
+                    Button { actions.openMenu(.newPlaylist([])) } label: {
+                        PlaylistLine(name: "New playlist") { LeadTile(icon: .addToLibrary) }
                     }
-                    .buttonStyle(PressSqueeze())
+                    .buttonStyle(SqueezeStyle())
+                    .pressAnchor()
                     if let open = LiveListHook.newLiveList {
                         Button { open(nil) } label: {
                             PlaylistLine(name: "New live list", subtitle: "Songs picked by rules, always up to date") {
-                                LeadTile(icon: MenuIcon.filter, tinted: true)
+                                LeadTile(icon: .filter, tinted: true)
                             }
                         }
-                        .buttonStyle(PressSqueeze())
+                        .buttonStyle(SqueezeStyle())
                     }
                     Button { importing = true } label: {
-                        PlaylistLine(name: "Import a playlist file", subtitle: "M3U or M3U8") { LeadTile(icon: MenuIcon.folder) }
+                        PlaylistLine(name: "Import a playlist file", subtitle: "M3U or M3U8") { LeadTile(icon: .folder) }
                     }
-                    .buttonStyle(PressSqueeze())
+                    .buttonStyle(SqueezeStyle())
                     if let importNote { importNoteView(importNote) }
                     ForEach(sortPlaylists(playlists ?? [], order)) { playlist in
                         NavigationLink(value: Route.library(.playlist(id: playlist.id))) {
                             PlaylistLine(name: playlist.name, subtitle: songsCount(playlist.songCount), onServer: playlist.onServer) {
-                                PlaylistCover(covers: playlist.covers, size: 56, notice: playlist.octoNotice)
+                                PlaylistCover(playlist: playlist, size: 56)
                             }
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(SqueezeStyle())
                         .id(playlist.id)
-                        .contextMenu {
-                            CollectionActions(target: .playlist(playlist.id), playlist: playlist)
-                        } preview: {
-                            MenuHeader(artwork: playlist.covers.first, title: playlist.name, line: songsCount(playlist.songCount))
-                        }
+                        .longPressMenu { actions.openMenu(.playlist(playlist)) }
                     }
                 }
                 .padding(.bottom, 20)
@@ -642,7 +633,7 @@ struct PlaylistsView: View {
             }
         }
         .barClearance()
-        .libraryRefreshable()
+        .libraryRefreshable {}
         .task { sync.syncAgain() }
         .task(id: library.stamp(.playlists, .library)) { playlists = await library.playlists() }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.m3uPlaylist, .plainText, .data]) { result in
@@ -690,23 +681,21 @@ struct PlaylistsView: View {
         let tracks = await library.tracks()
         let match = matchM3u(entries, library: tracks.map { M3uSong($0.id, $0.title, $0.artist, $0.durationMs) }, paths: [:])
         let found = await library.tracks(ids: match.trackIds)
-        if !entries.isEmpty, !found.isEmpty { await actions.createPlaylist(name: name, tracks: found) }
+        if !entries.isEmpty, !found.isEmpty { actions.createPlaylist(name: name, tracks: found) }
         importNote = ImportNote(report: ImportReport(name, match.trackIds.count, entries.count, match.missed.map(\.shown)))
     }
 }
 
 /// A square tile for the lead lines: an icon on the quiet tile, or the live mark's tint.
 private struct LeadTile: View {
-    let icon: String
+    let icon: OctoIcon
     var tinted = false
 
     var body: some View {
         RoundedRectangle(cornerRadius: OctoRadius.artS)
             .fill(tinted ? OctoColor.accent.opacity(0.16) : OctoColor.backgroundTertiary)
             .overlay {
-                Image(systemName: icon)
-                    .font(.system(size: 20, weight: .medium))
-                    .foregroundStyle(tinted ? OctoColor.accent : .white)
+                IconView(icon, size: 24, color: tinted ? OctoColor.accent : .white)
             }
             .overlay { RoundedRectangle(cornerRadius: OctoRadius.artS).strokeBorder(.white.opacity(0.1), lineWidth: 1) }
             .frame(width: 56, height: 56)
@@ -763,7 +752,6 @@ struct PlaylistPage: View {
     @State private var rows: [PlaylistTrack] = []
     @State private var phoneOnly = 0
     @State private var read = false
-    @State private var selection = SongSelection()
     @State private var dragging: Int64?
     @State private var dragOffset: CGFloat = 0
     @State private var rowHeight: CGFloat = 56
@@ -795,11 +783,13 @@ struct PlaylistPage: View {
         }
         .barClearance()
         .sensoryFeedback(.selection, trigger: step)
-        .selectable(selection, songs: rows.map { Pickable(key: String($0.itemId), track: $0.track) }) { picked in
+        .backStopsPicking()
+        .selectableSongs(state.pickables(rows)) { picked in
             guard let summary else { return }
-            actions.remove(Set(picked.compactMap { Int64($0.key) }), from: summary)
+            actions.remove(picked.compactMap { Int64($0.key) }, from: summary)
         }
-        .task(id: "\(id)|\(library.stamp(.playlists, .library))|\(state.revision)") { await readPage() }
+        .libraryRefreshable {}
+        .task(id: "\(id)|\(library.stamp(.playlists, .library))") { await readPage() }
     }
 
     private func readPage() async {
@@ -820,7 +810,7 @@ struct PlaylistPage: View {
         let tracks = rows.map(\.track)
         let length = Int(tracks.reduce(0) { $0 + $1.durationMs } / 1_000)
         VStack(spacing: 0) {
-            PlaylistCover(covers: playlist.covers, size: 240, radius: 10, notice: playlist.octoNotice)
+            PlaylistCover(playlist: playlist, size: 240, radius: 10)
                 .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
             Text(playlist.name).font(.octoTitle).multilineTextAlignment(.center).padding(.top, 20)
             HStack(spacing: 8) {
@@ -829,17 +819,11 @@ struct PlaylistPage: View {
                     .foregroundStyle(OctoColor.textMuted)
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Menu {
-                    PlaylistOptions(playlist: playlist, hasServerOnly: tracks.contains { !$0.onPhone }) { dismiss() }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "ellipsis").font(.system(size: 15)).frame(width: 18, height: 18)
-                        Text("More").font(LibraryLook.label)
-                    }
-                    .foregroundStyle(OctoColor.textSecondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 12)
+                QuietAction(icon: .more, text: "More") {
+                    actions.openMenu(.playlistOptions(playlist, serverOnly: tracks.contains { !$0.onPhone && !$0.isFound },
+                                                      deleted: { dismiss() }))
                 }
+                .pressAnchor()
                 .accessibilityLabel("More")
             }
             .padding(.top, 14)
@@ -858,10 +842,10 @@ struct PlaylistPage: View {
         let lifted = dragging == row.itemId
         return TrackRow(
             track: row.track,
-            context: SongMenuContext(playlistId: playlist.id, playlistItemId: row.itemId, selecting: selection.active, selectKey: String(row.itemId)),
-            selection: selection, selectKey: String(row.itemId),
+            context: SongMenuContext(playlistId: playlist.id, playlistItemId: row.itemId, selectKey: String(row.itemId)),
+            selectKey: String(row.itemId),
             swipe: dragging == nil ? .remove { actions.remove([row.itemId], from: playlist) } : .none,
-            trailing: selection.active ? nil : AnyView(handle(row, position, playlist))
+            trailing: AnyView(HiddenWhilePicking { handle(row, position, playlist) })
         ) {
             actions.play(rows.map(\.track), from: position)
         }
@@ -924,23 +908,12 @@ struct PlaylistPage: View {
     }
 }
 
-/// The playlist's options: rename, download, export and delete.
-struct PlaylistOptions: View {
-    let playlist: PlaylistSummary
-    var hasServerOnly = false
-    var deleted: (@MainActor () -> Void)?
-    @Environment(LibraryActions.self) private var actions
+/// Hidden while the list is picking songs.
+private struct HiddenWhilePicking<Content: View>: View {
+    @ViewBuilder var content: Content
+    @Environment(\.songSelection) private var selection
 
     var body: some View {
-        Section(playlist.name) {
-            Button { actions.rename(playlist) } label: { Label("Rename", systemImage: MenuIcon.rename) }
-            if actions.state.kept.available, hasServerOnly {
-                Button {
-                    Task { actions.state.kept.download(await actions.state.playlistTracks(playlist.id).map(\.track).filter { !$0.onPhone }.map(\.id)) }
-                } label: { Label("Download", systemImage: MenuIcon.download) }
-            }
-            Button { actions.exportPlaylist(playlist) } label: { Label("Export as M3U", systemImage: MenuIcon.share) }
-            Button(role: .destructive) { actions.delete(playlist, then: deleted) } label: { Label("Delete", systemImage: MenuIcon.delete) }
-        }
+        if selection?.active != true { content }
     }
 }

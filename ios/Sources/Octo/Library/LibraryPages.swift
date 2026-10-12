@@ -2,7 +2,7 @@ import OctoKit
 import SwiftUI
 
 /// The library pages beyond Albums, Artists, Playlists and Favorites.
-enum LibraryPage: Hashable {
+enum LibraryPage: Hashable, Codable {
     case songs
     case genres
     case genre(String)
@@ -14,6 +14,25 @@ enum LibraryPage: Hashable {
     case recentlyRemoved
     case favorites(FavoriteSegment?)
     case playlist(id: String)
+}
+
+extension LibraryPage {
+    /// What kind of page this is, as the glow sees it.
+    var ambientPage: AmbientPage {
+        switch self {
+        case .songs: .songs
+        case .genres: .genres
+        case .genre: .genre
+        case .folders: .folders
+        case .history: .history
+        case .downloads: .downloads
+        case .health: .libraryHealth
+        case .healthCheck: .healthCheck
+        case .recentlyRemoved: .healthTrash
+        case .favorites(let segment): segment == .songs ? .liked : .favorites
+        case .playlist: .playlist
+        }
+    }
 }
 
 /// The page for one of them.
@@ -166,12 +185,12 @@ struct SongsPage: View {
     @Environment(Library.self) private var library
     @Environment(LibraryState.self) private var state
     @Environment(LibraryActions.self) private var actions
+    @Environment(Prompts.self) private var prompts
     @State private var sorted: Sorted<LibraryTrack>?
     @State private var shown: [LibraryTrack]?
     @State private var shownHeadings: [String]?
     @State private var filters = SongFilters()
     @State private var searchOpen = false
-    @State private var selection = SongSelection()
     @State private var genreChoices: [String] = []
     @State private var decadeChoices: [Int] = []
     @FocusState private var fieldFocused: Bool
@@ -186,7 +205,7 @@ struct SongsPage: View {
                 LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
                     TitleWithButtons(title: "Songs") {
                         if let sorted, !sorted.items.isEmpty {
-                            GlassIconButton(icon: searching ? "xmark" : "magnifyingglass",
+                            GlassIconButton(icon: searching ? .close : .search,
                                             label: searching ? "Close the search" : "Search these songs", lit: searching) {
                                 if searching { closeSearch() } else { openSearch() }
                             }
@@ -214,10 +233,7 @@ struct SongsPage: View {
                                 actions.play(list, shuffled: true)
                             }
                             LetterRuns(items: list, headings: shownHeadings, id: \.id) { position, track in
-                                TrackRow(track: track, context: SongMenuContext(selecting: selection.active, selectKey: track.id),
-                                         selection: selection) {
-                                    actions.play(list, from: position)
-                                }
+                                TrackRow(track: track) { actions.play(list, from: position) }
                             }
                             Color.clear.frame(height: 140)
                         }
@@ -231,9 +247,19 @@ struct SongsPage: View {
             .onChange(of: order) { _, _ in if let first = list.first { proxy.scrollTo(first.id, anchor: .top) } }
         }
         .barClearance()
-        .libraryRefreshable()
-        .selectable(selection, songs: list.map { Pickable(key: $0.id, track: $0) })
-        .backAction(searching && !selection.active ? { closeSearch() } : nil)
+        .backAction(searching ? { closeSearch() } : nil)
+        .backStopsPicking()
+        .selectableSongs(state.pickables(list))
+        .libraryRefreshable {}
+        .onAppear {
+            #if DEBUG
+            if let words = LibraryDrive.pendingSearch {
+                LibraryDrive.pendingSearch = nil
+                searchOpen = true
+                filters.words = words
+            }
+            #endif
+        }
         .task(id: "\(library.stamp(.library, .likes, .ratings, .plays))|\(order.by.id)|\(order.descending)") {
             let read = await library.sortedSongs(order)
             sorted = read
@@ -292,7 +318,7 @@ struct SongsPage: View {
     private var searchPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 4) {
-                Image(systemName: "magnifyingglass").foregroundStyle(OctoColor.textMuted)
+                IconView(.search, size: 20, color: OctoColor.textMuted)
                 TextField("Search songs", text: $filters.words)
                     .focused($fieldFocused)
                     .submitLabel(.search)
@@ -300,7 +326,7 @@ struct SongsPage: View {
                     .autocorrectionDisabled()
                 if !filters.words.isEmpty {
                     Button { filters.words = "" } label: {
-                        Image(systemName: "xmark").font(.system(size: 15)).foregroundStyle(OctoColor.textMuted).frame(width: 40, height: 40)
+                        IconView(.close, size: 18, color: OctoColor.textMuted).frame(width: 40, height: 40)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Clear the words")
@@ -362,13 +388,13 @@ struct SongsPage: View {
         if let on {
             FilterChip(text: on, on: true, action: clear)
         } else {
-            Menu {
-                Section(title) {
-                    ForEach(answers, id: \.0) { answer in Button(answer.1) { pick(answer.0) } }
-                }
+            Button {
+                prompts.choose(title, answers.map { Choice($0.1) }) { index in pick(answers[index].0) }
             } label: {
                 chipLabel(off, on: false)
             }
+            .buttonStyle(.plain)
+            .choiceAnchor()
             .accessibilityAddTraits(.isToggle)
         }
     }
@@ -403,14 +429,14 @@ struct GenresPage: View {
                             .frame(height: 64)
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(PressSqueeze())
+                        .buttonStyle(SqueezeStyle())
                     }
                 }
             }
             .padding(.bottom, 20)
         }
         .barClearance()
-        .libraryRefreshable()
+        .libraryRefreshable {}
         .task(id: library.stamp(.library)) { genres = await library.genres() }
     }
 }
@@ -423,7 +449,6 @@ struct GenrePage: View {
     @Environment(LibraryActions.self) private var actions
     @State private var albums: [LibraryAlbum] = []
     @State private var songs: [LibraryTrack] = []
-    @State private var selection = SongSelection()
     @State private var gridWidth: CGFloat = 390
 
     var body: some View {
@@ -446,10 +471,7 @@ struct GenrePage: View {
                     albumGrid
                     if !songs.isEmpty { SortBar(name: "Songs", list: .genreSongs).id("songs") }
                     ForEach(Array(songs.enumerated()), id: \.element.id) { position, track in
-                        TrackRow(track: track, context: SongMenuContext(selecting: selection.active, selectKey: track.id),
-                                 selection: selection) {
-                            actions.play(songs, from: position)
-                        }
+                        TrackRow(track: track) { actions.play(songs, from: position) }
                     }
                 }
                 .padding(.bottom, 20)
@@ -457,7 +479,9 @@ struct GenrePage: View {
             .onChange(of: order) { _, _ in proxy.scrollTo("songs", anchor: .top) }
         }
         .barClearance()
-        .selectable(selection, songs: songs.map { Pickable(key: $0.id, track: $0) })
+        .backStopsPicking()
+        .selectableSongs(state.pickables(songs))
+        .libraryRefreshable {}
         .task(id: "\(name)|\(library.stamp(.library, .likes, .ratings, .plays))|\(order.by.id)|\(order.descending)") {
             albums = await library.genreAlbums(name).sorted { $0.sortKey < $1.sortKey }
             songs = await library.sortedSongs(order, scope: .genre(name)).items
@@ -497,6 +521,7 @@ struct HistoryPage: View {
     @State var mostPlayed: Bool
     @Environment(Library.self) private var library
     @Environment(LibraryActions.self) private var actions
+    @Environment(Prompts.self) private var prompts
     @State private var days: [HistoryDay]?
     @State private var most: [PlayedTrack]?
     @State private var range: HistoryRange = .fourWeeks
@@ -560,19 +585,23 @@ struct HistoryPage: View {
     private var mostPlayedList: some View {
         HStack {
             Spacer()
-            Menu {
-                Picker("Most played in", selection: $range) {
-                    ForEach(HistoryRange.allCases, id: \.self) { range in Text(range.label).tag(range) }
-                }
+            Button {
+                let ranges = HistoryRange.allCases
+                prompts.choose("Most played in", ranges.map { Choice($0.label) },
+                               selected: ranges.firstIndex(of: range) ?? -1) { range = ranges[$0] }
             } label: {
                 HStack(spacing: 4) {
                     Text(range.label).font(LibraryLook.label)
-                    Image(systemName: "chevron.down").font(.system(size: 11, weight: .semibold))
+                    IconView(.collapse, size: 14)
                 }
                 .foregroundStyle(OctoColor.textSecondary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .choiceAnchor()
+            .accessibilityElement(children: .ignore)
             .accessibilityLabel("Most played, \(range.label)")
             .accessibilityHint("Change the time range")
         }
@@ -599,42 +628,39 @@ struct HistoryPage: View {
 
 // MARK: Downloads
 
-/// Songs downloaded to the phone: the ones on their way with how far they are, then the ones on
-/// the phone. Swipe one away, or hold it, to remove it.
+/// Songs downloaded to the phone from the server in use: the ones on their way with how far they
+/// are, then the ones on the phone. One asked for by hand can be swiped away or held to remove it.
 struct DownloadsPage: View {
     @Environment(Library.self) private var library
     @Environment(LibraryState.self) private var state
     @Environment(LibraryActions.self) private var actions
-    @Environment(Router.self) private var router
-    @State private var rows: [DownloadListRow]?
+    @Environment(OfflineDownloads.self) private var offline
     @State private var confirming = false
     @State private var playlistNames: [String: String] = [:]
+    @State private var removals = 0
 
     var body: some View {
         let order = state.order(.downloads)
-        let mine = (rows ?? []).filter { $0.sourceId == library.serverInUse }
-        let shown = sortDownloads(mine, order, done: { $0.state == .done }, title: \.title, id: \.trackId, size: \.sizeBytes,
+        let rows = offline.rows
+        let shown = sortDownloads(rows, order, done: { $0.state == .done }, title: \.title, id: \.trackId, size: \.sizeBytes,
                                   addedAt: \.addedAt)
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                TitleWithButtons(title: "Downloads") { if !mine.isEmpty { SortButton(list: .downloads) } }
+                TitleWithButtons(title: "Downloads") { if !rows.isEmpty { SortButton(list: .downloads) } }
                     .padding(.top, detailTopGap)
-                if rows != nil {
-                    if mine.isEmpty {
-                        MutedNote("Songs you download play without a connection. Long press a song and choose Download, or keep a playlist downloaded from its page.")
-                    } else {
-                        summary(mine)
-                        ForEach(shown) { row in downloadRow(row, shown) }
-                    }
+                if rows.isEmpty {
+                    MutedNote("Songs you download play without a connection. Long press a song and choose Download, or keep a playlist downloaded from its page.")
                 } else {
-                    LibrarySpinner()
+                    summary(rows)
+                    ForEach(shown) { row in downloadRow(row, shown) }
                 }
             }
             .padding(.bottom, 20)
+            .animation(.spring(response: 0.35, dampingFraction: 0.9), value: shown.map(\.id))
         }
         .barClearance()
-        .task(id: library.stamp(.downloads, .playlists)) {
-            rows = (try? await library.store.downloadRows()) ?? []
+        .sensoryFeedback(.impact, trigger: removals)
+        .task(id: library.stamp(.playlists)) {
             playlistNames = Dictionary((await library.playlists()).map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
         }
     }
@@ -651,17 +677,15 @@ struct DownloadsPage: View {
                     .foregroundStyle(OctoColor.textSecondary)
                     .padding(.top, 10)
                 HStack(spacing: 12) {
-                    Button("Remove all") {
-                        for row in rows { state.kept.remove(row.trackId) }
+                    AccentButton("Remove all", size: .medium) {
+                        offline.removeAll()
                         confirming = false
                     }
-                    .buttonStyle(.glassProminent)
-                    Button("Cancel") { confirming = false }.buttonStyle(.glass)
+                    GlazeButton("Cancel", size: .medium) { confirming = false }
                 }
                 .padding(.top, 12)
             } else {
-                Button("Remove all") { confirming = true }
-                    .buttonStyle(.glass)
+                GlazeButton("Remove all", size: .medium) { confirming = true }
                     .padding(.top, 12)
             }
         }
@@ -669,17 +693,14 @@ struct DownloadsPage: View {
         .padding(.bottom, 12)
     }
 
-    private func reasons(_ row: DownloadListRow) -> Set<String> {
-        Set(row.reason.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) })
-    }
-
     private func downloadRow(_ row: DownloadListRow, _ shown: [DownloadListRow]) -> some View {
-        let byHand = reasons(row).contains("manual")
-        let detail = downloadDetail(row.state, progress: Double(row.progress), sizeBytes: row.sizeBytes, reasons: reasons(row),
+        let reasons = DownloadReasons.parse(row.reason)
+        let byHand = reasons.contains(DownloadReasons.manual)
+        let detail = downloadDetail(row.state, progress: Double(row.progress), sizeBytes: row.sizeBytes, reasons: reasons,
                                     playlistNames: playlistNames)
         return Button {
             switch row.state {
-            case .failed: state.kept.retry(row.trackId)
+            case .failed: offline.retry(row.trackId)
             case .done:
                 Task {
                     let done = shown.filter { $0.state == .done }
@@ -692,10 +713,7 @@ struct DownloadsPage: View {
             HStack(spacing: 12) {
                 ArtCover(artwork: row.artwork, size: 44, radius: 6)
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(row.title).font(.octoBodySmall).foregroundStyle(.white).lineLimit(1)
-                        if row.explicit == true { ExplicitMark() }
-                    }
+                    SongTitleLine(row.title, explicit: row.explicit == true)
                     Text("\(row.artist) · \(detail)")
                         .font(.octoCaption)
                         .foregroundStyle(row.state == .failed ? OctoColor.textSecondary : OctoColor.textMuted)
@@ -720,14 +738,14 @@ struct DownloadsPage: View {
             }
             .contentShape(Rectangle())
         }
-        .buttonStyle(PressSqueeze())
-        .rowSwipe(byHand ? .remove { remove(row) } : .none, enabled: byHand)
-        .onLongPressGesture { if byHand { remove(row) } }
-        .sensoryFeedback(.impact, trigger: confirming)
+        .buttonStyle(SqueezeStyle())
+        .rowSwipe(.remove { remove(row) }, enabled: byHand)
+        .gesture(MenuPress(enabled: byHand) { remove(row) })
+        .accessibilityAction(named: "Remove download") { if byHand { remove(row) } }
     }
 
     private func remove(_ row: DownloadListRow) {
-        state.kept.remove(row.trackId)
-        router.show("Download removed")
+        removals += 1
+        actions.removeDownload(row.trackId)
     }
 }

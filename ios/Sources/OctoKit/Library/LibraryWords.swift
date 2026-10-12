@@ -18,26 +18,6 @@ public func countText(_ count: Int, _ one: String, _ many: String) -> String {
     count == 1 ? "1 \(one)" : "\(grouped(count)) \(many)"
 }
 
-/// A song's length as a clock, like 3:07 or 1:02:45.
-public func asClock(_ seconds: Int) -> String {
-    let h = seconds / 3600
-    let m = (seconds % 3600) / 60
-    let s = seconds % 60
-    return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
-}
-
-/// An album's or playlist's length in words, like 48 min or 1 hr 12 min.
-public func asLength(_ seconds: Int) -> String {
-    let minutes = (seconds + 30) / 60
-    return minutes >= 60 ? "\(minutes / 60) hr \(minutes % 60) min" : "\(minutes) min"
-}
-
-/// "1 song" or "N songs", no thousands separator.
-public func songsCount(_ count: Int) -> String { count == 1 ? "1 song" : "\(count) songs" }
-
-/// "1 album" or "N albums", no thousands separator.
-public func albumsCount(_ count: Int) -> String { count == 1 ? "1 album" : "\(count) albums" }
-
 /// A song's length as a row shows it, like 3:45. Nothing when it is not known, rather than 0:00.
 public func rowLength(_ durationMs: Int64) -> String? { durationMs >= 1_000 ? asClock(Int(durationMs / 1_000)) : nil }
 
@@ -206,7 +186,7 @@ public func addMissingLabel(missing: Int) -> String {
 // MARK: Favorites
 
 /// The parts of the Favorites page, in the order they show.
-public enum FavoriteSegment: String, CaseIterable, Sendable {
+public enum FavoriteSegment: String, CaseIterable, Sendable, Codable {
     case songs = "Songs", albums = "Albums", artists = "Artists"
 }
 
@@ -274,12 +254,6 @@ public enum PlaylistsLead: CaseIterable, Sendable {
 /// import went while there is one.
 public func playlistsLead(importNote: Bool) -> [PlaylistsLead] {
     PlaylistsLead.allCases.filter { $0 != .importNote || importNote }
-}
-
-/// The quiet line on a playlist kept with the server when some of its songs have no copy there.
-public func phoneOnlyNote(_ count: Int) -> String {
-    count == 1 ? "1 song is only on this phone and is not in the server's copy"
-        : "\(count) songs are only on this phone and are not in the server's copy"
 }
 
 // MARK: Finding a better copy

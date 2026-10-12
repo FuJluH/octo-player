@@ -1,12 +1,10 @@
 import Foundation
-import Network
 import Observation
 import OctoKit
 
 /// What the library pages keep beside the library itself: the order each list was left in, the
-/// playlists added to lately, what the server lets this user do to its files, whether the phone
-/// is online, and every change the listener makes (likes, ratings, favorites, pins, playlists),
-/// written through `writes`.
+/// playlists added to lately, what the server lets this user do to its files, and the listener's
+/// likes, favorites, pins and ratings as the stores hold them.
 @MainActor
 @Observable
 final class LibraryState {
@@ -16,54 +14,47 @@ final class LibraryState {
     private(set) var recentPlaylists: [String] = []
     /// What the server lets this user do to the library's files; nil when it offers nothing.
     private(set) var fileActions: FileActions?
-    /// Whether the phone has a connection.
-    private(set) var online = true
     /// Servers that turned sharing down, by kept server id.
     private var sharingRefused = Set<String>()
-    /// Changes not in the library yet, shown at once: ratings, by library song id.
+    /// Ratings set here, shown at once until the library has them.
     private(set) var ratings: [String: Int] = [:]
-    /// Playlists changed here, until the library reads them again.
-    private(set) var playlistEdits: [String: [PlaylistTrack]] = [:]
-    /// Bumped by every change made here, for pages to read again.
-    private(set) var revision = 0
-    /// What the menus need at once, kept up to date with the library: liked songs, favorite
-    /// albums and artists, Home's pins and the playlists to add to.
-    private(set) var likedIds = Set<String>()
-    private(set) var favoriteAlbumIds = Set<String>()
-    private(set) var favoriteArtistIds = Set<String>()
-    private(set) var pins: [PinnedItem] = []
+    /// The playlists to add to, as the library last listed them.
     private(set) var playlists: [PlaylistSummary] = []
     /// Every rated library song's rating, by id.
     private(set) var rated: [String: Int] = [:]
 
-    @ObservationIgnored let library: Library
+    @ObservationIgnored let data: DataServices
     @ObservationIgnored let session: Session
-    @ObservationIgnored let sync: ServerSync
-    @ObservationIgnored var kept: KeptDownloadsSource = NoKeptDownloads()
-    @ObservationIgnored lazy var writes: LibraryWrites = ServerFirstWrites(state: self)
-    @ObservationIgnored private let network = NWPathMonitor()
+    /// Library songs by the id their plain song has, for the selection bar.
+    @ObservationIgnored private var bySongId: [String: LibraryTrack] = [:]
     @ObservationIgnored private var server: String?
 
-    init(library: Library, session: Session, sync: ServerSync) {
-        self.library = library
+    init(data: DataServices, session: Session) {
+        self.data = data
         self.session = session
-        self.sync = sync
         for list in SortList.allCases { orders[list] = list.decode(UserDefaults.standard.string(forKey: Self.orderKey(list))) }
-        network.pathUpdateHandler = { [weak self] path in
-            let up = path.status == .satisfied
-            Task { @MainActor in self?.online = up }
-        }
-        network.start(queue: DispatchQueue(label: "app.winters.octo.library.network"))
     }
+
+    var library: Library { data.library }
+    var sync: ServerSync { data.serverSync }
+    var offline: OfflineDownloads { data.offline }
+
+    /// Whether the phone has a connection.
+    var online: Bool { data.connectivity.online }
+
+    /// Every liked song, by library id.
+    var likedIds: Set<String> { data.likes.liked }
+    var favoriteAlbumIds: Set<String> { data.favorites.albums }
+    var favoriteArtistIds: Set<String> { data.favorites.artists }
+    /// Home's pins, in row order.
+    var pins: [PinnedItem] { data.pins.shown }
 
     /// Reads again what goes with the server in use, when another comes into use.
     func serverChanged() async {
         guard session.activeId != server else { return }
         server = session.activeId
         ratings = [:]
-        playlistEdits = [:]
         recentPlaylists = UserDefaults.standard.stringArray(forKey: recentKey) ?? []
-        revision += 1
         await readFileActions()
     }
 
@@ -113,18 +104,15 @@ final class LibraryState {
         for (list, order) in restorableOrders(saved) { setOrder(list, order) }
     }
 
-    /// Reads again what the menus need at once.
+    /// Reads again what the menus need at once: the playlists and the ratings.
     func refreshCaches() async {
-        likedIds = await library.likedIds()
-        favoriteAlbumIds = await library.likedAlbumIds()
-        favoriteArtistIds = await library.likedArtistIds()
-        pins = await library.shownPins()
         playlists = await library.playlists()
         let ratedRows = (try? await library.store.tracks(sql: "SELECT t.*, NULL AS heading FROM track t WHERE t.rating > 0")) ?? []
         var byId: [String: Int] = [:]
         for row in ratedRows { byId[row.track.id] = row.track.rating }
         for rating in (try? await library.store.ratings()) ?? [] { byId[rating.trackId] = rating.rating }
         rated = byId
+        ratings = ratings.filter { byId[$0.key] != $0.value }
     }
 
     /// A library song as a plain server song shows it, before the library is asked: enough for
@@ -152,19 +140,6 @@ final class LibraryState {
         return await library.track(track.id) ?? track
     }
 
-    /// Notes likes at once, before the library says so.
-    func noteLiked(_ ids: [String], _ on: Bool) {
-        if on { likedIds.formUnion(ids) } else { likedIds.subtract(ids) }
-    }
-
-    func noteFavorite(album id: String, _ on: Bool) {
-        if on { favoriteAlbumIds.insert(id) } else { favoriteAlbumIds.remove(id) }
-    }
-
-    func noteFavorite(artist id: String, _ on: Bool) {
-        if on { favoriteArtistIds.insert(id) } else { favoriteArtistIds.remove(id) }
-    }
-
     /// Where a collection stands on Home.
     func pinSpot(kind: String, id: String) -> PinSpot {
         OctoKit.pinSpot(pins.map { "\($0.kind)|\($0.itemId)" }, "\(kind)|\(id)")
@@ -176,14 +151,48 @@ final class LibraryState {
         return library.serverInUse.map { "\($0):\(song.id)" }
     }
 
-    // MARK: Ratings and likes shown at once
+    // MARK: Picking songs
+
+    /// Songs of a list as the selection bar takes them, keyed by `key` (a playlist row, or the
+    /// song's id). The bar's songs are found again by `tracks(for:)`.
+    func pickables(_ tracks: [LibraryTrack], key: (LibraryTrack) -> String = \.id) -> [Pickable] {
+        tracks.map { track in
+            let song = track.asSong
+            bySongId[song.id] = track
+            return Pickable(key: key(track), song: song)
+        }
+    }
+
+    func pickables(_ rows: [PlaylistTrack]) -> [Pickable] {
+        rows.map { row in
+            let song = row.track.asSong
+            bySongId[song.id] = row.track
+            return Pickable(key: String(row.itemId), song: song)
+        }
+    }
+
+    /// The library songs the selection bar's songs are.
+    func tracks(for songs: [Song]) -> [LibraryTrack] { songs.map { bySongId[$0.id] ?? provisional($0) } }
+
+    // MARK: Ratings
 
     func rating(of track: LibraryTrack) -> Int { ratings[track.id] ?? rated[track.id] ?? track.rating }
 
-    func noteRating(_ trackId: String, _ rating: Int) {
-        ratings[trackId] = rating
-        revision += 1
+    func noteRating(_ trackId: String, _ rating: Int) { ratings[trackId] = rating }
+
+    // MARK: Downloads to the phone
+
+    /// A library song's download: how far along, and whether it was asked for by hand.
+    func kept(_ trackId: String) -> (status: DownloadStatus, byHand: Bool)? {
+        guard let row = offline.byTrack[trackId] else { return nil }
+        return (row.state, row.reasons.contains(DownloadReasons.manual))
     }
+
+    /// Whether the song plays without a connection: on the phone, or downloaded.
+    func isDownloaded(_ track: LibraryTrack) -> Bool { data.marks.isDownloaded(track) }
+
+    /// With no connection, a song that cannot play.
+    func isOutOfReach(_ track: LibraryTrack) -> Bool { data.marks.isOutOfReach(track) }
 
     // MARK: Playlists
 
@@ -200,23 +209,7 @@ final class LibraryState {
         UserDefaults.standard.set(recentPlaylists, forKey: recentKey)
     }
 
-    /// A playlist's songs as changed here, or as the library has them.
-    func playlistTracks(_ id: String) async -> [PlaylistTrack] {
-        if let edited = playlistEdits[id] { return edited }
-        return await library.playlistTracks(id)
-    }
-
-    func setPlaylistEdit(_ id: String, _ rows: [PlaylistTrack]?) {
-        playlistEdits[id] = rows
-        revision += 1
-    }
-
-    /// The library read the playlists again: changes made here are in it now.
-    func playlistsRead() {
-        guard !playlistEdits.isEmpty else { return }
-        playlistEdits = [:]
-        revision += 1
-    }
+    func playlistTracks(_ id: String) async -> [PlaylistTrack] { await library.playlistTracks(id) }
 
     // MARK: Songs of collections
 
@@ -267,24 +260,4 @@ enum CollectionTarget: Hashable {
     case album(String)
     case artist(String)
     case playlist(String)
-}
-
-/// Songs kept downloaded on the phone. Nothing is kept until the downloads to the phone are
-/// wired in; then `available` turns on and the rows offering them show.
-@MainActor
-protocol KeptDownloadsSource: AnyObject {
-    var available: Bool { get }
-    func status(_ trackId: String) -> (status: DownloadStatus, byHand: Bool)?
-    func download(_ trackIds: [String])
-    func remove(_ trackId: String)
-    func retry(_ trackId: String)
-}
-
-@MainActor
-final class NoKeptDownloads: KeptDownloadsSource {
-    var available: Bool { false }
-    func status(_ trackId: String) -> (status: DownloadStatus, byHand: Bool)? { nil }
-    func download(_ trackIds: [String]) {}
-    func remove(_ trackId: String) {}
-    func retry(_ trackId: String) {}
 }

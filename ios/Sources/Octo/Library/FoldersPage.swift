@@ -15,7 +15,6 @@ struct FoldersPage: View {
     @State private var serverLevels: [String: Level] = [:]
     @State private var gathering = false
     @State private var note: String?
-    @State private var selection = SongSelection()
 
     /// One step into the folders.
     enum Step: Hashable {
@@ -60,10 +59,14 @@ struct FoldersPage: View {
             .padding(.bottom, 20)
         }
         .barClearance()
-        .libraryRefreshable { await rereadServer() }
         .backAction(trail.isEmpty ? nil : { goUp() })
-        .selectable(selection, songs: shownSongs.map { Pickable(key: $0.id, track: $0) })
-        .task(id: library.stamp(.library)) { await readPhone() }
+        .backStopsPicking()
+        .selectableSongs(state.pickables(shownSongs))
+        .libraryRefreshable {}
+        .task(id: library.stamp(.library)) {
+            await readPhone()
+            await rereadServer()
+        }
         .task(id: path) { await readCurrentServerLevel() }
         .onChange(of: session.activeId) { _, _ in
             trail = []
@@ -217,7 +220,7 @@ struct FoldersPage: View {
             if let failure = level.failure {
                 VStack(spacing: 12) {
                     Text(failure).font(.octoBodySmall).foregroundStyle(OctoColor.textMuted)
-                    Button("Try again") { Task { await readServerLevel(serverKey, force: true) } }.buttonStyle(.glass)
+                    GlazeButton("Try again", size: .medium) { Task { await readServerLevel(serverKey, force: true) } }
                 }
                 .frame(maxWidth: .infinity)
                 .padding(20)
@@ -234,7 +237,7 @@ struct FoldersPage: View {
                 folderSongs(level.songs)
             }
         } else {
-            ProgressView().tint(OctoColor.accent).frame(maxWidth: .infinity).padding(32)
+            LoadingSpinner(size: 28).frame(maxWidth: .infinity).padding(32)
         }
     }
 
@@ -254,10 +257,7 @@ struct FoldersPage: View {
             let list = shownSongs
             SortBar(name: "Songs", list: .folderSongs).padding(.top, 12)
             ForEach(Array(list.enumerated()), id: \.offset) { position, track in
-                TrackRow(track: track, context: SongMenuContext(selecting: selection.active, selectKey: track.id),
-                         selection: selection) {
-                    actions.play(list, from: position)
-                }
+                TrackRow(track: track) { actions.play(list, from: position) }
             }
         }
     }
@@ -333,19 +333,18 @@ private struct FolderRow: View {
     var body: some View {
         Button(action: open) {
             HStack(spacing: 16) {
-                Image(systemName: MenuIcon.folder).font(.system(size: 19)).foregroundStyle(OctoColor.accent).frame(width: 24)
+                IconView(.folder, size: 24, color: OctoColor.accent)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(name).font(.octoBodySmall).foregroundStyle(.white).lineLimit(1)
                     if let subtitle { Text(subtitle).font(.octoCaption).foregroundStyle(OctoColor.textMuted) }
                 }
                 Spacer(minLength: 0)
-                Image(systemName: "chevron.right").font(.system(size: 15, weight: .semibold)).foregroundStyle(OctoColor.textMuted)
-                    .frame(width: 22)
+                IconView(.chevron, size: 22, color: OctoColor.textMuted)
             }
             .padding(.horizontal, 20)
             .frame(height: 56)
             .contentShape(Rectangle())
         }
-        .buttonStyle(PressSqueeze())
+        .buttonStyle(SqueezeStyle())
     }
 }

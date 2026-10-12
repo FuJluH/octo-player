@@ -15,17 +15,6 @@ enum LibraryLook {
     static let resting = Glass.regular.interactive()
 }
 
-/// Pressed, a control shrinks a little on a quick spring; no ripple or highlight.
-struct PressScale: ButtonStyle {
-    var amount: CGFloat = 0.94
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? amount : 1)
-            .animation(.interpolatingSpring(stiffness: 600, damping: 2 * 0.45 * sqrt(600)), value: configuration.isPressed)
-    }
-}
-
 /// Play and Shuffle across a detail page: two glass capsules of equal width. Play has the lifted
 /// glass, Shuffle the resting glass. While loading, Play shows a spinner in place of its icon.
 struct PlayShuffle: View {
@@ -37,21 +26,21 @@ struct PlayShuffle: View {
     var body: some View {
         GlassEffectContainer(spacing: 12) {
             HStack(spacing: 12) {
-                capsule("Play", icon: "play.fill", glass: LibraryLook.lifted, spinner: loading, action: play)
-                capsule("Shuffle", icon: "shuffle", glass: LibraryLook.resting, spinner: false, action: shuffle)
+                capsule("Play", icon: .play, glass: LibraryLook.lifted, spinner: loading, action: play)
+                capsule("Shuffle", icon: .shuffle, glass: LibraryLook.resting, spinner: false, action: shuffle)
             }
         }
         .disabled(!enabled || loading)
         .opacity(enabled || loading ? 1 : 0.4)
     }
 
-    private func capsule(_ word: String, icon: String, glass: Glass, spinner: Bool, action: @escaping () -> Void) -> some View {
+    private func capsule(_ word: String, icon: OctoIcon, glass: Glass, spinner: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 8) {
                 if spinner {
-                    ProgressView().tint(.white).controlSize(.small).frame(width: 22, height: 22)
+                    Spinner(size: 20).frame(width: 22, height: 22)
                 } else {
-                    Image(systemName: icon).font(.system(size: 18, weight: .semibold)).frame(width: 22, height: 22)
+                    IconView(icon, size: 22)
                 }
                 Text(word).font(.octoBody)
             }
@@ -62,7 +51,7 @@ struct PlayShuffle: View {
             .frame(minHeight: 48)
             .contentShape(Capsule())
         }
-        .buttonStyle(PressScale(amount: 0.96))
+        .buttonStyle(PressScale(scale: 0.96))
     }
 }
 
@@ -75,7 +64,7 @@ struct PlayPills: View {
         HStack(spacing: 4) {
             Button(action: play) {
                 HStack(spacing: 6) {
-                    Image(systemName: "play.fill").font(.system(size: 14, weight: .semibold)).frame(width: 18, height: 18)
+                    IconView(.play, size: 18)
                     Text("Play").font(LibraryLook.labelMedium)
                 }
                 .foregroundStyle(.white)
@@ -87,24 +76,21 @@ struct PlayPills: View {
                 .contentShape(Capsule())
             }
             .buttonStyle(PressScale())
-            GlassIconButton(icon: "shuffle", label: "Shuffle", action: shuffle)
+            GlassIconButton(icon: .shuffle, label: "Shuffle", action: shuffle)
         }
     }
 }
 
 /// A round glass button with an icon: 34 across in a 48 target, lit while `lit`.
 struct GlassIconButton: View {
-    let icon: String
+    let icon: OctoIcon
     let label: String
     var lit = false
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.white)
-                .contentTransition(.symbolEffect(.replace))
+            IconView(icon, size: 16, color: .white)
                 .frame(width: 34, height: 34)
                 .glassEffect(lit ? LibraryLook.lifted : LibraryLook.resting, in: .circle)
                 .frame(width: 48, height: 48)
@@ -119,7 +105,7 @@ struct GlassIconButton: View {
 /// A quiet action: an icon and a word in the secondary color, no glass. As a switch it turns
 /// white while on.
 struct QuietAction: View {
-    let icon: String
+    let icon: OctoIcon
     let text: String
     var enabled = true
     var checked: Bool?
@@ -128,7 +114,7 @@ struct QuietAction: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                Image(systemName: icon).font(.system(size: 15)).frame(width: 18, height: 18)
+                IconView(icon, size: 18)
                 Text(text).font(LibraryLook.label).lineLimit(1)
             }
             .foregroundStyle(checked == true ? Color.white : OctoColor.textSecondary)
@@ -144,41 +130,15 @@ struct QuietAction: View {
     }
 }
 
-/// A small text button: the label words in the secondary color, no fill.
-struct QuietButton: View {
-    let text: String
-    let action: () -> Void
-
-    init(_ text: String, action: @escaping () -> Void) {
-        self.text = text
-        self.action = action
-    }
-
-    var body: some View {
-        Button(action: action) {
-            Text(text)
-                .font(LibraryLook.label)
-                .foregroundStyle(OctoColor.textSecondary)
-                .lineLimit(1)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 /// The plain white icon at 80% in a 48 circle, no glass.
 struct QuietIconAction: View {
-    let icon: String
+    let icon: OctoIcon
     let label: String
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 19))
-                .foregroundStyle(.white.opacity(0.8))
+            IconView(icon, size: 22, color: .white.opacity(0.8))
                 .frame(width: 48, height: 48)
                 .contentShape(Circle())
         }
@@ -190,30 +150,9 @@ struct QuietIconAction: View {
 /// Centered spinner in the accent color, for a list before its first read.
 struct LibrarySpinner: View {
     var body: some View {
-        ProgressView()
-            .tint(OctoColor.accent)
-            .controlSize(.regular)
+        LoadingSpinner(size: 28)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 40)
-    }
-}
-
-/// A failure in place of a page: the message, then "Try again".
-struct LibraryFailure: View {
-    let message: String
-    let retry: () async -> Void
-
-    var body: some View {
-        VStack(spacing: 16) {
-            Text(message)
-                .font(.octoBodySmall)
-                .foregroundStyle(OctoColor.textSecondary)
-                .multilineTextAlignment(.center)
-            Button("Try again") { Task { await retry() } }
-                .buttonStyle(.glassProminent)
-        }
-        .padding(32)
-        .frame(maxWidth: .infinity)
     }
 }
 
@@ -263,9 +202,7 @@ struct LibrarySourceActions: View {
 
     var body: some View {
         if session.servers.isEmpty || session.client == nil && session.active == nil {
-            Button("Sign in to a server") { router.signIn = .signIn }
-                .buttonStyle(.glass)
-                .font(.octoBodySmall)
+            GlazeButton("Sign in to a server", size: .medium) { router.signIn = .signIn }
         }
     }
 }
@@ -317,47 +254,18 @@ struct TitleWithButtons<Buttons: View>: View {
 struct SortButton: View {
     let list: SortList
     @Environment(LibraryState.self) private var library
+    @Environment(LibraryActions.self) private var actions
 
     var body: some View {
         let order = library.order(list)
-        Menu {
-            Section {
-                Picker("Direction", selection: Binding(
-                    get: { order.descending },
-                    set: { library.setOrder(list, ListOrder(order.by, descending: $0)) })
-                ) {
-                    ForEach(directionChoices(order.by), id: \.descending) { choice in
-                        Label(choice.label, systemImage: choice.descending ? "arrow.down" : "arrow.up").tag(choice.descending)
-                    }
-                }
-                .pickerStyle(.palette)
-            }
-            Section {
-                Picker("Sort by", selection: Binding(
-                    get: { order.by.id },
-                    set: { id in
-                        guard let option = list.options.first(where: { $0.id == id }) else { return }
-                        library.setOrder(list, order.picking(option))
-                    })
-                ) {
-                    ForEach(list.options, id: \.id) { option in Text(option.label).tag(option.id) }
-                }
-                .pickerStyle(.inline)
-            }
-        } label: {
+        Button { actions.openSort(list) } label: {
             HStack(spacing: 7) {
-                Image(systemName: "arrow.up.arrow.down")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.72))
-                    .frame(width: 16, height: 16)
+                IconView(.sort, size: 16, color: .white.opacity(0.72))
                 Text(order.by.label)
                     .font(LibraryLook.labelMedium)
                     .foregroundStyle(.white)
                     .lineLimit(1)
-                Image(systemName: "arrow.up")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.72))
-                    .frame(width: 14, height: 14)
+                IconView(.ascending, size: 14, color: .white.opacity(0.72))
                     .rotationEffect(.degrees(sortArrowTurn(descending: order.descending)))
                     .animation(.interpolatingSpring(stiffness: 300, damping: 2 * 0.7 * sqrt(300)), value: order.descending)
             }
@@ -368,11 +276,79 @@ struct SortButton: View {
             .frame(minHeight: 48)
             .contentShape(Capsule())
         }
-        .menuOrder(.fixed)
-        .buttonStyle(PressScale())
+        .buttonStyle(SortPress())
+        .choiceAnchor()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Sorted by \(order.by.label), \(sortScale(order.by).label(descending: order.descending))")
         .accessibilityHint("Change the order")
+        .accessibilityAddTraits(.isButton)
+    }
+}
+
+/// The sort button pressed: it shrinks to 0.94 on a quick, bouncy spring.
+private struct SortPress: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.94 : 1)
+            .animation(.interpolatingSpring(stiffness: 600, damping: 2 * 0.45 * sqrt(600)), value: configuration.isPressed)
+    }
+}
+
+/// The sort list: the two directions side by side on top, then every option, the chosen one
+/// in the darker pill with a check. Another direction reorders at once and stays open; another
+/// option takes its own starting direction and closes.
+struct SortPopup: View {
+    let list: SortList
+    let close: () -> Void
+    @Environment(LibraryState.self) private var library
+    @Namespace private var pill
+
+    var body: some View {
+        let order = library.order(list)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 0) {
+                ForEach(directionChoices(order.by), id: \.descending) { choice in
+                    let chosen = choice.descending == order.descending
+                    Button {
+                        guard !chosen else { return }
+                        withAnimation(.interpolatingSpring(stiffness: 350, damping: 2 * 0.8 * sqrt(350))) {
+                            library.setOrder(list, ListOrder(order.by, descending: choice.descending))
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            IconView(choice.descending ? .descending : .ascending, size: 16, color: chosen ? .white : .white.opacity(0.45))
+                                .shadow(color: chosen ? .white.opacity(0.6) : .clear, radius: 4)
+                            Text(choice.label)
+                                .font(.system(size: 13.5, weight: chosen ? .semibold : .medium))
+                                .foregroundStyle(chosen ? .white : .white.opacity(0.45))
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background {
+                            if chosen { GlazeSelected(shape: Capsule()).matchedGeometryEffect(id: "pill", in: pill) }
+                        }
+                        .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(chosen ? [.isSelected] : [])
+                }
+            }
+            .padding(4)
+            .frame(height: 44)
+            .octoGlass(Capsule())
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Direction")
+            HuggingScroll {
+                GlassMenuOptions(options: list.options.map { Choice($0.label) },
+                                 selected: list.options.firstIndex { $0.id == order.by.id } ?? -1) { index in
+                    let option = list.options[index]
+                    if option.id != order.by.id { library.setOrder(list, order.picking(option)) }
+                    close()
+                }
+            }
+        }
+        .frame(width: 248)
+        .padding(6)
     }
 }
 
@@ -483,11 +459,9 @@ struct FavoriteHeart: View {
 
     var body: some View {
         Button(action: toggle) {
-            Image(systemName: on ? "heart.fill" : "heart")
-                .font(.system(size: 22))
-                .foregroundStyle(on ? .white : .white.opacity(0.6))
+            IconView(on ? .liked : .like, size: 24, color: on ? .white : .white.opacity(0.6))
                 .shadow(color: on ? .white.opacity(0.5) : .clear, radius: 6)
-                .symbolEffect(.bounce, value: on)
+                .iconAccent(on ? .pulse : nil, trigger: on)
                 .frame(width: 44, height: 44)
                 .contentShape(Circle())
         }
