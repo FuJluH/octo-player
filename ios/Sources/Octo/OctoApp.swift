@@ -10,6 +10,15 @@ struct OctoApp: App {
     @State private var downloads: Downloads
     @State private var library: Library
     @State private var serverSync: ServerSync
+    @State private var overlays = Overlays()
+    @State private var prompts = Prompts()
+    @State private var presses = PressSpots()
+    @State private var motion = MotionSettings()
+    @State private var ambience = AmbientSettings()
+    @State private var pageArtworks = PageArtworks()
+    @State private var selectionBar = SelectionBarState()
+    @State private var selectionActions = SelectionActions()
+    @State private var artworkColors: ArtworkColorStore
 
     init() {
         let session = Session()
@@ -28,6 +37,7 @@ struct OctoApp: App {
         _sound = State(initialValue: sound)
         _player = State(initialValue: Player(session: session, sound: sound.processor))
         _lyrics = State(initialValue: LyricsStore(session: session))
+        _artworkColors = State(initialValue: ArtworkColorStore(session: session))
     }
 
     var body: some Scene {
@@ -41,10 +51,23 @@ struct OctoApp: App {
                 .environment(downloads)
                 .environment(library)
                 .environment(serverSync)
+                .environment(overlays)
+                .environment(prompts)
+                .environment(presses)
+                .environment(motion)
+                .environment(ambience)
+                .environment(pageArtworks)
+                .environment(artworkColors)
+                .environment(selectionBar)
+                .environment(selectionActions)
+                .motionScaled(motion)
+                .recordsPresses(presses)
+                .onAppear { prompts.spots = presses }
                 .tint(OctoColor.accent)
                 .preferredColorScheme(.dark)
                 #if DEBUG
-                .task { await Drive.run(session: session, player: player, router: router) }
+                .task { await Drive.run(session: session, player: player, router: router, prompts: prompts, motion: motion,
+                                         overlays: overlays, ambience: ambience, selectionBar: selectionBar) }
                 #endif
         }
     }
