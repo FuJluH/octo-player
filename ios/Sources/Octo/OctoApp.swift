@@ -15,12 +15,13 @@ struct OctoApp: App {
     @State private var liveLists: LiveListStore
     @State private var liveLibrary: LiveLibrary
     @State private var artistExtras: ArtistExtrasSource
-    @State private var overlays = Overlays()
+    @State private var overlays: Overlays
     @State private var motion = MotionSettings()
     @State private var ambience = AmbientSettings()
     @State private var pageArtworks = PageArtworks()
-    @State private var selectionBar = SelectionBarState()
-    @State private var selectionActions = SelectionActions()
+    @State private var selectionBar: SelectionBarState
+    @State private var selectionActions: SelectionActions
+    @State private var libraryActions: LibraryActions
     @State private var artworkColors: ArtworkColorStore
     @State private var accounts: Accounts
     /// The ways in from outside the app; kept here so they live as long as it does.
@@ -48,6 +49,15 @@ struct OctoApp: App {
         let player = Player(session: session, sound: sound.processor, data: data)
         player.announce = { router.show($0) }
         _player = State(initialValue: player)
+        let overlays = Overlays()
+        let selectionBar = SelectionBarState()
+        let selectionActions = SelectionActions()
+        _overlays = State(initialValue: overlays)
+        _selectionBar = State(initialValue: selectionBar)
+        _selectionActions = State(initialValue: selectionActions)
+        _libraryActions = State(initialValue: LibraryActions(
+            state: LibraryState(data: data, session: session), player: player, router: router, session: session,
+            selection: selectionActions, selectionBar: selectionBar))
         _lyrics = State(initialValue: LyricsStore(session: session))
         _artworkColors = State(initialValue: ArtworkColorStore(session: session))
         data.start()
@@ -56,6 +66,7 @@ struct OctoApp: App {
         let entries = SystemEntries(session: session, player: player, router: router, accounts: accounts)
         _entries = State(initialValue: entries)
         SystemEntries.shared = entries
+        SystemHooks.start(player: player, router: router)
         FamilyNotices.session = session
         AccountHooks.install(data, session: session)
         #if DEBUG
@@ -85,6 +96,8 @@ struct OctoApp: App {
                 .environment(artworkColors)
                 .environment(selectionBar)
                 .environment(selectionActions)
+                .environment(libraryActions)
+                .environment(libraryActions.state)
                 .environment(accounts)
                 .task { accounts.start() }
                 .motionScaled(motion)
@@ -92,6 +105,7 @@ struct OctoApp: App {
                 .preferredColorScheme(.dark)
                 #if DEBUG
                 .task { PlaybackDrive.install(player: player, router: router, overlays: overlays)
+                        SystemDrive.install(router: router)
                         await Drive.run(session: session, player: player, router: router, motion: motion,
                                          overlays: overlays, ambience: ambience, selectionBar: selectionBar) }
                 #endif

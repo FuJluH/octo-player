@@ -140,20 +140,10 @@ extension View {
         }
         .navigationDestination(for: SettingsSideRoute.self) { route in
             switch route {
-            case .downloads: DownloadsStandIn()
+            case .downloads: DownloadsPage().detailPage()
             }
         }
         .accountRoutes()
     }
 }
 
-/// Where the Downloads screen goes once its part of the app is in.
-private struct DownloadsStandIn: View {
-    var body: some View {
-        SettingsPageFrame(title: "Downloads") {
-            SettingsGroup {
-                NoteRow("What is downloaded, and how much room it takes.")
-            }
-        }
-    }
-}

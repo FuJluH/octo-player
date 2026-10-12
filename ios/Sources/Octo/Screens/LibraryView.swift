@@ -1,339 +1,517 @@
 import OctoKit
 import SwiftUI
 
-/// Library: one page of rows into each list, then the newest albums.
+/// One way into the library, like Albums or Songs.
+private struct LibrarySection {
+    let icon: OctoIcon
+    let label: String
+    let route: Route
+}
+
+private let librarySections = [
+    LibrarySection(icon: .playlists, label: "Playlists", route: .playlists),
+    LibrarySection(icon: .like, label: "Favorites", route: .favorites),
+    LibrarySection(icon: .artist, label: "Artists", route: .artists),
+    LibrarySection(icon: .album, label: "Albums", route: .albums),
+    LibrarySection(icon: .songs, label: "Songs", route: .library(.songs)),
+    LibrarySection(icon: .genres, label: "Genres", route: .library(.genres)),
+    LibrarySection(icon: .folder, label: "Folders", route: .library(.folders)),
+    LibrarySection(icon: .downloaded, label: "Downloads", route: .library(.downloads)),
+    LibrarySection(icon: .history, label: "History", route: .library(.history(mostPlayed: false))),
+    LibrarySection(icon: .check, label: "Library health", route: .library(.health)),
+]
+
+/// The library's front page: a menu of ways in, then the newest albums, two covers to a row.
 struct LibraryView: View {
-    @Environment(Session.self) private var session
-    @State private var newest: [Album] = []
-
-    private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                ScreenTitle("Library")
-                VStack(spacing: 0) {
-                    row("Playlists", "music.note.list", .playlists)
-                    divider
-                    row("Favorites", "heart", .favorites)
-                    divider
-                    row("Artists", "music.microphone", .artists)
-                    divider
-                    row("Albums", "square.stack", .albums)
-                }
-                if !newest.isEmpty {
-                    SectionTitle("Recently added").padding(.top, 24)
-                    LazyVGrid(columns: columns, alignment: .leading, spacing: 18) {
-                        ForEach(newest) { album in
-                            GeometryReader { box in AlbumCard(album: album, width: box.size.width) }
-                                .aspectRatio(0.78, contentMode: .fit)
-                        }
-                    }
-                    .padding(.horizontal, 20)
-                }
-            }
-        }
-        .barClearance()
-        .refreshable { await load() }
-        .task(id: session.client?.baseURL) { await load() }
-    }
-
-    private func row(_ title: String, _ icon: String, _ route: Route) -> some View {
-        NavigationLink(value: route) {
-            HStack(spacing: 16) {
-                Image(systemName: icon)
-                    .font(.system(size: 20))
-                    .foregroundStyle(OctoColor.accent)
-                    .frame(width: 24)
-                Text(title).font(.octoBody).foregroundStyle(.white)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(OctoColor.textMuted)
-            }
-            .padding(.horizontal, 20)
-            .frame(height: 52)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(PressSqueeze())
-    }
-
-    private var divider: some View {
-        Rectangle().fill(.white.opacity(0.08)).frame(height: 1).padding(.leading, 60).padding(.trailing, 20)
-    }
-
-    private func load() async {
-        guard let client = session.client else { newest = []; return }
-        newest = (try? await client.albumList(.newest, size: 20)) ?? newest
-    }
-}
-
-/// A list page's header: the big title, a count, and Play and Shuffle as small glass pills.
-struct ListHeader: View {
-    let title: String
-    let count: String
-    var play: (() -> Void)?
-    var shuffle: (() -> Void)?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(title).font(.octoDisplay).tracking(-0.5).padding(.horizontal, 20).padding(.bottom, 6)
-            HStack {
-                Text(count).font(.octoCaption).foregroundStyle(OctoColor.textMuted)
-                Spacer()
-                if let play {
-                    Button(action: play) { Label("Play", systemImage: "play.fill").font(.system(size: 14, weight: .semibold)) }
-                        .buttonStyle(.glass)
-                }
-                if let shuffle {
-                    Button(action: shuffle) { Image(systemName: "shuffle").font(.system(size: 15, weight: .semibold)) }
-                        .buttonStyle(.glass)
-                        .buttonBorderShape(.circle)
-                        .accessibilityLabel("Shuffle")
-                }
-            }
-            .padding(.leading, 20)
-            .padding(.trailing, 13)
-            .padding(.bottom, 6)
-        }
-        .padding(.top, detailTopGap)
-    }
-}
-
-struct PlaylistsView: View {
-    @Environment(Session.self) private var session
-    @State private var playlists: [Playlist] = []
-    @State private var failure: String?
+    @Environment(Library.self) private var library
+    @Environment(Downloads.self) private var downloads
+    @Environment(Router.self) private var router
+    @State private var recent: [LibraryAlbum] = []
 
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                ListHeader(title: "Playlists", count: playlists.count == 1 ? "1 playlist" : "\(playlists.count) playlists")
-                if let failure, playlists.isEmpty { LoadFailed(message: failure) { await load() } }
-                ForEach(playlists.filter { $0.octoList == nil }) { playlist in
-                    NavigationLink(value: Route.playlist(playlist)) {
-                        HStack(spacing: 14) {
-                            Cover(id: playlist.coverArt, size: 56, radius: OctoRadius.artS)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(playlist.name).font(.octoBodySmall).foregroundStyle(.white).lineLimit(1)
-                                Text(playlist.songCount == 1 ? "1 song" : "\(playlist.songCount) songs")
-                                    .font(.octoCaption).foregroundStyle(OctoColor.textMuted)
+                ScreenTitle("Library").bigTitle()
+                ForEach(Array(librarySections.enumerated()), id: \.offset) { index, section in
+                    if index > 0 { LibraryHairline() }
+                    NavigationLink(value: section.route) {
+                        SectionRow(icon: section.icon, label: section.label)
+                    }
+                    .buttonStyle(SqueezeStyle())
+                }
+                if downloads.keepsLog {
+                    LibraryHairline()
+                    Button { router.showServerDownloads() } label: {
+                        SectionRow(icon: .cloud, label: "Server downloads",
+                                   detail: downloads.asked.isEmpty ? nil : "\(downloads.asked.count) on the way")
+                    }
+                    .buttonStyle(SqueezeStyle())
+                }
+                if !recent.isEmpty {
+                    SectionTitle("Recently added").padding(.top, 24)
+                    ForEach(Array(stride(from: 0, to: recent.count, by: 2)), id: \.self) { start in
+                        HStack(alignment: .top, spacing: 14) {
+                            GridAlbumCard(album: recent[start])
+                            if start + 1 < recent.count {
+                                GridAlbumCard(album: recent[start + 1])
+                            } else {
+                                Color.clear.frame(maxWidth: .infinity)
                             }
-                            Spacer()
                         }
                         .padding(.horizontal, 20)
-                        .frame(minHeight: 72)
-                        .contentShape(Rectangle())
+                        .padding(.vertical, 9)
                     }
-                    .buttonStyle(PressSqueeze())
                 }
             }
         }
+        .inlineTitle("Library")
         .barClearance()
-        .refreshable { await load() }
-        .task { await load() }
-    }
-
-    private func load() async {
-        do { playlists = try await session.client?.playlists() ?? [] } catch { failure = error.localizedDescription }
+        .libraryRefreshable {}
+        .task(id: library.stamp(.library)) { recent = await library.recentAlbums(limit: 20) }
     }
 }
 
-struct ArtistsView: View {
-    @Environment(Session.self) private var session
-    @State private var artists: [Artist] = []
-    @State private var failure: String?
+/// One row of the front page's menu: an accent icon, the label, an optional detail and a chevron.
+private struct SectionRow: View {
+    let icon: OctoIcon
+    let label: String
+    var detail: String?
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
-                ListHeader(title: "Artists", count: artists.count == 1 ? "1 artist" : "\(artists.count.formatted()) artists")
-                if let failure, artists.isEmpty { LoadFailed(message: failure) { await load() } }
-                ForEach(groups, id: \.letter) { group in
-                    Section {
-                        ForEach(group.artists) { artist in
-                            NavigationLink(value: Route.artist(id: artist.id, name: artist.name)) {
-                                HStack(spacing: 14) {
-                                    Cover(id: artist.coverArt, size: 48, radius: 24)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(artist.name).font(.octoBodySmall).foregroundStyle(.white).lineLimit(1)
-                                        Text(artist.albumCount == 1 ? "1 album" : "\(artist.albumCount) albums")
-                                            .font(.octoCaption).foregroundStyle(OctoColor.textMuted)
-                                    }
-                                    Spacer()
-                                }
-                                .padding(.horizontal, 20)
-                                .frame(minHeight: 64)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(PressSqueeze())
-                        }
-                    } header: {
-                        Text(group.letter)
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(OctoColor.textMuted)
-                            .frame(minWidth: 26, minHeight: 26)
-                            .background(.black.opacity(0.55), in: Capsule())
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 4)
+        HStack(spacing: 16) {
+            IconView(icon, size: 24, color: OctoColor.accent)
+            Text(label).font(.octoBody).foregroundStyle(.white).frame(maxWidth: .infinity, alignment: .leading)
+            if let detail { Text(detail).font(.octoCaption).foregroundStyle(OctoColor.textMuted) }
+            IconView(.chevron, size: 22, color: OctoColor.textMuted)
+        }
+        .padding(.horizontal, 20)
+        .frame(height: 52)
+        .contentShape(Rectangle())
+    }
+}
+
+/// A hairline between menu rows, starting under the labels.
+struct LibraryHairline: View {
+    var leading: CGFloat = 60
+    var trailing: CGFloat = 20
+
+    var body: some View {
+        Rectangle().fill(LibraryLook.hairline).frame(height: 1).padding(.leading, leading).padding(.trailing, trailing)
+    }
+}
+
+// MARK: Shared list page frame
+
+/// The play line under a list page's title: the count, room for one quiet action, then the small
+/// Play pill and Shuffle button.
+struct ListPlayLine<Extra: View>: View {
+    let count: String
+    let play: () -> Void
+    let shuffle: () -> Void
+    @ViewBuilder var extra: Extra
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(count)
+                .font(.octoCaption)
+                .foregroundStyle(OctoColor.textMuted)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            // The buttons keep their words whole; the count gives way first.
+            extra.fixedSize()
+            PlayPills(play: play, shuffle: shuffle).fixedSize()
+        }
+        .padding(.leading, 20)
+        .padding(.trailing, 13)
+        .padding(.bottom, 6)
+    }
+}
+
+extension ListPlayLine where Extra == EmptyView {
+    init(count: String, play: @escaping () -> Void, shuffle: @escaping () -> Void) {
+        self.init(count: count, play: play, shuffle: shuffle) { EmptyView() }
+    }
+}
+
+/// Runs of rows under their letters, for a list ordered by name.
+struct LetterRuns<Item, Row: View>: View {
+    let items: [Item]
+    let headings: [String]?
+    let id: (Item) -> String
+    @ViewBuilder let row: (Int, Item) -> Row
+
+    /// One row's place in the list and its id.
+    private struct Entry: Identifiable {
+        let position: Int
+        let id: String
+    }
+
+    private func entries(_ positions: Range<Int>) -> [Entry] {
+        positions.map { Entry(position: $0, id: id(items[$0])) }
+    }
+
+    var body: some View {
+        if let headings, headings.count == items.count {
+            let runs = letterRuns(headings)
+            ForEach(Array(runs.enumerated()), id: \.offset) { index, run in
+                Section {
+                    ForEach(entries(run.start..<(run.start + run.count))) { entry in
+                        row(entry.position, items[entry.position]).id(entry.id)
                     }
+                } header: {
+                    LetterHeading(letter: run.letter).plainListRow().id("run-\(index)")
                 }
             }
-        }
-        .barClearance()
-        .task { if artists.isEmpty { await load() } }
-    }
-
-    private var groups: [(letter: String, artists: [Artist])] {
-        Dictionary(grouping: artists) { artist -> String in
-            let first = artist.name.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil).first.map(String.init)?.uppercased() ?? "#"
-            return first.range(of: "^[A-Z]$", options: .regularExpression) == nil ? "#" : first
-        }
-        .map { ($0.key, $0.value) }
-        .sorted { $0.letter == "#" ? false : ($1.letter == "#" ? true : $0.letter < $1.letter) }
-    }
-
-    private func load() async {
-        do {
-            artists = try await session.client?.artists() ?? []
-        } catch {
-            failure = error.localizedDescription
+        } else {
+            ForEach(entries(items.indices)) { entry in
+                row(entry.position, items[entry.position]).id(entry.id)
+            }
         }
     }
 }
 
-/// Every album, A to Z, a page at a time.
+/// Where the letter rail jumps in a list with headings: each letter's first run.
+func railTargets(_ headings: [String]?) -> [RailStop] {
+    guard let headings else { return [] }
+    var seen = Set<Character>()
+    return letterRuns(headings).enumerated().compactMap { index, run in
+        seen.insert(run.letter).inserted ? RailStop(run.letter, index) : nil
+    }
+}
+
+extension View {
+    /// The letter rail beside a long list ordered by name, clear of the floating bar.
+    func letterRail(_ headings: [String]?, count: Int, byName: Bool, jump: @escaping (Int) -> Void) -> some View {
+        overlay(alignment: .trailing) {
+            if byName, count >= railMinItems, let headings {
+                LetterRail(stops: railTargets(headings), jump: jump)
+                    .padding(.top, 8)
+                    .padding(.bottom, 132)
+            }
+        }
+    }
+}
+
+// MARK: Albums
+
+/// Every album, as a grid of covers, in the chosen order.
 struct AlbumsView: View {
-    @Environment(Session.self) private var session
-    @Environment(Player.self) private var player
-    @State private var albums: [Album] = []
-    @State private var done = false
-    @State private var loading = false
-    @State private var failure: String?
+    @Environment(Library.self) private var library
+    @Environment(LibraryState.self) private var state
+    @Environment(LibraryActions.self) private var actions
+    @Environment(Router.self) private var router
+    @State private var sorted: Sorted<LibraryAlbum>?
 
     private let columns = [GridItem(.adaptive(minimum: 150), spacing: 14)]
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                ListHeader(title: "Albums", count: albums.count == 1 ? "1 album" : "\(albums.count.formatted()) albums")
-                if let failure, albums.isEmpty { LoadFailed(message: failure) { await more() } }
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 18) {
-                    ForEach(albums) { album in
-                        GeometryReader { box in AlbumCard(album: album, width: box.size.width) }
-                            .aspectRatio(0.78, contentMode: .fit)
-                            .onAppear { if album.id == albums.last?.id { Task { await more() } } }
+        let order = state.order(.albums)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    TitleWithButtons(title: "Albums") { SortButton(list: .albums) }
+                        .padding(.top, detailTopGap)
+                        .bigTitle()
+                    if let sorted {
+                        if sorted.items.isEmpty {
+                            EmptyLibraryNote()
+                        } else {
+                            ListPlayLine(count: countText(sorted.items.count, "album", "albums")) {
+                                playAll(sorted.items, shuffled: false)
+                            } shuffle: {
+                                Task { actions.play(await library.tracks(), shuffled: true) }
+                            } extra: {
+                                QuietButton("Random album") {
+                                    if let album = sorted.items.randomElement() { router.go(.album(album.asAlbum)) }
+                                }
+                            }
+                            LazyVGrid(columns: columns, alignment: .leading, spacing: 18) {
+                                ForEach(sorted.items) { album in GridAlbumCard(album: album).id(album.id) }
+                            }
+                            .padding(.horizontal, 20)
+                            .padding(.top, 4)
+                            .padding(.bottom, 140)
+                            .animation(.easeOut(duration: 0.25), value: sorted.items.map(\.id))
+                        }
+                    } else {
+                        LibrarySpinner()
                     }
+                }
+            }
+            .letterRail(sorted?.headings, count: sorted?.items.count ?? 0, byName: order.by.byName) { index in
+                if let items = sorted?.items, let headings = sorted?.headings {
+                    let runs = letterRuns(headings)
+                    if runs.indices.contains(index) { proxy.scrollTo(items[runs[index].start].id, anchor: .top) }
+                }
+            }
+            .onChange(of: order) { _, _ in if let first = sorted?.items.first { proxy.scrollTo(first.id, anchor: .top) } }
+        }
+        .barClearance()
+        .inlineTitle("Albums")
+        .libraryRefreshable {}
+        .task(id: "\(library.stamp(.library, .plays))|\(order.by.id)|\(order.descending)") {
+            sorted = await library.sortedAlbums(order)
+        }
+    }
+
+    /// Plays every album in the order shown, each album's songs in album order.
+    private func playAll(_ albums: [LibraryAlbum], shuffled: Bool) {
+        Task {
+            let places = await library.trackPlaces()
+            let ids = songsInGroupOrder(places, groupOf: \.albumId, groups: albums.map(\.id))
+            actions.play(await library.tracks(ids: ids), shuffled: shuffled)
+        }
+    }
+}
+
+// MARK: Artists
+
+/// Every artist, in the chosen order, under letters when by name.
+struct ArtistsView: View {
+    @Environment(Library.self) private var library
+    @Environment(LibraryState.self) private var state
+    @Environment(LibraryActions.self) private var actions
+    @State private var sorted: Sorted<LibraryArtist>?
+
+    var body: some View {
+        let order = state.order(.artists)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
+                    TitleWithButtons(title: "Artists") { SortButton(list: .artists) }
+                        .padding(.top, detailTopGap)
+                        .bigTitle()
+                    if let sorted {
+                        if sorted.items.isEmpty {
+                            EmptyLibraryNote()
+                        } else {
+                            ListPlayLine(count: countText(sorted.items.count, "artist", "artists")) {
+                                playAll(sorted.items)
+                            } shuffle: {
+                                Task { actions.play(await library.tracks(), shuffled: true) }
+                            }
+                            LetterRuns(items: sorted.items, headings: sorted.headings, id: \.id) { _, artist in
+                                ArtistRow(artist: artist)
+                            }
+                            Color.clear.frame(height: 140)
+                        }
+                    } else {
+                        LibrarySpinner()
+                    }
+                }
+            }
+            .letterRail(sorted?.headings, count: sorted?.items.count ?? 0, byName: order.by.byName) { index in
+                proxy.scrollTo("run-\(index)", anchor: .top)
+            }
+            .onChange(of: order) { _, _ in if let first = sorted?.items.first { proxy.scrollTo(first.id, anchor: .top) } }
+        }
+        .barClearance()
+        .inlineTitle("Artists")
+        .libraryRefreshable {}
+        .task(id: "\(library.stamp(.library, .plays))|\(order.by.id)|\(order.descending)") {
+            sorted = await library.sortedArtists(order)
+        }
+    }
+
+    /// Plays every artist in the order shown, artist by artist, each album by album.
+    private func playAll(_ artists: [LibraryArtist]) {
+        Task {
+            let places = await library.trackPlaces()
+            let ids = songsInGroupOrder(places, groupOf: \.artistId, groups: artists.map(\.id))
+            actions.play(await library.tracks(ids: ids))
+        }
+    }
+}
+
+// MARK: Favorites
+
+/// Favorites: hearted songs, albums and artists, in three segments.
+struct FavoritesView: View {
+    var opening: FavoriteSegment?
+    @Environment(Library.self) private var library
+    @Environment(LibraryState.self) private var state
+    @Environment(LibraryActions.self) private var actions
+    @Environment(Router.self) private var router
+    @State private var segment: FavoriteSegment?
+    @State private var songs: [LibraryTrack]?
+    @State private var albums: [LikedAlbum]?
+    @State private var artists: [LikedArtist]?
+
+    private let columns = [GridItem(.adaptive(minimum: 150), spacing: 14)]
+
+    /// Liked songs sit in a list, for their swipes; albums and artists in a plain scroll.
+    var body: some View {
+        ScrollViewReader { proxy in
+            Group {
+                if segment == .songs {
+                    LibraryList {
+                        top
+                        songsSegment
+                        Color.clear.frame(height: 20)
+                    }
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            top
+                            switch segment {
+                            case .albums: albumsSegment
+                            case .artists: artistsSegment
+                            case .songs, nil: LibrarySpinner()
+                            }
+                        }
+                    }
+                }
+            }
+            .onChange(of: state.order(.liked)) { _, _ in proxy.scrollTo("liked-top", anchor: .top) }
+        }
+        .barClearance()
+        .inlineTitle("Favorites")
+        .backStopsPicking()
+        .selectableSongs(state.pickables(songs ?? []))
+        .libraryRefreshable {}
+        .task(id: "\(library.stamp(.library, .likes, .favorites))|\(state.order(.liked).by.id)|\(state.order(.liked).descending)|\(state.order(.favorites).by.id)|\(state.order(.favorites).descending)") {
+            await read()
+        }
+    }
+
+    /// The title with its sort button, then the segments.
+    @ViewBuilder
+    private var top: some View {
+        TitleWithButtons(title: "Favorites") {
+            switch segment {
+            case .songs: SortButton(list: .liked)
+            case .albums, .artists: SortButton(list: .favorites)
+            case nil: EmptyView()
+            }
+        }
+        .padding(.top, detailTopGap)
+        .bigTitle()
+        if let segment {
+            GlassSegments(options: FavoriteSegment.allCases.map { ($0, $0.rawValue) },
+                          selection: Binding(get: { segment }, set: { self.segment = $0 }))
+                .padding(.horizontal, 20)
+                .padding(.bottom, 12)
+        }
+    }
+
+    private func read() async {
+        let liked = await library.likedTracks()
+        let order = state.order(.liked)
+        if let sorted = try? await library.store.tracks(sql: songQuery(order.by.song ?? .dateLiked, descending: order.descending, scope: .liked).sql) {
+            songs = sorted.map(\.track)
+        } else {
+            songs = liked
+        }
+        let favorites = state.order(.favorites)
+        albums = sortFavorites(await library.likedAlbums(), order: favorites, likedAt: \.likedAt, name: { $0.album.sortKey }, id: { $0.album.id })
+        artists = sortFavorites(await library.likedArtists(), order: favorites, likedAt: \.likedAt, name: { $0.artist.sortKey }, id: { $0.artist.id })
+        if segment == nil {
+            segment = opening ?? firstSegment(songs: songs?.count ?? 0, albums: albums?.count ?? 0, artists: artists?.count ?? 0)
+        }
+    }
+
+    @ViewBuilder
+    private var songsSegment: some View {
+        if let songs {
+            if songs.isEmpty {
+                MutedNote("No liked songs yet. Tap the heart in the player to add the song that is playing, or long press any song and choose Add to Liked songs.")
+            } else {
+                ListPlayLine(count: countText(songs.count, "song", "songs")) {
+                    actions.play(songs)
+                } shuffle: {
+                    actions.play(songs, shuffled: true)
+                }
+                .padding(.bottom, 6)
+                Color.clear.frame(height: 0).id("liked-top")
+                ForEach(Array(songs.enumerated()), id: \.element.id) { position, track in
+                    TrackRow(track: track, swipe: .remove { unlike(track) }) {
+                        actions.play(songs, from: position)
+                    }
+                }
+            }
+        } else {
+            LibrarySpinner()
+        }
+    }
+
+    /// Unlikes at once, with an Undo that likes it again at its own time, so it returns to its place.
+    private func unlike(_ track: LibraryTrack) {
+        songs?.removeAll { $0.id == track.id }
+        actions.unlikeUndoable(track)
+    }
+
+    @ViewBuilder
+    private var albumsSegment: some View {
+        if let albums {
+            if albums.isEmpty {
+                MutedNote("Heart an album from its page or its menu to keep it here.")
+            } else {
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 18) {
+                    ForEach(albums, id: \.album.id) { liked in GridAlbumCard(album: liked.album) }
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 4)
+                .padding(.bottom, 140)
             }
+        } else {
+            LibrarySpinner()
         }
-        .barClearance()
-        .task { if albums.isEmpty { await more() } }
     }
 
-    private func more() async {
-        guard !loading, !done, let client = session.client else { return }
-        loading = true
-        defer { loading = false }
-        do {
-            let page = try await client.albumList(.alphabetical, size: 120, offset: albums.count)
-            albums += page
-            done = page.count < 120
-        } catch {
-            failure = error.localizedDescription
+    @ViewBuilder
+    private var artistsSegment: some View {
+        if let artists {
+            if artists.isEmpty {
+                MutedNote("Heart an artist from their page or their menu to keep them here.")
+            } else {
+                ForEach(artists, id: \.artist.id) { liked in ArtistRow(artist: liked.artist) }
+            }
+        } else {
+            LibrarySpinner()
         }
     }
 }
 
-/// Favorites: songs, albums and artists hearted, in three segments.
-struct FavoritesView: View {
-    @Environment(Session.self) private var session
-    @Environment(Player.self) private var player
-    @State private var starred = SearchResult()
-    @State private var segment = 0
-    @State private var loaded = false
+// MARK: Reading sorted lists
 
-    private let columns = [GridItem(.adaptive(minimum: 150), spacing: 14)]
-
-    var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                Text("Favorites").font(.octoDisplay).tracking(-0.5).padding(.horizontal, 20).padding(.top, detailTopGap)
-                Picker("", selection: $segment) {
-                    Text("Songs").tag(0)
-                    Text("Albums").tag(1)
-                    Text("Artists").tag(2)
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
-                switch segment {
-                case 0:
-                    if starred.song.isEmpty, loaded {
-                        empty("No liked songs yet. Tap the heart in the player to add the song that is playing, or long press any song and choose Add to Liked songs.")
-                    } else {
-                        HStack {
-                            Text(starred.song.count == 1 ? "1 song" : "\(starred.song.count) songs").font(.octoCaption).foregroundStyle(OctoColor.textMuted)
-                            Spacer()
-                            PlayButtons(songs: starred.song).frame(maxWidth: 240)
-                        }
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 8)
-                        ForEach(Array(starred.song.enumerated()), id: \.offset) { position, song in
-                            SongRow(song: song, list: starred.song, position: position)
-                        }
-                    }
-                case 1:
-                    if starred.album.isEmpty, loaded {
-                        empty("Heart an album from its page or its menu to keep it here.")
-                    } else {
-                        LazyVGrid(columns: columns, alignment: .leading, spacing: 18) {
-                            ForEach(starred.album) { album in
-                                GeometryReader { box in AlbumCard(album: album, width: box.size.width) }
-                                    .aspectRatio(0.78, contentMode: .fit)
-                            }
-                        }
-                        .padding(.horizontal, 20)
-                    }
-                default:
-                    if starred.artist.isEmpty, loaded {
-                        empty("Heart an artist from their page or their menu to keep them here.")
-                    } else {
-                        ForEach(starred.artist) { artist in
-                            NavigationLink(value: Route.artist(id: artist.id, name: artist.name)) {
-                                HStack(spacing: 14) {
-                                    Cover(id: artist.coverArt, size: 48, radius: 24)
-                                    Text(artist.name).font(.octoBodySmall).foregroundStyle(.white)
-                                    Spacer()
-                                }
-                                .padding(.horizontal, 20)
-                                .frame(minHeight: 64)
-                            }
-                            .buttonStyle(PressSqueeze())
-                        }
-                    }
-                }
-            }
+extension Library {
+    /// Every song in an order, by the order's SQL, then by plays for the play orders.
+    func sortedSongs(_ order: ListOrder, scope: SongScope = .all) async -> Sorted<LibraryTrack> {
+        let sort = order.by.song ?? .title
+        let query = songQuery(sort, descending: order.descending, scope: scope)
+        let rows = (try? await store.tracks(sql: query.sql, args: query.args)) ?? []
+        let tracks = rows.map(\.track)
+        if sort.byListening {
+            let listening = songListening(await playedTracks())
+            return Sorted(items: byListening(tracks, id: \.id, listening: listening, mostPlayed: sort == .mostPlayed,
+                                             descending: order.descending), order: order, headings: nil)
         }
-        .barClearance()
-        .refreshable { await load() }
-        .task { await load() }
+        return Sorted(items: tracks, order: order, headings: sort.byName ? rows.map { $0.heading ?? "" } : nil)
     }
 
-    private func empty(_ text: String) -> some View {
-        Text(text)
-            .font(.octoBodySmall)
-            .foregroundStyle(OctoColor.textMuted)
-            .padding(20)
+    func sortedAlbums(_ order: ListOrder, artistId: String? = nil) async -> Sorted<LibraryAlbum> {
+        let sort = order.by.album ?? .title
+        let query = albumQuery(sort, descending: order.descending, artistId: artistId)
+        let rows = (try? await store.albums(sql: query.sql, args: query.args)) ?? []
+        let albums = rows.map(\.album)
+        if sort.byListening {
+            let listening = albumListening(await playedTracks(), await playedAlbums())
+            return Sorted(items: byListening(albums, id: \.id, listening: listening, mostPlayed: sort == .mostPlayed,
+                                             descending: order.descending), order: order, headings: nil)
+        }
+        return Sorted(items: albums, order: order, headings: sort.byName ? rows.map { $0.heading ?? "" } : nil)
     }
 
-    private func load() async {
-        starred = (try? await session.client?.starred()) ?? starred
-        if !loaded {
-            segment = !starred.song.isEmpty ? 0 : (!starred.album.isEmpty ? 1 : (!starred.artist.isEmpty ? 2 : 0))
+    func sortedArtists(_ order: ListOrder) async -> Sorted<LibraryArtist> {
+        let sort = order.by.artist ?? .name
+        let query = artistQuery(sort, descending: order.descending)
+        let rows = (try? await store.artists(sql: query.sql, args: query.args)) ?? []
+        let artists = rows.map(\.artist)
+        if sort.byListening {
+            let listening = artistListening(await playedTracks())
+            return Sorted(items: byListening(artists, id: \.id, listening: listening, mostPlayed: sort == .mostPlayed,
+                                             descending: order.descending), order: order, headings: nil)
         }
-        loaded = true
+        return Sorted(items: artists, order: order, headings: sort.byName ? rows.map { $0.heading ?? "" } : nil)
     }
 }

@@ -9,3 +9,7 @@ extensions:
     bundleID: app.winters.octo.share
     infoPath: OctoShare-Info.plist
     entitlementsPath: OctoShare.entitlements
+  - product: OctoWidgets
+    bundleID: app.winters.octo.widgets
+    infoPath: OctoWidgets-Info.plist
+    entitlementsPath: OctoWidgets.entitlements

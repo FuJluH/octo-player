@@ -258,7 +258,7 @@ struct LiveListEditView: View {
                             .frame(minHeight: 64)
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(PressSqueeze())
+                        .buttonStyle(SqueezeStyle())
                     }
                 }
                 if picked != nil {

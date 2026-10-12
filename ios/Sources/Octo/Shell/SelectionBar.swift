@@ -68,6 +68,10 @@ final class SelectionActions {
     var deletableFromDisk: (([Song]) async -> [String])?
     /// Asks before deleting these songs from the server's disk.
     var askDeleteFromDisk: (([Song]) -> Void)?
+    /// Likes or unlikes these library songs, and says whether a song is liked. When not given,
+    /// the server is asked directly and the song's own star is read.
+    var setLiked: (([Song], Bool) -> Void)?
+    var isLiked: ((Song) -> Bool)?
 }
 
 extension EnvironmentValues {
@@ -161,7 +165,7 @@ private struct SelectionBar: View {
         let picked = target.picked()
         let songs = picked.map(\.song)
         let library = songs.filter { !$0.isExternal }
-        let allLiked = !library.isEmpty && library.allSatisfy(\.isStarred)
+        let allLiked = !library.isEmpty && library.allSatisfy { actions.isLiked?($0) ?? $0.isStarred }
         let canDownload = actions.download != nil && library.contains { !actions.onPhone($0) }
         let allOnPhone = !picked.isEmpty && songs.allSatisfy { !$0.isExternal && actions.onPhone($0) }
         let allOnDisk = !library.isEmpty && library.count == songs.count && onDisk.count == library.count
@@ -242,6 +246,10 @@ private struct SelectionBar: View {
 
     /// Likes every song, or takes the like off every one, touching only those that differ.
     private func setLiked(_ songs: [Song], like: Bool) {
+        if let set = actions.setLiked {
+            set(songs, like)
+            return
+        }
         guard let client = session.client else { return }
         let changing = songs.filter { $0.isStarred != like }
         Task {

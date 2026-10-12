@@ -11,6 +11,7 @@ struct NowPlayingView: View {
     @Environment(Player.self) private var player
     @Environment(Session.self) private var session
     @Environment(Router.self) private var router
+    @Environment(LibraryActions.self) private var libraryActions
     @Environment(LyricsStore.self) private var lyrics
     @Environment(ArtworkColorStore.self) private var colorStore
     @Environment(Library.self) private var library
@@ -336,10 +337,18 @@ struct NowPlayingView: View {
         }
     }
 
+    /// The song playing as the song menu takes it.
+    private var menuSubject: SongSubject? {
+        player.current.map { SongSubject(track: libraryActions.state.provisional($0), song: $0) }
+    }
+
+    /// The song menu for the song playing, the same one every song row opens.
     private var moreButton: some View {
         Menu {
-            if let song = player.current {
-                PlayerSongMenu(song: song, facts: facts, airPlay: airPlay) { route in close { router.go(route) } }
+            if let menuSubject {
+                SongMenuItems(subject: menuSubject) {
+                    PlayerMenuExtras(airPlay: airPlay) { route in close { router.go(route) } }
+                }
             }
         } label: {
             IconView(.more, size: 24, color: ink.opacity(0.6))
@@ -347,6 +356,7 @@ struct NowPlayingView: View {
                 .contentShape(Rectangle())
         }
         .menuOrder(.fixed)
+        .disabled(menuSubject == nil)
         .accessibilityLabel("More")
     }
 
@@ -552,6 +562,8 @@ struct NowPlayingView: View {
             openSleep(.sleep)
         case "speed": showsSpeed = true
         case "speedpage": openSleep(.speed)
+        case "more", "rate":
+            if let menuSubject { libraryActions.previewMenu(.song(menuSubject)) }
         case "timing":
             if !lyrics.open { toggleLyrics() }
             // The lyrics bar comes in with the lyrics; its popover opens once it is there.

@@ -83,6 +83,8 @@ final class Player {
     @ObservationIgnored var announce: (String) -> Void = { _ in }
     /// The car's browse tree, told when the library changes.
     @ObservationIgnored var onLibraryChanged: (() -> Void)?
+    /// Told when Close takes the music off the lock screen, for the home screen widget.
+    @ObservationIgnored var onClose: (() -> Void)?
     /// The car's now playing screen, told when the heart beside the song changes.
     @ObservationIgnored var onHeartChange: ((NotificationHeart) -> Void)? {
         get { nowPlaying.onHeartChange }
@@ -319,6 +321,7 @@ final class Player {
         engine.pause()
         engine.output.stopNow()
         nowPlaying.clear()
+        onClose?()
     }
 
     /// Next always moves on, even when repeating one song.

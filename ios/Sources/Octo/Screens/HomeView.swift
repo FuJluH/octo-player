@@ -260,6 +260,6 @@ private struct PinnedCard<Picture: View>: View {
             .frame(width: 150, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .buttonStyle(PressSqueeze(amount: 0.97))
+        .buttonStyle(PressScale(scale: 0.97))
     }
 }

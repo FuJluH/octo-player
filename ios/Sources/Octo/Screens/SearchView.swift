@@ -192,19 +192,15 @@ struct SearchView: View {
 
     private func resultsList(_ found: LibraryResults, _ online: DiscoverState) -> some View {
         ScrollViewReader { proxy in
-            ScrollView {
+            // A list, so the song rows take the system's swipes.
+            LibraryList {
                 Color.clear.frame(height: 0).id("top")
                 if model.filter == .all {
-                    VStack(alignment: .leading, spacing: 0) {
-                        everything(found)
-                        tail(found, online)
-                    }
+                    everything(found)
                 } else {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        oneKind(found)
-                        tail(found, online)
-                    }
+                    oneKind(found)
                 }
+                tail(found, online)
             }
             .contentMargins(.top, 12, for: .scrollContent)
             .barClearance()

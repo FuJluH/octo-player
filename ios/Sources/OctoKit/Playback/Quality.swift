@@ -58,7 +58,8 @@ public func audioQuality(codecMime: String?, fileMime: String?, bitDepth: Int?, 
     return AudioQuality(codec: codec, lossless: false, hiRes: false, specs: specs, songRate: rate)
 }
 
-private func codecName(_ mime: String?) -> String? {
+/// A codec's name from a MIME type, as the quality badge names it.
+public func codecName(_ mime: String?) -> String? {
     switch mime?.lowercased() {
     case nil: nil
     case "audio/flac", "audio/x-flac": "FLAC"

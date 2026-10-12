@@ -33,6 +33,10 @@ import UIKit
 /// - `glow:off`, `glow:subtle`, `glow:rich` sets the artwork's glow
 /// - `select:N` picks N songs of the queue (or of a sample list), showing the selection bar;
 ///   `unselect` ends the picking
+/// - library steps (see `LibraryDrive`): `page:NAME`, `album:NAME`, `artist:NAME`, `playlist:NAME`,
+///   `genre:NAME`, `menu:KIND` (song, album, artist, playlist; `menu:KIND=NAME`), `info:TITLE`,
+///   `sort:LIST:OPTION:asc|desc`, `pick:COUNT` (picks songs on the open library page),
+///   `songs-search:TEXT`
 /// - `sound`, `sound:graphic`, `sound:parametric`, `sound:preset:NAME`, `sound:editor`,
 ///   `sound:save`, `sound:own:NAME`, `sound:delete:NAME`, `sound:card:NAME`, `sound:eq:on|off`,
 ///   `sound:each:on|off`
