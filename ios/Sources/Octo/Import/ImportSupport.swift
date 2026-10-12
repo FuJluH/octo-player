@@ -3,6 +3,7 @@ import Network
 import Observation
 import OctoKit
 import SafariServices
+import ShareInbox
 import UIKit
 import UniformTypeIdentifiers
 
@@ -30,15 +31,8 @@ enum ImportFiles {
     static func read(_ url: URL) -> ImportFileRead {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return .unreadable }
-        defer { try? handle.close() }
-        var data = Data()
-        while true {
-            guard let chunk = try? handle.read(upToCount: 64 * 1024) else { return .unreadable }
-            if chunk.isEmpty { return .bytes(data) }
-            data.append(chunk)
-            if Int64(data.count) > importFileMaxBytes { return .tooBig }
-        }
+        guard let read = ShareInbox.read(url) else { return .unreadable }
+        return read.tooBig ? .tooBig : .bytes(read.bytes)
     }
 
     /// The type the system gives a file, by its ending.

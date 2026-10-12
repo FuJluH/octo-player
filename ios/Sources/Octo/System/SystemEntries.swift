@@ -1,6 +1,7 @@
 import AVFoundation
 import Observation
 import OctoKit
+import ShareInbox
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
@@ -37,18 +38,37 @@ final class SystemEntries {
     func open(_ url: URL) {
         if url.isFileURL {
             openFile(url)
+        } else if url.scheme?.lowercased() == "octo", url.host?.lowercased() == "import" {
+            takeShared()
         } else if let link = parseFamilyLink(url.absoluteString) {
             family.open(.join(link))
         }
     }
 
+    /// A list "Share to Octo" left in the inbox goes to Import, once.
+    func takeShared() {
+        guard let inbox = OctoAppGroup.inbox(), inbox.waiting, let (drop, bytes) = inbox.take(),
+              let share = Self.sharedImport(drop, bytes: bytes) else { return }
+        accounts.imports.offer(share)
+        router.openInSettings(.imports)
+    }
+
+    /// What Import takes from a share: a file read up to the limit, or the text itself named by
+    /// the share's subject.
+    static func sharedImport(_ drop: ShareDrop, bytes: Data?) -> SharedImport? {
+        switch drop.kind {
+        case .file:
+            let read: ImportFileRead = drop.tooBig ? .tooBig : bytes.map(ImportFileRead.bytes) ?? .unreadable
+            return .file(read, name: drop.name, type: drop.type)
+        case .text:
+            return sharedText(drop.text, subject: drop.name)
+        }
+    }
+
     private func openFile(_ url: URL) {
-        let scoped = url.startAccessingSecurityScopedResource()
         let type = UTType(filenameExtension: url.pathExtension.lowercased())
         if let type, importFileTypes.contains(where: { type.conforms(to: $0) }) {
-            let read = readShared(url)
-            if scoped { url.stopAccessingSecurityScopedResource() }
-            accounts.imports.offer(.file(read, name: url.lastPathComponent, type: type.preferredMIMEType))
+            accounts.imports.offer(.file(ImportFiles.read(url), name: url.lastPathComponent, type: type.preferredMIMEType))
             router.openInSettings(.imports)
             return
         }
@@ -58,19 +78,6 @@ final class SystemEntries {
 
     /// The list types Import takes from another app.
     private let importFileTypes: [UTType] = [.commaSeparatedText, .plainText, .json, .zip]
-
-    /// A shared list file, read up to the limit; nil for one over it or unreadable.
-    private func readShared(_ url: URL) -> ImportFileRead {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return .unreadable }
-        defer { try? handle.close() }
-        var data = Data()
-        while true {
-            guard let chunk = try? handle.read(upToCount: 64 * 1024) else { return .unreadable }
-            if chunk.isEmpty { return .bytes(data) }
-            data.append(chunk)
-            if Int64(data.count) > importFileMaxBytes { return .tooBig }
-        }
-    }
 
     /// Plays a file opened from another app: its tags give its title and artist; one that cannot
     /// be read says so.
@@ -267,6 +274,7 @@ private struct SystemEntryHost: ViewModifier {
             .onChange(of: scenePhase, initial: true) { _, phase in
                 guard phase == .active, let entries = SystemEntries.shared else { return }
                 entries.publishShortcuts()
+                entries.takeShared()
                 entries.checkClipboard()
                 if let shortcut = entries.pendingShortcut {
                     entries.pendingShortcut = nil
