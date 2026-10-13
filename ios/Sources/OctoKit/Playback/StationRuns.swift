@@ -23,9 +23,12 @@ public func offersStationSongs(_ extensions: some Sequence<String>) -> Bool {
 }
 
 /// What a server list plays under: one of Octo's stations as a station that keeps going, any
-/// other list (a Made for you list) as a list with its name.
-public func serverListSource(id: String, name: String) -> QueueSource {
-    if id.hasPrefix(stationIdPrefix), !id.contains(":") { return .station(id: id, name: name) }
+/// other list (a Made for you list, a mix) as a list with its name. A list Octo says is of
+/// another kind than a station (`octoGroup`) is never one.
+public func serverListSource(id: String, name: String, octoGroup: String? = nil) -> QueueSource {
+    if id.hasPrefix(stationIdPrefix), !id.contains(":"), octoGroup == nil || octoGroup == "station" {
+        return .station(id: id, name: name)
+    }
     return .played(name.isEmpty ? nil : name)
 }
 

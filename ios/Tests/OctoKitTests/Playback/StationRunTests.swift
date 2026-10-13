@@ -41,6 +41,8 @@ import Testing
         #expect(serverListSource(id: "og5678", name: "Deep Cuts") == .played("Deep Cuts"))
         #expect(serverListSource(id: "og5678", name: "") == .none)
         #expect(serverListSource(id: "or:12", name: "Odd") == .played("Odd"))
+        #expect(serverListSource(id: "or1234", name: "Your Radio", octoGroup: "station") == .station(id: "or1234", name: "Your Radio"))
+        #expect(serverListSource(id: "or1234", name: "Rock Mix", octoGroup: "genre") == .played("Rock Mix"))
     }
 
     @Test func stationSongsAreOfferedByTheExtension() {

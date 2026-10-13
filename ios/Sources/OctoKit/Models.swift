@@ -257,11 +257,14 @@ public struct Playlist: Codable, Sendable, Hashable, Identifiable {
     public var octoNotice: String?
     /// Octo: shorter words for the list's cover than its name.
     public var octoCoverTitle: String?
+    /// Octo: what kind of list Octo made this ("genre", "decade", "year", "country", "artist",
+    /// "chart", "forYou", "liked", "station"), for grouping its lists.
+    public var octoGroup: String?
     /// Only on `getPlaylist`.
     public var entry: [Song]
 
     enum CodingKeys: String, CodingKey {
-        case id, name, comment, owner, songCount, duration, coverArt, readonly, octoList, octoNotice, octoCoverTitle, entry
+        case id, name, comment, owner, songCount, duration, coverArt, readonly, octoList, octoNotice, octoCoverTitle, octoGroup, entry
     }
 
     public init(from decoder: Decoder) throws {
@@ -277,6 +280,7 @@ public struct Playlist: Codable, Sendable, Hashable, Identifiable {
         octoList = c.string(.octoList)
         octoNotice = c.string(.octoNotice)
         octoCoverTitle = c.string(.octoCoverTitle)
+        octoGroup = c.string(.octoGroup)
         entry = (try? c.decodeIfPresent([Song].self, forKey: .entry)) ?? []
     }
 }

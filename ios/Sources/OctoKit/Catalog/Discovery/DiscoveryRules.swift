@@ -64,22 +64,31 @@ public struct OnlineArtist: Sendable, Hashable, Identifiable {
     }
 }
 
-/// A station the server runs, played as the list of songs it has lined up. A Made for you list is
-/// shown and played the same way, with its song count. An internet radio station added to the
-/// server has its stream instead.
+/// A station the server runs, played as the list of songs it has lined up. A Made for you list or
+/// a mix is shown and played the same way, with its song count, and `octoGroup` says what kind of
+/// list Octo made it. An internet radio station added to the server has its stream instead.
 public struct Station: Sendable, Hashable, Identifiable, Codable {
     public var id: String
     public var name: String
     public var artwork: String?
     public var songCount: Int?
     public var streamUrl: String?
+    public var octoGroup: String?
 
-    public init(id: String, name: String, artwork: String?, songCount: Int? = nil, streamUrl: String? = nil) {
+    public init(id: String, name: String, artwork: String?, songCount: Int? = nil, streamUrl: String? = nil, octoGroup: String? = nil) {
         self.id = id
         self.name = name
         self.artwork = artwork
         self.songCount = songCount
         self.streamUrl = streamUrl
+        self.octoGroup = octoGroup
+    }
+
+    /// One of the server's playlists Octo made, its cover drawn from its id when it has none of
+    /// its own.
+    public init(_ list: Playlist, sourceId: String) {
+        self.init(id: list.id, name: list.name, artwork: ArtworkRef.server(sourceId: sourceId, coverId: list.coverArt ?? list.id).encode(),
+                  songCount: list.songCount, octoGroup: list.octoGroup)
     }
 
     /// One of Octo's stations, its cover drawn from its id when it has none of its own.
@@ -181,11 +190,7 @@ public func madeForYouLists(_ playlists: [Playlist], sourceId: String) -> [Stati
             let ra = rank(a.element.octoList), rb = rank(b.element.octoList)
             return ra != rb ? ra < rb : a.offset < b.offset
         }
-        .map { _, list in
-            Station(id: list.id, name: list.name,
-                    artwork: ArtworkRef.server(sourceId: sourceId, coverId: list.coverArt ?? list.id).encode(),
-                    songCount: list.songCount)
-        }
+        .map { _, list in Station(list, sourceId: sourceId) }
 }
 
 // MARK: Search
