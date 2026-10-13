@@ -9,6 +9,8 @@ class WashClock(initialLimit: Float) {
     val fade = CoverFade()
     val rate = FrameRate(initialLimit)
     private var last = 0L
+    // The slot the last drawn frame filled (`nextSlot`).
+    private var slot = 0L
 
     // Whether there is anything to move: the motion, or a cover fading in.
     fun busy(moving: Boolean): Boolean = moving || fade.running
@@ -16,6 +18,7 @@ class WashClock(initialLimit: Float) {
     // The clock starts, or starts again after a rest, at this frame.
     fun start(nowNanos: Long) {
         last = nowNanos
+        slot = nowNanos
     }
 
     // One frame the screen offers. `target` is the frame rate wanted now
@@ -24,7 +27,8 @@ class WashClock(initialLimit: Float) {
     // drawn.
     fun tick(nowNanos: Long, target: Float, bpm: Float, speed: Float, moving: Boolean): Boolean {
         val elapsed = nowNanos - last
-        if (!frameDue(elapsed, rate.limit)) return false
+        if (!frameDue(nowNanos - slot, rate.limit)) return false
+        slot = nextSlot(slot, nowNanos, rate.limit)
         last = nowNanos
         val limit = rate.ease(target)
         if (moving) motion.step(frameFactor(bpm, limit) * framesElapsed(elapsed, limit) * speed, bpm, elapsed / 1e9f)
@@ -40,7 +44,7 @@ class WashClock(initialLimit: Float) {
     fun restNanos(nowNanos: Long): Long {
         val limit = rate.limit
         if (limit <= 0f) return 0L
-        val due = last + (1_000_000_000.0 / limit * 0.8).toLong()
+        val due = slot + (1_000_000_000.0 / limit * 0.8).toLong()
         return (due - nowNanos - RestMarginNanos).coerceAtLeast(0L)
     }
 }

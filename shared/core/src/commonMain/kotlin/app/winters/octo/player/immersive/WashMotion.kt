@@ -2,6 +2,7 @@ package app.winters.octo.player.immersive
 
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 
@@ -111,6 +112,23 @@ class FrameRate(initial: Float) {
 // a 60 Hz screen from skipping frames that arrive a hair early.
 fun frameDue(elapsedNanos: Long, limit: Float): Boolean =
     limit > 0f && elapsedNanos >= (1_000_000_000.0 / limit * 0.8).toLong()
+
+// The time slot, on this limit's even spacing, that a frame drawn at
+// `nowNanos` fills, given the slot of the frame before. When the screen's
+// rate is not a whole multiple of the limit (60 on a 90 Hz screen), frames
+// land up to part of a screen frame off their slots; counting from the
+// slot rather than from when each was drawn keeps the average at the
+// limit. A frame drawn under a twentieth of a frame before its slot takes
+// the drawn time instead, so a screen a hair faster than the limit never
+// skips one. The slot never trails the drawn time by more than half a
+// frame, so a screen a hair slower never skips one either, and a stall
+// brings no run of quick frames.
+fun nextSlot(slotNanos: Long, nowNanos: Long, limit: Float): Long {
+    if (limit <= 0f) return nowNanos
+    val period = (1_000_000_000.0 / limit).toLong()
+    val next = slotNanos + period
+    return if (next >= nowNanos && next - nowNanos < period / 20) nowNanos else max(next, nowNanos - period / 2)
+}
 
 // How many frames' worth of time a gap is, at this limit. Usually 1; more
 // when the screen could not keep up, so the speed holds; held to 3 so a

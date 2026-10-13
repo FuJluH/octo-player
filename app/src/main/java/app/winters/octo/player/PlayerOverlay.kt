@@ -3,6 +3,7 @@ package app.winters.octo.player
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedContent
@@ -127,6 +128,7 @@ import app.winters.octo.playback.sleepSummary
 import app.winters.octo.playback.speedLabel
 import app.winters.octo.player.immersive.CoverFadeMs
 import app.winters.octo.player.immersive.PlayerBackground
+import app.winters.octo.player.immersive.pausedBackgroundFps
 import app.winters.octo.player.immersive.accentInk
 import app.winters.octo.player.immersive.backgroundDolly
 import app.winters.octo.player.immersive.isDarkInk
@@ -188,8 +190,18 @@ fun AnimatedVisibilityScope.PlayerOverlay(
 
     BackHandler(onBack = onClose)
     LightOnDarkBars(darkIcons = colors.content.isDarkInk)
+    // The display's fastest rate while things move, handed back on close.
+    val phoneCalm = rememberSystemReduceMotion()
+    val powerSave = rememberPowerSave()
+    val refreshNeed = playerRefreshNeed(
+        playing = now.isPlaying,
+        calm = prefs.reduceMotion || phoneCalm,
+        powerSave = powerSave,
+        movingBackgroundFps = pausedBackgroundFps(prefs, Build.VERSION.SDK_INT),
+    )
+    RequestDisplayRate(refreshNeed)
 
-    BoxWithConstraints(Modifier.fillMaxSize()) {
+    BoxWithConstraints(Modifier.fillMaxSize().displayRateModifier(refreshNeed)) {
         val cap = constraints.maxHeight * 0.45f
         val pulled = (pull / cap).coerceIn(0f, 1f)
         // Fully rounded a fifth of the way down.

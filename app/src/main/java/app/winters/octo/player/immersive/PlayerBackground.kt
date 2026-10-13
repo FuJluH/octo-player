@@ -90,6 +90,12 @@ class BackgroundViewModel @Inject constructor(
 fun drawnMode(mode: BackgroundMode, sdk: Int): BackgroundMode =
     if (mode == BackgroundMode.Default && sdk < Build.VERSION_CODES.TIRAMISU) BackgroundMode.Artwork else mode
 
+// The frame limit of the background while it moves even with the music
+// paused (the live wash), or null when it is still or moves only while
+// music plays.
+fun pausedBackgroundFps(prefs: PlayerPrefs, sdk: Int): Int? =
+    if (prefs.liveBackground && drawnMode(prefs.background.mode, sdk) == BackgroundMode.Default) prefs.background.fps else null
+
 // The full player's background, by the chosen mode. `dolly` is read only
 // while drawing, for the way in and out.
 @Composable

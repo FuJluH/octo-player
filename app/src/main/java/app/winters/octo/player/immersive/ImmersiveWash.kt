@@ -1,15 +1,10 @@
 package app.winters.octo.player.immersive
 
-import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Rect
 import android.os.Build
-import android.os.PowerManager
 import android.os.SystemClock
 import androidx.annotation.RequiresApi
 import androidx.compose.animation.core.Animatable
@@ -21,7 +16,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -30,12 +24,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalWindowInfo
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
+import app.winters.octo.player.rememberPowerSave
 
 // How long the wash takes to fade in once its first frame is drawn, and
 // how long it waits for that frame before fading in regardless.
@@ -134,29 +127,6 @@ private fun WashCanvas(cover: WashCover?, bpm: Float, fpsLimit: Int, speed: Floa
                 }
             },
     )
-}
-
-// Whether battery saver is on, kept up to date while shown.
-@Composable
-private fun rememberPowerSave(): Boolean {
-    val context = LocalContext.current
-    val power = remember(context) { context.getSystemService(PowerManager::class.java) }
-    var on by remember { mutableStateOf(power?.isPowerSaveMode == true) }
-    DisposableEffect(context, power) {
-        val receiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context, intent: Intent) {
-                on = power?.isPowerSaveMode == true
-            }
-        }
-        ContextCompat.registerReceiver(
-            context,
-            receiver,
-            IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED),
-            ContextCompat.RECEIVER_NOT_EXPORTED,
-        )
-        onDispose { context.unregisterReceiver(receiver) }
-    }
-    return on
 }
 
 // Two covers mixed as the wash mixes them, `mix` of the new over the old,
