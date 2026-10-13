@@ -49,6 +49,17 @@ extension QueueSource {
     }
 }
 
+/// The station to top up in a queue as it plays, with the queue entry the new songs would follow
+/// in play order (shuffle included), or nil. Never while repeat is on, which plays the queue again
+/// instead.
+public func stationTopUp(_ queue: PlayQueue) -> (station: QueueSource, tail: String)? {
+    guard queue.repeatMode == .off, queue.items.indices.contains(queue.current) else { return nil }
+    let order = [queue.current] + queue.upcoming()
+    guard let station = stationToTopUp(order.map { queue.items[$0].source }, current: 0),
+          let last = order.last, let tail = queue.items[last].entryId else { return nil }
+    return (station, tail)
+}
+
 /// The ids of a station's songs in the queue, in queue order: the last `stationAfter` of them.
 public func stationSongsQueued(_ items: [QueueItem], station: QueueSource) -> [String] {
     Array(items.filter { $0.source == station }.map(\.trackId).suffix(stationAfter))

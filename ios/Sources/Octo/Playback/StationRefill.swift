@@ -29,12 +29,10 @@ final class StationRefill {
     /// Whether the server in use sends more of a station's songs.
     private var offered: Bool { player.session.client != nil && offersStationSongs(player.session.extensions) }
 
-    /// The station to top up now, with the last queue entry it would go after.
+    /// The station to top up now, with the last queue entry in play order it would go after.
     private func due() -> (station: QueueSource, tail: String)? {
-        let queue = player.engine.queue
-        guard offered, let station = stationToTopUp(queue.items.map(\.source), current: queue.current),
-              let tail = queue.items.last?.entryId else { return nil }
-        return (station, tail)
+        guard offered else { return nil }
+        return stationTopUp(player.engine.queue)
     }
 
     /// Whether a station is being kept going from here, so Autoplay stands down.
@@ -67,7 +65,7 @@ final class StationRefill {
         if Task.isCancelled { return }
         task = nil
         // The queue may have moved on while the server answered: only a station still running
-        // low takes the songs, leaving out any it gained meanwhile.
+        // low in play order takes the songs, leaving out any it gained meanwhile.
         guard !items.isEmpty, let now = due(), now.station == station else {
             gaveUpAfter = tail
             playbackLog.info("station: nothing to add")

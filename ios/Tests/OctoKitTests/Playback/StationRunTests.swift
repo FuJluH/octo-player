@@ -96,6 +96,44 @@ import Testing
     }
 }
 
+@Suite struct StationTopUpInPlayOrderTest {
+    let radio = QueueSource.station(id: "or1", name: "Your Radio")
+
+    /// 50 of the station's songs, the one playing `rank` places into the play order.
+    func queue(at rank: Int, shuffle: Bool, repeatMode: RepeatMode = .off) -> PlayQueue {
+        let items = (0..<50).map { QueueItem(trackId: "s\($0)", uri: "", title: "s\($0)", source: radio) }
+        var q = PlayQueue()
+        var random = SeededRandom(state: 11)
+        q.setItems(items, startIndex: 0, using: &random)
+        let start = shuffle ? q.order[rank] : rank
+        var again = SeededRandom(state: 11)
+        q.setItems(items, startIndex: start, using: &again)
+        q.shuffle = shuffle
+        q.repeatMode = repeatMode
+        return q
+    }
+
+    @Test func shuffledTheSongsLeftAreCountedInPlayOrder() throws {
+        let low = queue(at: 30, shuffle: true)
+        let found = try #require(stationTopUp(low))
+        #expect(found.station == radio)
+        #expect(found.tail == low.items[low.order[49]].entryId)
+        #expect(stationTopUp(queue(at: 29, shuffle: true)) == nil)
+    }
+
+    @Test func inQueueOrderTheLastEntryIsTheTail() throws {
+        let low = queue(at: 30, shuffle: false)
+        #expect(try #require(stationTopUp(low)).tail == low.items[49].entryId)
+        #expect(stationTopUp(queue(at: 29, shuffle: false)) == nil)
+    }
+
+    @Test func aRepeatingQueueIsNeverToppedUp() {
+        #expect(stationTopUp(queue(at: 49, shuffle: false, repeatMode: .all)) == nil)
+        #expect(stationTopUp(queue(at: 49, shuffle: true, repeatMode: .one)) == nil)
+        #expect(stationTopUp(PlayQueue()) == nil)
+    }
+}
+
 @Suite struct StationSongsQueuedTest {
     let mix = QueueSource.station(id: "or1", name: "Your Radio")
 
