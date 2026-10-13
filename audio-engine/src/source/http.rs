@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 use symphonia::core::io::MediaSource;
 
 use crate::error::{ErrorKind, Failure};
-use crate::source::icy::IcySplitter;
+use crate::source::icy::{IcySplitter, IcyStatus};
 use crate::source::trust::{PinnedTls, Trust};
 
 /// How a stream is fetched.
@@ -111,11 +111,13 @@ pub fn agent(trust: Arc<Trust>) -> ureq::Agent {
         .timeout_recv_response(Some(Duration::from_secs(15)))
         .user_agent("Octo")
         .build();
-    // ureq's usual chain, with TLS that also knows the pins.
+    // ureq's usual chain, with TLS that also knows the pins, and old
+    // SHOUTcast servers' ICY answers read as HTTP.
     let connector =
         ().chain(ConnectProxyConnector::default())
             .chain(TcpConnector::default())
-            .chain(PinnedTls::new(trust));
+            .chain(PinnedTls::new(trust))
+            .chain(IcyStatus);
     ureq::Agent::with_parts(config, connector, DefaultResolver::default())
 }
 

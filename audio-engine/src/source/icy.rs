@@ -4,6 +4,10 @@
 //! length in sixteens, then that much text such as
 //! `StreamTitle='Artist - Song';`.
 
+use ureq::unversioned::transport::{
+    Buffers, ConnectionDetails, Connector, LazyBuffers, NextTimeout, Transport,
+};
+
 /// Splits a live stream's bytes into its audio and its metadata blocks, in
 /// pieces of any size, so a block may arrive across several reads.
 pub struct IcySplitter {
@@ -77,6 +81,100 @@ pub fn stream_title(block: &[u8]) -> Option<String> {
         None => rest.strip_suffix('\'').unwrap_or(rest),
     };
     Some(value.trim().to_string())
+}
+
+/// A link in the client's connection chain for old SHOUTcast servers,
+/// which answer `ICY 200 OK` where HTTP has `HTTP/1.0 200 OK`: the start of
+/// each connection's first answer is read as the latter. Everything else
+/// passes as it is.
+#[derive(Debug, Default)]
+pub struct IcyStatus;
+
+impl<In: Transport> Connector<In> for IcyStatus {
+    type Out = IcyTransport<In>;
+
+    fn connect(
+        &self,
+        details: &ConnectionDetails,
+        chained: Option<In>,
+    ) -> Result<Option<Self::Out>, ureq::Error> {
+        let sizes = (details.config.input_buffer_size(), details.config.output_buffer_size());
+        Ok(chained.map(|inner| IcyTransport {
+            inner,
+            buffers: LazyBuffers::new(sizes.0, sizes.1),
+            first: true,
+        }))
+    }
+}
+
+/// A connection whose first answer may start `ICY `.
+#[derive(Debug)]
+pub struct IcyTransport<In> {
+    inner: In,
+    // What ureq reads and writes; the inner connection's are copied to and from.
+    buffers: LazyBuffers,
+    // Nothing of the answer has been passed on yet.
+    first: bool,
+}
+
+const ICY: &[u8] = b"ICY ";
+const HTTP_1_0: &[u8] = b"HTTP/1.0 ";
+
+impl<In: Transport> Transport for IcyTransport<In> {
+    fn buffers(&mut self) -> &mut dyn Buffers {
+        &mut self.buffers
+    }
+
+    fn transmit_output(&mut self, amount: usize, timeout: NextTimeout) -> Result<(), ureq::Error> {
+        let output = &self.buffers.output()[..amount];
+        let room = self.inner.buffers().output().len();
+        let mut sent = 0;
+        while sent < output.len() {
+            let n = (output.len() - sent).min(room);
+            self.inner.buffers().output()[..n].copy_from_slice(&output[sent..sent + n]);
+            self.inner.transmit_output(n, timeout)?;
+            sent += n;
+        }
+        Ok(())
+    }
+
+    fn await_input(&mut self, timeout: NextTimeout) -> Result<bool, ureq::Error> {
+        if self.inner.buffers().input().is_empty() && !self.inner.await_input(timeout)? {
+            return Ok(false);
+        }
+        if self.first {
+            // Wait for enough to tell an ICY answer.
+            while self.inner.buffers().input().len() < ICY.len()
+                && ICY.starts_with(self.inner.buffers().input())
+            {
+                if !self.inner.await_input(timeout)? {
+                    break;
+                }
+            }
+            self.first = false;
+            if self.inner.buffers().input().starts_with(ICY) {
+                self.inner.buffers().input_consume(ICY.len());
+                let free = self.buffers.input_append_buf();
+                free[..HTTP_1_0.len()].copy_from_slice(HTTP_1_0);
+                self.buffers.input_appended(HTTP_1_0.len());
+            }
+        }
+        let input = self.inner.buffers().input();
+        let free = self.buffers.input_append_buf();
+        let n = input.len().min(free.len());
+        free[..n].copy_from_slice(&input[..n]);
+        self.buffers.input_appended(n);
+        self.inner.buffers().input_consume(n);
+        Ok(true)
+    }
+
+    fn is_open(&mut self) -> bool {
+        self.inner.is_open()
+    }
+
+    fn is_tls(&self) -> bool {
+        self.inner.is_tls()
+    }
 }
 
 #[cfg(test)]

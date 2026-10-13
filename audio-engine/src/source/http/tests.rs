@@ -369,3 +369,39 @@ fn a_live_stream_that_stays_gone_fails_clearly() {
     assert_eq!(server.asked().len(), 5);
     assert!(started.elapsed() >= Duration::from_millis(150));
 }
+
+#[test]
+fn an_old_shoutcast_server_answering_icy_200_ok_plays() {
+    use crate::testing::http_server::ScriptServer;
+    let server = ScriptServer::start(|_, conn, stopped| {
+        // The status line in pieces, the way a slow server may send it.
+        for piece in [&b"IC"[..], b"Y 2", b"00 OK\r\n"] {
+            if conn.write_all(piece).is_err() || conn.flush().is_err() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        let head = "icy-notice1:This stream requires Winamp\r\nicy-name:Old FM\r\ncontent-type:audio/mpeg\r\nicy-metaint:8000\r\n\r\n";
+        if conn.write_all(head.as_bytes()).is_err() {
+            return;
+        }
+        for i in 0u64.. {
+            let audio: Vec<u8> = (i * 8000..(i + 1) * 8000).map(on_air).collect();
+            let block = icy_block(&format!("StreamTitle='Old FM {}';", i / 4));
+            if stopped.load(Ordering::Acquire)
+                || conn.write_all(&audio).is_err()
+                || conn.write_all(&block).is_err()
+            {
+                return;
+            }
+        }
+    });
+    let slot = Arc::new(TitleSlot::default());
+    let opts = HttpOptions { titles: Some(slot.clone()), ..live() };
+    let mut source = HttpSource::open(&server.url("/;stream.mp3"), opts).unwrap();
+    assert_eq!(source.content_type(), Some("audio/mpeg"));
+    let (audio, titles) = read_live(&mut source, &slot, 100_000);
+    let expected: Vec<u8> = (0..100_000).map(on_air).collect();
+    assert!(audio == expected, "the audio came through changed");
+    assert_eq!(titles, ["Old FM 0", "Old FM 1", "Old FM 2"]);
+}
