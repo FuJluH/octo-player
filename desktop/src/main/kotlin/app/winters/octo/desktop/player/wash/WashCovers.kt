@@ -10,7 +10,9 @@ import app.winters.octo.player.immersive.WashRange
 import app.winters.octo.player.immersive.washRange
 import app.winters.octo.player.immersive.washPeak
 import app.winters.octo.desktop.library.CoverArrivals
+import app.winters.octo.desktop.library.coverPicture
 import app.winters.octo.subsonic.SubsonicClient
+import coil3.ImageLoader
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -59,6 +61,9 @@ val WASH_RETRY_MS = listOf(3_000L, 8_000L, 20_000L, 60_000L, 120_000L)
 // Octo finds it, and the wash went to the blend and straight on to it.
 const val WASH_HOLD_MS = 1_500L
 
+// The size covers are fetched at for the wash, which draws them at 512.
+private const val WashFetchPx = 600
+
 // The pixels of a 512 square, as ARGB, and back.
 private val SquareInfo = ImageInfo(WashSize, WashSize, ColorType.BGRA_8888, ColorAlphaType.PREMUL)
 
@@ -67,11 +72,15 @@ private val SquareInfo = ImageInfo(WashSize, WashSize, ColorType.BGRA_8888, Colo
 // saturation through the colour matrix and the brightness cap, pixel by
 // pixel, with the shared maths. The last few are kept, so going back a
 // song is instant. A cover the server did not send is not kept: the soft
-// blend stands in for it, and it is asked for again (see follow).
+// blend stands in for it, and it is asked for again (see follow). With an
+// image loader from `images`, covers come through it, sharing its caches
+// and its downloads with every other place that shows them; without, they
+// are downloaded here.
 class WashCovers(
     private val http: OkHttpClient,
     private val retryMs: List<Long> = WASH_RETRY_MS,
     private val holdMs: Long = WASH_HOLD_MS,
+    private val images: () -> ImageLoader? = { null },
 ) {
     private val kept = object : LinkedHashMap<String, WashCover>(8, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, WashCover>?) = size > 4
@@ -119,16 +128,16 @@ class WashCovers(
     }
 
     private suspend fun fetch(key: String, client: SubsonicClient?, coverId: String?, tuning: WashTuning): Made {
-        val bytes = if (client != null && coverId != null) {
-            runCatching {
-                http.newCall(Request.Builder().url(client.coverArtUrl(coverId, 600)).build()).execute().use { r ->
+        val loader = images()
+        val image = when {
+            client == null || coverId == null -> null
+            loader != null -> runCatching { coverPicture(loader, client, coverId, WashFetchPx) }.getOrNull()
+            else -> runCatching {
+                http.newCall(Request.Builder().url(client.coverArtUrl(coverId, WashFetchPx)).build()).execute().use { r ->
                     if (r.isSuccessful) r.body.bytes() else null
                 }
-            }.getOrNull()
-        } else {
-            null
+            }.getOrNull()?.let { runCatching { Image.makeFromEncoded(it) }.getOrNull() }
         }
-        val image = bytes?.let { runCatching { Image.makeFromEncoded(it) }.getOrNull() }
         val cover = withContext(Dispatchers.Default) { prepared(key, image, tuning) }
         // With no cover to ask for, the blend is the answer, and is kept.
         val real = image != null || client == null || coverId == null

@@ -693,7 +693,7 @@ private fun AnimatedVisibilityScope.PlayerArt(ref: String?, side: Dp, playing: B
                 }
                 .elevation3(shape),
         ) {
-            Artwork(ref, side, shape = shape)
+            Artwork(ref, side, shape = shape, keptFirst = true)
         }
     }
 }

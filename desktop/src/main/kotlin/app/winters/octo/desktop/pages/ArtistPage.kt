@@ -44,8 +44,8 @@ import app.winters.octo.desktop.artistSongs
 import app.winters.octo.desktop.library.LocalCovers
 import app.winters.octo.desktop.library.SongColumn
 import app.winters.octo.desktop.library.appearsOn
-import app.winters.octo.desktop.library.coverBucket
-import app.winters.octo.desktop.library.coverKey
+import app.winters.octo.covers.coverBucket
+import app.winters.octo.desktop.library.coverRequest
 import app.winters.octo.desktop.library.librarySongs
 import app.winters.octo.desktop.library.monogramOf
 import app.winters.octo.desktop.library.songsAlbumByAlbum
@@ -333,10 +333,7 @@ private fun ArtistPicture(name: String, coverArt: String?, url: String?, modifie
         val px = with(LocalDensity.current) { PageSize.HeaderArt.roundToPx() }
         val request = remember(client, coverArt, url, px) {
             when {
-                coverArt != null && client != null -> {
-                    val key = coverKey(client.primaryUrl.host, coverArt, coverBucket(px))
-                    ImageRequest.Builder(context).data(client.coverArtUrl(coverArt, coverBucket(px)).toString()).memoryCacheKey(key).diskCacheKey(key).build()
-                }
+                coverArt != null && client != null -> coverRequest(context, client, coverArt, coverBucket(px)).build()
                 url != null -> ImageRequest.Builder(context).data(url).build()
                 else -> null
             }

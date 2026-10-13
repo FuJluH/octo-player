@@ -42,6 +42,7 @@ import app.winters.octo.desktop.audio.CHECK_PLAY
 import app.winters.octo.desktop.audio.checkSound
 import app.winters.octo.desktop.audio.openPlayer
 import app.winters.octo.desktop.library.coverLoader
+import app.winters.octo.desktop.library.followCoversAhead
 import app.winters.octo.desktop.nav.KeyPress
 import app.winters.octo.desktop.nav.shortcutFor
 import app.winters.octo.desktop.settings.AppPlaces
@@ -76,7 +77,10 @@ import app.winters.octo.desktop.window.roundWindowsCorners
 import app.winters.octo.desktop.window.screenAreas
 import app.winters.octo.desktop.window.seeThroughMacTitleBar
 import app.winters.octo.subsonic.OCTO_TRANSITIONS
+import coil3.PlatformContext
+import coil3.SingletonImageLoader
 import coil3.compose.setSingletonImageLoaderFactory
+import kotlinx.coroutines.launch
 import java.awt.Dimension
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
@@ -217,6 +221,7 @@ fun main(args: Array<String>) {
                 player.problem?.let { problem -> it.notice = problem }
             }
             app.playlistArt.folder = File(places.cache, "playlist-art")
+            app.coverImages = { SingletonImageLoader.get(PlatformContext.INSTANCE) }
             // Kept songs carry on fetching, and play from this computer.
             app.offline.start()
             val system = SystemIntegration(app, places, os, instance, inTray).also { app.toggleMiniPlayer = it::toggleMiniPlayer }
@@ -233,6 +238,8 @@ fun main(args: Array<String>) {
                 }
             }
             LaunchedEffect(ready) {
+                // The covers of the song on and the next ones, ready ahead.
+                launch { followCoversAhead(ready.app.player, { ready.app.connection?.client }, { SingletonImageLoader.get(PlatformContext.INSTANCE) }) }
                 ready.system.quit = ::close
                 ready.system.start(args.toList())
                 ready.updates.start(ready.app.scope)

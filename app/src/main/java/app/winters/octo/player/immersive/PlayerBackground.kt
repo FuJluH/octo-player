@@ -39,7 +39,9 @@ import app.winters.octo.player.MeshBackground
 import app.winters.octo.player.PlayerColors
 import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.PlayerSettings
+import app.winters.octo.ui.common.artworkRequest
 import coil3.compose.AsyncImage
+import coil3.compose.LocalPlatformContext
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.SharingStarted
@@ -174,8 +176,9 @@ private fun ColourFill(colors: PlayerColors, background: BackgroundPrefs) {
 private fun ClassicArtwork(ref: String?) {
     val picture = remember(ref) { ArtworkRef.decode(ref) }
     if (picture != null) {
+        val context = LocalPlatformContext.current
         AsyncImage(
-            model = picture,
+            model = remember(picture) { artworkRequest(context, picture) },
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize().blur(80.dp).alpha(0.6f),

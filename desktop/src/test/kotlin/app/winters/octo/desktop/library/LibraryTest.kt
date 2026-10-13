@@ -1,6 +1,7 @@
 package app.winters.octo.desktop.library
 
 import app.winters.octo.catalog.DRAWN_COVER_VERSION
+import app.winters.octo.covers.coverBucket
 import app.winters.octo.catalog.naturalSortKey
 import app.winters.octo.server.serverTime
 import app.winters.octo.sort.SongSort
