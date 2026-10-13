@@ -1,4 +1,4 @@
-Covers load faster, the player has more room, and **ALAC** songs play on every phone. Plus everything since the last notes: **Automix**, **Family**, **Charts** and more.
+Arrange **Home** your way, a new icon, a smoother player, and new music shows up on its own. Earlier: ALAC songs on every phone, faster covers, **Automix**, **Family**, **Charts** and more.
 
 ## Sound
 
@@ -9,6 +9,8 @@ Covers load faster, the player has more room, and **ALAC** songs play on every p
 
 ## Library
 
+- **Home sections**: drag Home's shelves into your own order or hide them, in Settings > Appearance or with Edit Home at the end of Home.
+- New songs on your server show up in search right away, and the app notices new music on its own.
 - **Library songs only** hides songs found online, everywhere or for one album.
 - **Charts** on Home and on their own page, when your server is Octo and has charts.
 - Liked Songs, Review and Duplicates carry their own pictures.
@@ -16,6 +18,7 @@ Covers load faster, the player has more room, and **ALAC** songs play on every p
 
 ## Playback
 
+- The player and lyrics run at your screen's full refresh rate, 90 or 120 Hz on phones that have it.
 - The player has more room: pull it down to close, and Cast and Sound are in its More menu.
 - The playing song's cover and the next ones load ahead, so the artwork is there when a song starts.
 - **Start playing after** sets how much of a song loads before it plays, for spotty connections.
@@ -40,6 +43,9 @@ Covers load faster, the player has more room, and **ALAC** songs play on every p
 
 ## Everyday touches
 
+- A new, cleaner **Octo icon**.
+- Home no longer jumps as it opens: your stations and mixes show at once.
+- Song, artist and playlist rows run closer to the screen's edges.
 - Covers show up faster everywhere, and a screen full of them never holds up the player's.
 
 ## Settings
