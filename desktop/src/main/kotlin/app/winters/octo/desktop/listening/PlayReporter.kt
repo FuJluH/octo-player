@@ -4,6 +4,7 @@ import app.winters.octo.desktop.player.DesktopPlayer
 import app.winters.octo.desktop.server.Connection
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.desktop.system.isOpenedFile
+import app.winters.octo.playback.isRadio
 import app.winters.octo.listening.PendingPlay
 import app.winters.octo.listening.worthRetrying
 import app.winters.octo.subsonic.Song
@@ -111,7 +112,7 @@ class PlayReporter(
 
     private fun started(song: Song) {
         val client = connection()?.client ?: return
-        if (!reports() || isOpenedFile(song.id)) return
+        if (!reports() || isOpenedFile(song.id) || isRadio(song.id)) return
         scope.launch(io) {
             try {
                 client.scrobble(song.id, System.currentTimeMillis(), submission = false)

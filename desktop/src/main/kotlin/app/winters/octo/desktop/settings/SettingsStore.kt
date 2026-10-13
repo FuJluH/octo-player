@@ -9,6 +9,9 @@ import app.winters.octo.desktop.hotkeys.HotkeyPrefs
 import app.winters.octo.covers.PlaylistCoverStyle
 import app.winters.octo.home.HOME_SECTIONS_KEY
 import app.winters.octo.livelists.accountKey
+import app.winters.octo.liveradio.LIVE_RADIUS_DEFAULT_INDEX
+import app.winters.octo.liveradio.LivePlace
+import app.winters.octo.liveradio.LiveSort
 import app.winters.octo.server.serverName
 import app.winters.octo.server.settleServers
 import app.winters.octo.subsonic.AuthMode
@@ -94,6 +97,25 @@ data class AppSettings(
     val deviceId: String = "",
     // Songs kept on this computer to play without a connection.
     val offline: OfflinePrefs = OfflinePrefs(),
+    // Live radio near you: where, how far and in what order, and the
+    // stations kept here.
+    val liveRadio: LiveRadioPrefs = LiveRadioPrefs(),
+)
+
+// The Live radio page as the listener left it: what they typed in Where
+// (a postal code, or a city with its state after a comma), the country
+// (an ISO code, empty for this computer's own), the place it was found to
+// be, the radius chosen (by its place in the list of choices) and the
+// order. `kept` is the stations kept on this computer, as KeptStations
+// writes them, so a station saved by a newer Octo never breaks this file.
+@Serializable
+data class LiveRadioPrefs(
+    val where: String = "",
+    val country: String = "",
+    val place: LivePlace? = null,
+    val radius: Int = LIVE_RADIUS_DEFAULT_INDEX,
+    val sort: LiveSort = LiveSort.Distance,
+    val kept: String = "",
 )
 
 // Where kept songs go (empty for the usual folder), and what is kept from

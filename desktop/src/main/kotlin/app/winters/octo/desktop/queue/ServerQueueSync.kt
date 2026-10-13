@@ -9,6 +9,7 @@ import app.winters.octo.desktop.player.SavedQueue
 import app.winters.octo.desktop.server.Connection
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.desktop.system.isOpenedFile
+import app.winters.octo.playback.isRadio
 import app.winters.octo.desktop.system.readSaved
 import app.winters.octo.desktop.system.saveWhole
 import app.winters.octo.server.RemoteQueue
@@ -41,14 +42,14 @@ private const val SAVE_AFTER_MS = 10_000L
 private const val CHECK_EVERY_MS = 30_000L
 
 // The queue as the server should keep it: server songs in the order they
-// play (songs opened from files are left out), the current one's place,
+// play (songs opened from files and live radio are left out), the current one's place,
 // and where in it. When the current song is not on the server, the next
 // one that is takes its place, from its start. Null when none is.
 fun serverQueueOf(state: PlayerState, positionMs: Long): ServerQueue? {
     val current = state.current ?: return null
     val order = state.played + current + state.upcoming
     val currentRank = state.played.size
-    val kept = order.withIndex().filter { !isOpenedFile(it.value.song.id) }
+    val kept = order.withIndex().filter { !isOpenedFile(it.value.song.id) && !isRadio(it.value.song.id) }
     if (kept.isEmpty()) return null
     val ids = kept.map { it.value.song.id }
     val exact = kept.indexOfFirst { it.index == currentRank }

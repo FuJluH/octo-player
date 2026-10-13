@@ -2,6 +2,7 @@ package app.winters.octo.desktop.search
 
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.SidePanel
+import app.winters.octo.desktop.liveradio.LIVE_RADIO_NEAR
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.pages.addServer
 import app.winters.octo.desktop.pages.switchServer
@@ -44,6 +45,7 @@ fun commandsFor(app: AppState): List<Command> = buildList {
         val services = app.imports.services?.services.orEmpty().joinToString(" ") { it.name }
         page("Import", Page.Imports, "get my music move transfer $IMPORT_SERVICE_WORDS $services tunemymusic playlists liked songs file csv txt paste list missing download")
     }
+    page(LIVE_RADIO_NEAR, Page.LiveRadio, "live radio stations fm am local near me nearby internet stream broadcast")
     if (app.connection?.family == true) page(FAMILY, Page.Family, "family members requests devices plan approve")
     if (app.search?.charts?.offered == true) page("Charts", Page.Charts, "top songs popular right now best new trending genre chart hip hop pop country")
     page("Sound", Page.Sound, "equalizer eq loudness crossfade blend transitions automix tempo")

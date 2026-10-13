@@ -60,18 +60,23 @@ class HomeStore(
     // Writes go one at a time, in the order they were made.
     private val keeping = Dispatchers.IO.limitedParallelism(1)
 
-    // Whether the last read that finished asked for the stations.
+    // Whether the last read that finished asked for Octo's stations and for
+    // the live streams.
     private var stationsAsked = false
+    private var liveAsked = false
 
     fun refresh() {
         if (job?.isActive == true) return
         val wantStations = sections().shows(HomeSection.Stations)
+        val wantLive = sections().shows(HomeSection.InternetRadio)
         job = scope.launch {
             try {
-                val loaded = loadHome(connection, stations = wantStations)
+                val loaded = loadHome(connection, stations = wantStations, live = wantLive)
                 data = loaded
                 stationsAsked = wantStations
+                liveAsked = wantLive
                 loaded.stations?.let { stations -> keep(shelves.copy(stations = answered(shelves.stations, stations))) }
+                loaded.live?.let { live -> keep(shelves.copy(live = answered(shelves.live, live))) }
                 failure = null
             } catch (e: SubsonicException) {
                 // A failed refresh keeps what is showing.
@@ -91,10 +96,20 @@ class HomeStore(
         }
     }
 
-    // Home's sections were changed: stations shown again are asked for now,
-    // even while a read without them is still running.
+    // Home's sections were changed: stations or live streams shown again are
+    // asked for now, even while a read without them is still running.
     fun sectionsChanged() {
-        if (!sections().shows(HomeSection.Stations) || stationsAsked) return
+        val shown = sections()
+        val stationsNow = shown.shows(HomeSection.Stations) && !stationsAsked
+        val liveNow = shown.shows(HomeSection.InternetRadio) && !liveAsked
+        if (!stationsNow && !liveNow) return
+        job?.cancel()
+        refresh()
+    }
+
+    // A live stream was added to the server: read again now, even while a
+    // read is running.
+    fun liveChanged() {
         job?.cancel()
         refresh()
     }
