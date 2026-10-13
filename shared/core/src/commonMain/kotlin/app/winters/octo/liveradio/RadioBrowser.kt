@@ -1,0 +1,237 @@
+package app.winters.octo.liveradio
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.io.IOException
+import java.net.InetAddress
+import kotlin.math.roundToInt
+
+// A live radio station from the Radio Browser catalog, as an app shows,
+// plays and keeps it.
+@Serializable
+data class LiveStation(
+    val uuid: String,
+    val name: String,
+    val streamUrl: String,
+    val favicon: String = "",
+    val codec: String = "",
+    val bitrate: Int = 0,
+    val hls: Boolean = false,
+    val country: String = "",
+    val countryCode: String = "",
+    val state: String = "",
+    val tags: List<String> = emptyList(),
+    // How far from the place asked about, in meters; null when the catalog
+    // does not know where the station is.
+    val distanceMeters: Double? = null,
+    // How often listeners started it lately, the catalog's measure of how
+    // popular it is.
+    val clicks: Int = 0,
+)
+
+// A place to find stations around: where it is, and the names the catalog
+// files stations under when it has no coordinates for them.
+@Serializable
+data class LivePlace(
+    val latitude: Double,
+    val longitude: Double,
+    val label: String,
+    val state: String = "",
+    val countryCode: String = "",
+)
+
+// How the stations found are ordered.
+enum class LiveSort { Distance, Popular }
+
+// The radius choices, in the listener's own units.
+val LiveRadiusMiles = listOf(10, 25, 50, 100)
+val LiveRadiusKm = listOf(15, 40, 80, 160)
+const val LIVE_RADIUS_DEFAULT_INDEX = 1
+
+const val MILE_METERS = 1609.344
+
+// The station rows the catalog sends.
+@Serializable
+internal data class CatalogStation(
+    @SerialName("stationuuid") val uuid: String = "",
+    val name: String = "",
+    @SerialName("url_resolved") val urlResolved: String = "",
+    val url: String = "",
+    val favicon: String = "",
+    val codec: String = "",
+    val bitrate: Int = 0,
+    val hls: Int = 0,
+    val country: String = "",
+    @SerialName("countrycode") val countryCode: String = "",
+    val state: String = "",
+    val tags: String = "",
+    @SerialName("geo_distance") val geoDistance: Double? = null,
+    @SerialName("clickcount") val clickCount: Int = 0,
+    @SerialName("lastcheckok") val lastCheckOk: Int = 1,
+)
+
+@Serializable
+internal data class CatalogServer(val name: String = "")
+
+internal fun CatalogStation.toLive(): LiveStation? {
+    val stream = urlResolved.ifBlank { url }.trim()
+    if (uuid.isBlank() || stream.isBlank() || lastCheckOk == 0) return null
+    return LiveStation(
+        uuid = uuid,
+        name = name.trim().ifBlank { stream },
+        streamUrl = stream,
+        favicon = favicon.trim(),
+        codec = codec.trim(),
+        bitrate = bitrate,
+        hls = hls == 1,
+        country = country.trim(),
+        countryCode = countryCode.trim().uppercase(),
+        state = state.trim(),
+        tags = tags.split(',').map { it.trim() }.filter { it.isNotEmpty() }.distinct().take(6),
+        distanceMeters = geoDistance,
+        clicks = clickCount,
+    )
+}
+
+// The stations near a place: those the catalog places within the radius,
+// and those it files under the place's state and country but cannot place,
+// each once. Nearest first (the ones it cannot place after, the most played
+// first), or the most played first.
+internal fun mergeStations(near: List<LiveStation>, regional: List<LiveStation>, sort: LiveSort): List<LiveStation> {
+    val seen = HashSet<String>()
+    val all = (near + regional.filter { it.distanceMeters == null }).filter { seen.add(it.uuid) }
+    return when (sort) {
+        LiveSort.Distance -> all.sortedWith(
+            compareBy<LiveStation> { it.distanceMeters == null }
+                .thenBy { it.distanceMeters ?: 0.0 }
+                .thenByDescending { it.clicks }
+                .thenBy { it.name.lowercase() },
+        )
+        LiveSort.Popular -> all.sortedWith(compareByDescending<LiveStation> { it.clicks }.thenBy { it.name.lowercase() })
+    }
+}
+
+// A place to two decimals (about a kilometer): all that is sent, and what
+// answers are kept under.
+internal fun rounded(value: Double): Double = (value * 100).roundToInt() / 100.0
+
+// The Radio Browser catalog of live radio stations. It is asked through one
+// of its servers (`servers`, names or full addresses), picked at random, with
+// the app's own name so its keepers know who asks; answers are kept for six
+// hours per place and radius. `userAgent` is like "Octo/1.7 (Android)".
+class RadioBrowser(
+    private val http: OkHttpClient,
+    private val userAgent: String,
+    private val servers: suspend () -> List<String> = ::catalogServers,
+    private val now: () -> Long = System::currentTimeMillis,
+) {
+    private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
+    private var chosen: String? = null
+    private val kept = HashMap<String, Pair<Long, List<LiveStation>>>()
+
+    // The stations around `place` within `radiusMeters`, those this app
+    // can play (`playable`) only, ordered by `sort`.
+    suspend fun near(
+        place: LivePlace,
+        radiusMeters: Double,
+        sort: LiveSort,
+        playable: (LiveStation) -> Boolean = { true },
+    ): List<LiveStation> = withContext(Dispatchers.IO) {
+        val lat = rounded(place.latitude)
+        val lon = rounded(place.longitude)
+        val key = "$lat,$lon,${radiusMeters.roundToInt()},${place.state},${place.countryCode}"
+        val found = kept[key]?.takeIf { now() - it.first < KEEP_MS }?.second ?: run {
+            val near = search(
+                "geo_lat" to "$lat",
+                "geo_long" to "$lon",
+                "geo_distance" to "${radiusMeters.roundToInt()}",
+            )
+            val regional = if (place.countryCode.isNotBlank()) {
+                search(*listOfNotNull("countrycode" to place.countryCode, place.state.takeIf { it.isNotBlank() }?.let { "state" to it }).toTypedArray())
+            } else {
+                emptyList()
+            }
+            val all = mergeStations(near, regional, LiveSort.Distance)
+            kept[key] = now() to all
+            all
+        }
+        mergeStations(found.filter(playable), emptyList(), sort)
+    }
+
+    // Tells the catalog a listener started a station, as its keepers ask,
+    // so popular stations rise for everyone. A failure is of no matter.
+    suspend fun started(uuid: String) {
+        withContext(Dispatchers.IO) {
+            runCatching { get(base().newBuilder().addPathSegments("json/url").addPathSegment(uuid).build()) }
+        }
+    }
+
+    private suspend fun search(vararg params: Pair<String, String>): List<LiveStation> {
+        val url = base().newBuilder().addPathSegments("json/stations/search").apply {
+            params.forEach { (name, value) -> addQueryParameter(name, value) }
+            addQueryParameter("hidebroken", "true")
+            addQueryParameter("order", "clickcount")
+            addQueryParameter("reverse", "true")
+            addQueryParameter("limit", "$SEARCH_LIMIT")
+        }.build()
+        val body = get(url)
+        return json.decodeFromString<List<CatalogStation>>(body).mapNotNull { it.toLive() }
+    }
+
+    // A server's address: a name stands for its https address.
+    private suspend fun base(): HttpUrl {
+        val server = chosen ?: (runCatching { servers() }.getOrDefault(emptyList()).filter { it.isNotBlank() }.randomOrNull() ?: FALLBACK_SERVER)
+        chosen = server
+        return (if ("://" in server) server else "https://$server/").toHttpUrl()
+    }
+
+    private suspend fun get(url: HttpUrl): String {
+        currentCoroutineContext().ensureActive()
+        val call = http.newCall(Request.Builder().url(url).header("User-Agent", userAgent).build())
+        val stop = currentCoroutineContext()[Job]?.invokeOnCompletion { if (it != null) call.cancel() }
+        try {
+            return call.execute().use { response ->
+                if (!response.isSuccessful) {
+                    // Another server next time.
+                    chosen = null
+                    throw IOException("The radio catalog answered HTTP ${response.code}")
+                }
+                response.body.string()
+            }
+        } catch (e: IOException) {
+            chosen = null
+            throw e
+        } finally {
+            stop?.dispose()
+        }
+    }
+
+    private companion object {
+        const val KEEP_MS = 6 * 60 * 60 * 1000L
+        const val SEARCH_LIMIT = 200
+    }
+}
+
+const val FALLBACK_SERVER = "de1.api.radio-browser.info"
+
+// The catalog's servers, by name: every address all.api.radio-browser.info
+// stands for, named again by a reverse lookup, as its keepers ask apps to
+// find them. None when the lookup fails, and the fallback server is used.
+suspend fun catalogServers(): List<String> = withContext(Dispatchers.IO) {
+    runCatching {
+        InetAddress.getAllByName("all.api.radio-browser.info")
+            .map { it.canonicalHostName }
+            .filter { it.endsWith(".radio-browser.info") }
+            .distinct()
+    }.getOrDefault(emptyList())
+}
