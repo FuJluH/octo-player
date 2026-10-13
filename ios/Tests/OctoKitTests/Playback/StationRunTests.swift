@@ -1,0 +1,188 @@
+import Foundation
+import Testing
+@testable import OctoKit
+
+@Suite struct StationSourceTest {
+    let mix = QueueSource.station(id: "or1234", name: "Your Mix")
+
+    @Test func aStationIsHeadedByItsName() {
+        #expect(queueSourceTitle(mix) == "Next from Your Mix")
+        #expect(queueSourceTitle(.station(id: "or1", name: "")) == "Up next")
+    }
+
+    @Test func aStationIsSavedWithItsIdAndName() {
+        #expect(mix.encoded == "station:or1234:Your Mix")
+        #expect(queueSourceOf("station:or1234:Your Mix") == mix)
+    }
+
+    @Test func aStationSurvivesBeingSavedWithColonsInItsName() {
+        for source in [mix, .station(id: "or9", name: "Radio: a:b"), .station(id: "or9", name: ""), .station(id: "or9", name: ":")] {
+            #expect(queueSourceOf(source.encoded) == source)
+        }
+    }
+
+    @Test func aStationWithNoIdReadsBackAsAListWithNoName() {
+        #expect(queueSourceOf("station::Your Mix") == .none)
+        #expect(queueSourceOf("station:") == .none)
+    }
+
+    @Test func everyOtherSavedWordReadsBackAsBefore() {
+        #expect(queueSourceOf("you") == .you)
+        #expect(queueSourceOf("autoplay") == .autoplay)
+        #expect(queueSourceOf("list") == .none)
+        #expect(queueSourceOf("list:") == .none)
+        #expect(queueSourceOf("list:OK Computer") == .played("OK Computer"))
+        #expect(queueSourceOf("list:station:or1:x") == .played("station:or1:x"))
+        #expect(queueSourceOf("stations") == .none)
+    }
+
+    @Test func onlyOctosStationsPlayAsStations() {
+        #expect(serverListSource(id: "or1234", name: "Your Mix") == .station(id: "or1234", name: "Your Mix"))
+        #expect(serverListSource(id: "og5678", name: "Deep Cuts") == .played("Deep Cuts"))
+        #expect(serverListSource(id: "og5678", name: "") == .none)
+        #expect(serverListSource(id: "or:12", name: "Odd") == .played("Odd"))
+    }
+
+    @Test func stationSongsAreOfferedByTheExtension() {
+        #expect(offersStationSongs(["octoStations:1"]))
+        #expect(offersStationSongs(["songLyrics:1", "octoStations:2"]))
+        #expect(!offersStationSongs(["octoTopSongs:1", "octoStationsX:1"]))
+        #expect(!offersStationSongs([]))
+    }
+}
+
+@Suite struct StationTopUpTest {
+    let mix = QueueSource.station(id: "or1", name: "Your Mix")
+    let discovery = QueueSource.station(id: "or2", name: "Discovery")
+
+    func run(_ count: Int) -> [QueueSource] { Array(repeating: mix, count: count) }
+
+    @Test func aStationRunningLowIsToppedUp() {
+        #expect(stationToTopUp(run(50), current: 30) == mix)
+        #expect(stationToTopUp(run(50), current: 49) == mix)
+        #expect(stationToTopUp(run(3), current: 0) == mix)
+    }
+
+    @Test func aStationWithEnoughToComeIsLeftAlone() {
+        #expect(stationToTopUp(run(50), current: 29) == nil)
+        #expect(stationToTopUp(run(50), current: 0) == nil)
+    }
+
+    @Test func songsTheListenerQueuedAfterTheStationLeaveItGoing() {
+        #expect(stationToTopUp(run(10) + [.you], current: 9) == mix)
+        #expect(stationToTopUp(run(10) + [.you, .you], current: 8) == mix)
+        // Only the listener's songs from the one playing on: no station to keep going.
+        #expect(stationToTopUp(run(10) + [.you], current: 10) == nil)
+    }
+
+    @Test func theLastStationFromTheOnePlayingIsTheOneToppedUp() {
+        #expect(stationToTopUp(run(8) + [discovery, .you], current: 7) == discovery)
+        #expect(stationToTopUp([discovery] + run(4), current: 1) == mix)
+        // A station that played before the current song is not topped up.
+        #expect(stationToTopUp([mix, .you, .you], current: 1) == nil)
+    }
+
+    @Test func aQueueWithNoStationIsNeverToppedUp() {
+        #expect(stationToTopUp([.you, .autoplay, .played("OK Computer")], current: 2) == nil)
+        #expect(stationToTopUp([.played("Deep Cuts")], current: 0) == nil)
+    }
+
+    @Test func aPlaceOutsideTheQueueTopsUpNothing() {
+        #expect(stationToTopUp(run(3), current: -1) == nil)
+        #expect(stationToTopUp(run(3), current: 3) == nil)
+        #expect(stationToTopUp([], current: 0) == nil)
+    }
+}
+
+@Suite struct StationSongsQueuedTest {
+    let mix = QueueSource.station(id: "or1", name: "Your Mix")
+
+    func item(_ id: String, _ source: QueueSource) -> QueueItem { QueueItem(trackId: id, uri: "", title: id, source: source) }
+
+    @Test func onlyThatStationsSongsAreTold() {
+        let items = [item("a", mix), item("x", .you), item("b", mix), item("d", .station(id: "or2", name: "Discovery")),
+                     item("c", .station(id: "or1", name: "Your Mix")), item("e", .autoplay)]
+        #expect(stationSongsQueued(items, station: mix) == ["a", "b", "c"])
+    }
+
+    @Test func theLastHundredAreToldInQueueOrder() {
+        let items = (0..<130).map { item("s\($0)", mix) }
+        let told = stationSongsQueued(items, station: mix)
+        #expect(told.count == stationAfter)
+        #expect(told.first == "s30")
+        #expect(told.last == "s129")
+        #expect(told == (30..<130).map { "s\($0)" })
+    }
+
+    @Test func aQueueWithoutTheStationTellsNothing() {
+        #expect(stationSongsQueued([item("a", .you)], station: mix).isEmpty)
+        #expect(stationSongsQueued([], station: mix).isEmpty)
+    }
+}
+
+@Suite struct StationSongsCallTest {
+    static let answer = """
+    {"subsonic-response":{"status":"ok","version":"1.16.1","type":"octo","openSubsonic":true,
+     "stationSongs":{"id":"or1234","name":"Your Mix","entry":[
+      {"id":"s1","title":"Nikes","artist":"Frank Ocean","duration":314},
+      {"id":77,"title":"Ivy","artist":"Frank Ocean","duration":"249","isExternal":true}]}}}
+    """
+
+    @Test func theAnswerHasTheStationAndItsSongs() throws {
+        let songs: StationSongs = try SubsonicClient.decode(Data(Self.answer.utf8), key: "stationSongs")
+        #expect(songs.id == "or1234")
+        #expect(songs.name == "Your Mix")
+        #expect(songs.entry.map(\.id) == ["s1", "77"])
+        #expect(songs.entry[1].duration == 249)
+        #expect(songs.entry[1].isExternal)
+    }
+
+    @Test func aStationWithNothingMoreHasNoSongs() throws {
+        let json = #"{"subsonic-response":{"status":"ok","version":"1.16.1","stationSongs":{"id":"or1","name":"Your Mix"}}}"#
+        let songs: StationSongs = try SubsonicClient.decode(Data(json.utf8), key: "stationSongs")
+        #expect(songs.entry.isEmpty)
+    }
+
+    @Test func theCallNamesTheStationAndEverySongAlreadyQueued() async throws {
+        let server = FakeServer()
+        server.enqueue(Self.answer)
+        let songs = try await server.client().stationSongs(id: "or1234", after: ["s1", "s2", "s3"])
+        #expect(songs.entry.count == 2)
+        let request = try #require(server.requests.first)
+        #expect(request.method == "GET")
+        #expect(request.endpoint == "getStationSongs")
+        #expect(request.query["id"] == "or1234")
+        #expect(request.query["count"] == "\(stationBatch)")
+        #expect(request.values("after") == ["s1", "s2", "s3"])
+    }
+
+    @Test func aStationGoneFromTheServerIsNotFound() async {
+        let server = FakeServer()
+        server.error(70, "Station not found")
+        await #expect(throws: OctoError.self) { try await server.client().stationSongs(id: "or1", after: []) }
+    }
+
+    @Test func theRulesMatchTheOtherApps() {
+        #expect(stationTopUpAt == 20)
+        #expect(stationBatch == 25)
+        #expect(stationAfter == 100)
+    }
+}
+
+@Suite struct StationTapTest {
+    @Test func anAddedInternetStationPlaysItsStream() {
+        let added = Station(id: "7", name: "KEXP", artwork: nil, streamUrl: " https://kexp.example/live ")
+        #expect(stationTap(added) == .playStream("https://kexp.example/live"))
+        #expect(!stationHasPlayButton(added))
+    }
+
+    @Test func octosStationsAndMadeForYouListsOpenTheirSongs() {
+        let mix = Station(id: "or1234", name: "Your Mix", artwork: nil)
+        let deepCuts = Station(id: "og5678", name: "Deep Cuts", artwork: nil, songCount: 40)
+        let blank = Station(id: "or9", name: "Blank", artwork: nil, streamUrl: "  ")
+        for station in [mix, deepCuts, blank] {
+            #expect(stationTap(station) == .openList)
+            #expect(stationHasPlayButton(station))
+        }
+    }
+}

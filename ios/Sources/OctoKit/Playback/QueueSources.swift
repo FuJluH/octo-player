@@ -10,16 +10,21 @@ public enum QueueSource: Sendable, Hashable {
     case played(String?)
     /// Added by Autoplay once the listener's own queue ran out.
     case autoplay
+    /// One of the server's stations, which adds more of its songs as the queue runs low. `id`
+    /// is never empty and has no colon; `name` is how the queue shows it.
+    case station(id: String, name: String)
 
     /// A played list with no name.
     public static let none = QueueSource.played(nil)
 
-    /// A source as a short word, for saving a queue: "you", "autoplay", "list" or "list:<name>".
+    /// A source as a short word, for saving a queue: "you", "autoplay", "list", "list:<name>" or
+    /// "station:<id>:<name>".
     public var encoded: String {
         switch self {
         case .you: "you"
         case .autoplay: "autoplay"
         case .played(let name): name.map { "list:\($0)" } ?? "list"
+        case .station(let id, let name): "station:\(id):\(name)"
         }
     }
 }
@@ -30,6 +35,7 @@ public func queueSourceTitle(_ source: QueueSource) -> String {
     case .you: "Next from you"
     case .autoplay: "Next from Autoplay"
     case .played(let name): name.map { "Next from \($0)" } ?? "Up next"
+    case .station(_, let name): name.isEmpty ? "Up next" : "Next from \(name)"
     }
 }
 
@@ -66,7 +72,9 @@ public func movedSource(_ own: QueueSource, before: QueueSource?, after: QueueSo
     return joined == .autoplay && own != .autoplay ? own : joined
 }
 
-/// The source a saved word stands for; an unknown or missing one is a list with no name.
+/// The source a saved word stands for; an unknown or missing one is a list with no name. A
+/// station's id ends at the first colon after "station:", so its name may hold colons; a station
+/// with no id is a list with no name.
 public func queueSourceOf(_ word: String?) -> QueueSource {
     guard let word else { return .none }
     if word == "you" { return .you }
@@ -74,6 +82,12 @@ public func queueSourceOf(_ word: String?) -> QueueSource {
     if word.hasPrefix("list:") {
         let name = String(word.dropFirst("list:".count))
         return .played(name.isEmpty ? nil : name)
+    }
+    if word.hasPrefix("station:") {
+        let rest = word.dropFirst("station:".count)
+        let id = rest.prefix { $0 != ":" }
+        guard !id.isEmpty else { return .none }
+        return .station(id: String(id), name: String(rest.dropFirst(id.count + 1)))
     }
     return .none
 }
