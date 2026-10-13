@@ -26,17 +26,21 @@ public struct OctoPlace: Decodable, Sendable, Equatable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: AnyKey.self)
         func text(_ key: String) -> String { (try? c.decodeIfPresent(String.self, forKey: AnyKey(key))) ?? "" }
-        func number(_ key: String) throws -> Double {
-            if let value = try? c.decodeIfPresent(Double.self, forKey: AnyKey(key)) { return value }
-            if let text = try? c.decodeIfPresent(String.self, forKey: AnyKey(key)), let value = Double(text) { return value }
-            throw DecodingError.keyNotFound(AnyKey(key), .init(codingPath: c.codingPath, debugDescription: "no \(key)"))
+        // A coordinate on the earth: finite and within `limit` either way.
+        func number(_ key: String, limit: Double) throws -> Double {
+            let value = (try? c.decodeIfPresent(Double.self, forKey: AnyKey(key)))
+                ?? (try? c.decodeIfPresent(String.self, forKey: AnyKey(key))).flatMap { $0.flatMap { Double($0) } }
+            guard let value, value.isFinite, abs(value) <= limit else {
+                throw DecodingError.dataCorrupted(.init(codingPath: c.codingPath, debugDescription: "no \(key) on the earth"))
+            }
+            return value
         }
         code = text("code")
         name = text("name")
         state = text("state")
         country = text("country").uppercased()
-        latitude = try number("latitude")
-        longitude = try number("longitude")
+        latitude = try number("latitude", limit: 90)
+        longitude = try number("longitude", limit: 180)
     }
 
     /// The place to find stations around, named "City, State", its state as the radio catalog
@@ -89,6 +93,102 @@ extension SubsonicClient {
             return try await get("getPlace", query.params, key: "place", as: OctoPlace.self, timeout: 15)
         } catch OctoError.notFound {
             return nil
+        }
+    }
+}
+
+// MARK: Where a place is looked up
+
+/// Where a place is looked up: on the Octo server, which lists the look-up; on a server that
+/// lists it but cannot be reached now (nothing then goes to the phone's place service); or by
+/// the phone's own place service.
+public enum PlaceLookup: Sendable, Equatable {
+    case server
+    case serverUnreachable
+    case phone
+
+    /// From the server's extensions as last known, and whether it can be asked now.
+    public init(extensions: [String], reachable: Bool) {
+        if serverLooksUpPlaces(extensions) {
+            self = reachable ? .server : .serverUnreachable
+        } else {
+            self = .phone
+        }
+    }
+}
+
+public enum PlaceProblem: Error, Sendable, Equatable {
+    case notFound
+    case serverUnreachable
+}
+
+/// Finds places by the way `lookup` says, the server's answers by `server` and the phone's by
+/// `phoneTyped` and `phoneNear`. A location is rounded to two decimals before anything is asked,
+/// and when nothing names it the place is its rounded coordinates alone (stations by radius).
+public struct PlaceResolver: Sendable {
+    public typealias ServerAsk = @Sendable (PlaceQuery) async throws -> OctoPlace?
+    public typealias PhoneTyped = @Sendable (PlaceQuery) async -> LivePlace?
+    public typealias PhoneNear = @Sendable (LivePlace) async -> LivePlace?
+
+    public let lookup: PlaceLookup
+    private let server: ServerAsk
+    private let phoneTyped: PhoneTyped
+    private let phoneNear: PhoneNear
+
+    public init(lookup: PlaceLookup, server: @escaping ServerAsk, phoneTyped: @escaping PhoneTyped, phoneNear: @escaping PhoneNear) {
+        self.lookup = lookup
+        self.server = server
+        self.phoneTyped = phoneTyped
+        self.phoneNear = phoneNear
+    }
+
+    /// A ZIP or postal code, or a city, typed for a country.
+    public func typed(_ words: String, country: String) async throws -> LivePlace {
+        let clean = words.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { throw PlaceProblem.notFound }
+        let query = PlaceQuery.typed(clean, country: country)
+        switch lookup {
+        case .serverUnreachable:
+            throw PlaceProblem.serverUnreachable
+        case .server:
+            let found: OctoPlace?
+            do {
+                found = try await server(query)
+            } catch {
+                if error is CancellationError { throw error }
+                throw PlaceProblem.serverUnreachable
+            }
+            guard let found else { throw PlaceProblem.notFound }
+            return named(found.livePlace, or: clean)
+        case .phone:
+            guard let found = await phoneTyped(query) else { throw PlaceProblem.notFound }
+            return named(found.rounded, or: clean)
+        }
+    }
+
+    /// A place found for typed words, named by them when nothing else names it.
+    private func named(_ place: LivePlace, or words: String) -> LivePlace {
+        var named = place
+        if named.label.trimmingCharacters(in: .whitespaces).isEmpty { named.label = words }
+        return named
+    }
+
+    /// The place at a location: its rounded coordinates, named with its state and country when
+    /// the server (or, without one, the phone) can name them.
+    public func near(latitude: Double, longitude: Double) async -> LivePlace {
+        let at = LivePlace(latitude: latitude, longitude: longitude, label: "Your location").rounded
+        switch lookup {
+        case .serverUnreachable:
+            return at
+        case .server:
+            guard let found = try? await server(.near(latitude: at.latitude, longitude: at.longitude)) else { return at }
+            let named = found.livePlace
+            return LivePlace(latitude: at.latitude, longitude: at.longitude, label: named.label.isEmpty ? at.label : named.label,
+                             state: named.state, countryCode: named.countryCode)
+        case .phone:
+            guard let named = await phoneNear(at) else { return at }
+            return LivePlace(latitude: at.latitude, longitude: at.longitude, label: named.label.isEmpty ? at.label : named.label,
+                             state: named.state, countryCode: named.countryCode)
         }
     }
 }

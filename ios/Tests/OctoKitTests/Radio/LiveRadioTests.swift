@@ -108,7 +108,7 @@ import Testing
         #expect(b.name == "https://x/b" && b.streamUrl == "https://x/b" && b.bitrate == 64 && b.hls && b.distanceMeters == nil)
     }
 
-    @Test func aRegionalRowWithCoordinatesGetsItsDistance() throws {
+    @Test func aNearbyRowWithoutItsDistanceGetsOne() throws {
         let json = #"[{"stationuuid":"a","url":"https://x/a","geo_lat":30.27,"geo_long":-97.84}]"#
         let found = try catalogStations(Data(json.utf8), from: austin.rounded)
         let meters = try #require(found.first?.distanceMeters)
@@ -119,8 +119,39 @@ import Testing
         let near = [station("far", distance: 9_000), station("near", distance: 100), station("same", distance: 500)]
         let regional = [station("same", distance: nil, clicks: 999), station("unplaced", clicks: 5),
                         station("elsewhere", distance: 900_000), station("inside", distance: 2_000)]
-        let merged = sortStations(mergeStations(near: near, regional: regional, radiusMeters: 40_000), by: .distance)
-        #expect(merged.map(\.uuid) == ["near", "same", "inside", "far", "unplaced"])
+        let merged = sortStations(mergeStations(near: near, regional: regional), by: .distance)
+        #expect(merged.map(\.uuid) == ["near", "same", "far", "unplaced"])
+    }
+
+    @Test func regionalRowsTheCatalogPlacesAreDropped() throws {
+        let json = #"""
+        [{"stationuuid":"placed","url":"https://x/a","geo_lat":31.76,"geo_long":-106.49},
+         {"stationuuid":"unplaced","url":"https://x/b","geo_lat":null,"geo_long":null},
+         {"stationuuid":"zero","url":"https://x/c","geo_lat":0,"geo_long":0},
+         {"stationuuid":"offEarth","url":"https://x/d","geo_lat":95,"geo_long":10}]
+        """#
+        let found = try regionalStations(Data(json.utf8))
+        #expect(found.map(\.uuid) == ["unplaced", "zero", "offEarth"])
+        #expect(found.allSatisfy { $0.distanceMeters == nil })
+    }
+
+    @Test func numbersFromTheCatalogNeverTrap() throws {
+        let json = #"""
+        [{"stationuuid":"a","url":"https://x/a","bitrate":1e20,"clickcount":-1e300,"hls":1e19,"lastcheckok":1e20,
+          "geo_distance":1e300,"geo_lat":"Infinity","geo_long":"nan"},
+         {"stationuuid":"b","url":"https://x/b","bitrate":"99999999999999999999","geo_distance":"Infinity"},
+         {"stationuuid":"c","url":"https://x/c","geo_distance":-5}]
+        """#
+        let found = try catalogStations(Data(json.utf8), from: austin.rounded)
+        #expect(found.count == 3)
+        #expect(found[0].bitrate == 1_000_000_000 && found[0].clicks == -1_000_000_000 && !found[0].hls)
+        #expect(found.allSatisfy { $0.distanceMeters == nil })
+        #expect(found[1].bitrate == 0)
+        #expect(liveDistanceText(.infinity, miles: true) == "")
+        #expect(liveDistanceText(1e300, miles: false) == "")
+        #expect(liveDistanceText(earthHalfCircumferenceMeters, miles: false) == "20040 km")
+        #expect(clampedWhole(.nan) == 0 && clampedWhole(1e30) == 1_000_000_000)
+        #expect(liveCacheKey(austin, radiusMeters: .infinity).contains(",0,"))
     }
 
     @Test func unplacedStationsComeLastMostPlayedFirst() {
@@ -164,6 +195,37 @@ import Testing
         #expect(liveCacheKey(a, radiusMeters: 40_000.2) == "30.26,-97.74,40000,TX,US")
         a.latitude = 30.2651
         #expect(liveCacheKey(a, radiusMeters: 40_000) == "30.27,-97.74,40000,TX,US")
+    }
+
+    @Test func aFailedRegionalSearchIsNotKept() async throws {
+        let calls = LockedBox<[String]>([])
+        let regionalFails = LockedBox(true)
+        let browser = RadioBrowser(userAgent: "Octo", servers: { ["at1.api.radio-browser.info"] }, fetch: { request in
+            let regional = request.url?.query?.contains("countrycode") == true
+            calls.update { $0.append(regional ? "regional" : "near") }
+            if regional && regionalFails.value { return (Data(), 500) }
+            if regional { return (Data(#"[{"stationuuid":"r","url":"https://x/r","codec":"MP3"}]"#.utf8), 200) }
+            return (Data(#"[{"stationuuid":"n","url":"https://x/n","codec":"MP3","geo_distance":10}]"#.utf8), 200)
+        })
+        // The nearby stations still show, but the answer is not kept.
+        #expect(try await browser.near(austin, radiusMeters: 40_000).map(\.uuid) == ["n"])
+        regionalFails.update { $0 = false }
+        #expect(try await browser.near(austin, radiusMeters: 40_000).map(\.uuid) == ["n", "r"])
+        _ = try await browser.near(austin, radiusMeters: 40_000)
+        #expect(calls.value == ["near", "regional", "near", "regional"])
+    }
+
+    @Test func anUnreadableAnswerLetsTheServerGo() async throws {
+        let picks = LockedBox(0)
+        let bad = LockedBox(true)
+        let browser = RadioBrowser(userAgent: "Octo", servers: {
+            picks.update { $0 += 1 }
+            return ["at1.api.radio-browser.info"]
+        }, fetch: { _ in (Data((bad.value ? "<html>" : "[]").utf8), 200) })
+        await #expect(throws: RadioBrowserError.self) { try await browser.near(austin, radiusMeters: 40_000) }
+        bad.update { $0 = false }
+        _ = try await browser.near(austin, radiusMeters: 40_000)
+        #expect(picks.value == 2)
     }
 
     @Test func aFailedSearchIsNotKept() async throws {

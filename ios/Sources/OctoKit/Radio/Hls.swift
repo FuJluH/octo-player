@@ -38,12 +38,28 @@ public enum HlsPlaylist: Sendable, Equatable {
     /// The streams to choose from, and the separate sound streams named for them.
     case master([HlsVariant], audio: [URL])
     case media(HlsMedia)
+    /// A plain playlist (M3U) naming whole streams, not segments: its entries in order.
+    case plain([URL])
 }
 
-/// Reads a playlist, its addresses taken against `base`; nil for text that is not one.
+/// The longest and shortest a segment's target time is taken to be, in seconds.
+public let hlsTargetRange: ClosedRange<Double> = 1...60
+
+/// The highest segment number read; anything above is held there, so counting on never overflows.
+public let hlsSequenceCap = 1 << 48
+
+/// Reads a playlist, its addresses taken against `base`; nil for text that is not one. One with
+/// no target time, or with entries of unknown length (`#EXTINF:-1`), names whole streams.
 public func parseHlsPlaylist(_ text: String, base: URL) -> HlsPlaylist? {
     let lines = text.replacingOccurrences(of: "\r", with: "").split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
-    guard lines.first(where: { !$0.isEmpty })?.hasPrefix("#EXTM3U") == true else { return nil }
+    func address(_ line: String) -> URL? { URL(string: line, relativeTo: base)?.absoluteURL }
+    let entries = lines.filter { !$0.isEmpty && !$0.hasPrefix("#") }.compactMap(address)
+    guard lines.first(where: { !$0.isEmpty })?.hasPrefix("#EXTM3U") == true else {
+        // Whole web addresses one to a line, with no header at all.
+        let web = lines.filter { $0.lowercased().hasPrefix("http://") || $0.lowercased().hasPrefix("https://") }
+            .compactMap { URL(string: $0) }
+        return web.isEmpty ? nil : .plain(web)
+    }
     if lines.contains(where: { $0.hasPrefix("#EXT-X-STREAM-INF") }) {
         var variants: [HlsVariant] = []
         var audio: [URL] = []
@@ -53,32 +69,37 @@ public func parseHlsPlaylist(_ text: String, base: URL) -> HlsPlaylist? {
                 pending = hlsAttributes(String(line.dropFirst("#EXT-X-STREAM-INF:".count)))
             } else if line.hasPrefix("#EXT-X-MEDIA:") {
                 let attributes = hlsAttributes(String(line.dropFirst("#EXT-X-MEDIA:".count)))
-                if attributes["TYPE"] == "AUDIO", let uri = attributes["URI"], let url = URL(string: uri, relativeTo: base)?.absoluteURL {
+                if attributes["TYPE"] == "AUDIO", let uri = attributes["URI"], let url = address(uri) {
                     audio.append(url)
                 }
             } else if let attributes = pending, !line.isEmpty, !line.hasPrefix("#") {
-                if let url = URL(string: line, relativeTo: base)?.absoluteURL {
-                    variants.append(HlsVariant(uri: url, bandwidth: Int(attributes["BANDWIDTH"] ?? "") ?? 0, codecs: attributes["CODECS"] ?? ""))
+                if let url = address(line) {
+                    let bandwidth = Int(attributes["BANDWIDTH"] ?? "").map { min(max($0, 0), 1 << 40) } ?? 0
+                    variants.append(HlsVariant(uri: url, bandwidth: bandwidth, codecs: attributes["CODECS"] ?? ""))
                 }
                 pending = nil
             }
         }
         return .master(variants, audio: audio)
     }
-    var target = 0.0
+    var target: Double?
     var sequence = 0
     var segments: [HlsSegment] = []
     var seconds: Double?
     var ended = false
     var encrypted = false
     var fragmented = false
+    var unknownLength = false
     for line in lines {
         if line.hasPrefix("#EXT-X-TARGETDURATION:") {
-            target = Double(line.dropFirst("#EXT-X-TARGETDURATION:".count)) ?? 0
+            target = Double(line.dropFirst("#EXT-X-TARGETDURATION:".count).trimmingCharacters(in: .whitespaces))
         } else if line.hasPrefix("#EXT-X-MEDIA-SEQUENCE:") {
-            sequence = Int(line.dropFirst("#EXT-X-MEDIA-SEQUENCE:".count)) ?? 0
+            let number = Int(line.dropFirst("#EXT-X-MEDIA-SEQUENCE:".count).trimmingCharacters(in: .whitespaces)) ?? 0
+            sequence = min(max(number, 0), hlsSequenceCap)
         } else if line.hasPrefix("#EXTINF:") {
-            seconds = Double(line.dropFirst("#EXTINF:".count).split(separator: ",").first ?? "") ?? 0
+            let length = Double(line.dropFirst("#EXTINF:".count).split(separator: ",").first?.trimmingCharacters(in: .whitespaces) ?? "") ?? 0
+            if length < 0 { unknownLength = true }
+            seconds = length.isFinite ? min(max(length, 0), 3_600) : 0
         } else if line.hasPrefix("#EXT-X-ENDLIST") {
             ended = true
         } else if line.hasPrefix("#EXT-X-KEY:") {
@@ -86,15 +107,16 @@ public func parseHlsPlaylist(_ text: String, base: URL) -> HlsPlaylist? {
             if method != "NONE" { encrypted = true }
         } else if line.hasPrefix("#EXT-X-MAP:") {
             fragmented = true
-        } else if !line.isEmpty, !line.hasPrefix("#"), let length = seconds {
-            if let url = URL(string: line, relativeTo: base)?.absoluteURL {
+        } else if !line.isEmpty, !line.hasPrefix("#") {
+            if let url = address(line), let length = seconds {
                 segments.append(HlsSegment(sequence: sequence + segments.count, uri: url, seconds: length))
             }
             seconds = nil
         }
     }
-    return .media(HlsMedia(targetSeconds: target > 0 ? target : 6, segments: segments, ended: ended, encrypted: encrypted,
-                           fragmentedMp4: fragmented))
+    guard let target, !unknownLength else { return entries.isEmpty ? nil : .plain(entries) }
+    let held = target.isFinite ? min(max(target, hlsTargetRange.lowerBound), hlsTargetRange.upperBound) : 6
+    return .media(HlsMedia(targetSeconds: held, segments: segments, ended: ended, encrypted: encrypted, fragmentedMp4: fragmented))
 }
 
 /// A tag's attributes, `NAME=value` or `NAME="value"`, split on commas outside quotes.
@@ -290,4 +312,87 @@ public struct TransportDemuxer: Sendable {
             }
         }
     }
+}
+
+// MARK: Following a live playlist
+
+/// What to do with a live playlist just read.
+public enum HlsStep: Sendable, Equatable {
+    /// Fetch these segments (none when it has not grown), then read it again after `reloadSeconds`.
+    case fetch([HlsSegment], reloadSeconds: Double)
+    /// It has not grown for three of its target times: the stream is treated as lost.
+    case stalled
+    /// It has ended and every segment was fetched.
+    case finished
+}
+
+/// Follows a live playlist from one reading to the next: which segments are new, a restart of
+/// its numbering, and a stream that stopped growing.
+public struct HlsFollower: Sendable, Equatable {
+    /// The last segment fetched.
+    public private(set) var last: Int?
+    /// When the playlist last brought a new segment, in ms.
+    private var grewAt: Int64?
+
+    /// How many target times without a new segment count as a stall.
+    public static let stallTargets = 3.0
+
+    public init() {}
+
+    public mutating func step(_ media: HlsMedia, now: Int64) -> HlsStep {
+        // Numbered anew below what was fetched (the station restarted it): back to its live edge.
+        if let last, let newest = media.segments.last?.sequence, newest < last { self.last = nil }
+        let next = hlsNextSegments(media, after: last)
+        if !next.isEmpty {
+            grewAt = now
+            return .fetch(next, reloadSeconds: media.targetSeconds)
+        }
+        if media.ended { return .finished }
+        let since = grewAt ?? now
+        if grewAt == nil { grewAt = now }
+        if Double(now - since) >= Self.stallTargets * media.targetSeconds * 1000 { return .stalled }
+        return .fetch([], reloadSeconds: media.targetSeconds / 2)
+    }
+
+    /// A segment was fetched (or passed over), so the next reading starts after it.
+    public mutating func fetched(_ segment: HlsSegment) { last = segment.sequence }
+}
+
+/// What a stretch of sound's first frame says of its format (kind, sample rate, channels), to
+/// tell when a stream changes format part way; nil when no frame start is found near its front.
+public func hlsSoundFormat(_ sound: Data, kind: HlsSound) -> UInt32? {
+    let bytes = [UInt8](sound.prefix(4_096))
+    guard bytes.count >= 4 else { return nil }
+    for at in 0..<(bytes.count - 3) where bytes[at] == 0xFF {
+        let b1 = bytes[at + 1], b2 = bytes[at + 2], b3 = bytes[at + 3]
+        switch kind {
+        case .aac where b1 & 0xF6 == 0xF0:
+            // Profile, sample rate and channel layout.
+            return 0x0100_0000 | UInt32(b2 & 0xFD) << 8 | UInt32(b3 & 0xC0)
+        case .mpeg where b1 & 0xE0 == 0xE0 && b1 & 0x06 != 0 && b2 & 0x0C != 0x0C:
+            // Version and layer, sample rate, and channel mode.
+            return 0x0200_0000 | UInt32(b1 & 0x1E) << 16 | UInt32(b2 & 0x0C) << 8 | UInt32(b3 & 0xC0)
+        default:
+            continue
+        }
+    }
+    return nil
+}
+
+/// Whether the first bytes of an answer are a playlist's (`#EXTM3U`, after any byte order mark
+/// or blank space).
+public func startsLikePlaylist(_ data: Data) -> Bool {
+    var bytes = [UInt8](data.prefix(64))
+    if bytes.starts(with: [0xEF, 0xBB, 0xBF]) { bytes.removeFirst(3) }
+    let text = String(decoding: bytes, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+    return text.hasPrefix("#EXTM3U")
+}
+
+/// The types an HLS playlist is sent as; the first is the one a station flagged as HLS is
+/// queued with.
+public let hlsPlaylistTypes: [String] = ["application/vnd.apple.mpegurl", "application/x-mpegurl", "audio/mpegurl", "audio/x-mpegurl"]
+
+/// Whether a type names an HLS playlist.
+public func isHlsPlaylistType(_ type: String?) -> Bool {
+    hlsPlaylistTypes.contains(type?.lowercased().trimmingCharacters(in: .whitespaces) ?? "")
 }

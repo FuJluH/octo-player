@@ -90,3 +90,44 @@ public func stationFailureWords(_ error: PlayError) -> String {
         playFailureOf(error).words
     }
 }
+
+/// When to reach a live station again once its connection stopped: after 1, 2, 4 and 8 s, then
+/// it has failed. An answer that refused the stream fails at once. A connection that played a
+/// good stretch starts the waits over.
+public struct LiveReconnect: Sendable, Equatable {
+    public enum Decision: Sendable, Equatable {
+        case again(after: Double)
+        case fail
+    }
+
+    /// Tries made since the stream last played a good stretch.
+    public private(set) var tries = 0
+    /// Sound bytes the connection in use has given.
+    private var heard = 0
+
+    /// A connection that gave this much sound played a good stretch.
+    public static let goodStretch = 128 << 10
+
+    public init() {}
+
+    /// The connection stopped; `status` is the HTTP status it answered with, when it refused.
+    public mutating func lost(status: Int? = nil) -> Decision {
+        if let status, !liveStatusRetries(status) { return .fail }
+        guard tries < liveReconnectDelays.count else { return .fail }
+        let wait = liveReconnectDelays[tries]
+        tries += 1
+        return .again(after: wait)
+    }
+
+    /// A new connection opened.
+    public mutating func connected() { heard = 0 }
+
+    /// The connection gave `bytes` of sound.
+    public mutating func heard(_ bytes: Int) {
+        heard = min(heard + max(0, bytes), Self.goodStretch)
+        if heard >= Self.goodStretch { tries = 0 }
+    }
+
+    /// Sound came again (a segment arrived): the waits start over.
+    public mutating func recovered() { tries = 0 }
+}

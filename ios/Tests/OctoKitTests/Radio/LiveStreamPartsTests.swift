@@ -115,7 +115,7 @@ import Testing
     }
 
     @Test func encryptedAndFragmentedPlaylistsAreMarked() throws {
-        let text = "#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"k\"\n#EXT-X-MAP:URI=\"init.mp4\"\n#EXTINF:6,\na.m4s\n#EXT-X-ENDLIST\n"
+        let text = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-KEY:METHOD=AES-128,URI=\"k\"\n#EXT-X-MAP:URI=\"init.mp4\"\n#EXTINF:6,\na.m4s\n#EXT-X-ENDLIST\n"
         guard case .media(let media) = try #require(parseHlsPlaylist(text, base: base)) else { return }
         #expect(media.encrypted && media.fragmentedMp4 && media.ended)
         #expect(parseHlsPlaylist("<html>", base: base) == nil)

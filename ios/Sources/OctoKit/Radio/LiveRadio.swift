@@ -194,11 +194,30 @@ public struct LiveRadius: Sendable, Hashable {
 
 /// A distance as a row shows it, in the listener's units: "2.4 mi", "18 km".
 public func liveDistanceText(_ meters: Double, miles: Bool) -> String {
+    // A distance no place on earth can be is not shown.
+    guard let meters = trueDistance(meters) else { return "" }
     let amount = meters / (miles ? mileMeters : 1000)
     let unit = miles ? "mi" : "km"
     if amount < 0.1 { return "here" }
     if amount < 10 { return String(format: "%.1f %@", amount, unit) }
-    return "\(Int(amount.rounded())) \(unit)"
+    return "\(clampedWhole(amount)) \(unit)"
+}
+
+/// The farthest two places on earth are apart, in meters: half its circumference.
+public let earthHalfCircumferenceMeters = 20_040_000.0
+
+/// A number from outside as a whole number, held to a billion either way so nothing done with it
+/// overflows; 0 for one that is not finite.
+public func clampedWhole(_ value: Double) -> Int {
+    guard value.isFinite else { return 0 }
+    return Int(min(max(value.rounded(), -1e9), 1e9))
+}
+
+/// A distance from outside that can be true: finite, not below 0, and no more than half the
+/// earth around; nil for any other.
+public func trueDistance(_ meters: Double?) -> Double? {
+    guard let meters, meters.isFinite, meters >= 0, meters <= earthHalfCircumferenceMeters else { return nil }
+    return meters
 }
 
 /// A coordinate to two decimals (about a kilometer).
@@ -240,12 +259,17 @@ struct CatalogStation: Decodable {
         func text(_ key: String) -> String { (try? c.decodeIfPresent(String.self, forKey: AnyKey(key))) ?? "" }
         func whole(_ key: String) -> Int? {
             if let value = try? c.decodeIfPresent(Int.self, forKey: AnyKey(key)) { return value }
-            if let value = try? c.decodeIfPresent(Double.self, forKey: AnyKey(key)) { return Int(value) }
+            if let value = try? c.decodeIfPresent(Double.self, forKey: AnyKey(key)) {
+                return value.isFinite ? clampedWhole(value) : nil
+            }
             return (try? c.decodeIfPresent(String.self, forKey: AnyKey(key))).flatMap { $0.flatMap { Int($0) } }
+                .map { min(max($0, -1_000_000_000), 1_000_000_000) }
         }
+        // Only finite numbers: "Infinity" or "nan" written as text is no number.
         func number(_ key: String) -> Double? {
-            if let value = try? c.decodeIfPresent(Double.self, forKey: AnyKey(key)) { return value }
-            return (try? c.decodeIfPresent(String.self, forKey: AnyKey(key))).flatMap { $0.flatMap { Double($0) } }
+            let value = (try? c.decodeIfPresent(Double.self, forKey: AnyKey(key)))
+                ?? (try? c.decodeIfPresent(String.self, forKey: AnyKey(key))).flatMap { $0.flatMap { Double($0) } }
+            return value.flatMap { $0.isFinite ? $0 : nil }
         }
         uuid = text("stationuuid")
         name = text("name")
@@ -266,15 +290,21 @@ struct CatalogStation: Decodable {
         lastCheckOk = whole("lastcheckok") ?? 1
     }
 
+    /// Whether the catalog says where the station is: coordinates on the earth, not 0, 0.
+    var placed: Bool {
+        guard let latitude, let longitude else { return false }
+        return abs(latitude) <= 90 && abs(longitude) <= 180 && (latitude != 0 || longitude != 0)
+    }
+
     /// The station as the app keeps it, its distance from `origin` when the catalog places it.
     /// Nil for a row with no id or stream, or one the catalog found broken at its last check.
     func live(from origin: LivePlace?) -> LiveStation? {
         let stream = (urlResolved.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? url : urlResolved)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !uuid.trimmingCharacters(in: .whitespaces).isEmpty, !stream.isEmpty, lastCheckOk != 0 else { return nil }
-        var distance = geoDistance
-        if distance == nil, let origin, let latitude, let longitude, latitude != 0 || longitude != 0 {
-            distance = greatCircleMeters(origin.latitude, origin.longitude, latitude, longitude)
+        var distance = trueDistance(geoDistance)
+        if distance == nil, let origin, placed, let latitude, let longitude {
+            distance = trueDistance(greatCircleMeters(origin.latitude, origin.longitude, latitude, longitude))
         }
         var seenTags = Set<String>()
         let tagList = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
@@ -295,15 +325,19 @@ func catalogStations(_ data: Data, from origin: LivePlace?) throws -> [LiveStati
     try JSONDecoder().decode([CatalogStation].self, from: data).compactMap { $0.live(from: origin) }
 }
 
+/// The catalog's answer to the state and country search, around a real place: only the stations
+/// it cannot place, since one it places would have been found by distance when near enough.
+func regionalStations(_ data: Data) throws -> [LiveStation] {
+    try JSONDecoder().decode([CatalogStation].self, from: data).filter { !$0.placed }.compactMap { $0.live(from: nil) }
+}
+
 // MARK: Merging and order
 
 /// The stations near a place: those the catalog places within the radius, and those it files
-/// under the place's state and country, each once. A regional station the catalog places is kept
-/// only within the radius; one it cannot place is kept with no distance.
-public func mergeStations(near: [LiveStation], regional: [LiveStation], radiusMeters: Double) -> [LiveStation] {
+/// under the place's state and country but cannot place, each once.
+public func mergeStations(near: [LiveStation], regional: [LiveStation]) -> [LiveStation] {
     var seen = Set<String>()
-    let kept = regional.filter { station in station.distanceMeters.map { $0 <= radiusMeters } ?? true }
-    return (near + kept).filter { seen.insert($0.uuid).inserted }
+    return (near + regional.filter { $0.distanceMeters == nil }).filter { seen.insert($0.uuid).inserted }
 }
 
 /// Nearest first (the ones the catalog cannot place after, the most played first), or the most
@@ -410,7 +444,7 @@ public func radioSearchUrl(_ base: URL, _ params: [(String, String)]) -> URL? {
 public func radioNearbyUrl(_ base: URL, place: LivePlace, radiusMeters: Double) -> URL? {
     let at = place.rounded
     return radioSearchUrl(base, [("geo_lat", "\(at.latitude)"), ("geo_long", "\(at.longitude)"),
-                                 ("geo_distance", "\(Int(radiusMeters.rounded()))")])
+                                 ("geo_distance", "\(clampedWhole(radiusMeters))")])
 }
 
 /// The search for stations filed under the place's country and state; nil without a country.
@@ -430,7 +464,7 @@ public func radioClickUrl(_ base: URL, uuid: String) -> URL? {
 /// meters, and the state and country the regional search used.
 public func liveCacheKey(_ place: LivePlace, radiusMeters: Double) -> String {
     let at = place.rounded
-    return "\(at.latitude),\(at.longitude),\(Int(radiusMeters.rounded())),\(place.state),\(place.countryCode)"
+    return "\(at.latitude),\(at.longitude),\(clampedWhole(radiusMeters)),\(place.state),\(place.countryCode)"
 }
 
 /// How long the stations found for a place are kept: six hours.
@@ -488,13 +522,20 @@ public actor RadioBrowser {
         let at = place.rounded
         let base = try await self.base()
         guard let nearUrl = radioNearbyUrl(base, place: at, radiusMeters: radiusMeters) else { throw RadioBrowserError() }
-        let near = try catalogStations(try await get(nearUrl), from: at)
+        let near = try read(try await get(nearUrl)) { try catalogStations($0, from: at) }
         var regional: [LiveStation] = []
+        var whole = true
         if let regionalUrl = radioRegionalUrl(base, place: at) {
-            regional = (try? catalogStations(try await get(regionalUrl), from: at)) ?? []
+            do {
+                regional = try read(try await get(regionalUrl), regionalStations)
+            } catch {
+                if error is CancellationError { throw error }
+                // Shown without them, and asked for again next time rather than kept.
+                whole = false
+            }
         }
-        let all = sortStations(mergeStations(near: near, regional: regional, radiusMeters: radiusMeters), by: .distance)
-        cache.put(key, all, now: now())
+        let all = sortStations(mergeStations(near: near, regional: regional), by: .distance)
+        if whole { cache.put(key, all, now: now()) }
         return all
     }
 
@@ -520,6 +561,16 @@ public actor RadioBrowser {
             throw RadioBrowserError()
         }
         return url
+    }
+
+    /// An answer read as stations; one that cannot be read lets the server go, like a failure.
+    private func read(_ data: Data, _ stations: (Data) throws -> [LiveStation]) throws -> [LiveStation] {
+        do {
+            return try stations(data)
+        } catch {
+            chosen = nil
+            throw RadioBrowserError()
+        }
     }
 
     private func get(_ url: URL) async throws -> Data {
@@ -549,7 +600,10 @@ public actor RadioBrowser {
 /// again by a reverse lookup, as its keepers ask apps to find them; else the list its own
 /// servers give; none when both fail, and the fallback server is used.
 public func radioBrowserServers() async -> [String] {
-    let looked = await Task.detached { lookUpRadioServers() }.value
+    // The look-up blocks, so it runs on a queue of its own, never on a task's thread.
+    let looked = await withCheckedContinuation { continuation in
+        DispatchQueue.global(qos: .utility).async { continuation.resume(returning: lookUpRadioServers()) }
+    }
     if !looked.isEmpty { return looked }
     guard let url = URL(string: "https://all.api.radio-browser.info/json/servers"),
           let (data, response) = try? await URLSession.shared.data(for: URLRequest(url: url, timeoutInterval: 10)),
