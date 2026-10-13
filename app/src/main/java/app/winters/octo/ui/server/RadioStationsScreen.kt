@@ -40,6 +40,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import androidx.navigation3.runtime.NavKey
 import app.winters.octo.data.userMessage
 import app.winters.octo.design.AccentButton
 import app.winters.octo.design.GlassInput
@@ -61,6 +62,8 @@ import app.winters.octo.ui.common.LocalHaze
 import app.winters.octo.ui.common.rememberLast
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.screenPadding
+import app.winters.octo.ui.liveradio.FindNearRow
+import app.winters.octo.ui.nav.LiveRadioNearRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -208,13 +211,15 @@ class RadioStationsViewModel @Inject constructor(
 
 // The server's internet radio stations. Tapping one plays it. An admin can
 // add stations and change or delete them, except ones the server keeps.
+// Above them is the way to live stations near the listener.
 @Composable
-fun RadioStationsScreen(onBack: () -> Unit, vm: RadioStationsViewModel = hiltViewModel()) {
+fun RadioStationsScreen(onBack: () -> Unit, onOpen: (NavKey) -> Unit, vm: RadioStationsViewModel = hiltViewModel()) {
     val admin by vm.admin.collectAsStateWithLifecycle()
     val readOnly by vm.readOnly.collectAsStateWithLifecycle()
     Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = screenPadding(extraTop = DetailTopGap)) {
             item(key = "title") { ScreenTitle("Radio stations") }
+            item(key = "near") { FindNearRow(onClick = { onOpen(LiveRadioNearRoute) }, modifier = Modifier.padding(bottom = 8.dp)) }
             if (admin) {
                 item(key = "add") {
                     GlazeButton("Add station", onClick = vm::add, modifier = Modifier.padding(start = 20.dp, bottom = 8.dp))

@@ -29,6 +29,10 @@ import app.winters.octo.home.Rediscovery
 import app.winters.octo.home.shows
 import app.winters.octo.home.answered
 import app.winters.octo.listening.PlayHistory
+import app.winters.octo.liveradio.KeptStations
+import app.winters.octo.liveradio.LiveRadioStore
+import app.winters.octo.liveradio.LiveStation
+import app.winters.octo.liveradio.RadioBrowser
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.playback.radioId
 import app.winters.octo.server.ServerSync
@@ -69,7 +73,13 @@ class HomeViewModel @Inject constructor(
     favourites: FavouritesDao,
     private val chartLists: ChartLists,
     keptFiles: KeptShelvesFiles,
+    private val liveRadio: LiveRadioStore,
+    private val radioCatalog: RadioBrowser,
 ) : ViewModel() {
+    // The live stations kept on this phone, for the Live radio shelf.
+    val keptStations: StateFlow<KeptStations> =
+        liveRadio.kept.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), KeptStations())
+
     // What is pinned to the front of Home, in its order.
     val pinned: StateFlow<List<PinnedItem>> =
         pins.items.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -279,6 +289,20 @@ class HomeViewModel @Inject constructor(
             } finally {
                 startingStation = null
             }
+        }
+    }
+
+    // A station kept on this phone plays its stream, and the catalog hears
+    // it was started.
+    fun playKept(station: LiveStation) {
+        playback.playTracks(listOf(radioId(station.streamUrl, station.name, station.hls)), source = station.name)
+        viewModelScope.launch { radioCatalog.started(station.uuid) }
+    }
+
+    fun removeKept(station: LiveStation) {
+        viewModelScope.launch {
+            liveRadio.drop(station.uuid)
+            feedback.undoable("Removed ${station.name}") { viewModelScope.launch { liveRadio.keep(station) } }
         }
     }
 

@@ -95,6 +95,9 @@ enum class ServerForm {
 @Serializable data object SharesRoute : NavKey
 @Serializable data object RadioStationsRoute : NavKey
 
+// Live radio stations around a place, from the Radio Browser catalog.
+@Serializable data object LiveRadioNearRoute : NavKey
+
 // The equalizer and everything else that shapes the sound.
 @Serializable data object SoundRoute : NavKey
 

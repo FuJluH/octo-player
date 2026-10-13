@@ -17,6 +17,7 @@ import app.winters.octo.favourites.PinKey
 import app.winters.octo.favourites.PinStore
 import app.winters.octo.listening.FavouriteKind
 import app.winters.octo.listening.ListenBrainzStore
+import app.winters.octo.liveradio.LiveRadioStore
 import app.winters.octo.lyrics.LyricsLookSettings
 import app.winters.octo.lyrics.LyricsTiming
 import app.winters.octo.offline.OfflineSettings
@@ -44,10 +45,10 @@ import javax.inject.Singleton
 // The largest backup read. Even a big library's backup is a few megabytes.
 private const val MAX_BACKUP_BYTES = 32 * 1024 * 1024
 
-// Saves the app's settings, playlists, likes, ratings, favourites and pins
-// to a file the listener picks, and puts them back from one. Sign-in
-// secrets are never written: only the server's address and user name, for
-// reference, and no ListenBrainz token at all.
+// Saves the app's settings, playlists, likes, ratings, favourites, pins and
+// kept live radio stations to a file the listener picks, and puts them back
+// from one. Sign-in secrets are never written: only the server's address
+// and user name, for reference, and no ListenBrainz token at all.
 @Singleton
 class Backups @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -72,6 +73,7 @@ class Backups @Inject constructor(
     private val listenBrainz: ListenBrainzStore,
     private val sorts: SortSettings,
     private val home: HomePrefs,
+    private val liveRadio: LiveRadioStore,
 ) {
     // Everything as it is now.
     suspend fun make(now: Long = System.currentTimeMillis()): Backup = withContext(Dispatchers.IO) {
@@ -120,6 +122,7 @@ class Backups @Inject constructor(
             listenBrainz = listenBrainz.current().let { ListenBrainzBackup(it.enabled, it.sendPlays, it.nowPlaying) },
             homeSections = encodeHomeSections(home.homeSections.first()),
             sortOrders = sorts.saved(),
+            keptStations = liveRadio.keptNow().stations,
         )
     }
 
@@ -179,6 +182,7 @@ class Backups @Inject constructor(
         backup.listenBrainz?.let { listenBrainz.restoreChoices(it.enabled, it.sendPlays, it.nowPlaying) }
         backup.homeSections?.let { home.setHomeSections(homeSectionOrder(it)) }
         sorts.restore(backup.sortOrders)
+        liveRadio.restore(backup.keptStations)
         backup.lyrics?.let { lyrics.setKeepScreenOn(it.keepScreenOn) }
         backup.lyrics?.look?.let { lyricsLook.restore(it) }
         plan.lyricsOffsets.forEach { (id, ms) -> lyrics.setOffset(id, ms) }

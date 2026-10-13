@@ -7,6 +7,7 @@ import app.winters.octo.catalog.matchKey
 import app.winters.octo.discovery.TitleIndex
 import app.winters.octo.discovery.sameSong
 import app.winters.octo.listening.SendPlays
+import app.winters.octo.liveradio.LiveStation
 import app.winters.octo.lyrics.LyricsLook
 import app.winters.octo.offline.CacheSize
 import app.winters.octo.offline.OfflinePrefs
@@ -172,6 +173,8 @@ data class Backup(
     // The order each list was left in, by the list's name, as "<order>:asc"
     // or "<order>:desc". Lists never reordered are not named.
     val sortOrders: Map<String, String> = emptyMap(),
+    // The live radio stations kept on the phone, newest first.
+    val keptStations: List<LiveStation> = emptyList(),
 )
 
 private val BackupJson = Json {
@@ -367,6 +370,7 @@ fun describeBackup(backup: Backup): List<String> = buildList {
     if (backup.favouriteAlbums.isNotEmpty()) add(plural(backup.favouriteAlbums.size, "favorite album", "favorite albums"))
     if (backup.favouriteArtists.isNotEmpty()) add(plural(backup.favouriteArtists.size, "favorite artist", "favorite artists"))
     if (backup.pins.isNotEmpty()) add(plural(backup.pins.size, "pin on Home", "pins on Home"))
+    if (backup.keptStations.isNotEmpty()) add(plural(backup.keptStations.size, "kept live radio station", "kept live radio stations"))
     backup.lyrics?.offsets?.takeIf { it.isNotEmpty() }?.let { add("Lyrics timing for " + plural(it.size, "song", "songs")) }
     backup.lyrics?.outputOffsets?.takeIf { it.isNotEmpty() }?.let { add("Lyrics timing for " + plural(it.size, "sound output", "sound outputs")) }
     backup.offline?.keptPlaylists?.takeIf { it.isNotEmpty() }?.let {

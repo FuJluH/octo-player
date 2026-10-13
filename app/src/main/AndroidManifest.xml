@@ -12,6 +12,9 @@
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <!-- Whether a stream goes over Wi-Fi or mobile data, or cannot go at all. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- A rough position for Live radio near you, asked for only when "Use my
+         location" is tapped. It is rounded to about a kilometer on the phone. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <!-- The music already on the phone. -->
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission

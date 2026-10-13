@@ -63,6 +63,18 @@ import app.winters.octo.ui.nav.HistoryRoute
 import app.winters.octo.ui.nav.ServerListRoute
 import app.winters.octo.discovery.isRadio
 import app.winters.octo.home.mixGroup
+import app.winters.octo.home.shows
+import app.winters.octo.liveradio.LiveShelfEntry
+import app.winters.octo.liveradio.LiveStation
+import app.winters.octo.liveradio.StationAction
+import app.winters.octo.liveradio.liveShelf
+import app.winters.octo.ui.common.Choice
+import app.winters.octo.ui.common.ChoiceRequest
+import app.winters.octo.ui.common.LocalChoiceSheet
+import app.winters.octo.ui.common.choiceAnchor
+import app.winters.octo.ui.liveradio.FindNearCard
+import app.winters.octo.ui.liveradio.KeptStationCard
+import app.winters.octo.ui.nav.LiveRadioNearRoute
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -77,6 +89,23 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
     val favouriteAlbums by vm.favouriteAlbums.collectAsStateWithLifecycle()
     val rediscovery by vm.rediscovery.collectAsStateWithLifecycle()
     val sections by vm.sections.collectAsStateWithLifecycle()
+    val keptStations by vm.keptStations.collectAsStateWithLifecycle()
+    val sheet = LocalChoiceSheet.current
+    // The Live radio shelf: the way to stations near the listener, then the
+    // server's stations and the ones kept on this phone.
+    val liveRadio: LazyListScope.(String) -> Unit = { title ->
+        liveRadioShelf(
+            title,
+            liveShelf(vm.stations.filter { it.streamUrl != null }, keptStations.stations),
+            vm.startingStation,
+            onFindNear = { onOpen(LiveRadioNearRoute) },
+            onPlayServer = vm::playStation,
+            onPlayKept = vm::playKept,
+            onKeptMenu = { station ->
+                sheet.show(ChoiceRequest(station.name, listOf(Choice(StationAction.Remove.label)), selected = -1) { vm.removeKept(station) })
+            },
+        )
+    }
 
     LifecycleResumeEffect(Unit) {
         vm.onShown()
@@ -97,8 +126,10 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
             when {
                 layout.empty -> {
                     item(key = "empty") { EmptyCard(offerAccess = !layout.askAccess) }
-                    // An empty library is where the charts help most: songs to start from.
+                    // An empty library is where the charts and live radio
+                    // help most: music to start from.
                     songShelf("Charts", vm.charts, vm::play, onTitle = { onOpen(ChartsRoute) })
+                    if (sections?.shows(HomeSection.InternetRadio) != false) liveRadio(HomeSection.InternetRadio.title)
                 }
                 layout.shelves -> {
                     // The shelves in the order kept in Settings, the hidden
@@ -112,7 +143,7 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
                             HomeSection.RecentlyPlayed -> shelf(title, recentlyPlayed, onOpen, onTitle = { onOpen(HistoryRoute()) })
                             HomeSection.MadeForYou -> stationShelf(title, vm.madeForYou, vm.startingStation, onOpen, vm::playStation)
                             HomeSection.Stations -> stationShelf(title, vm.stations.filter { it.streamUrl == null }, vm.startingStation, onOpen, vm::playStation)
-                            HomeSection.InternetRadio -> stationShelf(title, vm.stations.filter { it.streamUrl != null }, vm.startingStation, onOpen, vm::playStation)
+                            HomeSection.InternetRadio -> liveRadio(title)
                             HomeSection.YearMixes, HomeSection.GenreMixes, HomeSection.ArtistMixes, HomeSection.CountryMixes ->
                                 stationShelf(title, vm.mixes[entry.section.mixGroup].orEmpty(), vm.startingStation, onOpen, vm::playStation)
                             HomeSection.RecentlyAdded -> shelf(title, recent.orEmpty(), onOpen)
@@ -249,6 +280,45 @@ private fun LazyListScope.stationShelf(
                     onOpen = { onOpen(ServerListRoute(station.id, station.name, station.artwork, radio = station.isRadio)) },
                     onPlay = { onPlay(station) },
                 )
+            }
+        }
+    }
+}
+
+// Live radio: always there, led by the card to stations near the listener,
+// then the server's stations and those kept on this phone. A server station
+// or a kept one plays at a tap; a long press on a kept one offers to remove it.
+private fun LazyListScope.liveRadioShelf(
+    title: String,
+    entries: List<LiveShelfEntry>,
+    starting: String?,
+    onFindNear: () -> Unit,
+    onPlayServer: (Station) -> Unit,
+    onPlayKept: (LiveStation) -> Unit,
+    onKeptMenu: (LiveStation) -> Unit,
+) {
+    moving(key = "title:$title") { SectionTitle(title, Modifier.padding(top = 18.dp)) }
+    moving(key = "row:$title") {
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            item(key = "find-near") { FindNearCard(onFindNear) }
+            items(entries, key = { it.key }) { entry ->
+                when (entry) {
+                    is LiveShelfEntry.Server -> StationCard(
+                        entry.station,
+                        starting = entry.station.id == starting,
+                        onOpen = { onPlayServer(entry.station) },
+                        onPlay = { onPlayServer(entry.station) },
+                    )
+                    is LiveShelfEntry.Kept -> KeptStationCard(
+                        entry.station,
+                        onPlay = { onPlayKept(entry.station) },
+                        onLongPress = { onKeptMenu(entry.station) },
+                        modifier = Modifier.choiceAnchor(LocalChoiceSheet.current),
+                    )
+                }
             }
         }
     }

@@ -405,7 +405,8 @@ private fun pagesFor(stack: NavBackStack<NavKey>): (NavKey) -> NavEntry<NavKey> 
         entry<SoundRoute> { SoundScreen(back) }
         entry<HomeSectionsRoute> { app.winters.octo.ui.settings.HomeSectionsPage(back) }
         entry<SharesRoute> { SharesScreen(back) }
-        entry<RadioStationsRoute> { RadioStationsScreen(back) }
+        entry<RadioStationsRoute> { RadioStationsScreen(back, open) }
+        entry<LiveRadioNearRoute> { app.winters.octo.ui.liveradio.LiveRadioScreen(back) }
         entry<HistoryRoute> { HistoryScreen(it.mostPlayed, back) }
         entry<LibraryHealthRoute> { LibraryHealthScreen(open, back) }
         entry<HealthCheckRoute> { HealthCheckScreen(it.check, back) }

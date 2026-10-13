@@ -3,6 +3,8 @@ package app.winters.octo.backup
 import app.winters.octo.catalog.PinKind
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.listening.SendPlays
+import app.winters.octo.liveradio.KeptStations
+import app.winters.octo.liveradio.LiveStation
 import app.winters.octo.offline.CacheSize
 import app.winters.octo.offline.OfflinePrefs
 import app.winters.octo.playback.CopyPreference
@@ -58,6 +60,19 @@ class BackupTest {
             "liveBackground", "crossfade", "crossfadeSeconds", "lyricsOnline", "speed", "keepPitch", "pitchSemitones",
             "skipSilence", "resumeWired", "resumeBluetooth", "resumeAlways", "smartTransitions", "filterSweeps", "matchTempo",
         ).forEach { assertTrue("$it is missing", text.contains("\"$it\"")) }
+    }
+
+    @Test
+    fun keptLiveStationsReadBackTheSame() {
+        val kept = KeptStations()
+            .keep(LiveStation("u1", "KEXP", "https://kexp.example/live.aac", favicon = "https://kexp.example/icon.png", codec = "AAC", bitrate = 128, state = "Washington", countryCode = "US", tags = listOf("indie")))
+            .keep(LiveStation("u2", "FIP", "https://fip.example/hls.m3u8", hls = true, country = "France"))
+        val backup = Backup(keptStations = kept.stations)
+        val read = decodeBackup(encodeBackup(backup)) as BackupRead.Read
+        assertEquals(kept.stations, read.backup.keptStations)
+        assertTrue(describeBackup(backup).contains("2 kept live radio stations"))
+        // A backup made before stations were kept has none.
+        assertTrue((decodeBackup("{\"kind\": \"octo-settings\"}") as BackupRead.Read).backup.keptStations.isEmpty())
     }
 
     @Test

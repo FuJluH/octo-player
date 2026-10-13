@@ -83,7 +83,9 @@ import app.winters.octo.ui.common.SongLead
 import app.winters.octo.ui.common.SongRow
 import app.winters.octo.ui.common.rowAlbum
 import app.winters.octo.ui.common.songs
+import app.winters.octo.ui.liveradio.FindNearRow
 import app.winters.octo.ui.nav.AlbumRoute
+import app.winters.octo.ui.nav.LiveRadioNearRoute
 import app.winters.octo.ui.nav.ArtistRoute
 import app.winters.octo.ui.nav.OnlineAlbumRoute
 import app.winters.octo.ui.nav.OnlineArtistRoute
@@ -147,7 +149,9 @@ fun SearchScreen(onOpen: (NavKey) -> Unit, vm: SearchViewModel = hiltViewModel()
         // Nothing to show online: not looking, or looked and found nothing.
         val nothingOnline = online is DiscoverState.Idle || (online is DiscoverState.Done && online.found.isEmpty)
         when {
-            vm.text.isBlank() && (recent.isNotEmpty() || chart != null) -> RecentList(
+            // Before anything is typed: the way to live radio near the
+            // listener, the last searches and the chart.
+            vm.text.isBlank() -> RecentList(
                 recent,
                 hider,
                 onSearch = {
@@ -156,12 +160,16 @@ fun SearchScreen(onOpen: (NavKey) -> Unit, vm: SearchViewModel = hiltViewModel()
                 },
                 onForget = vm::forget,
                 onForgetAll = vm::forgetAll,
+                before = { item(key = "live-near") { FindNearRow(onClick = { onOpen(LiveRadioNearRoute) }, modifier = Modifier.padding(bottom = 8.dp)) } },
             ) {
                 chart?.let { list ->
                     rankedSection(
                         "chart", "Popular right now", list, TOP_CHART_SHOWN, vm.chartOpen, { vm.chartOpen = it },
                         withArtist = true, top = recent.isNotEmpty(),
                     ) { vm.playRanked(list, it) }
+                }
+                if (recent.isEmpty() && chart == null) {
+                    item(key = "hint") { Hint(if (signedIn) "Search your music and discover more" else "Search the music on your phone") }
                 }
             }
             found == null -> Hint(if (signedIn) "Search your music and discover more" else "Search the music on your phone")
@@ -293,7 +301,7 @@ private fun KindTitle(text: String, spaced: Boolean, onSeeAll: (() -> Unit)?) {
 }
 
 // The last searches, while the field is empty: a tap searches again, the
-// cross forgets one.
+// cross forgets one. `before` comes above them and `after` below.
 @Composable
 private fun RecentList(
     recent: List<String>,
@@ -301,9 +309,11 @@ private fun RecentList(
     onSearch: (String) -> Unit,
     onForget: (String) -> Unit,
     onForgetAll: () -> Unit,
+    before: LazyListScope.() -> Unit = {},
     after: LazyListScope.() -> Unit = {},
 ) {
     LazyColumn(Modifier.fillMaxSize().nestedScroll(hider), contentPadding = PaddingValues(top = 12.dp, bottom = 140.dp)) {
+        before()
         if (recent.isNotEmpty()) {
             item(key = "recent:title") {
                 Row(Modifier.fillMaxWidth().padding(end = 10.dp), verticalAlignment = Alignment.CenterVertically) {
