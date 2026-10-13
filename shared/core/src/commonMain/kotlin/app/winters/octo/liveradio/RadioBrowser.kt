@@ -80,6 +80,8 @@ internal data class CatalogStation(
     val state: String = "",
     val tags: String = "",
     @SerialName("geo_distance") val geoDistance: Double? = null,
+    @SerialName("geo_lat") val geoLat: Double? = null,
+    @SerialName("geo_long") val geoLong: Double? = null,
     @SerialName("clickcount") val clickCount: Int = 0,
     @SerialName("lastcheckok") val lastCheckOk: Int = 1,
 )
@@ -165,8 +167,12 @@ class RadioBrowser(
             } else {
                 emptyList()
             }
+            // From the state and country, only the stations the catalog cannot
+            // place: one it can place was in the circle search if near enough.
             val regional = if (place.countryCode.isNotBlank()) {
-                search(*listOfNotNull("countrycode" to place.countryCode, place.state.takeIf { it.isNotBlank() }?.let { "state" to it }).toTypedArray())
+                rows(*listOfNotNull("countrycode" to place.countryCode, place.state.takeIf { it.isNotBlank() }?.let { "state" to it }).toTypedArray())
+                    .filter { !place.located || it.geoLat == null || it.geoLong == null }
+                    .mapNotNull { it.toLive() }
             } else {
                 emptyList()
             }
@@ -185,7 +191,9 @@ class RadioBrowser(
         }
     }
 
-    private suspend fun search(vararg params: Pair<String, String>): List<LiveStation> {
+    private suspend fun search(vararg params: Pair<String, String>): List<LiveStation> = rows(*params).mapNotNull { it.toLive() }
+
+    private suspend fun rows(vararg params: Pair<String, String>): List<CatalogStation> {
         val url = base().newBuilder().addPathSegments("json/stations/search").apply {
             params.forEach { (name, value) -> addQueryParameter(name, value) }
             addQueryParameter("hidebroken", "true")
@@ -194,7 +202,7 @@ class RadioBrowser(
             addQueryParameter("limit", "$SEARCH_LIMIT")
         }.build()
         val body = get(url)
-        return json.decodeFromString<List<CatalogStation>>(body).mapNotNull { it.toLive() }
+        return json.decodeFromString<List<CatalogStation>>(body)
     }
 
     // A server's address: a name stands for its https address.

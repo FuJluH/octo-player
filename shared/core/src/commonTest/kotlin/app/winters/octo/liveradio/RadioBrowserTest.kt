@@ -65,6 +65,14 @@ class RadioBrowserTest {
     }
 
     @Test
+    fun aStationOfTheStateThatIsPlacedOutsideTheCircleIsLeftOut() = runTest {
+        nearBody = "[${station("a", "KQED", 9094.3, 50)}]"
+        val farButPlaced = station("far", "Far FM", null, 99).dropLast(1) + ""","geo_lat":34.05,"geo_long":-118.24}"""
+        regionalBody = "[$farButPlaced,${station("c", "Unplaced FM", null, 5)}]"
+        assertEquals(listOf("a", "c"), catalog().near(sf, 40_000.0, LiveSort.Distance).map { it.uuid })
+    }
+
+    @Test
     fun theMostPlayedComeFirstWhenAsked() = runTest {
         nearBody = "[${station("a", "KQED", 9094.3, 50)},${station("b", "KDFC", 807.7, 10)}]"
         assertEquals(listOf("a", "b"), catalog().near(sf, 40_000.0, LiveSort.Popular).map { it.uuid })
