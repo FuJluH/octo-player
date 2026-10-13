@@ -520,7 +520,7 @@ fn segments_the_server_keeps_saying_are_missing_end_the_stream() {
 }
 
 #[test]
-fn an_hls_station_with_a_plain_address_opens_as_hls_when_marked() {
+fn an_hls_station_with_a_plain_address_opens_as_hls() {
     let segments = adts_segments("tone-440-44k-stereo.aac");
     let polls = AtomicU64::new(0);
     let server = ScriptServer::start(move |asked, conn, _| {
@@ -536,8 +536,74 @@ fn an_hls_station_with_a_plain_address_opens_as_hls_when_marked() {
     });
     let marked = Deck::open(1, server.url("/stream"), 0.0, HttpOptions { hls: true, ..live() });
     read_secs(&marked, 1.5);
-    // Unmarked, the playlist is read as a live stream of sound, which it is
-    // not: no sound ever comes, and the stream counts as gone.
+    // Unmarked, its first bytes say what it is.
     let unmarked = Deck::open(2, server.url("/stream"), 0.0, live());
-    read_to_failure(&unmarked);
+    read_secs(&unmarked, 1.5);
+}
+
+#[test]
+fn a_playlist_behind_a_plain_address_is_known_by_its_first_bytes() {
+    let segments = adts_segments("tone-440-44k-stereo.aac");
+    let polls = AtomicU64::new(0);
+    let server = ScriptServer::start(move |asked, conn, _| {
+        let t = asked.target.as_str();
+        if t == "/listen" {
+            // A byte order mark and blank lines first, and a type that says sound.
+            let n = polls.fetch_add(1, Ordering::SeqCst);
+            let mut body = vec![0xef, 0xbb, 0xbf];
+            body.extend_from_slice(b"\r\n \n");
+            body.extend_from_slice(live_playlist(n, "aac", "", |_| None).as_bytes());
+            answer(conn, "audio/mpeg", &body);
+        } else if let Some(seq) = number(t).filter(|_| t.starts_with("/seg/")) {
+            answer(conn, "audio/aac", &segments[seq as usize % segments.len()]);
+        } else {
+            not_found(conn);
+        }
+    });
+    let deck = Deck::open(1, server.url("/listen"), 0.0, live());
+    let sound = read_secs(&deck, 2.0);
+    let middle = &sound[sound.len() / 4..];
+    assert!((steady_frequency(middle, 44_100) - 440.0).abs() < 3.0, "{}", steady_frequency(middle, 44_100));
+    assert_eq!(deck.info().unwrap().codec, "aac");
+}
+
+#[test]
+fn a_plain_m3u_opens_its_first_station_and_a_looping_one_fails() {
+    let server = ScriptServer::start(|asked, conn, stopped| {
+        let host = asked.header("host").unwrap_or_default().to_string();
+        match asked.target.as_str() {
+            "/station.m3u" => {
+                let text = format!("#EXTM3U\n#EXTINF:-1,Test FM\nhttp://{host}/radio\nhttp://{host}/other\n");
+                answer(conn, "application/octet-stream", text.as_bytes());
+            }
+            "/loop.m3u" => {
+                let text = format!("#EXTM3U\n#EXTINF:-1,Again\nhttp://{host}/loop.m3u\n");
+                answer(conn, "text/plain", text.as_bytes());
+            }
+            "/radio" => icy_radio(stopped, conn),
+            _ => not_found(conn),
+        }
+    });
+    let deck = Deck::open(1, server.url("/station.m3u"), 0.0, live());
+    let mut titles = Vec::new();
+    let until = Instant::now() + Duration::from_secs(20);
+    let mut buf = vec![0.0; 2048];
+    let mut heard = 0.0;
+    while heard < 2.0 {
+        let r = deck.read(&mut buf);
+        assert!(r.failure.is_none() && !r.finished, "{r:?}");
+        heard = r.start_secs + r.frames as f64 / 44_100.0;
+        titles.extend(deck.take_title(heard));
+        if r.frames == 0 {
+            assert!(Instant::now() < until);
+            thread::sleep(Duration::from_millis(1));
+        }
+    }
+    assert_eq!(deck.info().unwrap().codec, "mp3");
+    assert!(titles.first().is_some_and(|t| t == "Test FM - Song 0"), "{titles:?}");
+    assert!(server.asked().iter().all(|a| a.target != "/other"));
+    // Pointing at itself, it is followed three times and then given up.
+    let err = source::open(&server.url("/loop.m3u"), live()).err().unwrap();
+    assert_eq!(err.kind, ErrorKind::Unsupported);
+    assert!(err.message.contains("too many"), "{err}");
 }

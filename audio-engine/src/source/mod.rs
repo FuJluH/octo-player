@@ -7,6 +7,7 @@ pub mod trust;
 pub mod ts;
 
 use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 use symphonia::core::io::MediaSource;
@@ -69,18 +70,54 @@ pub fn open(source: &str, http: HttpOptions) -> Result<Opened, Failure> {
     })
 }
 
-// An HTTP(S) stream, or the playlist its server says it is, `hops` deep in
-// playlists that point at other addresses.
+// An HTTP(S) stream, or the playlist it turns out to be by its server's
+// type or, for a live stream, by its first bytes; `hops` playlists in after
+// the address first asked for.
 fn open_stream(source: &str, http: HttpOptions, hops: u32) -> Result<Opened, Failure> {
     let live = http.live;
-    let stream = HttpSource::open(source, http.clone())?;
-    if hops == 0 && stream.content_type().is_some_and(hls::is_playlist_type) {
+    let mut stream = HttpSource::open(source, http.clone())?;
+    let listed = stream.content_type().is_some_and(hls::is_playlist_type);
+    if listed || (live && starts_as_playlist(&mut stream)?) {
         drop(stream);
-        return hls::open(source, http);
+        return hls::open_hop(source, http, hops);
     }
     let hint = stream.content_type().and_then(extension_for_type).or_else(|| url_extension(source));
     let seeks_cheaply = stream.answered_with_range();
     Ok(Opened { source: Box::new(stream), hint, remote: true, seeks_cheaply, live, periods: None })
+}
+
+// Whether a stream starts `#EXTM3U`, after any byte order mark and white
+// space, as an M3U or HLS playlist does. Reads only as far as it takes to
+// tell, and puts the stream back at its start.
+fn starts_as_playlist(stream: &mut HttpSource) -> Result<bool, Failure> {
+    const MARK: &[u8] = b"#EXTM3U";
+    const BOM: &[u8] = &[0xef, 0xbb, 0xbf];
+    let trimmed = |head: &[u8]| -> Vec<u8> {
+        let head = head.strip_prefix(BOM).unwrap_or(head);
+        head.iter().copied().skip_while(u8::is_ascii_whitespace).collect()
+    };
+    let mut head = Vec::new();
+    let mut buf = [0u8; 64];
+    loop {
+        let n = stream.read(&mut buf).map_err(|e| read_failure(&e))?;
+        head.extend_from_slice(&buf[..n]);
+        let text = trimmed(&head);
+        // Only part of the mark, or of the byte order mark, so far.
+        let partial = (text.len() < MARK.len() && MARK.starts_with(&text)) || BOM.starts_with(&head);
+        if n == 0 || !partial || head.len() >= 1024 {
+            break;
+        }
+    }
+    stream.seek(SeekFrom::Start(0)).map_err(|e| read_failure(&e))?;
+    Ok(trimmed(&head).starts_with(MARK))
+}
+
+// A failed read's own failure, when it carries one.
+fn read_failure(e: &std::io::Error) -> Failure {
+    match e.get_ref().and_then(|inner| inner.downcast_ref::<Failure>()) {
+        Some(f) => f.clone(),
+        None => Failure::new(ErrorKind::Network, e.to_string()),
+    }
 }
 
 /// Whether a stream is made on the way (a server's transcode, asked for with

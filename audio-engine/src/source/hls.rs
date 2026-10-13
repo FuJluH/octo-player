@@ -26,8 +26,8 @@ use crate::source::{Opened, Periods};
 // The most a playlist or segment may be, so a wrong address cannot fill memory.
 const MOST_BYTES: u64 = 64 << 20;
 
-// Plain playlists that point at another playlist, followed this deep.
-const MOST_HOPS: u32 = 4;
+// Playlists that point at another address, followed this many in a row.
+pub(crate) const MOST_HOPS: u32 = 3;
 
 // Fetches in a row that may fail before the stream counts as gone.
 const RETRIES: u32 = 4;
@@ -62,7 +62,8 @@ pub fn open(url: &str, http: HttpOptions) -> Result<Opened, Failure> {
     open_hop(url, http, 0)
 }
 
-fn open_hop(url: &str, http: HttpOptions, hops: u32) -> Result<Opened, Failure> {
+/// The same, `hops` playlists in after the address first asked for.
+pub(crate) fn open_hop(url: &str, http: HttpOptions, hops: u32) -> Result<Opened, Failure> {
     let text = fetch_text(url, &http)?;
     let media_url = match parse(&text, url) {
         Playlist::Master(variants) => {
@@ -81,7 +82,8 @@ fn open_hop(url: &str, http: HttpOptions, hops: u32) -> Result<Opened, Failure> 
                 .next()
                 .ok_or_else(|| Failure::new(ErrorKind::Unsupported, "the playlist lists nothing to play"))?;
             if hops >= MOST_HOPS {
-                return Err(Failure::new(ErrorKind::Unsupported, "the playlist points at itself"));
+                let looped = "the playlist points at itself, or through too many others";
+                return Err(Failure::new(ErrorKind::Unsupported, looped));
             }
             return if is_hls_url(&first) {
                 open_hop(&first, http, hops + 1)
@@ -666,17 +668,20 @@ struct Map {
     range: Option<(u64, u64)>,
 }
 
+// A master playlist names its variants, a media playlist its target
+// duration; anything else, such as a radio station's M3U with `#EXTINF:-1`
+// entries, is a plain list of addresses.
 fn parse(text: &str, base: &str) -> Playlist {
+    let text = text.trim_start_matches('\u{feff}');
     let lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
-    let hls = lines.iter().any(|l| l.starts_with("#EXT-X-"));
-    if !hls {
-        let entries = lines.iter().filter(|l| !l.starts_with('#')).map(|l| resolve(base, l)).collect();
-        return Playlist::Plain(entries);
-    }
     if lines.iter().any(|l| l.starts_with("#EXT-X-STREAM-INF")) {
         return Playlist::Master(parse_master(&lines, base));
     }
-    Playlist::Media(parse_media(&lines, base))
+    if lines.iter().any(|l| l.starts_with("#EXT-X-TARGETDURATION")) {
+        return Playlist::Media(parse_media(&lines, base));
+    }
+    let entries = lines.iter().filter(|l| !l.starts_with('#')).map(|l| resolve(base, l)).collect();
+    Playlist::Plain(entries)
 }
 
 fn parse_master(lines: &[&str], base: &str) -> Vec<Variant> {
@@ -953,6 +958,9 @@ mod tests {
     #[test]
     fn a_plain_list_gives_its_addresses() {
         let text = "#EXTM3U\n#EXTINF:-1,Station\nhttp://s.example/stream\n";
+        assert_eq!(parse(text, "http://h/a.m3u"), Playlist::Plain(vec!["http://s.example/stream".into()]));
+        // HLS-looking tags without a target duration, and a byte order mark.
+        let text = "\u{feff}#EXTM3U\n#EXT-X-VERSION:3\n#EXTINF:-1,Station\nhttp://s.example/stream\n";
         assert_eq!(parse(text, "http://h/a.m3u"), Playlist::Plain(vec!["http://s.example/stream".into()]));
     }
 

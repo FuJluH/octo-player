@@ -220,7 +220,11 @@ looks like.
   audio stream (AAC in ADTS, or MPEG audio) by `source/ts.rs`, which keeps
   its place across segments, so a packet cut between two joins up; timed
   ID3 and other streams are passed over. Encrypted streams are refused
-  with a clear error. A plain M3U list opens its first entry.
+  with a clear error. A live answer whose first bytes (after a byte order
+  mark and white space) are `#EXTM3U` is a playlist whatever its address
+  and type say; one with no target duration or variants, such as a
+  station's `#EXTINF:-1` list, opens its first entry, following at most
+  three playlists in a row.
 - **HE-AAC.** symphonia's AAC decoder has no SBR or PS, so HE-AAC plays its
   AAC-LC core: half the sample rate, no rebuilt high band, and for HE-AAC
   v2 its mono core. In ADTS that happens by itself; an MP4 config that
