@@ -2,7 +2,7 @@ import Foundation
 
 /// One of Home's shelves, by the id it is stored under. The cases are in the default order.
 /// `stations` is Octo's own stations, shown as Radio; `internetRadio` the internet radio stations
-/// added to the server; the mixes Octo's lists by year, genre, artist and country.
+/// added to the server, shown as Live radio; the mixes Octo's lists by year, genre, artist and country.
 public enum HomeSection: String, CaseIterable, Sendable, Hashable, Identifiable {
     case pinned
     case recentlyPlayed
@@ -32,7 +32,7 @@ public enum HomeSection: String, CaseIterable, Sendable, Hashable, Identifiable 
         case .recentlyPlayed: "Recently played"
         case .madeForYou: "Made for you"
         case .stations: "Radio"
-        case .internetRadio: "Internet radio"
+        case .internetRadio: "Live radio"
         case .yearMixes: "Year mixes"
         case .genreMixes: "Genre mixes"
         case .artistMixes: "Artist mixes"

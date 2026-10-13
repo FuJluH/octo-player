@@ -50,14 +50,14 @@ import Testing
         #expect(entries.first { $0.section == .stations }?.shown == true)
     }
 
-    @Test func anOrderSavedBeforeInternetRadioGetsItRightAfterRadio() {
+    @Test func anOrderSavedBeforeLiveRadioGetsItRightAfterRadio() {
         let entries = homeSectionOrder(stored: "-stations,charts,pinned,recentlyPlayed,madeForYou,recentlyAdded,mostPlayed,favoriteAlbums,"
             + "artists,somethingDifferent,notPlayedLately,neverFinished,neverPlayed")
         #expect(Array(ids(entries).prefix(7)) == ["-stations", "internetRadio"] + mixIds + ["charts"])
         #expect(entries.count == HomeSection.allCases.count)
     }
 
-    @Test func anOrderSavedBeforeTheMixesGetsThemRightAfterInternetRadio() {
+    @Test func anOrderSavedBeforeTheMixesGetsThemRightAfterLiveRadio() {
         let entries = homeSectionOrder(stored: "charts,internetRadio,-stations,pinned,recentlyPlayed,madeForYou,recentlyAdded,mostPlayed,"
             + "favoriteAlbums,artists,somethingDifferent,notPlayedLately,neverFinished,neverPlayed")
         #expect(Array(ids(entries).prefix(7)) == ["charts", "internetRadio"] + mixIds + ["-stations"])
@@ -125,7 +125,7 @@ import Testing
 
     @Test func eachSectionHasHomesName() {
         #expect(HomeSection.stations.title == "Radio")
-        #expect(HomeSection.internetRadio.title == "Internet radio")
+        #expect(HomeSection.internetRadio.title == "Live radio")
         #expect(HomeSection.yearMixes.title == "Year mixes")
         #expect(HomeSection.genreMixes.title == "Genre mixes")
         #expect(HomeSection.artistMixes.title == "Artist mixes")

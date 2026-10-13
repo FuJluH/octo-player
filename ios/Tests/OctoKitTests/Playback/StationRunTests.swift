@@ -178,7 +178,7 @@ import Testing
         #expect(!stationHasPlayButton(added))
     }
 
-    @Test func homeShowsOctosStationsAsRadioAndAddedStationsAsInternetRadio() {
+    @Test func homeShowsOctosStationsAsRadioAndAddedStationsAsLiveRadio() {
         let radio = Station(id: "or1234", name: "Your Radio", artwork: nil)
         let kexp = Station(id: "7", name: "KEXP", artwork: nil, streamUrl: "https://kexp.example/live")
         let discovery = Station(id: "or5678", name: "Discovery Radio", artwork: nil)

@@ -199,7 +199,7 @@ final class HomeModel {
         loadCharts()
     }
 
-    /// The server shelves Home draws now: a hidden one is not asked for. Radio and Internet radio
+    /// The server shelves Home draws now: a hidden one is not asked for. Radio and Live radio
     /// both come from the server's stations, Made for you and the mixes from its playlists.
     private var wantedStationShelves: Set<HomeSection> {
         Set(([HomeSection.stations, .internetRadio, .madeForYou] + Self.mixSections).filter { AppSettings.shared.homeSectionShown($0) })

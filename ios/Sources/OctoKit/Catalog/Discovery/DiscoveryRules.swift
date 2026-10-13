@@ -116,8 +116,8 @@ public func homeStations(_ stations: [RadioStation], sourceId: String) -> [Stati
 /// they have lined up and keep going.
 public func octoRadio(_ stations: [Station]) -> [Station] { stations.filter(stationHasPlayButton) }
 
-/// The internet radio stations added to the server among those Home shows, for its Internet
-/// radio shelf: the ones that play a stream.
+/// The internet radio stations added to the server among those Home shows, for its Live radio
+/// shelf: the ones that play a stream.
 public func internetRadio(_ stations: [Station]) -> [Station] { stations.filter { !stationHasPlayButton($0) } }
 
 /// What a search found beyond the library. `partAlbums` are albums the library holds some of the
