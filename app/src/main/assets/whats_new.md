@@ -1,77 +1,50 @@
-A big update: a new **equalizer**, **sorting** for every list, **favorites**, **downloads**, lyrics that follow the song, and much more.
+Covers load faster, the player has more room, and **ALAC** songs play on every phone. Plus everything since the last notes: **Automix**, **Family**, **Charts** and more.
 
 ## Sound
 
-- An **equalizer** with a live curve, presets, and room for your own.
-- **Loudness** evens out the volume from song to song.
-- **Headphone correction**, and balance between left and right.
-- Headphones and speakers can each keep their own sound.
+- **ALAC** songs (Apple's .m4a music files) play on every phone. Some phones used to play them in silence.
+- A song the phone cannot play is skipped with a note, never played in silence.
+- **Automix** blends songs like a DJ: lined up on the beat, with filter sweeps and matched tempo.
+- Crossfade runs from 2 to 16 seconds, with Smart transitions, Filter sweeps and Match tempo under it.
 
 ## Library
 
-- **Sort any list**, and each list remembers its order.
-- **Favorites** in one place: your liked songs, albums and artists, with a shelf on Home.
-- **Pin** albums, artists and playlists to the top of Home.
-- Browse your music **by folder**, on the phone or your server.
-- **History** shows what you played lately and what you play most.
-- Rate songs with stars.
-- Play and Shuffle at the top of your lists, and a random album.
-- Pull down on a list to look for new music.
+- **Library songs only** hides songs found online, everywhere or for one album.
+- **Charts** on Home and on their own page, when your server is Octo and has charts.
+- Liked Songs, Review and Duplicates carry their own pictures.
+- **Get my music** brings in your playlists from other services through TuneMyMusic, a file or pasted text.
 
 ## Playback
 
-- Play next and Add to queue keep their place while shuffling.
-- The **queue** shows what already played. It can clear itself, save as a playlist, or stop after a song.
-- **Autoplay** keeps similar songs coming when the queue runs out.
-- Change the **speed and pitch**, and skip the quiet parts.
-- The **sleep timer** can add a few minutes, or stop after a few songs.
-- Songs can **fade into each other**, and music can carry on when headphones reconnect.
-- Swipe the artwork to skip, and turn the phone sideways for a wider player.
-- Play in the car with **Android Auto**, or ask your phone's assistant to play something.
+- The player has more room: pull it down to close, and Cast and Sound are in its More menu.
+- The playing song's cover and the next ones load ahead, so the artwork is there when a song starts.
+- **Start playing after** sets how much of a song loads before it plays, for spotty connections.
+- The background no longer jumps back to the last cover when you skip.
+- Song lengths are exact, so the progress bar matches the song.
 
 ## Server
 
-- **Discover** finds songs, albums and artists beyond your library, and plays them.
-- Stations on Home, and a **radio** from a song or an artist.
-- Play your server's internet radio stations.
-- Playlists stay the same on the phone and your server, both ways.
-- **Share links** to songs and albums.
-- Pick up the queue where another device left off.
-- Artist pages show top songs, a biography and similar artists.
-- Scan your server for new music, and see who else is listening.
-- If your server is Octo, Settings shows what it is doing.
+- **Radio** has new settings: Discovery, Adventure, Artist variety and Favorites. Songs from outside your library spread through it at random.
+- **Find songs** asks before a copy that is not better replaces yours, and a replacement can be undone.
+- A song found online that the server will not send says so.
+- The downloads pill shows each step, and its log follows along.
+- Each phone names itself to your server, so you can tell your devices apart.
 
 ## Lyrics
 
-- **Lyrics** in the player, from your server, the song's files or online.
-- Lyrics that follow the song light up as they are sung. Tap a line to play from there.
-- Move a song's lyrics earlier or later when they are out of time.
-- The screen stays on while lyrics show.
+- Lyrics keep time with the song's real length, so they stay in step to the end.
 
 ## Offline
 
-- **Download** songs, albums and playlists.
-- Keep Liked songs and chosen playlists downloaded as they change.
-- Songs you stream are kept for a while, so they play again without a connection.
-- The next few songs load ahead while one plays.
-- With no connection, songs that cannot play are dimmed.
+- Songs you download for offline no longer count as plays on an Octo server.
 
 ## Everyday touches
 
-- **Undo** when you remove something, and a short note when something does not work.
-- **Pick several songs** at once to play, queue, add to a playlist, download or like.
-- **Song info** shows everything known about a song.
-- Swipe a song to the right to play it next.
-- **Home screen widgets** for what is playing and for quick play.
-- Long-press the app icon to shuffle everything, play Liked songs or recently added, or resume.
-- Audio files from other apps open straight in Octo.
-- Share a song's file, set it as a ringtone, or delete it from the phone.
-- Search remembers your recent searches, and can show only songs, albums, artists or playlists.
-- Bring in playlists from files, and save them out again.
+- Covers show up faster everywhere, and a screen full of them never holds up the player's.
 
 ## Settings
 
-- Settings has **a page for each topic**, and a search for any setting.
-- The artwork's colours can glow softly behind the app.
-- Send your plays to **ListenBrainz**, with or without a server.
-- **Back up** your settings, playlists, likes, favorites and more to a file, and bring them back.
+- **Family** under Settings > Server: share your server, each person with their own library, plan and devices.
+- Join a family with a code or its link.
+- Original quality comes first, and is the default, in every quality picker.
+- ListenBrainz gets each play's real length.
