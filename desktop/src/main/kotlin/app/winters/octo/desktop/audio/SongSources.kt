@@ -12,6 +12,7 @@ import app.winters.octo.playback.isRadio
 import app.winters.octo.playback.radioOf
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicClient
+import app.winters.octo.playback.radioIsHls
 
 // Where the engine fetches a song from: a file path, or a signed stream
 // address, with any extra request headers it needs.
@@ -111,14 +112,10 @@ fun queueItem(entry: QueueEntry, sources: SongSources): QueueItem {
         genre = genreOf(song),
         bpm = song.bpm?.takeIf { it > 0 }?.toDouble(),
         live = live,
-        hls = live && sentAsHls(song.id),
+        hls = live && radioIsHls(song.id),
     )
 }
 
-// Whether a station's id carries the mark of a stream sent as HLS, whose
-// address and server do not say so: a third part, "hls", after the
-// address and the name.
-internal fun sentAsHls(id: String): Boolean = isRadio(id) && id.split(':').getOrNull(3) == "hls"
 
 // Every genre a song has, in one line: a song in any genre that is never
 // mixed (classical, a podcast) gets the plain crossfade.
