@@ -3,6 +3,7 @@ package app.winters.octo.desktop.listening
 import app.winters.octo.desktop.player.PlayerState
 import app.winters.octo.discovery.knownLengthMs
 import app.winters.octo.playback.countsAsPlay
+import app.winters.octo.playback.isRadio
 import app.winters.octo.playback.msLeftToCount
 import app.winters.octo.subsonic.Song
 
@@ -14,7 +15,7 @@ data class HeardPlay(val song: Song, val startedAt: Long, val heardMs: Long, val
 // network left out, and hands on a play the moment enough of it was heard
 // (the phone's rule), or when it moves on if that moment was missed. Also
 // says when each song first starts to be heard. Each time round a song on
-// repeat is its own play.
+// repeat is its own play. Live radio is never a play, nor announced.
 // Fed every player state, and flushed at quit from another thread, so
 // each step holds the counter's lock.
 class PlayCounter(
@@ -38,7 +39,7 @@ class PlayCounter(
 
     @Synchronized
     fun update(state: PlayerState) {
-        val current = state.current
+        val current = state.current?.takeUnless { isRadio(it.song.id) }
         val id = current?.let { it.key to state.rounds }
         if (id != play) {
             finish()

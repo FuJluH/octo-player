@@ -40,7 +40,8 @@ pub struct TrustedCertificate {
 pub struct QueueItem {
     /// The app's own id for this entry, handed back in events.
     pub id: String,
-    /// A file path, a `file://` address, or a signed HTTP(S) stream address.
+    /// A file path, a `file://` address, a signed HTTP(S) stream address,
+    /// or an HLS playlist's address.
     pub source: String,
     /// The album, for keeping albums gapless and for Smart ReplayGain.
     #[uniffi(default)]
@@ -64,6 +65,11 @@ pub struct QueueItem {
     /// it runs at double or half time.
     #[uniffi(default)]
     pub bpm: Option<f64>,
+    /// A live stream, such as live radio: it has no length and cannot be
+    /// sought, a dropped connection is made again, and its titles arrive as
+    /// `StreamTitle` events.
+    #[uniffi(default)]
+    pub live: bool,
 }
 
 /// What happens at the end of the queue or the song.
@@ -169,6 +175,12 @@ pub enum EngineEvent {
     Position {
         item_id: String,
         position_ms: f64,
+    },
+    /// A live stream's title changed, as it is heard: usually "Artist -
+    /// Song" for what the station plays now.
+    StreamTitle {
+        item_id: String,
+        title: String,
     },
     /// How the next song will follow the playing one, decided ahead of
     /// time. `start_ms` is when in `from_id` the blend starts (its length

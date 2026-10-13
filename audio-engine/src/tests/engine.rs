@@ -131,6 +131,7 @@ fn item(id: &str, path: &Path) -> QueueItem {
         headers: Vec::new(),
         genre: None,
         bpm: None,
+        live: false,
     }
 }
 
@@ -1193,5 +1194,45 @@ fn a_smart_plan_is_made_with_the_decoded_lengths() {
     assert_eq!((start_ms, overlap_ms), (9_500, 500), "{reason}");
     pump.play_out();
     events.wait_for("queue end", Duration::from_secs(10), |e| matches!(e, EngineEvent::QueueEnded));
+    engine.shutdown();
+}
+
+#[test]
+fn a_live_radio_stream_plays_on_with_its_titles_and_takes_no_seek() {
+    use crate::testing::http_server::ScriptServer;
+    let server = ScriptServer::start(|_, conn, stopped| super::live::icy_radio(stopped, conn));
+    let (engine, events, _, pump) = driven_engine();
+    let radio = QueueItem { source: server.url("/stream"), live: true, ..item("radio", Path::new("")) };
+    // A start time means nothing to a live stream.
+    engine.load(vec![radio], 0, 5_000, true).unwrap();
+    let started =
+        play_until(&pump, &events, "start", 1_000, |e| matches!(e, EngineEvent::TrackStarted { .. }));
+    let EngineEvent::TrackStarted { info: Some(info), .. } = started else { panic!("{started:?}") };
+    assert_eq!((info.codec.as_str(), info.duration_ms), ("mp3", None));
+    let second =
+        |e: &EngineEvent| matches!(e, EngineEvent::StreamTitle { title, .. } if title.ends_with("Song 1"));
+    play_until(&pump, &events, "the second title", 1_000, second);
+    // Block 3 is a second into the stream: the title comes as that is heard.
+    let heard = engine.position().position_ms;
+    assert!((900.0..2_000.0).contains(&heard), "{heard}");
+    let titles: Vec<(String, String)> = events
+        .all()
+        .into_iter()
+        .filter_map(|e| match e {
+            EngineEvent::StreamTitle { item_id, title } => Some((item_id, title)),
+            _ => None,
+        })
+        .collect();
+    let named = |t: &str| ("radio".to_string(), t.to_string());
+    assert_eq!(titles, [named("Test FM - Song 0"), named("Test FM - Song 1")]);
+    // A seek is ignored: it plays on from where it was, over the same connection.
+    engine.seek(60_000).unwrap();
+    for _ in 0..50 {
+        pump.play();
+    }
+    let after = engine.position().position_ms;
+    assert!(after > heard && after < heard + 2_000.0, "{heard} then {after}");
+    assert_eq!(server.asked().len(), 1);
+    assert_eq!(events.story(), ["start radio"]);
     engine.shutdown();
 }

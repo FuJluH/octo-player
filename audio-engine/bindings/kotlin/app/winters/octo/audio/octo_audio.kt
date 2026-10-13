@@ -3487,7 +3487,8 @@ data class QueueItem (
     val `id`: kotlin.String
     , 
     /**
-     * A file path, a `file://` address, or a signed HTTP(S) stream address.
+     * A file path, a `file://` address, a signed HTTP(S) stream address,
+     * or an HLS playlist's address.
      */
     val `source`: kotlin.String
     , 
@@ -3524,6 +3525,13 @@ data class QueueItem (
      * it runs at double or half time.
      */
     val `bpm`: kotlin.Double? = null 
+    , 
+    /**
+     * A live stream, such as live radio: it has no length and cannot be
+     * sought, a dropped connection is made again, and its titles arrive as
+     * `StreamTitle` events.
+     */
+    val `live`: kotlin.Boolean = false 
     
 ){
     
@@ -3549,6 +3557,7 @@ public object FfiConverterTypeQueueItem: FfiConverterRustBuffer<QueueItem> {
             FfiConverterSequenceTypeHttpHeader.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalDouble.read(buf),
+            FfiConverterBoolean.read(buf),
         )
     }
 
@@ -3561,7 +3570,8 @@ public object FfiConverterTypeQueueItem: FfiConverterRustBuffer<QueueItem> {
             FfiConverterOptionalTypeReplayGainInfo.allocationSize(value.`replayGain`) +
             FfiConverterSequenceTypeHttpHeader.allocationSize(value.`headers`) +
             FfiConverterOptionalString.allocationSize(value.`genre`) +
-            FfiConverterOptionalDouble.allocationSize(value.`bpm`)
+            FfiConverterOptionalDouble.allocationSize(value.`bpm`) +
+            FfiConverterBoolean.allocationSize(value.`live`)
     )
 
     override fun write(value: QueueItem, buf: ByteBuffer) {
@@ -3574,6 +3584,7 @@ public object FfiConverterTypeQueueItem: FfiConverterRustBuffer<QueueItem> {
             FfiConverterSequenceTypeHttpHeader.write(value.`headers`, buf)
             FfiConverterOptionalString.write(value.`genre`, buf)
             FfiConverterOptionalDouble.write(value.`bpm`, buf)
+            FfiConverterBoolean.write(value.`live`, buf)
     }
 }
 
@@ -4313,6 +4324,20 @@ sealed class EngineEvent {
     }
     
     /**
+     * A live stream's title changed, as it is heard: usually "Artist -
+     * Song" for what the station plays now.
+     */
+    data class StreamTitle(
+        val `itemId`: kotlin.String, 
+        val `title`: kotlin.String) : EngineEvent()
+        
+    {
+        
+
+        companion object
+    }
+    
+    /**
      * How the next song will follow the playing one, decided ahead of
      * time. `start_ms` is when in `from_id` the blend starts (its length
      * for a gapless join), `entry_ms` where `to_id` comes in, and
@@ -4390,7 +4415,11 @@ public object FfiConverterTypeEngineEvent : FfiConverterRustBuffer<EngineEvent>{
                 FfiConverterString.read(buf),
                 FfiConverterDouble.read(buf),
                 )
-            12 -> EngineEvent.TransitionPlanned(
+            12 -> EngineEvent.StreamTitle(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            13 -> EngineEvent.TransitionPlanned(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterULong.read(buf),
@@ -4489,6 +4518,14 @@ public object FfiConverterTypeEngineEvent : FfiConverterRustBuffer<EngineEvent>{
                 + FfiConverterDouble.allocationSize(value.`positionMs`)
             )
         }
+        is EngineEvent.StreamTitle -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`itemId`)
+                + FfiConverterString.allocationSize(value.`title`)
+            )
+        }
         is EngineEvent.TransitionPlanned -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
@@ -4569,8 +4606,14 @@ public object FfiConverterTypeEngineEvent : FfiConverterRustBuffer<EngineEvent>{
                 FfiConverterDouble.write(value.`positionMs`, buf)
                 Unit
             }
-            is EngineEvent.TransitionPlanned -> {
+            is EngineEvent.StreamTitle -> {
                 buf.putInt(12)
+                FfiConverterString.write(value.`itemId`, buf)
+                FfiConverterString.write(value.`title`, buf)
+                Unit
+            }
+            is EngineEvent.TransitionPlanned -> {
+                buf.putInt(13)
                 FfiConverterString.write(value.`fromId`, buf)
                 FfiConverterString.write(value.`toId`, buf)
                 FfiConverterULong.write(value.`startMs`, buf)

@@ -1,7 +1,10 @@
 //! Where a song's bytes come from: a file on this computer, or a server.
 
+pub mod hls;
 pub mod http;
+pub mod icy;
 pub mod trust;
+pub mod ts;
 
 use std::fs::File;
 use std::path::Path;
@@ -20,6 +23,18 @@ pub struct Opened {
     /// A jump far into the song is cheap: a file, or a stream whose server
     /// answers with ranges.
     pub seeks_cheaply: bool,
+    /// A live stream: it has no length, is never sought, and may restart
+    /// its codec part way.
+    pub live: bool,
+    /// The parts after the first that each need a fresh decoder.
+    pub periods: Option<Box<dyn Periods>>,
+}
+
+/// The parts of a stream that each need a fresh decoder, such as the
+/// stretches between an HLS playlist's discontinuities.
+pub trait Periods: Send {
+    /// Waits for the next part; `None` once the stream is over.
+    fn next(&mut self) -> Result<Option<Box<dyn MediaSource>>, Failure>;
 }
 
 /// Whether a source string names a stream rather than a file.
@@ -28,13 +43,14 @@ pub fn is_remote(source: &str) -> bool {
     lower.starts_with("http://") || lower.starts_with("https://")
 }
 
-/// Opens a file path, a `file://` address, or an HTTP(S) address.
+/// Opens a file path, a `file://` address, or an HTTP(S) address, which
+/// may be an HLS playlist.
 pub fn open(source: &str, http: HttpOptions) -> Result<Opened, Failure> {
     if is_remote(source) {
-        let stream = HttpSource::open(source, http)?;
-        let hint = stream.content_type().and_then(extension_for_type).or_else(|| url_extension(source));
-        let seeks_cheaply = stream.answered_with_range();
-        return Ok(Opened { source: Box::new(stream), hint, remote: true, seeks_cheaply });
+        if hls::is_hls_url(source) {
+            return hls::open(source, http);
+        }
+        return open_stream(source, http, 0);
     }
     let path = source.strip_prefix("file://").unwrap_or(source);
     let file = File::open(path).map_err(|e| {
@@ -43,7 +59,28 @@ pub fn open(source: &str, http: HttpOptions) -> Result<Opened, Failure> {
         Failure::new(kind, format!("{path}: {e}"))
     })?;
     let hint = Path::new(path).extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
-    Ok(Opened { source: Box::new(file), hint, remote: false, seeks_cheaply: true })
+    Ok(Opened {
+        source: Box::new(file),
+        hint,
+        remote: false,
+        seeks_cheaply: true,
+        live: false,
+        periods: None,
+    })
+}
+
+// An HTTP(S) stream, or the playlist its server says it is, `hops` deep in
+// playlists that point at other addresses.
+fn open_stream(source: &str, http: HttpOptions, hops: u32) -> Result<Opened, Failure> {
+    let live = http.live;
+    let stream = HttpSource::open(source, http.clone())?;
+    if hops == 0 && stream.content_type().is_some_and(hls::is_playlist_type) {
+        drop(stream);
+        return hls::open(source, http);
+    }
+    let hint = stream.content_type().and_then(extension_for_type).or_else(|| url_extension(source));
+    let seeks_cheaply = stream.answered_with_range();
+    Ok(Opened { source: Box::new(stream), hint, remote: true, seeks_cheaply, live, periods: None })
 }
 
 /// Whether a stream is made on the way (a server's transcode, asked for with
@@ -96,7 +133,9 @@ fn extension_for_type(content_type: &str) -> Option<String> {
     let ext = match bare.as_str() {
         "audio/flac" | "audio/x-flac" => "flac",
         "audio/mpeg" | "audio/mp3" => "mp3",
-        "audio/mp4" | "audio/x-m4a" | "audio/m4a" | "audio/aac" | "audio/x-aac" => "m4a",
+        "audio/mp4" | "audio/x-m4a" | "audio/m4a" => "m4a",
+        // Raw AAC in ADTS frames, as radio sends it, HE-AAC included.
+        "audio/aac" | "audio/aacp" | "audio/x-aac" | "audio/x-aacp" => "aac",
         "audio/ogg" | "application/ogg" | "audio/vorbis" => "ogg",
         "audio/opus" => "opus",
         "audio/wav" | "audio/x-wav" | "audio/wave" => "wav",
@@ -107,7 +146,7 @@ fn extension_for_type(content_type: &str) -> Option<String> {
 }
 
 // The extension in an address's path, ignoring the query.
-fn url_extension(url: &str) -> Option<String> {
+pub(crate) fn url_extension(url: &str) -> Option<String> {
     let path = url.split(['?', '#']).next()?;
     let last = path.rsplit('/').next()?;
     let (_, ext) = last.rsplit_once('.')?;
@@ -123,6 +162,15 @@ mod tests {
         assert!(is_remote("HTTPS://x/y"));
         assert!(!is_remote("C:\\music\\a.flac"));
         assert_eq!(extension_for_type("audio/flac; charset=binary").as_deref(), Some("flac"));
+        assert_eq!(extension_for_type("audio/aacp").as_deref(), Some("aac"));
+        assert_eq!(extension_for_type("audio/AAC").as_deref(), Some("aac"));
+        assert_eq!(extension_for_type("audio/x-aac").as_deref(), Some("aac"));
+        assert_eq!(extension_for_type("audio/mpeg").as_deref(), Some("mp3"));
+        assert_eq!(extension_for_type("application/ogg").as_deref(), Some("ogg"));
+        assert!(hls::is_hls_url("https://h/live/index.M3U8?token=a.mp3"));
+        assert!(!hls::is_hls_url("https://h/live/stream.mp3?list=a.m3u8"));
+        assert!(hls::is_playlist_type("application/vnd.apple.mpegurl"));
+        assert!(hls::is_playlist_type("audio/mpegurl; charset=utf-8"));
         assert_eq!(url_extension("http://h/rest/stream.view?id=1&f=mp3").as_deref(), Some("view"));
         assert_eq!(url_extension("http://h/a/song.opus").as_deref(), Some("opus"));
     }

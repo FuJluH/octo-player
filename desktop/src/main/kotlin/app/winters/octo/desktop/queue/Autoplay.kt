@@ -9,6 +9,7 @@ import app.winters.octo.desktop.system.OPENED_FILE_PREFIX
 import app.winters.octo.playback.AUTOPLAY_BATCH
 import app.winters.octo.playback.QueueSource
 import app.winters.octo.playback.autoplayPicks
+import app.winters.octo.playback.isRadio
 import app.winters.octo.radio.RadioDiscovery
 import app.winters.octo.radio.RadioInput
 import app.winters.octo.radio.RadioTuning
@@ -76,7 +77,7 @@ class Autoplay(
     private fun lastSong(state: PlayerState, on: Boolean): Long? {
         val current = state.current ?: return null
         val due = on && state.playing && state.repeat == RepeatMode.Off && state.upcoming.isEmpty() &&
-            !current.song.id.startsWith(OPENED_FILE_PREFIX) && !standsDown(state)
+            !current.song.id.startsWith(OPENED_FILE_PREFIX) && !isRadio(current.song.id) && !standsDown(state)
         return current.key.takeIf { due }
     }
 

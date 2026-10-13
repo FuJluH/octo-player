@@ -5,6 +5,7 @@ import app.winters.octo.desktop.player.DesktopPlayer
 import app.winters.octo.desktop.player.OutputDevice
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.desktop.settings.currentOs
+import app.winters.octo.playback.isRadio
 import app.winters.octo.subsonic.Song
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -127,6 +128,8 @@ class LyricsModel(
                 .distinctUntilChanged()
                 .mapLatest { (song, _) ->
                     if (song == null) return@mapLatest Shown(null, LyricsAnswer.None)
+                    // Live radio has no lyrics to follow.
+                    if (isRadio(song.id)) return@mapLatest Shown(song, LyricsAnswer.None)
                     _state.value = Shown(song, null)
                     Shown(song, sources.answerFor(song))
                 }

@@ -6,7 +6,7 @@
 //!   --volume <0..1>        --crossfade <ms>       --speed <0.5..2>
 //!   --pitch <factor>       --eq <preset name>     --replaygain <off|track|album|smart>
 //!   --start <ms>           --device <id>          --list-devices
-//!   --silent               --seconds <n>
+//!   --silent               --seconds <n>          --live (streams are live radio)
 //!
 //! While playing, type a line and press Enter:
 //!   p  pause or resume     n  next song           s <secs>  seek
@@ -62,7 +62,7 @@ fn main() {
     let (mut volume, mut crossfade, mut speed, mut pitch) = (1.0f32, 0u32, 1.0f32, 1.0f32);
     let (mut eq, mut replaygain, mut start, mut device) =
         (None::<String>, None::<String>, 0u64, None::<String>);
-    let (mut list, mut silent, mut seconds) = (false, false, None::<f64>);
+    let (mut list, mut silent, mut seconds, mut live) = (false, false, None::<f64>, false);
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -77,6 +77,7 @@ fn main() {
             "--list-devices" => list = true,
             "--silent" => silent = true,
             "--seconds" => seconds = Some(value(&mut args, &arg)),
+            "--live" => live = true,
             other if other.starts_with("--") => fail(&format!("unknown option {other}")),
             other => sources.push(other.to_string()),
         }
@@ -141,6 +142,7 @@ fn main() {
             headers: Vec::new(),
             genre: None,
             bpm: None,
+            live: live && s.contains("://"),
         })
         .collect();
     engine.load(items, 0, start, true).unwrap();
