@@ -16,6 +16,7 @@ import app.winters.octo.subsonic.SongReplayGain
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ServerCatalogTest {
@@ -335,5 +336,33 @@ class ServerCatalogTest {
         val plain = buildServerCatalog(source, Library(listOf(song), listOf(album), emptyList())).tracks.single()
         assertNull(plain.trackGain)
         assertNull(plain.rating)
+    }
+
+    // A search or a look takes music in ahead of the next full copy: what
+    // the library lacks goes in, an album read whole replaces the kept one
+    // (it has another song count now), and nothing it has is put in again.
+    @Test
+    fun takingInAddsOnlyWhatTheLibraryLacks() {
+        val grown = album.copy(songCount = 2)
+        val added = song.copy(id = "s2", title = "Odd Look", track = 2)
+        val loose = Song(id = "s9", title = "Single", album = "Single", albumId = "al9", artist = "Kavinsky", artistId = "ar1")
+        val rows = buildServerCatalog(source, Library(listOf(song, added, loose), listOf(grown), emptyList()))
+
+        val read = rowsToTakeIn(rows, haveSongs = setOf("s1"), haveAlbums = setOf("al1", "al9"), readAlbums = setOf("al1"), haveArtists = setOf("$source:ar1"))
+        assertEquals(listOf("s2", "s9"), read.tracks.map { it.nativeId }.sorted())
+        // al9 is only made up from its one song, so the kept one stays.
+        assertEquals(listOf("al1"), read.albums.map { it.nativeId })
+        assertEquals(2, read.albums.single().songCount)
+        // The kept artist is not put in again; the made-up album names its
+        // artist by name.
+        assertEquals(listOf("$source:artist:kavinsky"), read.artists.map { it.id })
+
+        val fresh = rowsToTakeIn(rows, haveSongs = emptySet(), haveAlbums = emptySet(), readAlbums = emptySet(), haveArtists = emptySet())
+        assertEquals(3, fresh.tracks.size)
+        assertEquals(listOf("al1", "al9"), fresh.albums.map { it.nativeId }.sorted())
+        assertEquals(listOf("$source:ar1", "$source:artist:kavinsky"), fresh.artists.map { it.id }.sorted())
+
+        val nothing = rowsToTakeIn(rows, haveSongs = setOf("s1", "s2", "s9"), haveAlbums = setOf("al1", "al9"), readAlbums = emptySet(), haveArtists = setOf("$source:ar1", "$source:artist:kavinsky"))
+        assertTrue(nothing.isEmpty)
     }
 }

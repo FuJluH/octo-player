@@ -37,6 +37,26 @@ class ServerCatalog(
     val tracks: List<SourceTrackEntity>,
     val albums: List<SourceAlbumEntity>,
     val artists: List<SourceArtistEntity>,
+) {
+    val isEmpty get() = tracks.isEmpty() && albums.isEmpty() && artists.isEmpty()
+}
+
+// Of the rows made for music taken in ahead of a full copy, those that go
+// in: songs the library lacks (`haveSongs`, by server id), albums it lacks
+// (`haveAlbums`) or that were just read whole from the server (`readAlbums`,
+// whose details and song counts replace the kept ones), and artists it
+// lacks (`haveArtists`, by row id). An album made up from songs alone never
+// replaces a kept one.
+fun rowsToTakeIn(
+    rows: ServerCatalog,
+    haveSongs: Set<String>,
+    haveAlbums: Set<String>,
+    readAlbums: Set<String>,
+    haveArtists: Set<String>,
+): ServerCatalog = ServerCatalog(
+    rows.tracks.filter { it.nativeId !in haveSongs },
+    rows.albums.filter { it.nativeId !in haveAlbums || it.nativeId in readAlbums },
+    rows.artists.filter { it.id !in haveArtists },
 )
 
 // Turns what a server lists into its source's rows, shaped like the

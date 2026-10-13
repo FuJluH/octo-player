@@ -11,6 +11,8 @@ import app.winters.octo.desktop.library.LibraryIndex
 import app.winters.octo.desktop.library.isOutsideSong
 import app.winters.octo.desktop.server.Connection
 import app.winters.octo.desktop.server.userMessage
+import app.winters.octo.server.Arriving
+import app.winters.octo.server.arriving
 import app.winters.octo.subsonic.Album
 import app.winters.octo.subsonic.Artist
 import app.winters.octo.subsonic.Playlist
@@ -89,11 +91,13 @@ sealed interface SearchState {
 // Splits what the server sent into the library's and the rest. Only a
 // server that can fetch songs into the library (`outsideOn`) mixes in songs
 // found online, and only once the library has been read can they be told
-// apart; otherwise everything counts as the library's. With "Library songs
-// only" (`hideOutside`) what was found online is left out instead: songs,
-// albums and artists the server marks as outside, or the library, once
-// read, does not hold. One more of each kind than shown is asked for, to
-// know whether there are more.
+// apart; otherwise everything counts as the library's. An answer that
+// marks anything as outside the library is taken at its word: a song or
+// album it leaves unmarked is the library's even when the library, as last
+// read, lacks it (the server took it in since). Only an answer with no
+// marks falls back on the library. With "Library songs only"
+// (`hideOutside`) what was found online is left out instead. One more of
+// each kind than shown is asked for, to know whether there are more.
 fun splitResults(
     sent: SearchResult,
     query: String,
@@ -102,6 +106,9 @@ fun splitResults(
     index: LibraryIndex?,
     outsideOn: Boolean,
     hideOutside: Boolean = false,
+    // Whether the answer marks anything as outside; for the answer as it
+    // came, before what was found online is taken out of it.
+    marked: Boolean = sent.song.any { it.isExternal } || sent.album.any { it.isExternal },
 ): SearchFound {
     if (hideOutside) {
         // Songs are told apart even where they would otherwise count as the
@@ -110,19 +117,19 @@ fun splitResults(
         val telling = outsideOn && index != null
         val kept = sent.copy(
             album = if (telling) sent.album else sent.album.filterNot { it.isExternal },
-            song = sent.song.filterNot { isOutsideSong(it, index, canFetch = true) },
+            song = sent.song.filterNot { if (marked) it.isExternal else isOutsideSong(it, index, canFetch = true) },
         )
-        return splitResults(kept, query, filter, playlists, index, outsideOn).copy(outside = OutsideResults())
+        return splitResults(kept, query, filter, playlists, index, outsideOn, marked = marked).copy(outside = OutsideResults())
     }
     val caps = searchCaps(filter)
     val telling = outsideOn && index != null
-    val (held, outsideSongs) = if (telling) sent.song.partition { index.holds(it) } else sent.song to emptyList()
+    val (held, outsideSongs) = if (telling) sent.song.partition { index.holds(it) || marked && !it.isExternal } else sent.song to emptyList()
     // A song found online that the library already holds (under another id,
     // or another version Octo did not fold into it) is the library's own
     // copy here, once: the library's songs are only library songs, so none
     // of them reads as "not in your library" with a "+" beside it.
     val songs = if (telling) held.map { if (it.isExternal) index.copyOf(it) ?: it else it }.distinctBy { it.id } else held
-    val (libraryAlbums, foundAlbums) = if (telling) sent.album.partition { index.hasAlbum(it.id) } else sent.album to emptyList()
+    val (libraryAlbums, foundAlbums) = if (telling) sent.album.partition { index.hasAlbum(it.id) || marked && !it.isExternal } else sent.album to emptyList()
     // An album found online that is a library album by its very name and
     // artist is that album. One the library holds every song of (Octo
     // counts them) is the library's too: it opens with the library's copies.
@@ -172,6 +179,10 @@ class SearchModel(
     private val scope: CoroutineScope,
     // Whether "Library songs only" is on.
     private val libraryOnly: () -> Boolean = { false },
+    // Takes the server's own music a search found that the library lacks
+    // into the library (LibraryStore.takeIn), answering whether any of it
+    // is in now.
+    private val takeIn: suspend (Arriving) -> Boolean = { false },
 ) {
     var text by mutableStateOf("")
         private set
@@ -213,17 +224,27 @@ class SearchModel(
         state = SearchState.Looking
         job = scope.launch {
             if (pause) delay(SEARCH_AFTER_MS)
-            state = try {
-                SearchState.Done(search(query, filter).also { tops.follow(query, it, filter) })
+            val sent = try {
+                ask(query, filter)
             } catch (e: SubsonicException) {
-                SearchState.Failed(e.userMessage())
+                state = SearchState.Failed(e.userMessage())
+                return@launch
             }
+            state = SearchState.Done(split(sent, query, filter).also { tops.follow(query, it, filter) })
+            // Music the server took in since the library was read is taken
+            // in now; once it is, the same answer is split again, so it
+            // lists as the library's everywhere.
+            val index = index() ?: return@launch
+            val arriving = arriving(sent, { index.hasSong(it.id) }, { index.hasAlbum(it.id) }, findsOnline = connection.acquires)
+            if (!arriving.isEmpty && takeIn(arriving)) state = SearchState.Done(split(sent, query, filter))
         }
     }
 
-    suspend fun search(query: String, filter: SearchFilter): SearchFound {
+    suspend fun search(query: String, filter: SearchFilter): SearchFound = split(ask(query, filter), query, filter)
+
+    private suspend fun ask(query: String, filter: SearchFilter): SearchResult {
         val caps = searchCaps(filter)
-        val sent = if (caps.artists + caps.albums + caps.songs == 0) {
+        return if (caps.artists + caps.albums + caps.songs == 0) {
             SearchResult()
         } else {
             connection.client.search(
@@ -233,6 +254,8 @@ class SearchModel(
                 songs = if (caps.songs > 0) maxOf(caps.songs + 1, MIN_SONGS) else 0,
             )
         }
-        return splitResults(sent, query, filter, playlists(), index(), connection.acquires, hideOutside = libraryOnly())
     }
+
+    private fun split(sent: SearchResult, query: String, filter: SearchFilter): SearchFound =
+        splitResults(sent, query, filter, playlists(), index(), connection.acquires, hideOutside = libraryOnly())
 }

@@ -74,6 +74,10 @@ interface SourceDao {
     @Query("SELECT nativeId FROM source_album WHERE sourceId = :sourceId AND nativeId IN (:serverIds)")
     suspend fun knownAlbums(sourceId: String, serverIds: List<String>): List<String>
 
+    // How many songs the server listed in each of these albums the library has.
+    @Query("SELECT nativeId AS serverId, songCount FROM source_album WHERE sourceId = :sourceId AND nativeId IN (:serverIds)")
+    suspend fun albumSongCounts(sourceId: String, serverIds: List<String>): List<ServerAlbumCount>
+
     // One source's artists filed under this name.
     @Query("SELECT * FROM source_artist WHERE sourceId = :sourceId AND searchKey = :key")
     suspend fun artistsNamed(sourceId: String, key: String): List<SourceArtistEntity>

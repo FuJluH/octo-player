@@ -177,6 +177,8 @@ data class AlbumWithSongs(
     val duration: Int = 0,
     val year: Int? = null,
     val genre: String? = null,
+    // When the server first took the album in.
+    val created: String? = null,
     val song: List<Song> = emptyList(),
     // What the album list also says of it, for the album's own page: the
     // heart, the names of its discs, what kind of release it is, and its

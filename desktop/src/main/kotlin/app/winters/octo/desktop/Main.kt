@@ -48,6 +48,7 @@ import app.winters.octo.desktop.nav.shortcutFor
 import app.winters.octo.desktop.settings.AppPlaces
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SettingsStore
+import app.winters.octo.server.NEW_MUSIC_LOOK_MS
 import app.winters.octo.desktop.settings.WindowSpot
 import app.winters.octo.desktop.settings.currentOs
 import app.winters.octo.desktop.settings.systemReducesMotion
@@ -80,6 +81,7 @@ import app.winters.octo.subsonic.OCTO_TRANSITIONS
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import coil3.compose.setSingletonImageLoaderFactory
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.awt.Dimension
 import java.awt.event.WindowAdapter
@@ -301,10 +303,20 @@ fun main(args: Array<String>) {
                     val app = ready.app
                     val system = ready.system
                     system.watch(window)
+                    // Music the server took in is looked for now and then
+                    // while Octo runs, and on coming back to it; the library
+                    // decides whether a look is due.
+                    launch {
+                        while (true) {
+                            delay(NEW_MUSIC_LOOK_MS)
+                            app.library?.look()
+                        }
+                    }
                     // Coming back to Octo is when a queue from the phone is worth a look.
                     window.addWindowFocusListener(object : WindowAdapter() {
                         override fun windowGainedFocus(e: WindowEvent?) {
                             app.queueSync.check()
+                            app.library?.look()
                             Thread {
                                 val calm = systemReducesMotion(os)
                                 val text = systemTextScale(os)

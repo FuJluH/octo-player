@@ -125,6 +125,48 @@ class SearchTest {
         assertTrue(plain.outside.isEmpty)
     }
 
+    // An answer that marks what it found online is taken at its word: a
+    // song or album the server took in since the library was read is the
+    // library's, never "not in your library", with or without "Library
+    // songs only".
+    @Test
+    fun whatTheServerTookInSinceTheLibraryWasReadIsTheLibrarys() {
+        val sent = SearchResult(
+            album = listOf(Album("al-alac", "Octo ALAC test"), Album("ext-alb", "Kid A Mnesia", isExternal = true)),
+            song = listOf(Song("s-new", "Nightcall (ALAC test)", artist = "Kavinsky", albumId = "al-alac"), Song("ext1", "Lift", artist = "Radiohead", isExternal = true)),
+        )
+        val found = splitResults(sent, "test", SearchFilter.All, emptyList(), library, outsideOn = true)
+        assertEquals(listOf("s-new"), found.library.songs.map { it.id })
+        assertEquals(listOf("al-alac"), found.library.albums.map { it.id })
+        assertEquals(listOf("ext1"), found.outside.songs.map { it.id })
+        assertEquals(listOf("ext-alb"), found.outside.albums.map { it.id })
+
+        val hidden = splitResults(sent, "test", SearchFilter.All, emptyList(), library, outsideOn = true, hideOutside = true)
+        assertEquals(listOf("s-new"), hidden.library.songs.map { it.id })
+        assertTrue(hidden.outside.isEmpty)
+    }
+
+    // Songs the library had not read yet are taken in, and once in the
+    // same answer lists them as the library's.
+    @Test
+    fun aSearchTakesInWhatTheLibraryLacks() = runBlocking {
+        server.answer("search3", """"searchResult3":{"song":[${songJson("s-new", "Nightcall", albumId = "al-new")},${songJson("lib1", "Karma Police")}]}""")
+        val scope = CoroutineScope(Dispatchers.Default + Job())
+        var index = library
+        val asked = mutableListOf<List<String>>()
+        val model = SearchModel(server.connection(), { index }, { emptyList() }, scope) { arriving ->
+            asked += arriving.songs.map { it.id }
+            index = index.takingIn(arriving.songs, emptyList())
+            true
+        }
+        model.type("nightcall")
+        withTimeout(5_000) { while (asked.isEmpty()) delay(20) }
+        assertEquals(listOf(listOf("s-new")), asked)
+        val done = model.state as SearchState.Done
+        assertEquals(listOf("s-new", "lib1"), done.found.library.songs.map { it.id })
+        scope.cancel()
+    }
+
     @Test
     fun anyOtherServerShowsEverythingAsTheLibrary() {
         val found = splitResults(sent, "radiohead", SearchFilter.All, emptyList(), library, outsideOn = false)
