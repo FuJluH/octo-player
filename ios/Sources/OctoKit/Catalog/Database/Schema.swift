@@ -3,7 +3,7 @@ import Foundation
 /// The library database's tables. Raise `version` and add a step to `migrations` when a table
 /// changes; a step runs once on a file made by the version before it.
 enum Schema {
-    static let version = 1
+    static let version = 2
 
     static let create = """
     CREATE TABLE IF NOT EXISTS track (
@@ -113,7 +113,7 @@ enum Schema {
     CREATE TABLE IF NOT EXISTS download (
         trackId TEXT NOT NULL, sourceId TEXT NOT NULL, serverId TEXT NOT NULL, path TEXT NOT NULL,
         sizeBytes INTEGER NOT NULL, format TEXT, state TEXT NOT NULL, progress REAL NOT NULL, addedAt INTEGER NOT NULL,
-        reason TEXT NOT NULL, title TEXT NOT NULL, artist TEXT NOT NULL, PRIMARY KEY(sourceId, serverId));
+        reason TEXT NOT NULL, title TEXT NOT NULL, artist TEXT NOT NULL, fileSize INTEGER, PRIMARY KEY(sourceId, serverId));
     CREATE INDEX IF NOT EXISTS index_download_trackId ON download (trackId);
     CREATE INDEX IF NOT EXISTS index_download_state ON download (state);
 
@@ -129,7 +129,10 @@ enum Schema {
     """
 
     /// Steps from each older version to the next, by the version they start from.
-    static let migrations: [Int: String] = [:]
+    static let migrations: [Int: String] = [
+        // Each download notes the server's size for the file it was made from.
+        1: "ALTER TABLE download ADD COLUMN fileSize INTEGER;",
+    ]
 
     static func open(_ db: SQLiteDatabase) throws {
         let found = db.userVersion

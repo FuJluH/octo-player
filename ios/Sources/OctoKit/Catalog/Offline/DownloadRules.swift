@@ -55,6 +55,7 @@ public func restoredDownload(_ row: KeptDownload, fileBack: Bool) -> KeptDownloa
     waiting.progress = 0
     waiting.path = ""
     waiting.sizeBytes = 0
+    waiting.fileSize = nil
     return waiting
 }
 

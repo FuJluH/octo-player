@@ -85,12 +85,33 @@ extension CatalogStore {
         changed(.downloads)
     }
 
-    public func finishDownload(_ sourceId: String, _ serverId: String, path: String, size: Int64, format: String?) throws {
+    /// A download is in: its file, how big that is, what kind it is, and the server's size for the
+    /// file it was made from.
+    public func finishDownload(_ sourceId: String, _ serverId: String, path: String, size: Int64, format: String?,
+                               fileSize: Int64?) throws {
         try db.run("""
-            UPDATE download SET state = 'Done', progress = 1, path = ?, sizeBytes = ?, format = ?
+            UPDATE download SET state = 'Done', progress = 1, path = ?, sizeBytes = ?, format = ?, fileSize = ?
             WHERE sourceId = ? AND serverId = ?
-            """, [path, size, format, sourceId, serverId])
+            """, [path, size, format, fileSize, sourceId, serverId])
         changed(.downloads)
+    }
+
+    /// The finished downloads from this server, each beside its server song as the last sync saw it.
+    public func doneFiles(_ sourceId: String) throws -> [DownloadedFile] {
+        try db.query("""
+            SELECT d.sourceId, d.serverId, d.format, d.sizeBytes, d.fileSize, s.sizeBytes AS serverSize, s.mimeType AS serverType
+            FROM download d JOIN source_track s ON s.sourceId = d.sourceId AND s.nativeId = d.serverId
+            WHERE d.state = 'Done' AND d.sourceId = ?
+            """, [sourceId]) { row in
+            DownloadedFile(sourceId: row.string("sourceId"), serverId: row.string("serverId"), format: row.optionalString("format"),
+                           sizeBytes: row.int64("sizeBytes"), fileSize: row.optionalInt64("fileSize"),
+                           serverSize: row.optionalInt64("serverSize"), serverType: row.optionalString("serverType"))
+        }
+    }
+
+    /// Notes the server's size for the file a download was made from.
+    public func noteDownloadFileSize(_ sourceId: String, _ serverId: String, fileSize: Int64) throws {
+        try db.run("UPDATE download SET fileSize = ? WHERE sourceId = ? AND serverId = ?", [fileSize, sourceId, serverId])
     }
 
     /// A download cut short when the app last closed waits again.
