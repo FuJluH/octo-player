@@ -30,6 +30,7 @@ import app.winters.octo.home.shows
 import app.winters.octo.home.answered
 import app.winters.octo.listening.PlayHistory
 import app.winters.octo.playback.PlaybackConnection
+import app.winters.octo.playback.radioId
 import app.winters.octo.server.ServerSync
 import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.ui.common.Feedback
@@ -226,10 +227,14 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    // Plays what a station has lined up today. Taps while one is on the
-    // way are ignored.
+    // Plays what a station has lined up today, or an added station's stream.
+    // Taps while one is on the way are ignored.
     fun playStation(station: Station) {
         if (startingStation != null) return
+        if (station.streamUrl != null) {
+            playback.playTracks(listOf(radioId(station.streamUrl, station.name)))
+            return
+        }
         startingStation = station.id
         viewModelScope.launch {
             try {

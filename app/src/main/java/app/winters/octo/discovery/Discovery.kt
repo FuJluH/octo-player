@@ -22,6 +22,7 @@ import app.winters.octo.server.serverSourceId
 import app.winters.octo.subsonic.Album
 import app.winters.octo.subsonic.OCTO_LIST_KINDS
 import app.winters.octo.subsonic.Playlist
+import app.winters.octo.subsonic.RadioStation
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.SubsonicException
@@ -57,8 +58,18 @@ data class OnlineArtist(val id: String, val name: String, val albumCount: Int, v
 
 // A station the server runs, played as the list of songs it has lined up.
 // A Made for you list is shown and played the same way, with its song count.
+// An internet radio station added to the server has its stream instead.
 @Serializable
-data class Station(val id: String, val name: String, val artwork: String?, val songCount: Int? = null)
+data class Station(val id: String, val name: String, val artwork: String?, val songCount: Int? = null, val streamUrl: String? = null)
+
+// The stations Home shows, from the server's internet radio stations. Octo's
+// own carry their id as their cover and play the songs they have lined up;
+// any other plays its stream, like on the Radio stations screen.
+internal fun homeStations(stations: List<RadioStation>, sourceId: String): List<Station> =
+    stations.map {
+        val stream = it.streamUrl.takeIf { url -> it.coverArt != it.id && url.isNotBlank() }
+        Station(it.id, it.name, ArtworkRef.Server(sourceId, it.coverArt ?: it.id).encode(), streamUrl = stream)
+    }
 
 // The lists Octo made for the listener (New Releases, Rediscover, Deep Cuts),
 // in that order, from the server's playlists. Only an Octo server that makes
@@ -175,9 +186,7 @@ class Discovery @Inject constructor(
         val session = (sessions.state.value as? SessionState.SignedIn)?.session ?: return emptyList()
         if (!session.runsOcto) return emptyList()
         val (client, sourceId) = server() ?: return emptyList()
-        return client.radioStations().map { station ->
-            Station(station.id, station.name, ArtworkRef.Server(sourceId, station.coverArt ?: station.id).encode())
-        }
+        return homeStations(client.radioStations(), sourceId)
     }
 
     // The lists Octo made for the listener, from its playlists.
