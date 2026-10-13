@@ -4,6 +4,7 @@ pub mod hls;
 pub mod http;
 pub mod icy;
 pub mod trust;
+pub mod ts;
 
 use std::fs::File;
 use std::path::Path;

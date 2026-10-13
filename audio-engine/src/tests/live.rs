@@ -183,28 +183,87 @@ fn a_live_hls_playlist_of_fmp4_segments_plays_across_discontinuities() {
     assert!(targets.iter().filter(|t| *t == "/init.mp4").count() >= 2, "{targets:?}");
 }
 
-#[test]
-fn hls_in_mpeg_ts_segments_is_refused_clearly() {
-    let server = ScriptServer::start(|asked, conn, _| {
+// A transport stream fixture cut every `packets` packets, wherever that
+// falls, and whether any cut fell inside a PES packet of its audio.
+fn ts_segments(name: &str, packets: usize) -> (Vec<Vec<u8>>, bool) {
+    let bytes = std::fs::read(fixture(name)).unwrap();
+    assert_eq!(bytes.len() % 188, 0);
+    let segments: Vec<Vec<u8>> = bytes.chunks(188 * packets).map(<[u8]>::to_vec).collect();
+    // FFmpeg puts the audio on PID 0x100; a cut before a packet of it that
+    // starts no PES packet is a cut inside one.
+    let mid_pes = segments[1..]
+        .iter()
+        .any(|s| s[1] & 0x40 == 0 && (u16::from(s[1] & 0x1f) << 8 | u16::from(s[2])) == 0x100);
+    (segments, mid_pes)
+}
+
+// A live playlist of `segments` over and over, a discontinuity each time
+// they start again.
+fn ts_server(segments: Vec<Vec<u8>>) -> ScriptServer {
+    let polls = AtomicU64::new(0);
+    ScriptServer::start(move |asked, conn, _| {
         let t = asked.target.as_str();
-        if t == "/ts.m3u8" {
-            let text = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6,\na.ts\n#EXTINF:6,\nb.ts\n";
+        let count = segments.len() as u64;
+        if t == "/live.m3u8" {
+            let n = polls.fetch_add(1, Ordering::SeqCst);
+            let text = live_playlist(n, "ts", "", |seq| {
+                (seq % count == 0 && seq > 0).then_some("#EXT-X-DISCONTINUITY")
+            });
             answer(conn, "application/vnd.apple.mpegurl", text.as_bytes());
-        } else if t == "/bare.m3u8" {
-            // Segments that do not say what they are.
-            let text = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6,\nsegment?n=1\n#EXT-X-ENDLIST\n";
-            answer(conn, "application/vnd.apple.mpegurl", text.as_bytes());
-        } else if t.starts_with("/segment") {
-            let packets: Vec<u8> = (0..20).flat_map(|_| [vec![0x47], vec![0u8; 187]].concat()).collect();
-            answer(conn, "video/mp2t", &packets);
+        } else if let Some(seq) = number(t).filter(|_| t.starts_with("/seg/")) {
+            answer(conn, "video/mp2t", &segments[(seq % count) as usize]);
         } else {
             not_found(conn);
         }
-    });
-    let err = source::open(&server.url("/ts.m3u8"), live()).err().unwrap();
-    assert_eq!(err.kind, ErrorKind::Unsupported);
-    assert!(err.message.contains("MPEG-TS"), "{err}");
-    let deck = Deck::open(1, server.url("/bare.m3u8"), 0.0, live());
+    })
+}
+
+#[test]
+fn hls_in_mpeg_ts_segments_plays_aac_and_mp3() {
+    for (name, codec) in [("tone-440-44k-stereo-aac.ts", "aac"), ("tone-440-44k-mono-mp3.ts", "mp3")] {
+        let (segments, mid_pes) = ts_segments(name, 29);
+        assert!(mid_pes, "{name}: no cut fell inside a PES packet");
+        let server = ts_server(segments);
+        let deck = Deck::open(1, server.url("/live.m3u8"), 0.0, live());
+        // Past the end of the fixture, so across a discontinuity.
+        let sound = read_secs(&deck, 3.5);
+        let info = deck.info().unwrap();
+        assert_eq!(
+            (info.codec.as_str(), info.sample_rate, info.duration_ms),
+            (codec, 44_100, None),
+            "{name}"
+        );
+        let middle = &sound[sound.len() / 4..];
+        assert!(
+            (steady_frequency(middle, 44_100) - 440.0).abs() < 3.0,
+            "{name}: {}",
+            steady_frequency(middle, 44_100)
+        );
+        let wrapped = server
+            .asked()
+            .iter()
+            .filter_map(|a| number(&a.target).filter(|_| a.target.starts_with("/seg/")))
+            .max();
+        assert!(wrapped.unwrap() >= 7, "{name}: only up to segment {wrapped:?}");
+    }
+}
+
+#[test]
+fn hls_in_mpeg_ts_with_audio_the_engine_cannot_play_fails_clearly() {
+    let (mut segments, _) = ts_segments("tone-440-44k-stereo-aac.ts", 1_000);
+    // Every PMT (PID 0x1000) made to call the AAC stream AC-3.
+    let pmts = segments[0]
+        .chunks_exact_mut(188)
+        .filter(|p| (u16::from(p[1] & 0x1f) << 8 | u16::from(p[2])) == 0x1000);
+    for packet in pmts {
+        let section = 4 + 1 + packet[4] as usize;
+        let info = (usize::from(packet[section + 10] & 0x0f) << 8) | usize::from(packet[section + 11]);
+        let stream_type = section + 12 + info;
+        assert_eq!(packet[stream_type], 0x0f);
+        packet[stream_type] = 0x81;
+    }
+    let server = ts_server(segments);
+    let deck = Deck::open(1, server.url("/live.m3u8"), 0.0, live());
     let until = Instant::now() + Duration::from_secs(10);
     let failure = loop {
         if let DeckStatus::Failed(f) = deck.status() {
@@ -214,7 +273,7 @@ fn hls_in_mpeg_ts_segments_is_refused_clearly() {
         thread::sleep(Duration::from_millis(5));
     };
     assert_eq!(failure.kind, ErrorKind::Unsupported);
-    assert!(failure.message.contains("MPEG-TS"), "{failure}");
+    assert!(failure.message.contains("codec the engine does not play"), "{failure}");
 }
 
 // A stream that comes back at another rate after a discontinuity keeps

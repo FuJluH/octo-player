@@ -78,7 +78,7 @@ same sound shaping as the Android app, and a sample-accurate clock.
 | Pause and resume | 10 ms fade |
 | Per-output profiles | The app keeps them: it gets `DeviceChanged` and calls `set_eq` and `set_dsp` |
 | Trusted self-signed certificates | `set_trusted_certificates`: the system's check first, then a SHA-256 pin for that host only |
-| Live streams | Live radio (`live` items): reconnects, ICY titles as `StreamTitle`, HLS with AAC or fMP4 segments; MPEG-TS segments refused |
+| Live streams | Live radio (`live` items): reconnects, ICY titles as `StreamTitle`, old SHOUTcast `ICY 200 OK` servers, HLS with MPEG-TS, AAC, MP3 or fMP4 segments |
 | Skip silence | Not ported |
 
 <!-- markdownlint-enable MD013 -->
@@ -196,7 +196,8 @@ it fails or the listener moves on.
   wherever the server is; then the stream fails as gone. The metadata
   blocks an `icy-metaint` server puts in the audio are taken out, and each
   new `StreamTitle` is sent as an event once the sound it starts with is
-  heard.
+  heard. Old SHOUTcast servers answer `ICY 200 OK`; a link in the client's
+  connection chain reads that as `HTTP/1.0 200 OK`.
 - **Types.** `audio/aac`, `audio/aacp` and `audio/x-aac` are ADTS AAC,
   `audio/mpeg` MP3 and `audio/ogg` Ogg; the bytes have the last word. A
   codec that starts over (a new Ogg stream, say) gets a new decoder, and
@@ -205,10 +206,13 @@ it fails or the listener moves on.
   A master playlist's best variant the engine decodes is played (sound
   only first, then the highest bit rate). Segments are fetched in order
   and joined; a live playlist is fetched again every target duration,
-  starting three segments from the newest. ADTS AAC, MP3 and fragmented
-  MP4 (init segment, then segments) play; a discontinuity or a new init
-  segment opens a fresh decoder. MPEG-TS segments and encrypted streams
-  are refused with a clear error. A plain M3U list opens its first entry.
+  starting three segments from the newest. MPEG-TS, ADTS AAC, MP3 and
+  fragmented MP4 (init segment, then segments) play; a discontinuity or a
+  new init segment opens a fresh decoder. MPEG-TS is cut down to its first
+  audio stream (AAC in ADTS, or MPEG audio) by `source/ts.rs`, which keeps
+  its place across segments, so a packet cut between two joins up; timed
+  ID3 and other streams are passed over. Encrypted streams are refused
+  with a clear error. A plain M3U list opens its first entry.
 - **HE-AAC.** symphonia's AAC decoder has no SBR or PS, so HE-AAC plays its
   AAC-LC core: half the sample rate, no rebuilt high band, and for HE-AAC
   v2 its mono core. In ADTS that happens by itself; an MP4 config that

@@ -4,10 +4,10 @@
 //! are fetched in order and read as one stream. A live playlist is fetched
 //! again every target duration for the segments added since.
 //!
-//! Segments in AAC (ADTS), MP3 and the like are joined byte to byte. Fragmented
-//! MP4 segments follow their init segment. A discontinuity, or a change of
-//! init segment, starts a new period, which the decoder opens afresh. MPEG-TS
-//! segments are refused, since there is no demuxer for them.
+//! Segments in AAC (ADTS), MP3 and the like are joined byte to byte, and
+//! MPEG-TS segments are cut down to their audio first. Fragmented MP4
+//! segments follow their init segment. A discontinuity, or a change of init
+//! segment, starts a new period, which the decoder opens afresh.
 
 use std::collections::VecDeque;
 use std::io::{self, Read, Seek, SeekFrom};
@@ -20,6 +20,7 @@ use symphonia::core::io::MediaSource;
 
 use crate::error::{ErrorKind, Failure};
 use crate::source::http::HttpOptions;
+use crate::source::ts::TsDemuxer;
 use crate::source::{Opened, Periods};
 
 // The most a playlist or segment may be, so a wrong address cannot fill memory.
@@ -116,15 +117,7 @@ fn check(media: &Media) -> Result<(), Failure> {
     if media.encrypted {
         return Err(Failure::new(ErrorKind::Unsupported, "encrypted HLS streams are not supported"));
     }
-    if media.segments.iter().any(|s| s.map.is_none() && super::url_extension(&s.uri).as_deref() == Some("ts"))
-    {
-        return Err(ts_refused());
-    }
     Ok(())
-}
-
-fn ts_refused() -> Failure {
-    Failure::new(ErrorKind::Unsupported, "HLS streams in MPEG-TS segments are not supported")
 }
 
 // One piece of the stream as the fetch thread hands it over.
@@ -361,6 +354,9 @@ fn run(shared: Arc<Shared>, url: String, first: Media) {
     let mut next: Option<u64> = None;
     // The init segment the current period started with.
     let mut init: Option<Option<Map>> = None;
+    // The current period's MPEG-TS demuxer, once its segments turn out to
+    // be MPEG-TS; it carries a packet or a PES packet cut between segments.
+    let mut ts: Option<TsDemuxer> = None;
     let mut failures = 0u32;
     loop {
         let media = match playlist.take() {
@@ -425,6 +421,7 @@ fn run(shared: Arc<Shared>, url: String, first: Media) {
                     }
                 }
                 init = Some(segment.map.clone());
+                ts = None;
             }
             let mut bytes = match fetch_retrying(&shared, &segment.uri, segment.range, &mut failures) {
                 Fetched::Bytes(bytes) => bytes,
@@ -436,10 +433,21 @@ fn run(shared: Arc<Shared>, url: String, first: Media) {
                 Fetched::Gone => return,
             };
             if segment.map.is_none() {
-                if is_transport_stream(&bytes) {
-                    return shared.end(Some(ts_refused()));
+                if ts.is_none() && is_transport_stream(&bytes) {
+                    ts = Some(TsDemuxer::new());
                 }
-                strip_id3(&mut bytes);
+                match &mut ts {
+                    Some(demuxer) => {
+                        let mut audio = Vec::with_capacity(bytes.len());
+                        demuxer.feed(&bytes, &mut audio);
+                        if demuxer.has_no_audio() {
+                            let none = "the HLS stream's audio is in a codec the engine does not play";
+                            return shared.end(Some(Failure::new(ErrorKind::Unsupported, none)));
+                        }
+                        bytes = audio;
+                    }
+                    None => strip_id3(&mut bytes),
+                }
             }
             if !shared.push(Piece::Bytes(bytes)) {
                 return;
