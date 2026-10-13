@@ -79,9 +79,9 @@ internal fun MarkdownView(blocks: List<Block>, open: (String) -> Unit, modifier:
 private val Body = DesktopType.body.copy(color = OctoColors.TextSecondary)
 
 @Composable
-private fun Bullet(text: List<Span>, open: (String) -> Unit, dot: Dp, colour: Color) {
+private fun Bullet(text: List<Span>, open: (String) -> Unit, dot: Dp, color: Color) {
     Row(Modifier.fillMaxWidth()) {
-        Box(Modifier.padding(top = 8.dp, end = Space.L).size(dot).background(colour, CircleShape))
+        Box(Modifier.padding(top = 8.dp, end = Space.L).size(dot).background(color, CircleShape))
         Line(text, Body, open, Modifier.weight(1f))
     }
 }
