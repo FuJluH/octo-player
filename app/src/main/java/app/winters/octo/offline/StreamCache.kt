@@ -8,8 +8,10 @@ import androidx.media3.datasource.cache.Cache
 import androidx.media3.datasource.cache.CacheEvictor
 import androidx.media3.datasource.cache.CacheSpan
 import androidx.media3.datasource.cache.ContentMetadata
+import androidx.media3.datasource.cache.ContentMetadataMutations
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
+import app.winters.octo.playback.SavedCopies
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -78,6 +80,29 @@ class StreamCache @Inject constructor(
     // The names of every song saved whole.
     fun fullySavedKeys(): Set<String> = if (!_enabled.value) emptySet() else cache.keys.filterTo(HashSet(), ::isFullySaved)
 
+    // The saved songs as picking a song's saved name sees them: see
+    // savedCopyKey. Nothing is saved while songs are not kept.
+    val copies: SavedCopies = object : SavedCopies {
+        override fun has(key: String): Boolean = isPartlySaved(key)
+
+        override fun length(key: String): Long = ContentMetadata.getContentLength(cache.getContentMetadata(key))
+
+        override fun notedSize(key: String): Long? = cache.getContentMetadata(key).get(FILE_SIZE, -1L).takeIf { it > 0 }
+
+        override fun note(key: String, size: Long) {
+            try {
+                cache.applyContentMetadataMutations(key, ContentMetadataMutations().set(FILE_SIZE, size))
+            } catch (e: Cache.CacheException) {
+                // Unnoted, the copy is checked again next time.
+            }
+        }
+
+        override fun drop(key: String) {
+            cache.removeResource(key)
+            refreshUsed()
+        }
+    }
+
     suspend fun clear() = withContext(Dispatchers.IO) {
         clearNow()
         refreshUsed()
@@ -91,6 +116,9 @@ class StreamCache @Inject constructor(
         cache.keys.toList().forEach { key -> cache.removeResource(key) }
     }
 }
+
+// The server's size for the file a saved song was made from.
+private const val FILE_SIZE = "octo_file_size"
 
 // Lets the least recently played songs go once the store is over its size,
 // and takes a new size at any time. Each size is a fresh least-recently-used

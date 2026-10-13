@@ -111,7 +111,8 @@ class Streams @Inject constructor(
     // Where the queue keeps a server copy.
     fun uriFor(copy: SourceTrackEntity): String = streamUri(refFor(copy))
 
-    fun refFor(copy: SourceTrackEntity): StreamRef = StreamRef(copy.sourceId, copy.nativeId, copy.mimeType, bitrateOf(copy))
+    fun refFor(copy: SourceTrackEntity): StreamRef =
+        StreamRef(copy.sourceId, copy.nativeId, copy.mimeType, bitrateOf(copy), size = copy.sizeBytes?.takeIf { it > 0 })
 
     // Where the queue keeps any server song, by its server, its id there,
     // its type and its bits a second.
@@ -169,7 +170,9 @@ class Streams @Inject constructor(
     fun pinned(ref: StreamRef): StreamRef {
         if (ref.pinned != null) return ref
         val source = ref.sourceId ?: currentSourceId() ?: return ref
-        val request = chooseRequest(source, ref, quality(current.value), saved::isFullySaved, saved::isPartlySaved)
+        val request = chooseRequest(source, ref, quality(current.value), saved::isFullySaved, saved::isPartlySaved) {
+            savedCopyKey(source, ref, it, saved.copies)
+        }
         return ref.copy(sourceId = source).pin(request)
     }
 
@@ -190,7 +193,7 @@ class Streams @Inject constructor(
     // The name a song is saved under, or null when no server is known for it.
     fun cacheKey(ref: StreamRef): String? {
         val source = ref.sourceId ?: currentSourceId() ?: return null
-        return streamCacheKey(source, ref, ref.request(quality(current.value)))
+        return savedCopyKey(source, ref, ref.request(quality(current.value)), saved.copies)
     }
 
     private fun networkFactory(): DataSource.Factory = DefaultDataSource.Factory(context, OkHttpDataSource.Factory(http))
@@ -212,7 +215,8 @@ class Streams @Inject constructor(
             // A saved copy that cannot be read is passed over for the server's.
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
 
-    // Songs are saved by server, song, type and request, never by address.
+    // Songs are saved by server, song, type, request and file size, never by
+    // address.
     private val keys = CacheKeyFactory { spec ->
         parseStreamUri(spec.uri.toString())?.let(::cacheKey) ?: spec.key ?: spec.uri.toString()
     }

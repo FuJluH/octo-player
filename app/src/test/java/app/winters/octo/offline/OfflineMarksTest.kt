@@ -20,6 +20,9 @@ class OfflineMarksTest {
     fun aSavedKeyNamesItsSong() {
         val key = streamCacheKey("server:music.example", StreamRef(null, "tr-1", "audio/flac", null), StreamRequest(192))
         assertEquals(savedSong("server:music.example", "tr-1"), savedSongOf(key))
+        val sized = StreamRef(null, "tr-1", "audio/flac", null, size = 31_000_000)
+        assertEquals(savedSong("server:music.example", "tr-1"), savedSongOf(streamCacheKey("server:music.example", sized, StreamRequest(null))))
+        assertEquals(savedSong("server:music.example", "tr-1"), savedSongOf(streamCacheKey("server:music.example", sized, StreamRequest(192))))
     }
 
     @Test

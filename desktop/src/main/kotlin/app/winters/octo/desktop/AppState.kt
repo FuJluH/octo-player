@@ -16,6 +16,7 @@ import app.winters.octo.design.PopupHost
 import app.winters.octo.desktop.audio.SoundTarget
 import app.winters.octo.desktop.health.HealthModel
 import app.winters.octo.desktop.home.HomeStore
+import app.winters.octo.desktop.library.LibraryState
 import app.winters.octo.desktop.library.LibraryStore
 import app.winters.octo.desktop.listening.PlayReporter
 import app.winters.octo.desktop.livelists.LiveListStore
@@ -83,7 +84,9 @@ import app.winters.octo.desktop.library.PlaylistArtStore
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import coil3.ImageLoader
@@ -424,6 +427,9 @@ class AppState(
         startReading(views)
     }
 
+    // Follows the library read of the server in use.
+    private var libraryWatch: Job? = null
+
     // What the pages read a server through: its library, finds, search and
     // Home. Made before any of it shows, and read only after.
     private class ServerViews(
@@ -524,6 +530,12 @@ class AppState(
 
     private fun startReading(views: ServerViews) {
         views.library.load()
+        // Kept songs are checked against each read of the library, such as
+        // the one after a song's file is swapped for a better copy.
+        libraryWatch?.cancel()
+        libraryWatch = scope.launch {
+            views.library.state.filterIsInstance<LibraryState.Ready>().collect { offline.poke() }
+        }
         views.upgrades?.start()
         views.downloads?.start()
         // Whether songs can be deleted from disk, for every song menu.
@@ -589,6 +601,8 @@ class AppState(
 
     private fun signedOut() {
         val form = SignInForm(accounts.last)
+        libraryWatch?.cancel()
+        libraryWatch = null
         upgrades?.close()
         downloads?.close()
         together {

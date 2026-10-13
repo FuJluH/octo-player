@@ -35,6 +35,21 @@ data class DownloadEntity(
     // The song's name, for the Downloads page and the file.
     val title: String,
     val artist: String,
+    // The server's size for the file the download was made from, so a new
+    // file under the same id is told apart. Downloads made before it was
+    // noted have none until the first check after a sync.
+    val fileSize: Long? = null,
+)
+
+// A finished download beside its server song as the last sync saw it.
+data class DownloadedFile(
+    val sourceId: String,
+    val serverId: String,
+    val format: String?,
+    val sizeBytes: Long,
+    val fileSize: Long?,
+    val serverSize: Long?,
+    val serverType: String?,
 )
 
 // A download with the reasons it is kept, split out.
@@ -104,11 +119,24 @@ interface DownloadDao {
 
     @Query(
         """
-        UPDATE download SET state = 'Done', progress = 1, path = :path, sizeBytes = :size, format = :format
+        UPDATE download SET state = 'Done', progress = 1, path = :path, sizeBytes = :size, format = :format, fileSize = :fileSize
         WHERE sourceId = :sourceId AND serverId = :serverId
         """,
     )
-    suspend fun finish(sourceId: String, serverId: String, path: String, size: Long, format: String?)
+    suspend fun finish(sourceId: String, serverId: String, path: String, size: Long, format: String?, fileSize: Long?)
+
+    // The finished downloads from this server, each with its server song.
+    @Query(
+        """
+        SELECT d.sourceId, d.serverId, d.format, d.sizeBytes, d.fileSize, s.sizeBytes AS serverSize, s.mimeType AS serverType
+        FROM download d JOIN source_track s ON s.sourceId = d.sourceId AND s.nativeId = d.serverId
+        WHERE d.state = 'Done' AND d.sourceId = :sourceId
+        """,
+    )
+    suspend fun doneFiles(sourceId: String): List<DownloadedFile>
+
+    @Query("UPDATE download SET fileSize = :fileSize WHERE sourceId = :sourceId AND serverId = :serverId")
+    suspend fun noteFileSize(sourceId: String, serverId: String, fileSize: Long)
 
     // A download cut short when the app last closed waits again.
     @Query("UPDATE download SET state = 'Queued', progress = 0 WHERE state = 'Downloading'")
