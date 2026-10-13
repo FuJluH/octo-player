@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.ui
 
+import app.winters.octo.desktop.pages.serverUpdateWaits
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.focus.onFocusChanged
 import app.winters.octo.design.LocalFocusVisibility
@@ -164,8 +165,15 @@ fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier, r
         Separator(Modifier.padding(vertical = Space.S))
         DownloadsRow(app, rail)
         NavRow("Sound", OctoIcons.Sound, lit == SidebarItem.Top(Page.Sound), rail) { go(Page.Sound) }
-        // A small dot while an update waits to go in; the news itself is in Settings > About.
-        NavRow("Settings", OctoIcons.Settings, lit == SidebarItem.Top(Page.Settings), rail, mark = app.updates?.ready != null) { go(Page.Settings) }
+        // A small dot while an update waits to go in, the news itself in
+        // Settings > About, or while a newer Octo waits for the server, in Settings > Servers.
+        val serverUpdate = serverUpdateWaits(app)
+        val mark = when {
+            app.updates?.ready != null -> "update ready"
+            serverUpdate -> "server update available"
+            else -> null
+        }
+        NavRow("Settings", OctoIcons.Settings, lit == SidebarItem.Top(Page.Settings), rail, mark = mark) { go(Page.Settings) }
     }
 }
 
@@ -259,12 +267,13 @@ private fun NavRow(
     selected: Boolean,
     rail: Boolean,
     modifier: Modifier = Modifier,
-    mark: Boolean = false,
+    // What waits there, which puts a small dot by it.
+    mark: String? = null,
     state: String? = null,
     trailing: (@Composable () -> Unit)? = null,
     onClick: () -> Unit,
 ) {
-    val named = listOfNotNull(label, "update ready".takeIf { mark }, state).joinToString(", ")
+    val named = listOfNotNull(label, mark, state).joinToString(", ")
     val row: @Composable () -> Unit = {
         Box(
             modifier
@@ -283,10 +292,10 @@ private fun NavRow(
                 Box {
                     Glyph(icon, size = IconSize.Toolbar, tint = if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary)
                     // On the rail the dot sits on the icon's corner.
-                    if (mark && rail) NavMark(Modifier.align(Alignment.TopEnd))
+                    if (mark != null && rail) NavMark(Modifier.align(Alignment.TopEnd))
                 }
                 if (!rail) Txt(label, DesktopType.body, if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary, Modifier.weight(1f, fill = trailing != null))
-                if (mark && !rail) NavMark()
+                if (mark != null && !rail) NavMark()
                 if (trailing != null && !rail) trailing()
             }
         }

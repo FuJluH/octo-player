@@ -81,7 +81,7 @@ fun SettingsPage(app: AppState, visit: Visit) {
         visit,
         "Settings",
         listOfNotNull(
-            PageSection("servers", "Servers", OctoIcons.Servers) { ServerRows(app) },
+            PageSection("servers", "Servers", OctoIcons.Servers, mark = if (serverUpdateWaits(app)) SERVER_UPDATE_MARK else null) { ServerRows(app) },
             PageSection("look", "Appearance", OctoIcons.Appearance) { AppearanceGroups(app, settings) },
             PageSection("playback", "Playback", OctoIcons.Playback) { PlaybackRows(app, settings) },
             PageSection("quality", AUDIO_QUALITY, OctoIcons.Equalizer, detail = "At home, away, and on this computer.") { AudioQualityRows(app, settings) },

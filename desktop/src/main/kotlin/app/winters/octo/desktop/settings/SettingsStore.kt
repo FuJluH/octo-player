@@ -94,6 +94,8 @@ data class AppSettings(
     val deviceId: String = "",
     // Songs kept on this computer to play without a connection.
     val offline: OfflinePrefs = OfflinePrefs(),
+    // The newest server release the listener chose Later for, by server id.
+    val serverUpdateLater: Map<String, String> = emptyMap(),
 )
 
 // Where kept songs go (empty for the usual folder), and what is kept from

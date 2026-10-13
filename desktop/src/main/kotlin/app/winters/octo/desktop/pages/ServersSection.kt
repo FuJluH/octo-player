@@ -78,6 +78,7 @@ import app.winters.octo.server.passwordChangeWords
 import app.winters.octo.server.passwordDraftProblem
 import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.subsonic.shownAddress
+import app.winters.octo.serverupdate.upToDateLine
 import kotlinx.coroutines.launch
 
 // Settings > Servers: the servers kept on this computer, the one in use on
@@ -90,6 +91,7 @@ internal fun ServerRows(app: AppState) {
     // Every server is asked how it is while the section is on screen, and
     // again once another is in use.
     LaunchedEffect(connection, settings.servers.size) { app.serverFacts.refresh() }
+    if (connection?.isOcto == true) ServerUpdateCard(app)
     Group("Your servers") {
         settings.servers.forEach { server ->
             ServerRow(app, server, inUse = server.id == settings.activeServer)
@@ -182,7 +184,10 @@ private fun OverviewRows(app: AppState, connection: Connection) {
     val facts = app.serverFacts
     val state by (app.library?.state ?: return).collectAsState()
     val index = (state as? LibraryState.Ready)?.index
-    val server = connection.server
+    // As kept now: a check or an update since signing in can bring a new version.
+    val settings by app.settings.state.collectAsState()
+    val server = settings.servers.firstOrNull { it.id == connection.server.id } ?: connection.server
+    val update by app.serverUpdate.track.collectAsState()
     val overview = overviewOf(
         server,
         lyrics = connection.lyricsByIdOn || connection.supports(OCTO_LYRICS),
@@ -196,7 +201,9 @@ private fun OverviewRows(app: AppState, connection: Connection) {
         answerMs = facts.checks[server.id]?.ms,
         now = System.currentTimeMillis(),
     )
-    SettingRow(overview.kind, overview.offers ?: "Plays your music, with nothing beyond it.") {
+    // Octo that knows it runs the newest release says so.
+    val kind = upToDateLine(update)?.takeIf { connection.isOcto } ?: overview.kind
+    SettingRow(kind, overview.offers ?: "Plays your music, with nothing beyond it.") {
         overview.answer?.let { Txt(it, DesktopType.meta.copy(fontFeatureSettings = "tnum"), OctoColors.TextSecondary) }
     }
     SettingRow("In your library", overview.counts ?: if (state is LibraryState.Failed) "Couldn't read the library just now." else "Reading the library.")
