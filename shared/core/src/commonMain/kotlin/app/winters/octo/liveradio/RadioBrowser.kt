@@ -50,6 +50,10 @@ data class LivePlace(
     val countryCode: String = "",
 )
 
+// Whether the place has coordinates. One without them (a city typed where
+// nothing could look it up) is searched by its state and country only.
+val LivePlace.located: Boolean get() = latitude != 0.0 || longitude != 0.0
+
 // How the stations found are ordered.
 enum class LiveSort { Distance, Popular }
 
@@ -140,7 +144,8 @@ class RadioBrowser(
     private val kept = HashMap<String, Pair<Long, List<LiveStation>>>()
 
     // The stations around `place` within `radiusMeters`, those this app
-    // can play (`playable`) only, ordered by `sort`.
+    // can play (`playable`) only, ordered by `sort`. A place without
+    // coordinates skips the radius search and gives its state's stations.
     suspend fun near(
         place: LivePlace,
         radiusMeters: Double,
@@ -151,11 +156,15 @@ class RadioBrowser(
         val lon = rounded(place.longitude)
         val key = "$lat,$lon,${radiusMeters.roundToInt()},${place.state},${place.countryCode}"
         val found = kept[key]?.takeIf { now() - it.first < KEEP_MS }?.second ?: run {
-            val near = search(
-                "geo_lat" to "$lat",
-                "geo_long" to "$lon",
-                "geo_distance" to "${radiusMeters.roundToInt()}",
-            )
+            val near = if (place.located) {
+                search(
+                    "geo_lat" to "$lat",
+                    "geo_long" to "$lon",
+                    "geo_distance" to "${radiusMeters.roundToInt()}",
+                )
+            } else {
+                emptyList()
+            }
             val regional = if (place.countryCode.isNotBlank()) {
                 search(*listOfNotNull("countrycode" to place.countryCode, place.state.takeIf { it.isNotBlank() }?.let { "state" to it }).toTypedArray())
             } else {
