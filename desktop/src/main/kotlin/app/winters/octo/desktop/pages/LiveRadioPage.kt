@@ -23,7 +23,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.IntRect
 import app.winters.octo.design.ChipRow
 import app.winters.octo.design.ControlHeight
 import app.winters.octo.design.Corner
@@ -33,6 +41,7 @@ import app.winters.octo.design.GlassField
 import app.winters.octo.design.GlazeCapsule
 import app.winters.octo.design.GlazeSegments
 import app.winters.octo.design.Glyph
+import app.winters.octo.design.IconAction
 import app.winters.octo.design.IconSize
 import app.winters.octo.design.MenuRow
 import app.winters.octo.design.MenuSeparator
@@ -65,7 +74,9 @@ import app.winters.octo.desktop.ui.LocalPointer
 import app.winters.octo.desktop.ui.PageTitle
 import app.winters.octo.desktop.ui.SectionTitle
 import app.winters.octo.desktop.ui.StationLogo
+import app.winters.octo.desktop.ui.LiveStationMenu
 import app.winters.octo.desktop.ui.liveStationMenu
+import app.winters.octo.desktop.ui.windowRect
 import app.winters.octo.desktop.ui.onRightClick
 import app.winters.octo.desktop.ui.pagePadding
 import app.winters.octo.desktop.ui.rememberListState
@@ -73,6 +84,10 @@ import app.winters.octo.liveradio.LiveSort
 import app.winters.octo.liveradio.LiveStation
 import app.winters.octo.liveradio.located
 import java.util.Locale
+
+// Said under a city found with no server to look it up: Radio Browser is
+// asked for its stations by the words typed, as a state.
+const val AS_TYPED = "Searched by Radio Browser as typed, without a map position, so stations are matched by the state's name."
 
 // The words the Where field shows while empty.
 const val WHERE_HINT = "ZIP or postal code, or a city and state"
@@ -133,6 +148,9 @@ private fun LazyListScope.stations(app: AppState, find: LiveFind, keptIds: Set<S
         is LiveFind.CatalogDown -> item(key = "down") { FailedLine(CATALOG_DOWN, app.liveRadio::retry) }
         is LiveFind.Found -> {
             item(key = "near-title") { SectionTitle(if (find.place.located) "Near ${find.place.label}" else "In ${find.place.label}") }
+            if (!find.place.located) {
+                item(key = "as-typed") { Txt(AS_TYPED, DesktopType.meta, OctoColors.TextMuted, Modifier.padding(bottom = Space.S), maxLines = 2) }
+            }
             if (find.stations.isEmpty()) {
                 val value = radiusChoices(miles).let { it[radius.coerceIn(it.indices)] }
                 item(key = "none") { NothingHere(nothingFound(find.place, value, miles)) }
@@ -196,19 +214,27 @@ private fun ColumnScope.CountryMenu(chosen: String, pick: (String) -> Unit, clos
     }
 }
 
-// A station: its logo, its name, where it is and its tags, and how it
-// sounds. A click plays it (the second click of a double click does not
-// start it over); a right click opens its menu.
+// A station: its logo, its name, where it is and its tags, how it sounds,
+// and its menu button. A click (or Enter) plays it (the second click of a
+// double click does not start it over); a right click, the menu key or
+// Shift+F10 opens its menu where the button is.
 @Composable
 private fun StationRow(app: AppState, station: LiveStation, kept: Boolean, miles: Boolean, near: Boolean) {
     val clicks = remember { longArrayOf(0L) }
     val menu = liveStationMenu(app, station, kept)
+    var anchor by remember { mutableStateOf(IntRect.Zero) }
+    val menuHere = { app.popups.showUnder(anchor) { close -> LiveStationMenu(app, station, kept, close) } }
     Row(
         Modifier
             .fillMaxWidth()
             .heightIn(min = RowHeight.Roomy)
             .hoverLift(Corner.RowShape)
             .onRightClick(menu)
+            .onPreviewKeyEvent { event ->
+                val asks = event.type == KeyEventType.KeyDown && (event.key == Key.Menu || (event.key == Key.F10 && event.isShiftPressed))
+                if (asks) menuHere()
+                asks
+            }
             .clickable(role = Role.Button) {
                 val now = System.currentTimeMillis()
                 if (now - clicks[0] >= DOUBLE_CLICK_MS) app.playLive(station)
@@ -226,6 +252,15 @@ private fun StationRow(app: AppState, station: LiveStation, kept: Boolean, miles
         }
         if (kept && near) Glyph(OctoIcons.Pinned, size = IconSize.Table, tint = OctoColors.TextMuted)
         soundText(station)?.let { Txt(it, DesktopType.meta, OctoColors.TextMuted) }
+        IconAction(
+            OctoIcons.More,
+            "More for ${station.name}",
+            menuHere,
+            Modifier.onGloballyPositioned { anchor = it.windowRect() },
+            size = ControlHeight.S,
+            iconSize = IconSize.Table,
+            tint = OctoColors.TextSecondary,
+        )
     }
 }
 

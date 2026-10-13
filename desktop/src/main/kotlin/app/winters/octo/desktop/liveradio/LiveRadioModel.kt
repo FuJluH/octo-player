@@ -65,7 +65,11 @@ class LiveRadioModel(
     var serverStations by mutableStateOf<List<RadioStationDetails>?>(null)
         private set
 
-    private var job: Job? = null
+    // A place being looked up, and the stations being searched for; apart,
+    // so a new radius or order never cancels a lookup before its place is
+    // saved.
+    private var lookupJob: Job? = null
+    private var searchJob: Job? = null
     private var adminFor: Connection? = null
 
     val prefs: LiveRadioPrefs get() = settings.current.liveRadio
@@ -90,9 +94,10 @@ class LiveRadioModel(
     // stations around it. Nothing typed changes nothing.
     fun lookUp(where: String, country: String) {
         val asked = whereOf(where, country) ?: return
-        job?.cancel()
+        lookupJob?.cancel()
+        searchJob?.cancel()
         find = LiveFind.Finding
-        job = scope.launch {
+        lookupJob = scope.launch {
             val inUse = connection()
             val lookup: (suspend (WhereAsked) -> Place?)? = if (inUse?.supports(OCTO_PLACES) == true) {
                 { a -> inUse.client.place(a.code, a.name, a.state, a.country) }
@@ -132,10 +137,13 @@ class LiveRadioModel(
         prefs.place?.let(::search)
     }
 
+    // Searches the saved place again. While a lookup runs, it searches its
+    // own place once found, with the radius and order as they are then.
     private fun search(place: LivePlace) {
-        job?.cancel()
+        if (lookupJob?.isActive == true) return
+        searchJob?.cancel()
         find = LiveFind.Finding
-        job = scope.launch { find = stationsAround(place) }
+        searchJob = scope.launch { find = stationsAround(place) }
     }
 
     private suspend fun stationsAround(place: LivePlace): LiveFind = try {

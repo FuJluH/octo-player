@@ -60,7 +60,7 @@ class LiveRadioTest {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 asked += request
                 if (catalogDown) return MockResponse.Builder().code(503).build()
-                val body = if (request.url.queryParameter("geo_lat") != null) "[${station("a", "KBEM", 1200.0)}]" else "[${station("b", "Texas Public", null, "Texas")}]"
+                val body = if (request.url.queryParameter("geo_lat") != null) "[${station("a", "KBEM", 1200.0)}]" else "[${station("b", "Texas Public", null, request.url.queryParameter("state") ?: "Texas")}]"
                 return MockResponse.Builder().body(body).build()
             }
         }
@@ -314,5 +314,33 @@ class LiveRadioTest {
         assertEquals(listOf("k2", "k1"), model.kept().stations.map { it.uuid })
         model.drop("k2")
         assertEquals(listOf("k1"), KeptStations.decoded(store().current.liveRadio.kept).stations.map { it.uuid })
+    }
+
+    @Test
+    fun aCodeWithItsTownAndStateIsReadAsTheCode() {
+        assertEquals(WhereAsked(code = "78701", name = "Austin", state = "TX", country = "US"), whereOf("Austin, TX 78701", "us"))
+        assertEquals(WhereAsked(code = "10001", state = "NY", country = "US"), whereOf("10001, NY", "US"))
+    }
+
+    @Test
+    fun aNewRadiusWhileAPlaceIsLookedUpKeepsThePlace() {
+        val answer = java.util.concurrent.CountDownLatch(1)
+        server.answerBy("getPlace") {
+            answer.await(5, java.util.concurrent.TimeUnit.SECONDS)
+            server.ok(""""place":{"code":"55401","name":"Minneapolis","state":"Minnesota","country":"US","latitude":44.98,"longitude":-93.27}""")
+        }
+        val settings = store()
+        settings.update { it.copy(liveRadio = it.liveRadio.copy(place = LivePlace(30.27, -97.74, "Austin, Texas", "Texas", "US"))) }
+        val model = model(settings, listOf("$OCTO_PLACES:1"))
+        model.lookUp("55401", "US")
+        model.setRadius(3)
+        answer.countDown()
+        waitFor { (model.find as? LiveFind.Found)?.place?.label == "Minneapolis, Minnesota" }
+        assertEquals("Minneapolis, Minnesota", store().current.liveRadio.place?.label)
+        assertEquals(3, store().current.liveRadio.radius)
+        // Searched once found, with the radius chosen meanwhile.
+        val geo = asked.last { it.url.queryParameter("geo_lat") != null }
+        assertEquals("44.98", geo.url.queryParameter("geo_lat"))
+        assertEquals("${(100 * MILE_METERS).roundToInt()}", geo.url.queryParameter("geo_distance"))
     }
 }

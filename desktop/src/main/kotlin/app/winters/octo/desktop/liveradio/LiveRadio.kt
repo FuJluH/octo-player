@@ -5,7 +5,9 @@ import app.winters.octo.liveradio.LiveRadiusKm
 import app.winters.octo.liveradio.LiveRadiusMiles
 import app.winters.octo.liveradio.LiveStation
 import app.winters.octo.liveradio.MILE_METERS
+import app.winters.octo.liveradio.liveStreamKey
 import app.winters.octo.liveradio.located
+import app.winters.octo.liveradio.parseWhere
 import app.winters.octo.playback.radioId
 import app.winters.octo.subsonic.Place
 import app.winters.octo.subsonic.RadioStation
@@ -18,17 +20,12 @@ import kotlin.math.roundToInt
 data class WhereAsked(val code: String? = null, val name: String? = null, val state: String? = null, val country: String)
 
 // The Where field's words as a place to look up, or null when nothing was
-// typed. Words with a digit and no comma are a postal code ("55401",
-// "SW1A 1AA"); anything else is a city, its state after the first comma.
+// typed, read as both apps read them (parseWhere): the words with a digit
+// are a postal code ("55401", "SW1A 1AA", the 78701 of "Austin, TX 78701"),
+// the rest a city with its state after the first comma.
 fun whereOf(text: String, country: String): WhereAsked? {
-    val words = text.trim()
-    if (words.isEmpty()) return null
-    val code = country.trim().uppercase()
-    if (words.any(Char::isDigit) && ',' !in words) return WhereAsked(code = words.uppercase(), country = code)
-    val name = words.substringBefore(',').trim()
-    val state = words.substringAfter(',', "").trim().takeIf { it.isNotEmpty() }
-    if (name.isEmpty()) return null
-    return WhereAsked(name = name, state = state, country = code)
+    val parts = parseWhere(text) ?: return null
+    return WhereAsked(code = parts.code, name = parts.name, state = parts.state, country = country.trim().uppercase())
 }
 
 // How a place lookup went: where it is, or why it could not be found.
@@ -129,9 +126,8 @@ const val LIVE_RADIO = "Live radio"
 const val LIVE_RADIO_NEAR = "Live radio near you"
 const val FIND_STATIONS_NEAR = "Find stations near you"
 
-// A stream address as stations are matched by: the same address with or
-// without a slash at its end, in any case.
-fun streamKey(url: String): String = url.trim().trimEnd('/').lowercase()
+// A stream address as stations are matched by, the same in both apps.
+fun streamKey(url: String): String = liveStreamKey(url)
 
 // One card on Home's Live radio shelf: a station added to the server, or
 // one kept on this computer (`kept`), or both when they stream the same.
