@@ -8,6 +8,8 @@ import app.winters.octo.desktop.player.QueueEntry
 import app.winters.octo.desktop.system.isOpenedFile
 import app.winters.octo.desktop.system.openedFileOf
 import app.winters.octo.discovery.knownLengthMs
+import app.winters.octo.playback.isRadio
+import app.winters.octo.playback.radioOf
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicClient
 
@@ -56,7 +58,8 @@ fun serverSongId(song: Song, landed: (String) -> String?): String? = when {
 // the id being the path.
 const val LOCAL_PREFIX = "local:"
 
-// Files on this computer by path, and everything else from the server.
+// Files on this computer by path, live radio from its station's own
+// address, and everything else from the server.
 class LocalOrServer(
     private val server: SongSources,
     // A copy kept on this computer, played in place of the server's.
@@ -66,6 +69,8 @@ class LocalOrServer(
         when {
             kept(song.id) != null -> SongAddress(kept(song.id)!!.absolutePath)
             song.id.startsWith(LOCAL_PREFIX) -> SongAddress(song.id.removePrefix(LOCAL_PREFIX))
+            // The station's own server, so none of Octo's headers go along.
+            isRadio(song.id) -> radioOf(song.id)?.let { (stream, _) -> SongAddress(stream) }
             // A file opened from the system (a double click, a drop): the
             // file itself, or the address it was opened from.
             isOpenedFile(song.id) -> openedFileOf(song.id)?.let { SongAddress(it.path?.absolutePath ?: it.uri) }
@@ -86,10 +91,12 @@ fun albumOrder(song: Song): Int? = song.track?.let { (song.discNumber ?: 1) * 10
 // gaplessly instead. A song found online often comes with Octo's 3:00
 // guess, which is left out, so the engine takes the length from the file
 // as the phone does. A song that cannot be reached gets an address that fails, so
-// the engine reports it and moves on, as it does for any broken file.
+// the engine reports it and moves on, as it does for any broken file. Live
+// radio is a live stream, with no length at all.
 fun queueItem(entry: QueueEntry, sources: SongSources): QueueItem {
     val song = entry.song
     val address = sources.addressOf(song)
+    val live = isRadio(song.id)
     val gain = song.replayGain?.let {
         if (it.trackGain == null && it.albumGain == null) null else ReplayGainInfo(it.trackGain, it.trackPeak, it.albumGain, it.albumPeak)
     }
@@ -98,11 +105,12 @@ fun queueItem(entry: QueueEntry, sources: SongSources): QueueItem {
         source = address?.source ?: UNREACHABLE,
         albumId = song.albumId,
         albumOrder = albumOrder(song),
-        durationMs = knownLengthMs(song).takeIf { it > 0 }?.toULong(),
+        durationMs = knownLengthMs(song).takeIf { it > 0 && !live }?.toULong(),
         replayGain = gain,
         headers = address?.headers.orEmpty().map { (name, value) -> HttpHeader(name, value) },
         genre = genreOf(song),
         bpm = song.bpm?.takeIf { it > 0 }?.toDouble(),
+        live = live,
     )
 }
 

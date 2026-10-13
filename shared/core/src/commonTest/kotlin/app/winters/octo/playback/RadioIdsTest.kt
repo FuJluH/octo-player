@@ -6,7 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class RadioItemsTest {
+class RadioIdsTest {
     @Test
     fun aStationRoundTrips() {
         val id = radioId("https://stream.example:8443/fip.mp3?type=http&x=1", "FIP: Jazz & more")

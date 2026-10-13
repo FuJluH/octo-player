@@ -26,6 +26,7 @@ import app.winters.octo.discovery.knownLengthMs
 import app.winters.octo.playback.PlayFailure
 import app.winters.octo.playback.QueueSource
 import app.winters.octo.playback.RealLengths
+import app.winters.octo.playback.isRadio
 import app.winters.octo.playback.playingLengthMs
 import app.winters.octo.playback.withLengthMs
 import app.winters.octo.subsonic.Song
@@ -92,6 +93,9 @@ class EnginePlayer(
 
     // The decoder's length of the entry that started last, by its key.
     private var measured: Pair<Long, Long>? = null
+
+    // What a live stream says it plays now, by the entry's key.
+    private var streamTitle: Pair<Long, String>? = null
 
     // What the listener asked for: playing or not. The engine's own state
     // changes only override it when the engine stops by itself.
@@ -278,7 +282,12 @@ class EnginePlayer(
         synchronized(lock) {
             val current = queue.currentEntry ?: return
             val back = queue.previousPosition(if (repeat == RepeatMode.One) RepeatMode.All else repeat)
-            if (at > RESTART_AFTER_MS || back == null) {
+            if (isRadio(current.song.id)) {
+                // A live stream cannot start over: back goes to the song before.
+                if (back == null) return
+                queue.moveTo(back)
+                jump(play = playing)
+            } else if (at > RESTART_AFTER_MS || back == null) {
                 engine.seek(0)
                 setPending(current.key, 0)
             } else {
@@ -292,6 +301,8 @@ class EnginePlayer(
     override fun seekTo(positionMs: Long) {
         synchronized(lock) {
             val current = queue.currentEntry ?: return
+            // A live stream plays on from wherever its station is.
+            if (isRadio(current.song.id)) return
             val target = clamp(positionMs, durationMs())
             engine.seek(target)
             setPending(current.key, target)
@@ -492,9 +503,11 @@ class EnginePlayer(
         }
         val ordered = inPlayOrder()
         mirror = ordered.map { it.key }
-        engine.load(ordered.map { queueItem(it, sources) }, mirror.indexOf(current.key), startMs, play)
+        // A live stream starts where its station is.
+        val start = if (isRadio(current.song.id)) 0 else startMs
+        engine.load(ordered.map { queueItem(it, sources) }, mirror.indexOf(current.key), start, play)
         expect(current.key)
-        setPending(current.key, startMs)
+        setPending(current.key, start)
         askProfiles()
     }
 
@@ -598,6 +611,11 @@ class EnginePlayer(
                     val failed = keyOfItem(event.itemId)?.let { key -> queue.songs.firstOrNull { it.key == key } }
                     problem = PlayProblem(plainWords(event.kind, failed?.song?.isExternal == true), failed?.song, event.message.takeIf(String::isNotBlank))
                     if (keyOfItem(event.itemId) == expecting) expecting = null
+                }
+                is EngineEvent.StreamTitle -> {
+                    val key = keyOfItem(event.itemId) ?: return
+                    if (queue.songs.none { it.key == key }) return
+                    streamTitle = key to event.title
                 }
                 is EngineEvent.Position -> {
                     val key = keyOfItem(event.itemId)
@@ -704,7 +722,7 @@ class EnginePlayer(
         val outputs = listOf(defaultOutput()) + devices
         _state.value = PlayerState(
             queue = queue.songs,
-            current = queue.currentEntry,
+            current = queue.currentEntry?.let(::shown),
             upcoming = queue.upcoming,
             played = queue.played,
             rounds = rounds,
@@ -726,6 +744,14 @@ class EnginePlayer(
             canUndo = queue.canUndo,
             moves = moves,
         )
+    }
+
+    // The current entry as the screen shows it: a station with what its
+    // stream says it plays now as the song and its name as the artist.
+    // Only the current entry carries it, so a saved queue keeps the station.
+    private fun shown(entry: QueueEntry): QueueEntry {
+        val title = streamTitle?.takeIf { it.first == entry.key }?.second ?: return entry
+        return entry.copy(song = onAir(entry.song, title))
     }
 
     // The current song's format, the decoder's once it started and the
