@@ -53,6 +53,7 @@ class Autoplay @Inject constructor(
     private val online: OnlineDao,
     private val user: UserDao,
     private val playable: PlayableSongs,
+    private val stations: StationRefill,
 ) {
     private var player: OutputSwitch? = null
     private var scope: CoroutineScope? = null
@@ -88,7 +89,7 @@ class Autoplay @Inject constructor(
         val player = player ?: return
         val item = player.currentMediaItem
         val key = item?.entryId
-        val last = enabled && key != null && key != doneFor && !isRadio(item.mediaId) &&
+        val last = enabled && key != null && key != doneFor && !isRadio(item.mediaId) && !stations.keepsGoing(item) &&
             player.repeatMode == Player.REPEAT_MODE_OFF && !player.hasNextMediaItem() &&
             (player.isPlaying || player.playbackState == Player.STATE_ENDED)
         if (!last) {

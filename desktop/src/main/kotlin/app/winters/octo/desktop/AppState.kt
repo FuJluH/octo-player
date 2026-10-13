@@ -91,6 +91,10 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import coil3.ImageLoader
 import okhttp3.OkHttpClient
+import app.winters.octo.desktop.queue.StationRefill
+import app.winters.octo.playback.STATION_BATCH
+import app.winters.octo.playback.isStationId
+import app.winters.octo.subsonic.OCTO_STATIONS
 
 // How long a notice said in passing stays up.
 const val PASSING_NOTICE_MS = 6_000L
@@ -323,6 +327,14 @@ class AppState(
     // queue edit; shown only while the notice is still the one it came with.
     var noticeAction by mutableStateOf<NoticeAction?>(null)
 
+    // Keeps a station going, on a server that sends a station's next songs.
+    val stationRefill = StationRefill(
+        player,
+        scope,
+        supported = { connection?.supports(OCTO_STATIONS) == true },
+        more = { id, after -> connection?.client?.stationSongs(id, STATION_BATCH, after).orEmpty() },
+    ).also { it.start() }
+
     // Keeps music playing when the queue runs out, when the listener wants it.
     val autoplay = Autoplay(
         player,
@@ -341,6 +353,7 @@ class AppState(
                 )
             }
         },
+        standsDown = stationRefill::keepsGoing,
     ).also { it.start() }
 
     // ---- End of the queue's edits ----
@@ -755,10 +768,24 @@ class AppState(
     // the page it was played from names it (queueNameFor).
     fun play(songs: List<Song>, start: Int = 0, shuffle: Boolean = false, source: String? = null) {
         if (songs.isEmpty()) return
+        // A station's page plays the station, which keeps going.
+        val page = navigator.current.page
+        if (source == null && page is Page.Playlist && isStationId(page.id)) {
+            playlists.firstOrNull { it.id == page.id }?.let { return playStation(songs, start, shuffle, page.id, it.name) }
+        }
         val listName = { id: String -> playlists.firstOrNull { it.id == id }?.name ?: liveLists.byId(id)?.name }
         val name = source ?: queueNameFor(navigator.current.page, songs, listName)
         player.play(songs, if (shuffle) (songs.indices).random() else start, shuffle, QueueSource.Played(name))
         jumpList?.let { list -> jumpTargetFor(navigator.current.page, songs, listName)?.let(list::played) }
+    }
+
+    // Plays a station's songs from one of them, under its name; as they run
+    // low, more of its kind are added. Shuffled, its songs are put in a new
+    // order, so the songs added later still come after them.
+    fun playStation(songs: List<Song>, start: Int, shuffle: Boolean, id: String, name: String) {
+        if (songs.isEmpty()) return
+        val order = if (shuffle) songs.shuffled() else songs
+        player.play(order, if (shuffle) 0 else start, false, QueueSource.Station(id, name))
     }
 
     fun playNext(songs: List<Song>) = player.playNext(songs)

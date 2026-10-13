@@ -69,6 +69,7 @@ import app.winters.octo.subsonic.Playlist
 import app.winters.octo.subsonic.RadioStation
 import app.winters.octo.subsonic.SubsonicException
 import kotlinx.coroutines.launch
+import app.winters.octo.desktop.ui.PlayButton
 
 // Home: picking up where another device left off, what was played lately,
 // the lists Octo made for the listener and its stations, what came in, what
@@ -138,7 +139,7 @@ fun HomePage(app: AppState, visit: Visit) {
                                         starting = station.id
                                         app.scope.launch {
                                             try {
-                                                app.play(connection.client.playlist(station.id).entry)
+                                                app.playStation(connection.client.playlist(station.id).entry, 0, false, station.id, station.name)
                                             } catch (e: SubsonicException.NotFound) {
                                                 store.stationGone(station.id)
                                                 app.notice = "${station.name} isn't on the server any more."
@@ -241,15 +242,16 @@ private fun PlaylistCard(app: AppState, playlist: Playlist) {
     )
 }
 
-// A station Octo runs: a click plays the songs it has lined up today.
+// A station Octo runs: a click opens the songs it has lined up, and the
+// play button on its cover plays the station, which keeps going.
 @Composable
 private fun StationCard(app: AppState, station: RadioStation, starting: Boolean, onPlay: () -> Unit) {
     MediaCard(
         station.name,
         "Station",
         station.coverArt ?: station.id,
-        onOpen = onPlay,
-        badge = if (starting) ({ Spinner(size = IconSize.Transport) }) else null,
+        onOpen = { app.navigator.go(Page.Playlist(station.id)) },
+        badge = { if (starting) Spinner(size = IconSize.Transport) else PlayButton(playing = false, enabled = true, size = ControlHeight.L, onClick = onPlay) },
         picture = { modifier, shape -> StationPicture(app, station, modifier, shape) },
     )
 }

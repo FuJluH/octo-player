@@ -52,6 +52,8 @@ class Autoplay(
     private val pick: suspend (seed: Song, exclude: Set<String>) -> List<Song>,
     private val leadMs: Long = AUTOPLAY_LEAD_MS,
     private val everyMs: Long = WATCH_EVERY_MS,
+    // Whether something else keeps the songs to come going (a station).
+    private val standsDown: (PlayerState) -> Boolean = { false },
 ) {
     // The last song's watch, and the entry it is for.
     private var watch: Job? = null
@@ -70,7 +72,7 @@ class Autoplay(
     private fun lastSong(state: PlayerState, on: Boolean): Long? {
         val current = state.current ?: return null
         val due = on && state.playing && state.repeat == RepeatMode.Off && state.upcoming.isEmpty() &&
-            !current.song.id.startsWith(OPENED_FILE_PREFIX)
+            !current.song.id.startsWith(OPENED_FILE_PREFIX) && !standsDown(state)
         return current.key.takeIf { due }
     }
 

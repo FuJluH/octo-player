@@ -431,6 +431,17 @@ class SubsonicClient(
             SongList(),
         ).song
 
+    // A station's next songs on Octo (octoStations): up to `count`, none of
+    // the ones in `after` (the station's songs already queued).
+    suspend fun stationSongs(id: String, count: Int, after: List<String>): List<Song> =
+        getWith(
+            "getStationSongs",
+            listOf("id" to id, "count" to "$count") + after.map { "after" to it },
+            "stationSongs",
+            StationSongs.serializer(),
+            StationSongs(),
+        ).entry
+
     // Streams the server runs. On Octo each is also a read-only playlist
     // with the same id, holding the songs it will play.
     suspend fun radioStations(): List<RadioStation> =

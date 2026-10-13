@@ -50,6 +50,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import kotlin.coroutines.cancellation.CancellationException
+import app.winters.octo.discovery.isRadio
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
@@ -157,6 +158,16 @@ class HomeViewModel @Inject constructor(
     private var libraryEmpty = false
 
     init {
+        // A list found gone on its own page comes off Home, and the lists are
+        // read again.
+        viewModelScope.launch {
+            discovery.gone.collect { id ->
+                stations = stations.filterNot { it.id == id }
+                madeForYou = madeForYou.filterNot { it.id == id }
+                stationsLoadedAt = null
+                loadStations()
+            }
+        }
         viewModelScope.launch {
             combine(dao.libraryTrackCount(), serverSync.last.map { it?.at }) { count, syncedAt -> count to syncedAt }
                 .distinctUntilChanged()
@@ -240,7 +251,8 @@ class HomeViewModel @Inject constructor(
             try {
                 val songs = withContext(Dispatchers.IO) { discovery.stationSongs(station.id) }
                 if (songs.isEmpty()) feedback.show("Nothing is playing on ${station.name} right now")
-                playback.playTracks(songs.map { it.id }, 0)
+                val ids = songs.map { it.id }
+                if (station.isRadio) playback.playStation(ids, 0, station.id, station.name) else playback.playTracks(ids, 0, source = station.name)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: SubsonicException.NotFound) {

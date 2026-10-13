@@ -60,6 +60,8 @@ import app.winters.octo.ui.nav.AlbumRoute
 import app.winters.octo.ui.nav.ArtistRoute
 import app.winters.octo.ui.nav.FavouritesRoute
 import app.winters.octo.ui.nav.HistoryRoute
+import app.winters.octo.ui.nav.ServerListRoute
+import app.winters.octo.discovery.isRadio
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -107,8 +109,8 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
                         when (entry.section) {
                             HomeSection.Pinned -> pinnedShelf(pinned, onOpen)
                             HomeSection.RecentlyPlayed -> shelf(title, recentlyPlayed, onOpen, onTitle = { onOpen(HistoryRoute()) })
-                            HomeSection.MadeForYou -> stationShelf(title, vm.madeForYou, vm.startingStation, vm::playStation)
-                            HomeSection.Stations -> stationShelf(title, vm.stations, vm.startingStation, vm::playStation)
+                            HomeSection.MadeForYou -> stationShelf(title, vm.madeForYou, vm.startingStation, onOpen, vm::playStation)
+                            HomeSection.Stations -> stationShelf(title, vm.stations, vm.startingStation, onOpen, vm::playStation)
                             HomeSection.RecentlyAdded -> shelf(title, recent.orEmpty(), onOpen)
                             HomeSection.MostPlayed -> songShelf(title, mostPlayed, vm::play, onTitle = { onOpen(HistoryRoute(mostPlayed = true)) })
                             HomeSection.FavoriteAlbums -> shelf(title, favouriteAlbums, onOpen, onTitle = { onOpen(FavouritesRoute(albums = true)) })
@@ -221,11 +223,12 @@ private fun ShelfTitle(title: String, onClick: (() -> Unit)?) {
 }
 
 // The server's stations, or the lists it made for the listener; tapping
-// one plays what it has lined up.
+// one opens what it has lined up, its play button plays it.
 private fun LazyListScope.stationShelf(
     title: String,
     stations: List<Station>,
     starting: String?,
+    onOpen: (NavKey) -> Unit,
     onPlay: (Station) -> Unit,
 ) {
     if (stations.isEmpty()) return
@@ -236,7 +239,12 @@ private fun LazyListScope.stationShelf(
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             items(stations, key = { it.id }) { station ->
-                StationCard(station, starting = station.id == starting, onClick = { onPlay(station) })
+                StationCard(
+                    station,
+                    starting = station.id == starting,
+                    onOpen = { onOpen(ServerListRoute(station.id, station.name, station.artwork, radio = station.isRadio)) },
+                    onPlay = { onPlay(station) },
+                )
             }
         }
     }

@@ -96,6 +96,7 @@ import app.winters.octo.ui.menu.SongMenuState
 import app.winters.octo.ui.offline.DownloadsScreen
 import app.winters.octo.ui.online.OnlineAlbumScreen
 import app.winters.octo.ui.online.OnlineArtistScreen
+import app.winters.octo.ui.online.ServerListScreen
 import app.winters.octo.ui.playlist.LocalPlaylistSheets
 import app.winters.octo.ui.playlist.PlaylistScreen
 import app.winters.octo.ui.playlist.PlaylistSheets
@@ -372,6 +373,7 @@ private fun pagesFor(stack: NavBackStack<NavKey>): (NavKey) -> NavEntry<NavKey> 
         entry<ArtistRoute> { ArtistScreen(it.id, open, back) }
         entry<OnlineAlbumRoute> { OnlineAlbumScreen(it.id, open, back) }
         entry<OnlineArtistRoute> { OnlineArtistScreen(it.id, open, back) }
+        entry<ServerListRoute> { ServerListScreen(it, back) }
         entry<AlbumsRoute> { AlbumsScreen(open, back) }
         entry<ArtistsRoute> { ArtistsScreen(open, back) }
         entry<SongsRoute> { SongsScreen(back, open) }

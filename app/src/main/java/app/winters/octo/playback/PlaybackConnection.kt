@@ -139,9 +139,19 @@ class PlaybackConnection @Inject constructor(
 
     // Plays a list of songs, starting at one of them, or shuffled.
     // `source` names the list for the queue's headings ("OK Computer").
-    fun playTracks(trackIds: List<String>, startIndex: Int = 0, shuffle: Boolean = false, source: String? = null) {
+    fun playTracks(trackIds: List<String>, startIndex: Int = 0, shuffle: Boolean = false, source: String? = null) =
+        play(trackIds, startIndex, shuffle, QueueSource.Played(source).encoded())
+
+    // Plays a station's songs from one of them, under its name; as they run
+    // low, more of its kind are added. Shuffled, its songs are put in a new
+    // order, so the songs added later still come after them.
+    fun playStation(trackIds: List<String>, startIndex: Int, id: String, name: String, shuffle: Boolean = false) {
+        val ids = if (shuffle) trackIds.shuffled() else trackIds
+        play(ids, if (shuffle) 0 else startIndex, false, QueueSource.Station(id, name).encoded())
+    }
+
+    private fun play(trackIds: List<String>, startIndex: Int, shuffle: Boolean, word: String) {
         if (trackIds.isEmpty()) return
-        val word = QueueSource.Played(source).encoded()
         withController { c ->
             val items = trackIds.map { songRequest(it, word) }
             c.shuffleModeEnabled = shuffle

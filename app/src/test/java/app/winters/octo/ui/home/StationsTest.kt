@@ -1,5 +1,6 @@
 package app.winters.octo.ui.home
 
+import app.winters.octo.discovery.Station
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -44,5 +45,14 @@ class StationsTest {
     @Test
     fun aStationTheServerNoLongerHasSaysSo() {
         assertEquals("Chill mix isn't on the server any more", stationGoneLine("Chill mix"))
+    }
+
+    // A station with songs opens its list on a tap; one that is a stream has
+    // nothing to show and plays.
+    @Test
+    fun aTapOpensASongListAndPlaysAStream() {
+        assertTrue(opensOnTap(Station("or3kZ9QpLmN2xY7wV1bC0a", "Your Mix", null)))
+        assertTrue(opensOnTap(Station("og1", "New Releases", null, songCount = 40)))
+        assertFalse(opensOnTap(Station("rs-1", "City Radio", null, streamUrl = "https://radio.example.com/live.mp3")))
     }
 }

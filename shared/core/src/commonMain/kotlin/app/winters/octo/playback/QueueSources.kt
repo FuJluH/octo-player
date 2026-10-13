@@ -15,6 +15,10 @@ sealed interface QueueSource {
 
     // Added by Autoplay once the listener's own queue ran out.
     data object Autoplay : QueueSource
+
+    // A station the server runs, by its id and name. A station never ends:
+    // as its songs run low, more of its kind are added under the same name.
+    data class Station(val id: String, val name: String) : QueueSource
 }
 
 // A played list with no name.
@@ -25,6 +29,7 @@ fun queueSourceTitle(source: QueueSource): String = when (source) {
     QueueSource.You -> "Next from you"
     QueueSource.Autoplay -> "Next from Autoplay"
     is QueueSource.Played -> source.name?.let { "Next from $it" } ?: "Up next"
+    is QueueSource.Station -> "Next from ${source.name}"
 }
 
 // The songs to come cut into runs of one source each, in the order they
@@ -56,11 +61,13 @@ fun movedSource(own: QueueSource, before: QueueSource?, after: QueueSource?): Qu
 }
 
 // A source as a short word, for saving a queue and for the phone's queue
-// entries: "you", "autoplay", "list" or "list:<name>".
+// entries: "you", "autoplay", "list", "list:<name>" or
+// "station:<id>:<name>".
 fun QueueSource.encoded(): String = when (this) {
     QueueSource.You -> "you"
     QueueSource.Autoplay -> "autoplay"
     is QueueSource.Played -> if (name == null) "list" else "list:$name"
+    is QueueSource.Station -> "station:$id:$name"
 }
 
 // The source a saved word stands for; an unknown or missing one is a list
@@ -69,5 +76,13 @@ fun queueSourceOf(word: String?): QueueSource = when {
     word == "you" -> QueueSource.You
     word == "autoplay" -> QueueSource.Autoplay
     word != null && word.startsWith("list:") -> QueueSource.Played(word.removePrefix("list:").ifEmpty { null })
+    word != null && word.startsWith("station:") -> stationSourceOf(word.removePrefix("station:"))
     else -> NoSource
+}
+
+// "<id>:<name>" as a station; an id is never empty and holds no colon, a
+// name may.
+private fun stationSourceOf(rest: String): QueueSource {
+    val id = rest.substringBefore(':', "")
+    return if (id.isEmpty()) NoSource else QueueSource.Station(id, rest.substringAfter(':'))
 }

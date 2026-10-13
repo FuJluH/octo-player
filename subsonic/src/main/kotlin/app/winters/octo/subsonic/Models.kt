@@ -227,6 +227,13 @@ data class AlbumList(val album: List<Album> = emptyList())
 // comes as a read-only playlist naming its kind in `octoList`.
 const val OCTO_LISTS = "octoLists"
 
+// Octo's extension for stations that keep going: getStationSongs sends a
+// station's next songs, leaving out the ones already queued.
+const val OCTO_STATIONS = "octoStations"
+
+@Serializable
+data class StationSongs(val id: String = "", val name: String = "", val entry: List<Song> = emptyList())
+
 // The kinds of Made for you list, in the order Home shows them.
 val OCTO_LIST_KINDS = listOf("liked", "newReleases", "rediscover", "deepCuts")
 

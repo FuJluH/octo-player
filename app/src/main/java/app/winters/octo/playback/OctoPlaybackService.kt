@@ -117,6 +117,7 @@ class OctoPlaybackService : MediaLibraryService() {
     @Inject lateinit var coversAhead: CoversAhead
     @Inject lateinit var editor: QueueEditor
     @Inject lateinit var autoplay: Autoplay
+    @Inject lateinit var stationRefill: StationRefill
     @Inject lateinit var downloads: Downloads
     @Inject lateinit var online: OnlineDao
     @Inject lateinit var lengths: FindLengths
@@ -185,6 +186,7 @@ class OctoPlaybackService : MediaLibraryService() {
         // The covers of the song on and the next ones, wherever it plays.
         coversAhead.attach(player)
         editor.attach(player)
+        stationRefill.attach(player, scope)
         autoplay.attach(player, scope)
         // Casting to a TV or speaker swaps the session's player to one that
         // drives the device, and back.
@@ -284,6 +286,7 @@ class OctoPlaybackService : MediaLibraryService() {
         coversAhead.detach()
         editor.detach()
         autoplay.detach()
+        stationRefill.detach()
         outputs.detach(casting)
         casting.release()
         session?.release()
@@ -469,13 +472,20 @@ class OctoPlaybackService : MediaLibraryService() {
             saveQueue()
             widgets.show(player)
             serverQueue.changed(snapshot())
+            stationRefill.check()
             autoplay.check()
             learnLength()
         }
 
-        override fun onRepeatModeChanged(repeatMode: Int) = autoplay.check()
+        override fun onRepeatModeChanged(repeatMode: Int) {
+            stationRefill.check()
+            autoplay.check()
+        }
 
-        override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) = autoplay.check()
+        override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+            stationRefill.check()
+            autoplay.check()
+        }
 
         // While music plays, a song that cannot, like a stream with no
         // connection or a file that is gone, is skipped instead of stopping
@@ -509,12 +519,14 @@ class OctoPlaybackService : MediaLibraryService() {
                 closed = false
                 setShowNotificationForIdlePlayer(SHOW_NOTIFICATION_FOR_IDLE_PLAYER_AFTER_STOP_OR_ERROR)
             }
+            stationRefill.check()
             autoplay.check()
         }
 
         override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
             queueChanged.tryEmit(Unit)
             serverQueue.changed(snapshot())
+            stationRefill.check()
             autoplay.check()
             // The length is known once the song has opened.
             learnLength()
@@ -528,6 +540,7 @@ class OctoPlaybackService : MediaLibraryService() {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             positionSaver?.cancel()
             widgets.show(player)
+            stationRefill.check()
             autoplay.check()
             if (isPlaying) {
                 // Equalizer apps on the phone can attach to the music now,
