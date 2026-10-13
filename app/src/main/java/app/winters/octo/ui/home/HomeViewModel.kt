@@ -260,10 +260,12 @@ class HomeViewModel @Inject constructor(
 
     // Plays what a station has lined up today, or an added station's stream.
     // Taps while one is on the way are ignored.
-    fun playStation(station: Station) {
+    // `hls` when the stream is known to be HLS (the same stream kept on the
+    // phone says so).
+    fun playStation(station: Station, hls: Boolean = false) {
         if (startingStation != null) return
         if (station.streamUrl != null) {
-            playback.playTracks(listOf(radioId(station.streamUrl, station.name)))
+            playback.playTracks(listOf(radioId(station.streamUrl, station.name, hls)))
             return
         }
         startingStation = station.id

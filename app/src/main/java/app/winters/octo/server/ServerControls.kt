@@ -244,8 +244,12 @@ class ServerControls @Inject constructor(
         return stations
     }
 
-    suspend fun addStation(streamUrl: String, name: String, homepage: String?) {
-        session()?.client?.createRadioStation(streamUrl, name, homepage)
+    // Adds a station to the server in use: false when no server is signed
+    // in, so nothing was asked.
+    suspend fun addStation(streamUrl: String, name: String, homepage: String?): Boolean {
+        val client = session()?.client ?: return false
+        client.createRadioStation(streamUrl, name, homepage)
+        return true
     }
 
     suspend fun updateStation(id: String, streamUrl: String, name: String, homepage: String?) = refusing(id) {

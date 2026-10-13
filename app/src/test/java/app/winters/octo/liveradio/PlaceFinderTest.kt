@@ -37,6 +37,10 @@ class PlaceFinderTest {
 
     private val austin = LivePlace(30.27, -97.74, "Austin, Texas", "Texas", "US")
 
+    // A finder whose server looks places up (`server`) or does not (null).
+    private fun finder(server: PlaceService?, phone: PlaceService?) =
+        PlaceFinder({ server?.let { ServerRoute.Asks(it) } ?: ServerRoute.NoPlaces }, { phone }, waitMs = 2_000)
+
     @Test
     fun whatWasTypedIsACodeOrATownWithItsState() {
         assertEquals(TypedPlace(code = "55401"), typedPlace(" 55401 "))
@@ -44,6 +48,7 @@ class PlaceFinderTest {
         assertEquals(TypedPlace(name = "Austin", state = "Texas"), typedPlace("Austin, Texas"))
         assertEquals(TypedPlace(name = "Saint Paul"), typedPlace("Saint Paul"))
         assertEquals(TypedPlace(name = "Austin"), typedPlace("Austin,"))
+        assertEquals(TypedPlace(code = "78701", name = "Austin", state = "TX"), typedPlace("Austin, TX 78701"))
         assertNull(typedPlace("   "))
     }
 
@@ -51,7 +56,7 @@ class PlaceFinderTest {
     fun aServerThatListsPlacesIsAskedAndThePhoneIsNot() = runBlocking {
         val server = FakeService(typedAnswer = austin)
         val phone = FakeService(typedAnswer = LivePlace(1.0, 1.0, "Wrong"))
-        val finder = PlaceFinder({ server }, { phone })
+        val finder = this@PlaceFinderTest.finder(server, phone)
         assertEquals(PlaceSource.Server, finder.source())
         assertEquals(PlaceAnswer.Found(austin), finder.typed("Austin, Texas", "US"))
         assertEquals(listOf("typed Austin, Texas US"), server.asked)
@@ -61,7 +66,7 @@ class PlaceFinderTest {
     @Test
     fun aPlaceTheServerDoesNotKnowIsNotLookedForOnThePhone() = runBlocking {
         val phone = FakeService(typedAnswer = austin)
-        val finder = PlaceFinder({ FakeService() }, { phone })
+        val finder = this@PlaceFinderTest.finder(FakeService(), phone)
         assertEquals(PlaceAnswer.NotFound(PlaceSource.Server), finder.typed("00000", "US"))
         assertTrue(phone.asked.isEmpty())
     }
@@ -69,7 +74,7 @@ class PlaceFinderTest {
     @Test
     fun aServerThatDoesNotAnswerSaysSoAndThePhoneIsNotAsked() = runBlocking {
         val phone = FakeService(typedAnswer = austin)
-        val finder = PlaceFinder({ FakeService(fails = true) }, { phone })
+        val finder = this@PlaceFinderTest.finder(FakeService(fails = true), phone)
         assertEquals(PlaceAnswer.ServerDown, finder.typed("Austin", "US"))
         assertTrue(phone.asked.isEmpty())
     }
@@ -77,17 +82,17 @@ class PlaceFinderTest {
     @Test
     fun withoutPlacesOnTheServerThePhoneLooksItUp() = runBlocking {
         val phone = FakeService(typedAnswer = austin)
-        val finder = PlaceFinder({ null }, { phone })
+        val finder = this@PlaceFinderTest.finder(null, phone)
         assertEquals(PlaceSource.Phone, finder.source())
         assertEquals(PlaceAnswer.Found(austin), finder.typed("78701", "US"))
         assertEquals(listOf("typed 78701 US"), phone.asked)
-        assertEquals(PlaceAnswer.NotFound(PlaceSource.Phone), PlaceFinder({ null }, { FakeService() }).typed("Nowhere", "US"))
-        assertEquals(PlaceAnswer.NotFound(PlaceSource.Phone), PlaceFinder({ null }, { FakeService(fails = true) }).typed("Nowhere", "US"))
+        assertEquals(PlaceAnswer.NotFound(PlaceSource.Phone), finder(null, FakeService()).typed("Nowhere", "US"))
+        assertEquals(PlaceAnswer.NotFound(PlaceSource.Phone), finder(null, FakeService(fails = true)).typed("Nowhere", "US"))
     }
 
     @Test
     fun withNoWayToLookUpPlacesTypingCannotWork() = runBlocking {
-        val finder = PlaceFinder({ null }, { null })
+        val finder = this@PlaceFinderTest.finder(null, null)
         assertEquals(PlaceSource.None, finder.source())
         assertEquals(PlaceAnswer.NoLookup, finder.typed("Austin", "US"))
     }
@@ -97,7 +102,7 @@ class PlaceFinderTest {
         val named = LivePlace(30.27, -97.74, "Austin, Texas", "Texas", "US")
         val server = FakeService(aroundAnswer = named)
         val phone = FakeService(aroundAnswer = LivePlace(0.0, 0.0, "Wrong"))
-        assertEquals(PlaceAnswer.Found(named), PlaceFinder({ server }, { phone }).around(30.27, -97.74))
+        assertEquals(PlaceAnswer.Found(named), finder(server, phone).around(30.27, -97.74))
         assertEquals(listOf("around 30.27,-97.74"), server.asked)
         assertTrue(phone.asked.isEmpty())
     }
@@ -105,16 +110,16 @@ class PlaceFinderTest {
     @Test
     fun aPositionIsNamedByThePhoneWhenTheServerHasNoPlaces() = runBlocking {
         val phone = FakeService(aroundAnswer = austin)
-        assertEquals(PlaceAnswer.Found(austin), PlaceFinder({ null }, { phone }).around(30.27, -97.74))
+        assertEquals(PlaceAnswer.Found(austin), finder(null, phone).around(30.27, -97.74))
     }
 
     @Test
     fun aPositionNoOneCanNameIsSearchedByItsRadiusAlone() = runBlocking {
         val bare = PlaceAnswer.Found(LivePlace(30.27, -97.74, "Your location"))
-        assertEquals(bare, PlaceFinder({ FakeService(fails = true) }, { FakeService(aroundAnswer = austin) }).around(30.27, -97.74))
-        assertEquals(bare, PlaceFinder({ FakeService() }, { null }).around(30.27, -97.74))
-        assertEquals(bare, PlaceFinder({ null }, { FakeService(fails = true) }).around(30.27, -97.74))
-        assertEquals(bare, PlaceFinder({ null }, { null }).around(30.27, -97.74))
+        assertEquals(bare, finder(FakeService(fails = true), FakeService(aroundAnswer = austin)).around(30.27, -97.74))
+        assertEquals(bare, finder(FakeService(), null).around(30.27, -97.74))
+        assertEquals(bare, finder(null, FakeService(fails = true)).around(30.27, -97.74))
+        assertEquals(bare, finder(null, null).around(30.27, -97.74))
     }
 
     @Test
@@ -165,5 +170,75 @@ class PlaceFinderTest {
             web.enqueue(MockResponse.Builder().body("""{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":70,"message":"Unknown place"}}}""").build())
             assertNull(places.around(0.5, 0.5))
         }
+    }
+
+    // Which way the server in use takes places
+
+    private class Reads(private val answer: Set<String>?, private val fails: Boolean = false) {
+        var asked = 0
+        suspend fun read(): Set<String>? {
+            asked++
+            if (fails) throw IOException("no answer")
+            return answer
+        }
+    }
+
+    private val service = FakeService()
+
+    @Test
+    fun aSavedListWithPlacesAsksTheServerWithoutReadingAgain() = runBlocking {
+        val reads = Reads(emptySet())
+        val route = serverRoute(true, octo = true, saved = setOf("octoPlaces:1"), readAgain = reads::read, service = { service })
+        assertEquals(ServerRoute.Asks(service), route)
+        assertEquals(0, reads.asked)
+    }
+
+    @Test
+    fun anOctoServerSavedWithoutPlacesIsAskedForItsListAgain() = runBlocking {
+        val reads = Reads(setOf("octoRadio:1", "octoPlaces:1"))
+        assertEquals(ServerRoute.Asks(service), serverRoute(true, octo = true, saved = emptySet(), readAgain = reads::read, service = { service }))
+        assertEquals(1, reads.asked)
+        // An older Octo that answers without places: the phone may look up.
+        assertEquals(ServerRoute.NoPlaces, serverRoute(true, octo = true, saved = emptySet(), readAgain = Reads(setOf("octoRadio:1"))::read, service = { service }))
+    }
+
+    @Test
+    fun anOctoServerThatDoesNotAnswerIsNeverPassedOverForThePhone() = runBlocking {
+        assertEquals(ServerRoute.NotAnswering, serverRoute(true, octo = true, saved = emptySet(), readAgain = Reads(null, fails = true)::read, service = { service }))
+        assertEquals(ServerRoute.NotAnswering, serverRoute(true, octo = true, saved = emptySet(), readAgain = Reads(null)::read, service = { service }))
+        val phone = FakeService(typedAnswer = austin, aroundAnswer = austin)
+        val finder = PlaceFinder({ ServerRoute.NotAnswering }, { phone })
+        assertEquals(PlaceSource.Server, finder.source())
+        assertEquals(PlaceAnswer.ServerDown, finder.typed("Austin, Texas", "US"))
+        assertEquals(PlaceAnswer.Found(LivePlace(30.27, -97.74, "Your location")), finder.around(30.27, -97.74))
+        assertTrue(phone.asked.isEmpty())
+        assertEquals("Your server is not answering. Try again in a moment.", placeProblemLine(PlaceAnswer.ServerDown, typed = true))
+    }
+
+    @Test
+    fun anyOtherServerOrNoneLeavesPlacesToThePhone() = runBlocking {
+        val reads = Reads(setOf("octoPlaces:1"))
+        assertEquals(ServerRoute.NoPlaces, serverRoute(true, octo = false, saved = emptySet(), readAgain = reads::read, service = { service }))
+        assertEquals(ServerRoute.NoPlaces, serverRoute(false, octo = false, saved = emptySet(), readAgain = reads::read, service = { service }))
+        assertEquals(0, reads.asked)
+    }
+
+    @Test
+    fun aServerTooSlowToNameAPlaceCountsAsNotAnswering() = runBlocking {
+        val slow = object : PlaceService {
+            override suspend fun typed(asked: TypedPlace, country: String): LivePlace? {
+                kotlinx.coroutines.delay(10_000)
+                return austin
+            }
+
+            override suspend fun around(latitude: Double, longitude: Double): LivePlace? {
+                kotlinx.coroutines.delay(10_000)
+                return austin
+            }
+        }
+        val finder = PlaceFinder({ ServerRoute.Asks(slow) }, { null }, waitMs = 50)
+        assertEquals(PlaceAnswer.ServerDown, finder.typed("78701", "US"))
+        // A position it cannot name in time is searched by its radius alone.
+        assertEquals(PlaceAnswer.Found(LivePlace(30.27, -97.74, "Your location")), finder.around(30.27, -97.74))
     }
 }

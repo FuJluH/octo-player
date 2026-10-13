@@ -104,10 +104,10 @@ class LiveRadioRulesTest {
 
     @Test
     fun theMenuKeepsOrRemovesAndAdminsCanAddToTheServer() {
-        assertEquals(listOf(StationAction.Keep), stationActions(kept = false, admin = false))
-        assertEquals(listOf(StationAction.Remove), stationActions(kept = true, admin = false))
-        assertEquals(listOf(StationAction.Keep, StationAction.AddToServer), stationActions(kept = false, admin = true))
-        assertEquals(listOf(StationAction.Remove, StationAction.AddToServer), stationActions(kept = true, admin = true))
+        assertEquals(listOf(StationAction.Keep), stationActions(kept = false, addable = false))
+        assertEquals(listOf(StationAction.Remove), stationActions(kept = true, addable = false))
+        assertEquals(listOf(StationAction.Keep, StationAction.AddToServer), stationActions(kept = false, addable = true))
+        assertEquals(listOf(StationAction.Remove, StationAction.AddToServer), stationActions(kept = true, addable = true))
         assertEquals("Add to your server", StationAction.AddToServer.label)
     }
 
@@ -126,6 +126,16 @@ class LiveRadioRulesTest {
         )
         val shelf = liveShelf(server, kept)
         assertEquals(listOf("server:s1", "server:s2", "kept:k2"), shelf.map { it.key })
+    }
+
+    @Test
+    fun aServerStationThatIsAlsoKeptCarriesItsHlsMark() {
+        val server = listOf(Station("s1", "FIP", null, streamUrl = "https://fip.example/live"))
+        val kept = listOf(station("k1", stream = "http://FIP.example/live/", hls = true))
+        val entry = liveShelf(server, kept).single() as LiveShelfEntry.Server
+        assertTrue(entry.hls)
+        assertEquals("k1", entry.kept?.uuid)
+        assertFalse((liveShelf(server, emptyList()).single() as LiveShelfEntry.Server).hls)
     }
 
     @Test

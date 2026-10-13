@@ -99,7 +99,7 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
             liveShelf(vm.stations.filter { it.streamUrl != null }, keptStations.stations),
             vm.startingStation,
             onFindNear = { onOpen(LiveRadioNearRoute) },
-            onPlayServer = vm::playStation,
+            onPlayServer = { station, hls -> vm.playStation(station, hls) },
             onPlayKept = vm::playKept,
             onKeptMenu = { station ->
                 sheet.show(ChoiceRequest(station.name, listOf(Choice(StationAction.Remove.label)), selected = -1) { vm.removeKept(station) })
@@ -293,7 +293,7 @@ private fun LazyListScope.liveRadioShelf(
     entries: List<LiveShelfEntry>,
     starting: String?,
     onFindNear: () -> Unit,
-    onPlayServer: (Station) -> Unit,
+    onPlayServer: (Station, Boolean) -> Unit,
     onPlayKept: (LiveStation) -> Unit,
     onKeptMenu: (LiveStation) -> Unit,
 ) {
@@ -309,8 +309,8 @@ private fun LazyListScope.liveRadioShelf(
                     is LiveShelfEntry.Server -> StationCard(
                         entry.station,
                         starting = entry.station.id == starting,
-                        onOpen = { onPlayServer(entry.station) },
-                        onPlay = { onPlayServer(entry.station) },
+                        onOpen = { onPlayServer(entry.station, entry.hls) },
+                        onPlay = { onPlayServer(entry.station, entry.hls) },
                     )
                     is LiveShelfEntry.Kept -> KeptStationCard(
                         entry.station,

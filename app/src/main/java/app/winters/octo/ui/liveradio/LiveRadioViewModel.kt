@@ -7,7 +7,11 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.winters.octo.data.userMessage
+import app.winters.octo.liveradio.AddResult
 import app.winters.octo.liveradio.KeptStations
+import app.winters.octo.liveradio.ServerAdds
+import app.winters.octo.liveradio.addResultLine
+import app.winters.octo.liveradio.stationActions
 import app.winters.octo.liveradio.LivePlace
 import app.winters.octo.liveradio.LiveRadioStore
 import app.winters.octo.liveradio.LiveSearch
@@ -89,15 +93,45 @@ class LiveRadioViewModel @Inject constructor(
     var placeProblem by mutableStateOf<String?>(null)
         private set
 
-    // Where a place is looked up: on the Octo server or by the phone.
-    fun placeSource(): PlaceSource = places.source()
+    // Where a place is looked up: on the Octo server or by the phone. Read
+    // when the page opens, and again after each lookup.
+    var placeSource by mutableStateOf<PlaceSource?>(null)
+        private set
+
+    // Android said not to ask for location again: only its settings can
+    // allow it now.
+    var locationBlocked by mutableStateOf(false)
+        private set
+
+    // The server's stations' stream addresses, so a station it has is not
+    // offered to it again.
+    private var serverStreams by mutableStateOf<Set<String>>(emptySet())
+
+    val adds = ServerAdds(
+        admin = { controls.admin.value },
+        streams = { serverStreams },
+        add = { station -> controls.addStation(station.streamUrl, station.name, null) },
+        why = { it.userMessage() },
+    )
 
     // The country a typed code or town is looked for in.
     var country by mutableStateOf(places.localeCountry().ifBlank { "US" })
 
     private var loading: Job? = null
+    private var finding: Job? = null
 
     init {
+        viewModelScope.launch { placeSource = places.source() }
+        // An admin's menu leaves out the stations the server has.
+        viewModelScope.launch {
+            controls.admin.collect { admin ->
+                serverStreams = if (admin) {
+                    runCatching { controls.stations().map { it.streamUrl }.filter { it.isNotBlank() }.toSet() }.getOrDefault(serverStreams)
+                } else {
+                    emptySet()
+                }
+            }
+        }
         viewModelScope.launch {
             store.search.collect { saved ->
                 val changed = saved != search
@@ -143,37 +177,47 @@ class LiveRadioViewModel @Inject constructor(
         viewModelScope.launch { store.setSort(sort) }
     }
 
+    // Choosing a place again, or not: Cancel also stops a lookup under way.
     fun choose(on: Boolean) {
+        if (!on) {
+            finding?.cancel()
+            locating = false
+        }
         choosing = on
         placeProblem = null
     }
 
     // The phone's own position, once Android has allowed it.
     fun useLocation() {
-        if (locating) return
-        locating = true
-        placeProblem = null
-        viewModelScope.launch {
-            try {
-                found(places.here(), typed = false)
-            } finally {
-                locating = false
-            }
+        locationBlocked = false
+        find { found(places.here(), typed = false) }
+    }
+
+    // Location was refused: typing a place still works. `forGood` when
+    // Android will not ask again, so the way is through its settings.
+    fun locationRefused(forGood: Boolean) {
+        locationBlocked = forGood
+        placeProblem = if (forGood) {
+            "Location is off for Octo. Allow it in Android's settings, or type a ZIP, postal code or town instead."
+        } else {
+            "Octo can't use your location. Type a ZIP, postal code or town instead."
         }
     }
 
-    // Location was refused: typing a place still works.
-    fun locationRefused() {
-        placeProblem = "Octo can't use your location. Type a ZIP, postal code or town instead."
+    fun findTyped(text: String) {
+        if (text.isBlank()) return
+        find { found(places.named(text, country), typed = true) }
     }
 
-    fun findTyped(text: String) {
-        if (locating || text.isBlank()) return
+    // One lookup at a time; Cancel stops it.
+    private fun find(lookup: suspend () -> Unit) {
+        if (locating) return
         locating = true
         placeProblem = null
-        viewModelScope.launch {
+        finding = viewModelScope.launch {
             try {
-                found(places.named(text, country), typed = true)
+                lookup()
+                placeSource = places.source()
             } finally {
                 locating = false
             }
@@ -189,6 +233,10 @@ class LiveRadioViewModel @Inject constructor(
         choosing = false
         store.setPlace(place)
     }
+
+    // What a station's menu offers.
+    fun actions(station: LiveStation): List<StationAction> =
+        stationActions(kept.value.has(station.uuid), addable = adds.offers(station))
 
     // Plays a station's stream, and tells the catalog it was started.
     fun play(station: LiveStation) {
@@ -213,13 +261,13 @@ class LiveRadioViewModel @Inject constructor(
     }
 
     private suspend fun addToServer(station: LiveStation) {
-        try {
-            controls.addStation(station.streamUrl, station.name, null)
-            feedback.done("Added ${station.name} to your server")
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            feedback.show("Could not add ${station.name}: ${e.userMessage()}")
+        val result = adds.addToServer(station)
+        val line = addResultLine(result, station.name)
+        if (result == AddResult.Added) {
+            serverStreams = serverStreams + station.streamUrl
+            feedback.done(line)
+        } else {
+            feedback.show(line)
         }
     }
 }

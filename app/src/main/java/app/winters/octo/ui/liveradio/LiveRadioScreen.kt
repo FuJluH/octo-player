@@ -1,6 +1,9 @@
 package app.winters.octo.ui.liveradio
 
 import android.Manifest
+import android.app.Activity
+import android.content.Intent
+import android.provider.Settings
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -35,6 +38,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.winters.octo.design.AccentButton
@@ -52,7 +56,6 @@ import app.winters.octo.liveradio.noStationsLine
 import app.winters.octo.liveradio.placeSourceLine
 import app.winters.octo.liveradio.radiusChoices
 import app.winters.octo.liveradio.radiusLabel
-import app.winters.octo.liveradio.stationActions
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.Choice
 import app.winters.octo.ui.common.ChoiceRequest
@@ -73,19 +76,24 @@ private val SortWords = listOf("Nearest", "Most played")
 @Composable
 fun LiveRadioScreen(onBack: () -> Unit, vm: LiveRadioViewModel = hiltViewModel()) {
     val kept by vm.kept.collectAsStateWithLifecycle()
-    val admin by vm.admin.collectAsStateWithLifecycle()
     val sheet = LocalChoiceSheet.current
     val context = LocalContext.current
     val keyboard = LocalSoftwareKeyboardController.current
+    // After a second refusal Android stops asking; then only its settings
+    // for Octo can allow location.
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) vm.useLocation() else vm.locationRefused()
+        val canAskAgain = (context as? Activity)?.shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_COARSE_LOCATION) ?: true
+        if (granted) vm.useLocation() else vm.locationRefused(forGood = !canAskAgain)
+    }
+    val openSettings = {
+        context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:${context.packageName}".toUri()))
     }
     val useLocation = {
         keyboard?.hide()
-        if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-            vm.useLocation()
-        } else {
-            ask.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
+        when {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED -> vm.useLocation()
+            vm.locationBlocked -> openSettings()
+            else -> ask.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
         }
     }
     val countries = remember { countryChoices() }
@@ -96,7 +104,7 @@ fun LiveRadioScreen(onBack: () -> Unit, vm: LiveRadioViewModel = hiltViewModel()
         sheet.show(ChoiceRequest("Country", ordered.map { Choice(it.second) }, selected = if (here.isEmpty()) -1 else 0) { vm.country = ordered[it].first })
     }
     val menu: (LiveStation) -> Unit = { station ->
-        val actions = stationActions(kept.has(station.uuid), admin)
+        val actions = vm.actions(station)
         sheet.show(ChoiceRequest(station.name, actions.map { Choice(it.label) }, selected = -1) { vm.act(station, actions[it]) })
     }
     val search = vm.search
@@ -113,6 +121,7 @@ fun LiveRadioScreen(onBack: () -> Unit, vm: LiveRadioViewModel = hiltViewModel()
                             countryName = countries.firstOrNull { it.first == vm.country }?.second ?: vm.country,
                             canCancel = place != null,
                             onUseLocation = useLocation,
+                            onOpenSettings = openSettings,
                             onPickCountry = pickCountry,
                             onFind = { text ->
                                 keyboard?.hide()
@@ -204,6 +213,7 @@ private fun PlaceChooser(
     countryName: String,
     canCancel: Boolean,
     onUseLocation: () -> Unit,
+    onOpenSettings: () -> Unit,
     onPickCountry: () -> Unit,
     onFind: (String) -> Unit,
 ) {
@@ -215,7 +225,7 @@ private fun PlaceChooser(
             style = OctoType.bodySmall,
             color = OctoColors.TextSecondary,
         )
-        Text(placeSourceLine(vm.placeSource()), style = OctoType.caption, color = OctoColors.TextMuted)
+        vm.placeSource?.let { Text(placeSourceLine(it), style = OctoType.caption, color = OctoColors.TextMuted) }
         AccentButton("Use my location", onClick = onUseLocation, loading = vm.locating, enabled = !vm.locating)
         Text("Or type a ZIP, postal code or town", style = OctoType.caption, color = OctoColors.TextMuted, modifier = Modifier.padding(top = 4.dp))
         GlassInput(
@@ -228,9 +238,10 @@ private fun PlaceChooser(
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             GlazeButton(countryName, onClick = onPickCountry, size = ButtonSize.Small, modifier = Modifier.choiceAnchor(sheet))
             GlazeButton("Find", onClick = { onFind(typed) }, size = ButtonSize.Small, enabled = typed.isNotBlank() && !vm.locating)
-            if (canCancel) GlazeButton("Cancel", onClick = { vm.choose(false) }, size = ButtonSize.Small)
+            if (canCancel || vm.locating) GlazeButton("Cancel", onClick = { vm.choose(false) }, size = ButtonSize.Small)
         }
         vm.placeProblem?.let { Text(it, style = OctoType.caption, color = OctoColors.TextSecondary) }
+        if (vm.locationBlocked) GlazeButton("Open settings", onClick = onOpenSettings, size = ButtonSize.Small)
     }
 }
 

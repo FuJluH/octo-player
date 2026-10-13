@@ -81,30 +81,28 @@ fun livePlayable(station: LiveStation, decoders: Set<String>): Boolean {
 }
 
 // What a station's menu offers: keeping it on this phone or letting it go,
-// and, for a server admin, adding it to the server for everyone.
+// and, when `addable` (an admin, and a station the server lacks), adding it
+// to the server for everyone.
 enum class StationAction(val label: String) {
     Keep("Keep"),
     Remove("Remove"),
     AddToServer("Add to your server"),
 }
 
-fun stationActions(kept: Boolean, admin: Boolean): List<StationAction> = buildList {
+fun stationActions(kept: Boolean, addable: Boolean): List<StationAction> = buildList {
     add(if (kept) StationAction.Remove else StationAction.Keep)
-    if (admin) add(StationAction.AddToServer)
+    if (addable) add(StationAction.AddToServer)
 }
-
-// A stream address as two stations are compared by: no scheme, no case and
-// no ending slash, so the same stream added two ways counts once.
-fun sameStreamKey(url: String): String =
-    url.trim().substringAfter("://").trimEnd('/').lowercase()
 
 // One card on the Live radio shelf.
 sealed interface LiveShelfEntry {
     val key: String
 
-    // A station added to the server.
-    data class Server(val station: Station) : LiveShelfEntry {
+    // A station added to the server; `kept` is the same stream kept on this
+    // phone, which says whether it streams as HLS.
+    data class Server(val station: Station, val kept: LiveStation? = null) : LiveShelfEntry {
         override val key: String get() = "server:${station.id}"
+        val hls: Boolean get() = kept?.hls == true
     }
 
     // A station kept on this phone.
@@ -114,11 +112,14 @@ sealed interface LiveShelfEntry {
 }
 
 // The Live radio shelf: the server's stations first, then the ones kept on
-// this phone, each stream once.
+// this phone, each stream once (by liveStreamKey). A server station that is
+// also kept carries what the kept one knows.
 fun liveShelf(server: List<Station>, kept: List<LiveStation>): List<LiveShelfEntry> {
     val seen = HashSet<String>()
-    val fromServer = server.filter { it.streamUrl != null && seen.add(sameStreamKey(it.streamUrl)) }.map { LiveShelfEntry.Server(it) }
-    val fromPhone = kept.filter { seen.add(sameStreamKey(it.streamUrl)) }.map { LiveShelfEntry.Kept(it) }
+    val keptByStream = kept.associateBy { liveStreamKey(it.streamUrl) }
+    val fromServer = server.filter { it.streamUrl != null && seen.add(liveStreamKey(it.streamUrl)) }
+        .map { LiveShelfEntry.Server(it, keptByStream[liveStreamKey(it.streamUrl!!)]) }
+    val fromPhone = kept.filter { seen.add(liveStreamKey(it.streamUrl)) }.map { LiveShelfEntry.Kept(it) }
     return fromServer + fromPhone
 }
 

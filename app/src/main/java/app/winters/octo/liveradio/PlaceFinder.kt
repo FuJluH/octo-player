@@ -3,6 +3,7 @@ package app.winters.octo.liveradio
 import app.winters.octo.subsonic.OCTO_PLACES
 import app.winters.octo.subsonic.Place
 import app.winters.octo.subsonic.SubsonicClient
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.cancellation.CancellationException
 
 // What looking for a place gave.
@@ -15,7 +16,7 @@ sealed interface PlaceAnswer {
     // Nothing by that name or code, as the server or the phone said.
     data class NotFound(val by: PlaceSource) : PlaceAnswer
 
-    // The server lists place lookups but did not answer.
+    // The Octo server looks places up, or may, but did not answer.
     data object ServerDown : PlaceAnswer
 
     // Nothing here can look up places by name.
@@ -28,6 +29,52 @@ enum class PlaceSource { Server, Phone, None }
 
 // Whether a server's extensions include place lookups.
 fun listsPlaces(extensions: Set<String>): Boolean = extensions.any { it == OCTO_PLACES || it.startsWith("$OCTO_PLACES:") }
+
+// What the server in use does with places.
+sealed interface ServerRoute {
+    // It looks them up.
+    data class Asks(val service: PlaceService) : ServerRoute
+
+    // It is an Octo server that did not answer when asked what it offers:
+    // places wait for it and never go to the phone's service.
+    data object NotAnswering : ServerRoute
+
+    // No server, or one that does not look places up: the phone's service
+    // may.
+    data object NoPlaces : ServerRoute
+}
+
+// Which way the server in use takes places. A server whose saved list of
+// extensions has octoPlaces asks it. An Octo server whose saved list does
+// not is asked for its list again (`readAgain`), since that list is saved
+// empty when it could not be read at sign-in and kept as it was when a
+// later read failed; one that does not answer is NotAnswering. Any other
+// server has no places.
+suspend fun serverRoute(
+    signedIn: Boolean,
+    octo: Boolean,
+    saved: Set<String>,
+    readAgain: suspend () -> Set<String>?,
+    service: () -> PlaceService,
+): ServerRoute = when {
+    !signedIn -> ServerRoute.NoPlaces
+    listsPlaces(saved) -> ServerRoute.Asks(service())
+    !octo -> ServerRoute.NoPlaces
+    else -> {
+        val fresh = try {
+            readAgain()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+        when {
+            fresh == null -> ServerRoute.NotAnswering
+            listsPlaces(fresh) -> ServerRoute.Asks(service())
+            else -> ServerRoute.NoPlaces
+        }
+    }
+}
 
 // The words under the place choice saying where a place is looked up.
 fun placeSourceLine(source: PlaceSource): String = when (source) {
@@ -47,28 +94,14 @@ interface PlaceService {
     suspend fun around(latitude: Double, longitude: Double): LivePlace?
 }
 
-// What was typed: a postal code, or a town and maybe its state.
+// What was typed: a postal code, a town, its state, or some of them.
 data class TypedPlace(val code: String? = null, val name: String? = null, val state: String? = null) {
-    val words: String get() = code ?: listOfNotNull(name, state).joinToString(", ")
+    val words: String get() = listOfNotNull(name, state).joinToString(", ").ifEmpty { code.orEmpty() }
 }
 
-// Reads what was typed: anything with a digit in it is a postal code (US
-// ZIPs, UK and Canadian codes); otherwise a town, with its state after the
-// last comma when one is written, like "Austin, Texas".
-fun typedPlace(text: String): TypedPlace? {
-    val words = text.trim().replace(Regex("\\s+"), " ")
-    if (words.isEmpty()) return null
-    if (words.any { it.isDigit() }) return TypedPlace(code = words.uppercase())
-    val comma = words.lastIndexOf(',')
-    if (comma < 0) return TypedPlace(name = words)
-    val name = words.substring(0, comma).trim().trimEnd(',').trim()
-    val state = words.substring(comma + 1).trim()
-    return when {
-        name.isEmpty() -> TypedPlace(name = state)
-        state.isEmpty() -> TypedPlace(name = name)
-        else -> TypedPlace(name = name, state = state)
-    }
-}
+// Reads what was typed as both apps do (parseWhere): the words with a digit
+// in them are the postal code, the rest the town and its state.
+fun typedPlace(text: String): TypedPlace? = parseWhere(text)?.let { TypedPlace(it.code, it.name, it.state) }
 
 // A place as the server answered it. A reverse lookup keeps the phone's own
 // rounded position; a typed one takes the server's.
@@ -89,54 +122,65 @@ class ServerPlaces(private val client: SubsonicClient) : PlaceService {
         client.place(null, null, null, "", latitude, longitude)?.toLive("Your location", "", latitude to longitude)
 }
 
-// Finds places: on the server when it looks them up, otherwise by the
-// phone's place service. Only one is asked for any lookup, so with an Octo
-// server that lists octoPlaces nothing goes to the phone's service.
+// How long the server, or the phone's service, gets to name a place.
+const val PLACE_WAIT_MS = 15_000L
+
+// Finds places: on the server when it looks them up (or, as an Octo server,
+// may), otherwise by the phone's place service. Only one is asked for any
+// lookup, so with an Octo server nothing goes to the phone's service.
 class PlaceFinder(
-    private val server: () -> PlaceService?,
+    private val route: suspend () -> ServerRoute,
     private val phone: () -> PlaceService?,
+    private val waitMs: Long = PLACE_WAIT_MS,
 ) {
-    fun source(): PlaceSource = when {
-        server() != null -> PlaceSource.Server
-        phone() != null -> PlaceSource.Phone
-        else -> PlaceSource.None
+    suspend fun source(): PlaceSource = when (route()) {
+        is ServerRoute.Asks, ServerRoute.NotAnswering -> PlaceSource.Server
+        ServerRoute.NoPlaces -> if (phone() != null) PlaceSource.Phone else PlaceSource.None
     }
 
     suspend fun typed(text: String, country: String): PlaceAnswer {
         val asked = typedPlace(text) ?: return PlaceAnswer.NotFound(source())
-        val fromServer = server()
-        if (fromServer != null) {
-            return try {
-                fromServer.typed(asked, country)?.let { PlaceAnswer.Found(it) } ?: PlaceAnswer.NotFound(PlaceSource.Server)
+        when (val way = route()) {
+            is ServerRoute.Asks -> return try {
+                val found = withTimeoutOrNull(waitMs) { Answer(way.service.typed(asked, country)) } ?: return PlaceAnswer.ServerDown
+                found.place?.let { PlaceAnswer.Found(it) } ?: PlaceAnswer.NotFound(PlaceSource.Server)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 PlaceAnswer.ServerDown
             }
+            ServerRoute.NotAnswering -> return PlaceAnswer.ServerDown
+            ServerRoute.NoPlaces -> Unit
         }
         val fromPhone = phone() ?: return PlaceAnswer.NoLookup
-        return runCatchingPlace { fromPhone.typed(asked, country) }?.let { PlaceAnswer.Found(it) } ?: PlaceAnswer.NotFound(PlaceSource.Phone)
+        return quietly { fromPhone.typed(asked, country) }?.let { PlaceAnswer.Found(it) } ?: PlaceAnswer.NotFound(PlaceSource.Phone)
     }
 
     // A position already rounded, named by its town, state and country when
-    // they can be had; when they cannot, it is searched by its radius alone.
+    // they can be had; when they cannot (or the server does not answer in
+    // time), it is searched by its radius alone.
     suspend fun around(latitude: Double, longitude: Double): PlaceAnswer {
-        val service = server() ?: phone()
-        val named = service?.let { runCatchingPlace { it.around(latitude, longitude) } }
+        val service = when (val way = route()) {
+            is ServerRoute.Asks -> way.service
+            ServerRoute.NotAnswering -> null
+            ServerRoute.NoPlaces -> phone()
+        }
+        val named = service?.let { quietly { it.around(latitude, longitude) } }
         return PlaceAnswer.Found(named ?: LivePlace(latitude, longitude, "Your location"))
     }
 
-    private suspend fun runCatchingPlace(call: suspend () -> LivePlace?): LivePlace? = try {
-        call()
+    // A lookup, or null when it fails or takes too long.
+    private suspend fun quietly(call: suspend () -> LivePlace?): LivePlace? = try {
+        withTimeoutOrNull(waitMs) { call() }
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
         null
     }
-}
 
-// To two decimals, about a kilometer.
-fun roundedPlace(value: Double): Double = Math.round(value * 100) / 100.0
+    // An answer that may be "none", told apart from no answer in time.
+    private class Answer(val place: LivePlace?)
+}
 
 // Why a place could not be used, in words; null when it was found.
 fun placeProblemLine(answer: PlaceAnswer, typed: Boolean): String? = when (answer) {
@@ -147,6 +191,9 @@ fun placeProblemLine(answer: PlaceAnswer, typed: Boolean): String? = when (answe
         typed -> "No place found by that name. Try a ZIP or postal code."
         else -> "No place found here."
     }
-    PlaceAnswer.ServerDown -> "Your Octo server did not answer. Try again in a moment."
+    PlaceAnswer.ServerDown -> "Your server is not answering. Try again in a moment."
     PlaceAnswer.NoLookup -> "This phone can't look up places by name. Use your location instead."
 }
+
+// To two decimals, about a kilometer.
+fun roundedPlace(value: Double): Double = Math.round(value * 100) / 100.0

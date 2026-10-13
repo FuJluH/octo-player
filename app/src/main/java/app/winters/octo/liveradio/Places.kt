@@ -16,7 +16,9 @@ import android.os.CancellationSignal
 import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
+import app.winters.octo.data.Session
 import app.winters.octo.data.SessionRepository
+import app.winters.octo.data.runsOcto
 import app.winters.octo.data.SessionState
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -51,16 +53,32 @@ class Places @Inject constructor(
     // The catalog files states and countries under their English names.
     private val phonePlaces: PhonePlaces? by lazy { if (Geocoder.isPresent()) PhonePlaces(Geocoder(context, Locale.ENGLISH)) else null }
 
+    // The extensions an Octo server listed when asked again here, for the
+    // session they were read for.
+    @Volatile private var reread: Pair<Session, Set<String>>? = null
+
     private val finder = PlaceFinder(
-        server = {
+        route = {
             val session = (sessions.state.value as? SessionState.SignedIn)?.session
-            session?.takeIf { listsPlaces(it.extensions) }?.let { ServerPlaces(it.client) }
+            // Read again once per session: after that its answer stands.
+            val known = reread?.takeIf { (from, _) -> from === session }?.second
+            serverRoute(
+                signedIn = session != null,
+                octo = session?.runsOcto == true && known == null,
+                saved = session?.extensions.orEmpty() + known.orEmpty(),
+                readAgain = {
+                    session?.client?.extensions()?.flatMap { ext -> ext.versions.map { "${ext.name}:$it" } }?.toSet()
+                        ?.also { reread = session to it }
+                },
+                service = { ServerPlaces(checkNotNull(session).client) },
+            )
         },
         phone = { phonePlaces },
     )
 
-    // Where places are looked up right now.
-    fun source(): PlaceSource = finder.source()
+    // Where places are looked up right now. With an Octo server whose saved
+    // extensions say nothing of places, this asks it once.
+    suspend fun source(): PlaceSource = finder.source()
 
     fun allowed(): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
