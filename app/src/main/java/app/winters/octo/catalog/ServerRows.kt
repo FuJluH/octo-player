@@ -5,6 +5,9 @@ import androidx.room.Embedded
 // A server song that is in the library, and the library song it is.
 data class ServerLink(val serverId: String, val trackId: String)
 
+// A server album the library has, and how many songs the server listed in it.
+data class ServerAlbumCount(val serverId: String, val songCount: Int)
+
 // A server's copy of a library song: its id on the server, and when the
 // server last saw it played.
 data class ServerCopy(

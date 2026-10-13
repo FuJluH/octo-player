@@ -26,6 +26,7 @@ import app.winters.octo.playback.PlaylistStore
 import app.winters.octo.ui.common.LoadState
 import app.winters.octo.ui.common.load
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
@@ -133,7 +134,8 @@ class SearchViewModel @Inject constructor(
     // asked for, to know whether there are more. A song that joins the
     // library while the results are shown stays where it is, among the songs
     // not in the library, until the next search, rather than moving under
-    // the listener's finger.
+    // the listener's finger. The server's own songs that the library takes
+    // in during a search join these once they are in (see discover).
     @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
     val results: StateFlow<SearchResults?> = combine(
         snapshotFlow { text }.debounce(150).map { searchKey(it) }.distinctUntilChanged(),
@@ -191,13 +193,26 @@ class SearchViewModel @Inject constructor(
                 emit(DiscoverState.Loading)
                 delay(DISCOVER_AFTER_MS)
                 rounds.update { it + 1 }
+                val state = load { discovery.search(q) }
                 emit(
-                    when (val state = load { discovery.search(q) }) {
+                    when (state) {
                         is LoadState.Ready -> state.data?.let { DiscoverState.Done(it) } ?: DiscoverState.Idle
                         is LoadState.Failed -> DiscoverState.Failed
                         LoadState.Loading -> DiscoverState.Loading
                     },
                 )
+                // Songs the server has that the library had not copied yet
+                // show among the library's once they are taken in, a moment
+                // after the rest.
+                val found = (state as? LoadState.Ready)?.data ?: return@transformLatest
+                val tookIn = try {
+                    discovery.takeIn(found)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    false
+                }
+                if (tookIn) rounds.update { it + 1 }
             }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DiscoverState.Idle)
 

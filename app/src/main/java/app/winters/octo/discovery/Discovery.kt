@@ -15,6 +15,9 @@ import app.winters.octo.data.SessionState
 import app.winters.octo.data.accountId
 import app.winters.octo.data.runsOcto
 import app.winters.octo.playback.tracksByIds
+import app.winters.octo.server.Arriving
+import app.winters.octo.server.ServerSync
+import app.winters.octo.server.arriving
 import app.winters.octo.server.serverSourceId
 import app.winters.octo.subsonic.Album
 import app.winters.octo.subsonic.OCTO_LIST_KINDS
@@ -22,6 +25,7 @@ import app.winters.octo.subsonic.Playlist
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.SubsonicException
+import dagger.Lazy
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -65,11 +69,14 @@ internal fun madeForYouLists(playlists: List<Playlist>, sourceId: String): List<
 // What a search found beyond the library. `partAlbums` are albums the
 // library holds some of the songs of, kept apart from those it holds none
 // of, so the "Not in your library" title is never over one that partly is.
+// `arriving` is the server's own music the search found that the library
+// does not have yet: it is none of the above, and takeIn brings it in.
 class Discovered(
     val songs: List<TrackEntity>,
     val albums: List<OnlineAlbum>,
     val artists: List<OnlineArtist>,
     val partAlbums: List<OnlineAlbum> = emptyList(),
+    val arriving: Arriving = Arriving.Nothing,
 ) {
     val isEmpty get() = notInLibraryEmpty && partAlbums.isEmpty()
 
@@ -98,6 +105,8 @@ class Discovery @Inject constructor(
     private val sources: SourceDao,
     private val catalog: CatalogDao,
     private val online: OnlineDao,
+    // Taken lazily: ServerSync needs PlaylistSync, which needs this.
+    private val sync: Lazy<ServerSync>,
 ) {
     // Whether a server is signed in, so there is anything to discover.
     val available: Flow<Boolean> = sessions.state.map { it is SessionState.SignedIn }
@@ -120,19 +129,35 @@ class Discovery @Inject constructor(
     suspend fun search(query: String): Discovered? {
         val (client, sourceId) = server() ?: return null
         val found = client.search(query.trim(), artists = 10, albums = 20, songs = SEARCH_SONGS)
-        val songs = resolve(client, sourceId, found.song).filter { isFind(it.id) }
+        // The server's own songs and albums the library has not copied yet
+        // are not finds: they are left out here and taken in (takeIn).
+        val linked = found.song.map { it.id }.distinct().chunked(900)
+            .flatMap { sources.libraryLinks(sourceId, it) }
+            .mapTo(HashSet()) { it.serverId }
+        val knownAlbums = if (found.album.isEmpty()) emptySet() else sources.knownAlbums(sourceId, found.album.map { it.id }).toSet()
+        val octo = (sessions.state.value as? SessionState.SignedIn)?.session?.runsOcto == true
+        val arriving = arriving(found, { it.id in linked }, { it.id in knownAlbums }, findsOnline = octo)
+        val newSongs = arriving.songs.mapTo(HashSet()) { it.id }
+        val newAlbums = arriving.albums.mapTo(HashSet()) { it.id }
+        val songs = resolve(client, sourceId, found.song.filterNot { it.id in newSongs }).filter { isFind(it.id) }
         // Octo counts how many songs of each album the library holds. One it
         // holds every song of is not a find (its songs are in the library);
         // one it holds some of goes apart, saying how many.
-        val albums = notInLibrary(sourceId, found.album).filter { albumShare(it) != AlbumShare.Whole }
+        val albums = notInLibrary(sourceId, found.album.filterNot { it.id in newAlbums }).filter { albumShare(it) != AlbumShare.Whole }
         val (part, none) = albums.partition { albumShare(it) == AlbumShare.Part }
         return Discovered(
             songs,
             none.map { it.toOnline(sourceId) },
             artistsNotInLibrary(sourceId, found),
             partAlbums = part.map { it.toOnline(sourceId) },
+            arriving = arriving,
         )
     }
+
+    // Brings the server's own music a search found into the library (see
+    // Discovered.arriving). Answers whether any of it is in the library now,
+    // so the library's results are worth reading again.
+    suspend fun takeIn(found: Discovered): Boolean = !found.arriving.isEmpty && sync.get().takeInArriving(found.arriving)
 
     // The song first, then songs like it.
     suspend fun radio(seed: TrackEntity, count: Int = RADIO_SONGS): List<TrackEntity> {
