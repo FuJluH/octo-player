@@ -267,6 +267,9 @@ public enum SettingsIndex {
                                                          ["history", "past", "completed", "previous"], section: "Look")
     public static let lyricsArc = SettingEntry("lyrics_arc", .lyrics, "Curved lyrics", "The lines bend around a drum",
                                                ["arc", "curve", "3d", "perspective", "wheel"], section: "Look")
+    public static let lyricsBloomFast = SettingEntry("lyrics_bloom_fast", .lyrics, "Bloom fast singing",
+                                                     "Notes held out among quick singing bloom too",
+                                                     ["bloom", "rap", "fast", "held", "notes", "emphasis"], section: "Look")
     public static let lyricsOutputTiming = SettingEntry("lyrics_output_timing", .lyrics, "Lyrics timing on this output",
                                                         "Words earlier or later on this speaker or headphones",
                                                         ["sync", "delay", "latency", "bluetooth", "earbuds", "offset", "late", "early", "behind"],
@@ -315,7 +318,7 @@ public enum SettingsIndex {
         copies, accountHome, accountAway, deviceQuality, streamWifi, startAfter, streamMobile, cacheSize, fetchWifi, fetchMobile,
         clearCache, downloadQuality, wifiOnly, keepLiked, streamOnWifi, downloadedMusic,
         lyricsOnline, lyricsScreenOn, lyricsStyle, lyricsEmphasis, lyricsGlow, lyricsLift, lyricsMotionSpeed, lyricsInactiveScale,
-        lyricsFade, lyricsCascade, lyricsKeepCompleted, lyricsArc, lyricsOutputTiming,
+        lyricsFade, lyricsCascade, lyricsKeepCompleted, lyricsArc, lyricsBloomFast, lyricsOutputTiming,
         listenBrainz, sendPlays, nowPlaying, scrobblingDisconnect,
         saveBackup, restoreBackup,
         version, whatsNew, checkUpdates, earlyVersions, checkNow,

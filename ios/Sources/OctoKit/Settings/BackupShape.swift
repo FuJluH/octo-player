@@ -169,7 +169,7 @@ extension BackupShape {
     static let lyricsLook = fields(
         BackupField("style", .choice), BackupField("emphasis", .int), BackupField("glow", .int), BackupField("lift", .int),
         BackupField("speed", .int), BackupField("inactiveScale", .int), BackupField("fade", .int), BackupField("cascade", .int),
-        BackupField("keepCompleted", .flag), BackupField("arc", .flag)
+        BackupField("keepCompleted", .flag), BackupField("arc", .flag), BackupField("bloomFast", .flag)
     )
 
     static let lyrics = fields(

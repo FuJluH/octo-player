@@ -89,6 +89,9 @@ public struct LyricsLook: Equatable, Sendable, Codable {
     public var keepCompleted: Bool
     /// The lines bend around a drum.
     public var arc: Bool
+    /// Notes held out among quick singing bloom too, not only those held a second or more, and
+    /// sung words rise a little further.
+    public var bloomFast: Bool
 
     public init(
         style: LyricsStyle = .flowing,
@@ -100,7 +103,8 @@ public struct LyricsLook: Equatable, Sendable, Codable {
         fade: Int = LookDial.fade.default,
         cascade: Int = LookDial.cascade.default,
         keepCompleted: Bool = true,
-        arc: Bool = false
+        arc: Bool = false,
+        bloomFast: Bool = true
     ) {
         self.style = style
         self.emphasis = emphasis
@@ -112,6 +116,7 @@ public struct LyricsLook: Equatable, Sendable, Codable {
         self.cascade = cascade
         self.keepCompleted = keepCompleted
         self.arc = arc
+        self.bloomFast = bloomFast
     }
 
     public func percent(_ dial: LookDial) -> Int {
@@ -146,7 +151,7 @@ public struct LyricsLook: Equatable, Sendable, Codable {
         Double(percent(dial).clamped(dial.range.lowerBound, dial.range.upperBound)) / 100.0
     }
 
-    enum CodingKeys: String, CodingKey { case style, emphasis, glow, lift, speed, inactiveScale, fade, cascade, keepCompleted, arc }
+    enum CodingKeys: String, CodingKey { case style, emphasis, glow, lift, speed, inactiveScale, fade, cascade, keepCompleted, arc, bloomFast }
 
     // A saved look may leave out any field, and in a backup name a style this app does not know;
     // either takes its default.
@@ -162,5 +167,6 @@ public struct LyricsLook: Equatable, Sendable, Codable {
         cascade = try c.decodeIfPresent(Int.self, forKey: .cascade) ?? LookDial.cascade.default
         keepCompleted = try c.decodeIfPresent(Bool.self, forKey: .keepCompleted) ?? true
         arc = try c.decodeIfPresent(Bool.self, forKey: .arc) ?? false
+        bloomFast = try c.decodeIfPresent(Bool.self, forKey: .bloomFast) ?? true
     }
 }

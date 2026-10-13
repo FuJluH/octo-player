@@ -354,7 +354,7 @@ public enum BackupFile {
                 .object([("style", .string(look.style.rawValue)), ("emphasis", .int(Int64(look.emphasis))), ("glow", .int(Int64(look.glow))),
                          ("lift", .int(Int64(look.lift))), ("speed", .int(Int64(look.speed))), ("inactiveScale", .int(Int64(look.inactiveScale))),
                          ("fade", .int(Int64(look.fade))), ("cascade", .int(Int64(look.cascade))), ("keepCompleted", .bool(look.keepCompleted)),
-                         ("arc", .bool(look.arc))])
+                         ("arc", .bool(look.arc)), ("bloomFast", .bool(look.bloomFast))])
             }),
             ("outputOffsets", .object(l.outputOffsets.sorted { $0.key < $1.key }.map { ($0.key, .int($0.value)) })),
         ])
