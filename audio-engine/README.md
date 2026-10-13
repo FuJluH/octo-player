@@ -189,14 +189,18 @@ requests and reconnects.
 
 A `QueueItem` with `live = true` is live radio. It has no length and
 ignores seeks and start positions, and nothing is opened behind it until
-it fails or the listener moves on.
+it fails or the listener moves on. Paused for 30 s or more, it starts again
+where its station is now. `hls = true` opens an address as HLS whatever it
+looks like.
 
 - **HTTP.** Requests carry `Icy-MetaData: 1` and no range. A dropped or
   ended connection is made again after 1, 2, 4 and 8 s, carrying on from
-  wherever the server is; then the stream fails as gone. The metadata
+  wherever the server is; then the stream fails as gone. A connection
+  counts as working only after 64 KB or 10 s, so a server that hangs up
+  after a few bytes each time is gone too. The metadata
   blocks an `icy-metaint` server puts in the audio are taken out, and each
   new `StreamTitle` is sent as an event once the sound it starts with is
-  heard. Old SHOUTcast servers answer `ICY 200 OK`; a link in the client's
+  heard; an empty one says the station names nothing now. Old SHOUTcast servers answer `ICY 200 OK`; a link in the client's
   connection chain reads that as `HTTP/1.0 200 OK`.
 - **Types.** `audio/aac`, `audio/aacp` and `audio/x-aac` are ADTS AAC,
   `audio/mpeg` MP3 and `audio/ogg` Ogg; the bytes have the last word. A
@@ -206,13 +210,21 @@ it fails or the listener moves on.
   A master playlist's best variant the engine decodes is played (sound
   only first, then the highest bit rate). Segments are fetched in order
   and joined; a live playlist is fetched again every target duration,
-  starting three segments from the newest. MPEG-TS, ADTS AAC, MP3 and
+  starting three segments from the newest. Numbers that start again (an
+  encoder restart) are joined again at the newest; a playlist that adds
+  nothing for three target durations (at least 20 s) fails, as do eight
+  segments in a row the server says are missing. Empty segments are passed
+  over. MPEG-TS, ADTS AAC, MP3 and
   fragmented MP4 (init segment, then segments) play; a discontinuity or a
   new init segment opens a fresh decoder. MPEG-TS is cut down to its first
   audio stream (AAC in ADTS, or MPEG audio) by `source/ts.rs`, which keeps
   its place across segments, so a packet cut between two joins up; timed
   ID3 and other streams are passed over. Encrypted streams are refused
-  with a clear error. A plain M3U list opens its first entry.
+  with a clear error. A live answer whose first bytes (after a byte order
+  mark and white space) are `#EXTM3U` is a playlist whatever its address
+  and type say; one with no target duration or variants, such as a
+  station's `#EXTINF:-1` list, opens its first entry, following at most
+  three playlists in a row.
 - **HE-AAC.** symphonia's AAC decoder has no SBR or PS, so HE-AAC plays its
   AAC-LC core: half the sample rate, no rebuilt high band, and for HE-AAC
   v2 its mono core. In ADTS that happens by itself; an MP4 config that

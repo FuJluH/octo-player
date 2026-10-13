@@ -267,9 +267,12 @@ fn an_endless_icy_stream_gives_its_titles_and_clean_audio() {
             let audio: Vec<u8> = (i * METAINT..(i + 1) * METAINT).map(on_air).collect();
             // Each title comes three times, with an empty one and an empty
             // block among them.
+            // Each title comes twice, with an empty block and blocks
+            // naming no title among them, and once an empty title.
             let block = match (i, i % 3) {
                 (4, _) => vec![0],
-                (_, 1) => icy_block("StreamTitle='';"),
+                (10, _) => icy_block("StreamTitle='';"),
+                (_, 1) => icy_block("StreamUrl='http://example.com';"),
                 _ => icy_block(&format!("StreamTitle='Song {}';StreamUrl='';", i / 3)),
             };
             if stopped.load(Ordering::Acquire)
@@ -288,8 +291,8 @@ fn an_endless_icy_stream_gives_its_titles_and_clean_audio() {
     let (audio, titles) = read_live(&mut source, &slot, 160_000);
     let expected: Vec<u8> = (0..160_000).map(on_air).collect();
     assert!(audio == expected, "the audio came through changed");
-    let wanted: Vec<String> = (0..=6).map(|n| format!("Song {n}")).collect();
-    assert_eq!(titles, wanted);
+    // The empty title clears the one before, so the same one counts again.
+    assert_eq!(titles, ["Song 0", "Song 1", "Song 2", "Song 3", "", "Song 3", "Song 4", "Song 5", "Song 6"]);
     let asked = &server.asked()[0];
     assert_eq!(asked.header("icy-metadata"), Some("1"));
     assert_eq!(asked.header("range"), None, "a live stream asks for no range");
@@ -404,4 +407,26 @@ fn an_old_shoutcast_server_answering_icy_200_ok_plays() {
     let expected: Vec<u8> = (0..100_000).map(on_air).collect();
     assert!(audio == expected, "the audio came through changed");
     assert_eq!(titles, ["Old FM 0", "Old FM 1", "Old FM 2"]);
+}
+
+#[test]
+fn a_live_server_that_hangs_up_after_a_little_each_time_counts_as_gone() {
+    use crate::testing::http_server::ScriptServer;
+    // Every connection gives 1 000 bytes and hangs up.
+    let server = ScriptServer::start(|_, conn, _| {
+        let _ = conn.write_all(
+            b"HTTP/1.1 200 OK
+Content-Type: audio/mpeg
+
+",
+        );
+        let _ = conn.write_all(&[7u8; 1000]);
+    });
+    let mut source = HttpSource::open(&server.url("/radio"), live()).unwrap();
+    let mut out = Vec::new();
+    let err = source.read_to_end(&mut out).unwrap_err();
+    assert!(err.to_string().contains("did not come back"), "{err}");
+    // The first connection and four more, none of them counted as working.
+    assert_eq!(server.asked().len(), 5);
+    assert_eq!(out.len(), 5_000);
 }

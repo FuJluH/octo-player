@@ -118,8 +118,18 @@ impl Deck {
         });
         let worker = shared.clone();
         let first = first_secs.max(AHEAD_SECS);
-        let spawned =
-            thread::Builder::new().name("octo-deck".into()).spawn(move || run(worker, source, http, first));
+        let spawned = thread::Builder::new().name("octo-deck".into()).spawn(move || {
+            let watch = worker.clone();
+            // Whatever goes wrong in there, the player hears of it.
+            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(worker, source, http, first)))
+                .is_err()
+            {
+                let mut state = watch.lock();
+                let broke = Failure::new(crate::error::ErrorKind::Other, "decoding broke down");
+                state.status = DeckStatus::Failed(broke);
+                watch.wake.notify_all();
+            }
+        });
         if let Err(e) = spawned {
             let mut state = shared.lock();
             state.status = DeckStatus::Failed(Failure::new(crate::error::ErrorKind::Other, e.to_string()));

@@ -70,6 +70,11 @@ const IDLE_DEVICE_AFTER: Duration = Duration::from_secs(5);
 
 const DEFAULT_DEVICE_CHECK: Duration = Duration::from_secs(2);
 
+// A live stream paused this long starts again where its server is now,
+// rather than minutes behind it from what was held.
+const LIVE_PAUSE_LIMIT: Duration =
+    if cfg!(test) { Duration::from_millis(300) } else { Duration::from_secs(30) };
+
 pub enum Command {
     Load { items: Vec<QueueItem>, start_index: usize, start_ms: u64, play: bool },
     PlayNext(Vec<QueueItem>),
@@ -342,6 +347,8 @@ struct Player {
     // Where the song was when the device was lost and none would open, to
     // carry on from there once one does.
     lost_at: Option<Moment>,
+    // When playback was paused, while it is.
+    paused_at: Option<Instant>,
     infos: HashMap<u64, TrackInfo>,
     block: Vec<f32>,
     markers: Vec<Marker>,
@@ -391,6 +398,7 @@ pub fn run(driven: Driven) {
         device_running: false,
         last_default_check: Instant::now(),
         lost_at: None,
+        paused_at: None,
         infos: HashMap::new(),
         block: vec![0.0; 2048],
         markers: Vec::new(),
@@ -667,6 +675,7 @@ impl Player {
             agent: self.shared.agent.clone(),
             headers: item.headers.iter().map(|h| (h.name.clone(), h.value.clone())).collect(),
             live: item.live,
+            hls: item.hls,
             ..Default::default()
         }
     }
@@ -707,6 +716,8 @@ impl Player {
             return;
         }
         self.lost_at = None;
+        // Loaded paused counts as paused from now.
+        self.paused_at = (!self.playing).then(Instant::now);
         let previous = self.heard.and_then(|k| self.index_of(k));
         let loudness = self.loudness(index, previous);
         // A stream waits until `start_after` of it is decoded (or all of it,
@@ -758,6 +769,12 @@ impl Player {
         }
         self.playing = true;
         self.scouting.set_running(true);
+        let long_paused = self.paused_at.take().is_some_and(|at| at.elapsed() >= LIVE_PAUSE_LIMIT);
+        if long_paused && self.current_is_live() && self.mixer.is_some() && !self.ended {
+            log::info!("a live stream paused a long while starts again where it is now");
+            self.start_current(0.0, Transition::Start, EndReason::Skipped);
+            return;
+        }
         if self.mixer.is_none() || self.ended {
             if self.current.is_none() {
                 self.current = Some(0);
@@ -779,6 +796,9 @@ impl Player {
     }
 
     fn pause(&mut self) {
+        if self.playing {
+            self.paused_at = Some(Instant::now());
+        }
         self.playing = false;
         self.scouting.set_running(false);
         if let Some(out) = &self.out {

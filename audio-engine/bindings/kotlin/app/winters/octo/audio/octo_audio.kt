@@ -3532,6 +3532,12 @@ data class QueueItem (
      * `StreamTitle` events.
      */
     val `live`: kotlin.Boolean = false 
+    , 
+    /**
+     * The source is an HLS playlist even though its address and its
+     * server's content type do not say so.
+     */
+    val `hls`: kotlin.Boolean = false 
     
 ){
     
@@ -3558,6 +3564,7 @@ public object FfiConverterTypeQueueItem: FfiConverterRustBuffer<QueueItem> {
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalDouble.read(buf),
             FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
         )
     }
 
@@ -3571,7 +3578,8 @@ public object FfiConverterTypeQueueItem: FfiConverterRustBuffer<QueueItem> {
             FfiConverterSequenceTypeHttpHeader.allocationSize(value.`headers`) +
             FfiConverterOptionalString.allocationSize(value.`genre`) +
             FfiConverterOptionalDouble.allocationSize(value.`bpm`) +
-            FfiConverterBoolean.allocationSize(value.`live`)
+            FfiConverterBoolean.allocationSize(value.`live`) +
+            FfiConverterBoolean.allocationSize(value.`hls`)
     )
 
     override fun write(value: QueueItem, buf: ByteBuffer) {
@@ -3585,6 +3593,7 @@ public object FfiConverterTypeQueueItem: FfiConverterRustBuffer<QueueItem> {
             FfiConverterOptionalString.write(value.`genre`, buf)
             FfiConverterOptionalDouble.write(value.`bpm`, buf)
             FfiConverterBoolean.write(value.`live`, buf)
+            FfiConverterBoolean.write(value.`hls`, buf)
     }
 }
 
@@ -4325,7 +4334,8 @@ sealed class EngineEvent {
     
     /**
      * A live stream's title changed, as it is heard: usually "Artist -
-     * Song" for what the station plays now.
+     * Song" for what the station plays now. An empty title says the
+     * stream no longer names what it plays.
      */
     data class StreamTitle(
         val `itemId`: kotlin.String, 
