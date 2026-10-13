@@ -21,7 +21,7 @@ same sound shaping as the Android app, and a sample-accurate clock.
 | `src/decode.rs` | symphonia decoding, gapless trims, seeking, tags |
 | `src/opus.rs` | Opus through a pure Rust decoder |
 | `src/source/` | Files, and HTTP(S) streams with read-ahead and pinned certificates |
-| `src/sound/` | EQ, presets, limiter, balance, mono, ReplayGain |
+| `src/sound/` | EQ, presets, crossfeed, limiter, balance, mono, ReplayGain |
 | `src/pace.rs` | Speed (pitch kept) and pitch shift |
 | `src/output/` | Device callback, audio clock, cpal and silent drivers |
 | `src/timeline.rs` | Which song and second each ring frame holds |

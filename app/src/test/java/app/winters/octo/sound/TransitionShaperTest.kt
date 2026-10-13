@@ -3,11 +3,14 @@ package app.winters.octo.sound
 import androidx.media3.common.C
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.util.UnstableApi
+import app.winters.octo.playback.FadeCurve
 import app.winters.octo.playback.FILTER_STRENGTH
+import app.winters.octo.playback.MIX_ONLY_HEADROOM_DB
 import app.winters.octo.playback.TransitionKind
 import app.winters.octo.playback.TransitionPlan
 import app.winters.octo.playback.automixInGain
 import app.winters.octo.playback.automixOutGain
+import app.winters.octo.playback.fixedCrossfadePlan
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.double
@@ -122,6 +125,20 @@ class TransitionShaperTest {
             }
         }
         assertTrue(failures.take(10).joinToString("\n"), failures.isEmpty())
+    }
+
+    @Test
+    fun aFixedCrossfadeFollowsItsCurveAndHeadroom() {
+        val plan = fixedCrossfadePlan(200_000, 8_000, "test", FadeCurve.MixOnly)
+        val out = DeckTransition("a", plan, incoming = false)
+        val into = DeckTransition("b", plan, incoming = true)
+        // Mid-blend both songs play full, lowered by the 3 dB of headroom.
+        val lowered = 10.0.pow(-MIX_ONLY_HEADROOM_DB / 20)
+        assertEquals(lowered, out.gainAt(0.5), 1e-12)
+        assertEquals(lowered, into.gainAt(0.5), 1e-12)
+        val linear = fixedCrossfadePlan(200_000, 8_000, "test", FadeCurve.Linear)
+        assertEquals(0.75, DeckTransition("a", linear, incoming = false).gainAt(0.25), 1e-12)
+        assertEquals(0.25, DeckTransition("b", linear, incoming = true).gainAt(0.25), 1e-12)
     }
 
     @Test

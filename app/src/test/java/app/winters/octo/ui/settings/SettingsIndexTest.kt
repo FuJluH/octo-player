@@ -38,7 +38,7 @@ class SettingsIndexTest {
 
     @Test
     fun theTitleComesFirst() {
-        assertEquals(listOf("Crossfade", "Longest blend"), titles("crossfade").take(2))
+        assertEquals(listOf("Crossfade", "Crossfade curve", "Longest blend"), titles("crossfade").take(3))
         assertEquals("Crossfade", titles("CROSS").first())
     }
 

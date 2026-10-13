@@ -34,8 +34,13 @@ import app.winters.octo.sort.SortOrder
 
 // One answer to a choice: its name, and a line about it.
 // `enabled` false shows the answer dimmed, with its detail saying why, and
-// it cannot be picked.
-data class Choice(val label: String, val detail: String? = null, val enabled: Boolean = true)
+// it cannot be picked. `leading` draws a small picture of it before its name.
+data class Choice(
+    val label: String,
+    val detail: String? = null,
+    val enabled: Boolean = true,
+    val leading: (@Composable () -> Unit)? = null,
+)
 
 // What the sheet can ask.
 sealed interface SheetRequest

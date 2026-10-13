@@ -48,6 +48,16 @@ class AudioOutputTest {
     }
 
     @Test
+    fun onlyWornOutputsCountAsHeadphones() {
+        assertEquals(false, PhoneSpeaker.headphones)
+        assertEquals(true, outputFor(listOf(bt("Enco X3", "AA:01"))).headphones)
+        assertEquals(true, outputFor(listOf(OutputDevice(OutputKind.Usb, "DAC", ""))).headphones)
+        assertEquals(true, outputFor(listOf(OutputDevice(OutputKind.Wired, "", ""))).headphones)
+        val speaker = OutputDevice(OutputKind.Bluetooth, "Boom", "DD:01", speaker = true)
+        assertEquals(false, outputFor(listOf(speaker)).headphones)
+    }
+
+    @Test
     fun settingsSavedUnderAnOldAddressAreFound() {
         val out = outputFor(listOf(bt("Enco X3", "AA:01"), bt("Enco X3", "AA:02")))
         assertEquals(7, savedFor(mapOf("bluetooth:AA:02" to 7), out))

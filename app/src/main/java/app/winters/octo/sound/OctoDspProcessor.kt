@@ -18,7 +18,7 @@ const val GLIDE_MS = 30f
 // output stays in one format from song to song, so songs still run into
 // each other without a gap.
 fun SoundSettings.shapesSound(): Boolean =
-    eqEnabled || replayGain != ReplayGainMode.Off || limiter || balance != 0f || mono
+    eqEnabled || replayGain != ReplayGainMode.Off || limiter || balance != 0f || mono || crossfeed.on
 
 // A value that glides to a new setting over a number of frames.
 internal class Glide(initial: Float) {
@@ -52,7 +52,8 @@ internal class Glide(initial: Float) {
 
 // The sound shaping itself, for one stream, apart from the player so it can
 // be tested alone. In order: the level (ReplayGain and the equalizer's
-// preamp), the equalizer's filters, mono and balance, then the limiter.
+// preamp), the equalizer's filters, crossfeed, mono and balance, then the
+// limiter.
 // Samples are floats, interleaved, full scale at 1.
 class SoundShaper(val sampleRate: Int, val channels: Int) {
     private val glideFrames = (sampleRate * GLIDE_MS / 1_000f).roundToInt().coerceAtLeast(1)
@@ -67,6 +68,8 @@ class SoundShaper(val sampleRate: Int, val channels: Int) {
     private var fadingFrom: FilterBank? = null
     private var fadeLeft = 0
     private var fadeScratch = FloatArray(0)
+
+    private val crossfeed = CrossfeedFilter()
 
     private val limiter = Limiter(channels, sampleRate)
     private var started = false
@@ -101,9 +104,13 @@ class SoundShaper(val sampleRate: Int, val channels: Int) {
         val toMono = stereo && settings.mono
         mono.to(if (toMono) 1f else 0f, frames)
 
+        // Crossfeed blends the two sides, so it has nothing to do in mono.
+        val crossfeedOn = stereo && settings.crossfeed.on && !toMono
+        crossfeed.set(crossfeedCoefficients(settings.crossfeed, sampleRate), crossfeedOn, frames)
+
         // Sound that is left as it is passes through untouched; the limiter
         // only catches peaks the shaping could push over.
-        val untouched = bands.isEmpty() && level == 1f && balance == 0f && !toMono
+        val untouched = bands.isEmpty() && level == 1f && balance == 0f && !toMono && !crossfeedOn
         limiter.enabled = settings.limiter && !untouched
     }
 
@@ -112,6 +119,7 @@ class SoundShaper(val sampleRate: Int, val channels: Int) {
     fun process(samples: FloatArray, frames: Int, output: FloatArray): Int {
         applyGain(samples, frames)
         applyFilters(samples, frames)
+        crossfeed.process(samples, frames, channels)
         applyMix(samples, frames)
         return limiter.process(samples, frames, output)
     }

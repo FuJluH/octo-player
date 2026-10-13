@@ -255,6 +255,7 @@ fn plan_pair(a: &str, b: &str, a_len: f64, b_len: f64, opts: &Options) -> Transi
         smart: true,
         filter_sweeps: opts.sweeps,
         beat_match: opts.match_tempo,
+        fade_curve: automix::FadeCurve::EqualPower,
     };
     let now_ms = (heard_secs * 1_000.0) as i64;
     let context = TransitionContext {
@@ -317,6 +318,7 @@ fn render_pair(a: &str, b: &str, out: &Path, opts: &Options) -> Result<Outcome, 
     let frames = (overlap * RATE as f64) as u64;
     let shape = FadeShape {
         k: plan.k,
+        curve: plan.curve,
         filter_strength: plan.filter_strength,
         steps: plan.low_pass_glide().map(|glide| LowPassSteps { beats: plan.beat_progress(), glide }),
         rate: plan.beat_match_rate,

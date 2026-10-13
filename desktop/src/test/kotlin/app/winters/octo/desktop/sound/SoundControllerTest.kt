@@ -1,6 +1,7 @@
 package app.winters.octo.desktop.sound
 
 import app.winters.octo.audio.AutomixSettings
+import app.winters.octo.audio.CrossfeedSettings
 import app.winters.octo.audio.DspSettings
 import app.winters.octo.audio.EqSettings
 import app.winters.octo.audio.ReplayGainSettings
@@ -8,6 +9,9 @@ import app.winters.octo.desktop.audio.SoundTarget
 import app.winters.octo.desktop.settings.SHARED_SOUND
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.desktop.settings.SoundPrefs
+import app.winters.octo.playback.FadeCurve
+import app.winters.octo.sound.Crossfeed
+import app.winters.octo.sound.CrossfeedPreset
 import app.winters.octo.sound.EqFilter
 import app.winters.octo.sound.EqMode
 import app.winters.octo.sound.EqPresets
@@ -28,6 +32,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import app.winters.octo.audio.FadeCurve as EngineFadeCurve
 import app.winters.octo.audio.EqMode as EngineEqMode
 import app.winters.octo.audio.FilterType as EngineFilterType
 import app.winters.octo.audio.ReplayGainMode as EngineGainMode
@@ -114,7 +119,12 @@ class SoundControllerTest {
         assertEquals(3_000f, eq.correction?.filters?.single()?.frequency)
         val gain = sound.engineReplayGain()
         assertEquals(ReplayGainSettings(EngineGainMode.SMART, 2f, -4f, false), gain)
-        assertEquals(DspSettings(limiter = false, balance = -0.25f, mono = true), sound.engineDsp())
+        assertEquals(DspSettings(limiter = false, balance = -0.25f, mono = true, crossfeed = CrossfeedSettings(on = false, cutHz = 700f, feedDb = 4.5f)), sound.engineDsp())
+        // Crossfeed goes over as the values in use: the preset's, or the listener's own.
+        val meier = SoundSettings(crossfeed = Crossfeed(on = true, preset = CrossfeedPreset.JanMeier, cutHz = 1_500, feedDb = 2f))
+        assertEquals(CrossfeedSettings(on = true, cutHz = 650f, feedDb = 9.5f), meier.engineDsp().crossfeed)
+        val own = SoundSettings(crossfeed = Crossfeed(on = true, preset = CrossfeedPreset.Custom, cutHz = 1_500, feedDb = 2f))
+        assertEquals(CrossfeedSettings(on = true, cutHz = 1_500f, feedDb = 2f), own.engineDsp().crossfeed)
         assertEquals(EngineGainMode.OFF, SoundSettings().engineReplayGain().mode)
         assertEquals(EngineEqMode.GRAPHIC, SoundSettings().engineEq().mode)
     }
@@ -210,14 +220,16 @@ class SoundControllerTest {
         val target = FakeTarget()
         val settings = SettingsStore(file())
         SoundController(target, settings, scope)
-        assertEquals(AutomixSettings(smartTransitions = true, filterSweeps = true, matchTempo = false, maxOverlapMs = 0u), target.lastAutomix)
+        assertEquals(AutomixSettings(smartTransitions = true, filterSweeps = true, matchTempo = false, maxOverlapMs = 0u, fadeCurve = EngineFadeCurve.EQUAL_POWER), target.lastAutomix)
         settings.update { it.copy(playback = it.playback.copy(crossfadeSeconds = 16, filterSweeps = false, matchTempo = true)) }
         assertEquals(16_000, target.fade)
-        assertEquals(AutomixSettings(smartTransitions = true, filterSweeps = false, matchTempo = true, maxOverlapMs = 16_000u), target.lastAutomix)
+        assertEquals(AutomixSettings(smartTransitions = true, filterSweeps = false, matchTempo = true, maxOverlapMs = 16_000u, fadeCurve = EngineFadeCurve.EQUAL_POWER), target.lastAutomix)
         // A value past the longest blend is held to it.
         settings.update { it.copy(playback = it.playback.copy(crossfadeSeconds = 30, smartTransitions = false)) }
         assertEquals(16_000, target.fade)
         assertEquals(false, target.lastAutomix?.smartTransitions)
+        settings.update { it.copy(playback = it.playback.copy(crossfadeCurve = FadeCurve.MixOnly)) }
+        assertEquals(EngineFadeCurve.MIX_ONLY, target.lastAutomix?.fadeCurve)
         // A change elsewhere sends nothing new.
         val sent = target.automixSent
         settings.update { it.copy(playback = it.playback.copy(speed = 1.5f)) }

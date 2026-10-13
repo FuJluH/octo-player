@@ -70,6 +70,8 @@ data class SoundSettings(
     // From -1 (all left) to 1 (all right).
     val balance: Float = 0f,
     val mono: Boolean = false,
+    // Each ear hears a little of the other side, for headphones.
+    val crossfeed: Crossfeed = Crossfeed(),
 ) {
     // The filters the equalizer applies now: the headphone correction first,
     // then the user's own curve.

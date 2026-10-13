@@ -1,15 +1,29 @@
 package app.winters.octo.ui.settings
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
+import app.winters.octo.playback.FadeCurve
+import app.winters.octo.playback.SMART_PICKS_THE_CURVE
+import app.winters.octo.playback.detail
+import app.winters.octo.playback.fadeInGain
+import app.winters.octo.playback.fadeOutGain
+import app.winters.octo.playback.label
 import app.winters.octo.playback.speedLabel
 import app.winters.octo.player.CrossfadeSecondsRange
 import app.winters.octo.player.PlayerPrefs
@@ -46,6 +60,7 @@ class PlaybackViewModel @Inject constructor(private val settings: PlayerSettings
     fun setSmartTransitions(on: Boolean) = change { setSmartTransitions(on) }
     fun setFilterSweeps(on: Boolean) = change { setFilterSweeps(on) }
     fun setMatchTempo(on: Boolean) = change { setMatchTempo(on) }
+    fun setCrossfadeCurve(curve: FadeCurve) = change { setCrossfadeCurve(curve) }
     fun setSkipSilence(on: Boolean) = change { setSkipSilence(on) }
     fun setAutoplay(on: Boolean) = change { setAutoplay(on) }
     fun setRadioDiscovery(discovery: Discovery) = change { setRadioDiscovery(discovery) }
@@ -85,6 +100,7 @@ fun PlaybackPage(onBack: () -> Unit, highlight: String?, vm: PlaybackViewModel =
             )
             if (prefs.crossfade) {
                 CrossfadeLength(prefs.crossfadeSeconds, vm::setCrossfadeSeconds)
+                CurveRow(prefs.crossfadeCurve, prefs.smartTransitions, vm::setCrossfadeCurve)
                 SwitchRow(
                     SettingsIndex.SmartTransitions,
                     checked = prefs.smartTransitions,
@@ -214,4 +230,50 @@ private fun CrossfadeLength(seconds: Int, onChange: (Int) -> Unit) {
             if (picked != seconds) onChange(picked)
         },
     )
+}
+
+// The shape of the crossfade, picked from a list that draws each one. With
+// smart transitions on, Automix picks the curve and the row only says so.
+@Composable
+private fun CurveRow(curve: FadeCurve, smart: Boolean, onPick: (FadeCurve) -> Unit) {
+    val sheet = LocalChoiceSheet.current
+    val curves = FadeCurve.entries
+    ChoiceRow(
+        SettingsIndex.CrossfadeCurve,
+        value = if (smart) "Automix" else curve.label,
+        enabled = !smart,
+        helper = if (smart) SMART_PICKS_THE_CURVE else curve.detail,
+        onClick = {
+            sheet.show(
+                ChoiceRequest(
+                    SettingsIndex.CrossfadeCurve.title,
+                    curves.map { Choice(it.label, it.detail, leading = { CurvePreview(it) }) },
+                    curves.indexOf(curve),
+                ) { onPick(curves[it]) },
+            )
+        },
+    )
+}
+
+// A small drawing of a curve: the outgoing song falling, the incoming one
+// rising.
+@Composable
+private fun CurvePreview(curve: FadeCurve) {
+    Canvas(Modifier.size(width = 32.dp, height = 20.dp)) {
+        val steps = 24
+        val stroke = 1.5.dp.toPx()
+        fun line(gain: (Double) -> Double, color: Color) {
+            val path = Path()
+            for (i in 0..steps) {
+                val t = i.toDouble() / steps
+                val x = size.width * t.toFloat()
+                val y = size.height * (1f - gain(t).toFloat())
+                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            }
+            drawPath(path, color, style = Stroke(stroke))
+        }
+        // An 8 second blend, so mix only shows its short edges.
+        line({ fadeOutGain(curve, it, 8_000.0) }, OctoColors.TextMuted)
+        line({ fadeInGain(curve, it, 8_000.0) }, OctoColors.TextPrimary)
+    }
 }

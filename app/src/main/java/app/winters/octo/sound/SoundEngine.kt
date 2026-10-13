@@ -1,11 +1,17 @@
 package app.winters.octo.sound
 
+import android.app.UiModeManager
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.res.Configuration
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
+import androidx.core.content.ContextCompat
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -31,19 +37,26 @@ import javax.inject.Singleton
 // Where the sound is going: the phone's speaker, a cable, or one Bluetooth
 // or USB device, each keeping its own sound settings. `formerKeys` are the
 // keys the same output was saved under before, read when nothing is saved
-// under `key` yet.
-data class AudioOutput(val key: String, val label: String, val formerKeys: List<String> = emptyList()) {
+// under `key` yet. `headphones` says whether it is worn: false for a
+// speaker.
+data class AudioOutput(
+    val key: String,
+    val label: String,
+    val formerKeys: List<String> = emptyList(),
+    val headphones: Boolean = true,
+) {
     // Every key this output's settings may be saved under, the current one first.
     val keys: List<String> get() = listOf(key) + formerKeys
 }
 
-val PhoneSpeaker = AudioOutput("speaker", "Phone speaker")
+val PhoneSpeaker = AudioOutput("speaker", "Phone speaker", headphones = false)
 
 // The start of a Bluetooth output's key; the rest is the device's name.
 const val BLUETOOTH_OUTPUT_PREFIX = "bluetooth:"
 
-// One output device as Android lists it.
-data class OutputDevice(val kind: OutputKind, val name: String, val address: String)
+// One output device as Android lists it. `speaker` marks a Bluetooth
+// speaker rather than headphones.
+data class OutputDevice(val kind: OutputKind, val name: String, val address: String, val speaker: Boolean = false)
 
 enum class OutputKind(val rank: Int) { Bluetooth(0), Usb(1), Wired(2), Other(9) }
 
@@ -63,7 +76,7 @@ fun outputFor(devices: List<OutputDevice>): AudioOutput {
             val addresses = same.map { it.address }.filter(String::isNotEmpty).distinct()
             val key = BLUETOOTH_OUTPUT_PREFIX + name.ifEmpty { addresses.firstOrNull().orEmpty() }
             val former = if (name.isEmpty()) addresses.drop(1) else addresses
-            AudioOutput(key, name.ifEmpty { "Bluetooth" }, former.map { "$BLUETOOTH_OUTPUT_PREFIX$it" })
+            AudioOutput(key, name.ifEmpty { "Bluetooth" }, former.map { "$BLUETOOTH_OUTPUT_PREFIX$it" }, headphones = same.none { it.speaker })
         }
         OutputKind.Usb -> AudioOutput("usb:$name", name.ifEmpty { "USB audio" })
         else -> AudioOutput("wired", "Headphones")
@@ -103,7 +116,33 @@ class SoundEngine @Inject constructor(@ApplicationContext private val context: C
         (if (split) savedFor(all, out) else null) ?: all[SHARED] ?: SoundSettings()
     }.stateIn(scope, SharingStarted.Eagerly, SoundSettings())
 
+    // Whether the phone is in car mode (Android Auto), when the sound goes to
+    // the car however it is connected.
+    private val car = MutableStateFlow(inCar())
+
+    // Whether the output playing now is worn: not a speaker, and not a car.
+    val forHeadphones: StateFlow<Boolean> = combine(_output, car) { out, inCar -> out.headphones && !inCar }
+        .stateIn(scope, SharingStarted.Eagerly, _output.value.headphones && !car.value)
+
+    // What the audio path plays: `current`, with crossfeed left out on an
+    // output that is not headphones.
+    val playing: StateFlow<SoundSettings> = combine(current, forHeadphones) { settings, worn -> settings.heardOn(worn) }
+        .stateIn(scope, SharingStarted.Eagerly, SoundSettings())
+
     init {
+        ContextCompat.registerReceiver(
+            context,
+            object : BroadcastReceiver() {
+                override fun onReceive(context: Context, intent: Intent) {
+                    car.value = inCar()
+                }
+            },
+            IntentFilter().apply {
+                addAction(UiModeManager.ACTION_ENTER_CAR_MODE)
+                addAction(UiModeManager.ACTION_EXIT_CAR_MODE)
+            },
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
         audio.registerAudioDeviceCallback(
             object : AudioDeviceCallback() {
                 override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) { _output.value = currentOutput() }
@@ -154,10 +193,18 @@ class SoundEngine @Inject constructor(@ApplicationContext private val context: C
 
     private fun keyFor(perOutput: Boolean, output: AudioOutput) = if (perOutput) output.key else SHARED
 
+    private fun inCar(): Boolean =
+        context.getSystemService(UiModeManager::class.java)?.currentModeType == Configuration.UI_MODE_TYPE_CAR
+
     // The output Android routes music to; see outputFor.
     private fun currentOutput(): AudioOutput = outputFor(
         audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS).map {
-            OutputDevice(kindOf(it.type), it.productName?.toString()?.trim().orEmpty(), it.address.orEmpty())
+            OutputDevice(
+                kindOf(it.type),
+                it.productName?.toString()?.trim().orEmpty(),
+                it.address.orEmpty(),
+                speaker = it.type == AudioDeviceInfo.TYPE_BLE_SPEAKER,
+            )
         },
     )
 

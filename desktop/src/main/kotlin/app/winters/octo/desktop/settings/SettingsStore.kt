@@ -1,6 +1,7 @@
 package app.winters.octo.desktop.settings
 
 import app.winters.octo.offline.KeepChoices
+import app.winters.octo.playback.FadeCurve
 import app.winters.octo.playback.StartAfter
 import app.winters.octo.sound.SoundSettings
 import app.winters.octo.desktop.system.SystemPrefs
@@ -315,6 +316,9 @@ data class PlaybackPrefs(
     val smartTransitions: Boolean = true,
     val filterSweeps: Boolean = true,
     val matchTempo: Boolean = false,
+    // The shape of the crossfade with smart transitions off; smart
+    // transitions pick their own.
+    val crossfadeCurve: FadeCurve = FadeCurve.EqualPower,
     // The device picked in the output menu, or null to follow the system.
     val outputDevice: String? = null,
     // How fast music plays (0.5 to 2), whether the voice keeps its pitch at

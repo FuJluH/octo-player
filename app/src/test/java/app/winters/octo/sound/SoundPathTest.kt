@@ -111,4 +111,31 @@ class SoundPathTest {
         assertEquals(0.1f, output[(n - 1) * 2], 1e-6f)
         assertEquals(0.2f, output[(n - 1) * 2 + 1], 1e-6f)
     }
+
+    @Test
+    fun crossfeedSendsOneSideToTheOtherEarAtItsFeedLevel() {
+        val shaper = SoundShaper(rate, 2)
+        val crossfeed = Crossfeed(on = true, preset = CrossfeedPreset.ChuMoy)
+        shaper.apply(SoundSettings(limiter = false, crossfeed = crossfeed), null, instant = true)
+        val frames = 4_800
+        val input = FloatArray(frames * 2) { if (it % 2 == 0) 0.5f else 0f }
+        val output = FloatArray(input.size)
+        val n = shaper.process(input, frames, output)
+        // Steady sound on the left reaches the right ear 6 dB below the left.
+        val left = output[(n - 1) * 2]
+        val right = output[(n - 1) * 2 + 1]
+        assertEquals(-6.0, 20 * log10(right.toDouble() / left), 0.01)
+        assertEquals(0.5f, left + right, 1e-5f)
+    }
+
+    @Test
+    fun crossfeedTurnsTheShapingOnAndMonoTurnsItOff() {
+        assertTrue(SoundSettings(limiter = false, crossfeed = Crossfeed(on = true)).shapesSound())
+        val shaper = SoundShaper(rate, 2)
+        shaper.apply(SoundSettings(limiter = false, mono = true, crossfeed = Crossfeed(on = true)), null, instant = true)
+        val input = FloatArray(200) { if (it % 2 == 0) 0.4f else 0f }
+        val output = FloatArray(input.size)
+        val n = shaper.process(input, 100, output)
+        assertEquals(0.2f, output[(n - 1) * 2 + 1], 1e-6f)
+    }
 }

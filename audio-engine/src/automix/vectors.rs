@@ -312,6 +312,7 @@ fn check(vectors: &Value) -> Vec<String> {
                 smart: flag(settings, "smart"),
                 filter_sweeps: flag(settings, "filterSweeps"),
                 beat_match: flag(settings, "beatMatch"),
+                fade_curve: FadeCurve::EqualPower,
             },
             &context_of(&case["context"]),
         );

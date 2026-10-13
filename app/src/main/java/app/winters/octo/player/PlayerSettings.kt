@@ -14,6 +14,7 @@ import app.winters.octo.ambient.AmbientPrefs
 import app.winters.octo.ambient.AmbientStrength
 import app.winters.octo.playback.AutomixSettings
 import app.winters.octo.playback.CopyPreference
+import app.winters.octo.playback.FadeCurve
 import app.winters.octo.playback.PITCH_RANGE_SEMITONES
 import app.winters.octo.playback.Pace
 import app.winters.octo.playback.StartAfter
@@ -51,6 +52,9 @@ data class PlayerPrefs(
     val smartTransitions: Boolean = true,
     val filterSweeps: Boolean = true,
     val matchTempo: Boolean = false,
+    // The shape of the crossfade with smart transitions off; smart
+    // transitions pick their own.
+    val crossfadeCurve: FadeCurve = FadeCurve.EqualPower,
     // Looking lyrics up online when the server and the song's files have none.
     val lyricsOnline: Boolean = true,
     // How fast music plays, whether the voice keeps its pitch at other
@@ -92,7 +96,13 @@ data class PlayerPrefs(
 
     // How the player plans the blends.
     val automix: AutomixSettings
-        get() = AutomixSettings(maxOverlapMs = crossfadeMs, smart = smartTransitions, filterSweeps = filterSweeps, beatMatch = matchTempo)
+        get() = AutomixSettings(
+            maxOverlapMs = crossfadeMs,
+            smart = smartTransitions,
+            filterSweeps = filterSweeps,
+            beatMatch = matchTempo,
+            fadeCurve = crossfadeCurve,
+        )
 
     // The speed and pitch the player is set to.
     val pace: Pace get() = paceOf(speed, keepPitch, pitchSemitones)
@@ -126,6 +136,7 @@ private val CROSSFADE_SECONDS = intPreferencesKey("crossfade_seconds")
 private val SMART_TRANSITIONS = booleanPreferencesKey("smart_transitions")
 private val FILTER_SWEEPS = booleanPreferencesKey("filter_sweeps")
 private val MATCH_TEMPO = booleanPreferencesKey("match_tempo")
+private val CROSSFADE_CURVE = stringPreferencesKey("crossfade_curve")
 private val LYRICS_ONLINE = booleanPreferencesKey("lyrics_online")
 private val SPEED = floatPreferencesKey("speed")
 private val KEEP_PITCH = booleanPreferencesKey("keep_pitch")
@@ -197,6 +208,7 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
             smartTransitions = stored[SMART_TRANSITIONS] ?: defaults.smartTransitions,
             filterSweeps = stored[FILTER_SWEEPS] ?: defaults.filterSweeps,
             matchTempo = stored[MATCH_TEMPO] ?: defaults.matchTempo,
+            crossfadeCurve = choice(stored[CROSSFADE_CURVE], defaults.crossfadeCurve),
             lyricsOnline = stored[LYRICS_ONLINE] ?: defaults.lyricsOnline,
             speed = snapSpeed(stored[SPEED] ?: defaults.speed),
             keepPitch = stored[KEEP_PITCH] ?: defaults.keepPitch,
@@ -256,6 +268,10 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
 
     suspend fun setMatchTempo(on: Boolean) {
         context.playerPrefs.edit { it[MATCH_TEMPO] = on }
+    }
+
+    suspend fun setCrossfadeCurve(curve: FadeCurve) {
+        context.playerPrefs.edit { it[CROSSFADE_CURVE] = curve.name }
     }
 
     suspend fun setLyricsOnline(on: Boolean) {
@@ -370,6 +386,7 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
             it[SMART_TRANSITIONS] = player.smartTransitions
             it[FILTER_SWEEPS] = player.filterSweeps
             it[MATCH_TEMPO] = player.matchTempo
+            it[CROSSFADE_CURVE] = player.crossfadeCurve.name
             it[LYRICS_ONLINE] = player.lyricsOnline
             it[SPEED] = snapSpeed(player.speed)
             it[KEEP_PITCH] = player.keepPitch

@@ -67,11 +67,19 @@ pub struct AutomixSettings {
     /// The longest a smart blend may last, in milliseconds; 0 uses the
     /// crossfade length.
     pub max_overlap_ms: u32,
+    /// The shape of the fixed crossfade, with smart transitions off.
+    pub fade_curve: FadeCurve,
 }
 
 impl Default for AutomixSettings {
     fn default() -> Self {
-        Self { smart_transitions: false, filter_sweeps: true, match_tempo: false, max_overlap_ms: 8_000 }
+        Self {
+            smart_transitions: false,
+            filter_sweeps: true,
+            match_tempo: false,
+            max_overlap_ms: 8_000,
+            fade_curve: FadeCurve::EqualPower,
+        }
     }
 }
 
@@ -84,7 +92,8 @@ pub fn gains(t: f64, k: f64) -> (f64, f64) {
 
 impl TransitionPlan {
     /// The equal-power crossfade at the end of the outgoing song: `overlap_ms`
-    /// long, ending as the song does.
+    /// long, ending as the song does. [`TransitionPlan::with_curve`] gives
+    /// it another shape.
     pub fn fixed_crossfade(len_a_ms: i64, overlap_ms: i64, why: &str) -> Self {
         let start_ms = (len_a_ms - overlap_ms).max(0);
         TransitionPlan {
@@ -104,7 +113,14 @@ impl TransitionPlan {
                 planner::seconds(start_ms),
                 planner::seconds(overlap_ms)
             ),
+            curve: FadeCurve::EqualPower,
         }
+    }
+
+    /// This fixed crossfade with `curve` for its shape, and the headroom
+    /// that shape plays with.
+    pub fn with_curve(self, curve: FadeCurve) -> Self {
+        TransitionPlan { curve, headroom_db: fade_headroom_db(curve), ..self }
     }
 
     /// This plan when its start has already passed, or comes too soon to
@@ -282,6 +298,8 @@ pub fn plan(input: &PlanInput) -> TransitionPlan {
 #[cfg(test)]
 pub type Planner = fn(&PlanInput) -> TransitionPlan;
 
+#[cfg(test)]
+mod fade_vectors;
 #[cfg(test)]
 mod synthetic;
 #[cfg(test)]

@@ -110,7 +110,25 @@ impl Default for ReplayGainSettings {
     }
 }
 
-/// The rest of the shaping: the limiter, balance and mono.
+/// Headphone crossfeed: each ear hears a little of the other side.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct CrossfeedSettings {
+    pub on: bool,
+    /// Where the sound fed to the other ear has fallen by 3 dB, 300 to
+    /// 2000 Hz.
+    pub cut_hz: f32,
+    /// How much quieter than the ear's own sound the other side is in the
+    /// bass, 1 to 15 dB.
+    pub feed_db: f32,
+}
+
+impl Default for CrossfeedSettings {
+    fn default() -> Self {
+        Self { on: false, cut_hz: 700.0, feed_db: 4.5 }
+    }
+}
+
+/// The rest of the shaping: crossfeed, the limiter, balance and mono.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct DspSettings {
     /// Catches any peak that would still clip, just below full scale.
@@ -118,11 +136,12 @@ pub struct DspSettings {
     /// From -1 (all left) to 1 (all right).
     pub balance: f32,
     pub mono: bool,
+    pub crossfeed: CrossfeedSettings,
 }
 
 impl Default for DspSettings {
     fn default() -> Self {
-        Self { limiter: true, balance: 0.0, mono: false }
+        Self { limiter: true, balance: 0.0, mono: false, crossfeed: CrossfeedSettings::default() }
     }
 }
 
