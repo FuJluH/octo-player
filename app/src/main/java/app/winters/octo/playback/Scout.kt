@@ -8,10 +8,14 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import androidx.annotation.OptIn
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.extractor.ExtractorsFactory
 import androidx.media3.inspector.MediaExtractorCompat
+import app.winters.octo.sound.AlacConfig
+import app.winters.octo.sound.AlacDecoder
+import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
@@ -98,7 +102,6 @@ class Scout(private val sources: DataSource.Factory, private val extractors: Ext
 
     private fun decodeSection(uri: Uri, fromMs: Long, toMs: Long, stop: () -> Boolean): SectionEnvelope? {
         val extractor = MediaExtractorCompat(extractors, sources)
-        var codec: MediaCodec? = null
         try {
             extractor.setDataSource(uri, 0)
             val track = (0 until extractor.trackCount).firstOrNull {
@@ -107,13 +110,27 @@ class Scout(private val sources: DataSource.Factory, private val extractors: Ext
             extractor.selectTrack(track)
             val format = extractor.getTrackFormat(track)
             if (fromMs > 0) extractor.seekTo(fromMs * 1_000, MediaExtractorCompat.SEEK_TO_PREVIOUS_SYNC)
-            val decoder = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
-            codec = decoder
+            val stretch = Stretch(fromMs, toMs)
+            // ALAC goes through Octo's own decoder, as it does when it plays.
+            if (format.getString(MediaFormat.KEY_MIME) == MimeTypes.AUDIO_ALAC) {
+                readAlac(extractor, format, stretch, stop)
+            } else {
+                readWithCodec(extractor, format, stretch, stop)
+            }
+            if (stop()) return null
+            return stretch.envelope()
+        } finally {
+            extractor.release()
+        }
+    }
+
+    private fun readWithCodec(extractor: MediaExtractorCompat, format: MediaFormat, stretch: Stretch, stop: () -> Boolean) {
+        val decoder = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
+        try {
             decoder.configure(format, null, null, 0)
             decoder.start()
 
             val info = MediaCodec.BufferInfo()
-            var builder: EnvelopeBuilder? = null
             var rate = 0
             var channels = 0
             var floats = false
@@ -141,7 +158,7 @@ class Scout(private val sources: DataSource.Factory, private val extractors: Ext
                     val newRate = out.getInteger(MediaFormat.KEY_SAMPLE_RATE)
                     val newChannels = out.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
                     // A stretch that changes its format halfway is not worth the trouble.
-                    if (builder != null && (newRate != rate || newChannels != channels)) break
+                    if (stretch.started && (newRate != rate || newChannels != channels)) break
                     rate = newRate
                     channels = newChannels
                     floats = out.containsKey(MediaFormat.KEY_PCM_ENCODING) &&
@@ -168,25 +185,58 @@ class Scout(private val sources: DataSource.Factory, private val extractors: Ext
                 }
                 val startMs = info.presentationTimeUs / 1_000.0
                 decoder.releaseOutputBuffer(index, false)
-                val frames = count / max(1, channels)
-                // Frames before the stretch (a seek lands on the frame before) are left out.
-                val skip = if (startMs < fromMs) ((fromMs - startMs) * rate / 1_000).toInt().coerceAtMost(frames) else 0
-                if (frames > skip) {
-                    val b = builder ?: EnvelopeBuilder(rate, channels, max(fromMs.toDouble(), startMs).toLong()).also { builder = it }
-                    b.push(samples, skip * channels, (frames - skip) * channels)
-                }
-                val endMs = startMs + frames * 1_000.0 / rate
-                if (endMs >= toMs || info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
+                val full = stretch.add(samples, count, rate, channels, startMs)
+                if (full || info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
             }
-            if (stop()) return null
-            return builder?.build()?.takeIf { it.size > 0 }
         } finally {
             try {
-                codec?.stop()
+                decoder.stop()
             } catch (_: Exception) {
             }
-            codec?.release()
-            extractor.release()
+            decoder.release()
         }
     }
+
+    private fun readAlac(extractor: MediaExtractorCompat, format: MediaFormat, stretch: Stretch, stop: () -> Boolean) {
+        val setup = format.getByteBuffer("csd-0") ?: return
+        val alac = AlacDecoder(AlacConfig.parse(ByteArray(setup.remaining()).also { setup.duplicate().get(it) }))
+        val samples = FloatArray(alac.samples.size)
+        var frame = ByteArray(4_096)
+        while (!stop()) {
+            val size = extractor.sampleSize
+            if (size < 0) break
+            if (size > frame.size) frame = ByteArray(size.toInt())
+            val read = extractor.readSampleData(ByteBuffer.wrap(frame), 0)
+            if (read < 0) break
+            val startMs = extractor.sampleTime / 1_000.0
+            extractor.advance()
+            val frames = alac.decode(frame, 0, read)
+            alac.toFloats(frames, samples)
+            if (stretch.add(samples, frames * alac.channels, alac.config.sampleRate, alac.channels, startMs)) break
+        }
+    }
+}
+
+// Collects a stretch's decoded sound, from `fromMs` to `toMs`, into its
+// envelope.
+private class Stretch(private val fromMs: Long, private val toMs: Long) {
+    private var builder: EnvelopeBuilder? = null
+
+    val started: Boolean get() = builder != null
+
+    // Takes `count` interleaved samples starting at `startMs`, and says
+    // whether the stretch is now complete.
+    fun add(samples: FloatArray, count: Int, rate: Int, channels: Int, startMs: Double): Boolean {
+        val frames = count / max(1, channels)
+        // Frames before the stretch (a seek lands on the frame before) are left out.
+        val skip = if (startMs < fromMs) ((fromMs - startMs) * rate / 1_000).toInt().coerceAtMost(frames) else 0
+        if (frames > skip) {
+            val b = builder ?: EnvelopeBuilder(rate, channels, max(fromMs.toDouble(), startMs).toLong()).also { builder = it }
+            b.push(samples, skip * channels, (frames - skip) * channels)
+        }
+        val endMs = startMs + frames * 1_000.0 / rate
+        return endMs >= toMs
+    }
+
+    fun envelope(): SectionEnvelope? = builder?.build()?.takeIf { it.size > 0 }
 }
