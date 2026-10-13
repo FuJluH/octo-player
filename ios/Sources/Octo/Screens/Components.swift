@@ -661,23 +661,27 @@ struct StationCard: View {
         .opacity(loading ? 0.5 : 1)
     }
 
-    /// Plays the list at once, a spinner in its place while it starts.
+    /// Plays the list at once, a spinner in its place while it starts. The glass circle is smaller
+    /// than the 44 by 44 points it answers taps across.
     private var playButton: some View {
         Button(action: play) {
             ZStack {
                 if loading {
                     LoadingSpinner(size: 18)
                 } else {
-                    Image(systemName: "play.fill").font(.system(size: 17, weight: .semibold))
+                    Image(systemName: "play.fill").font(.system(size: 15, weight: .semibold))
                 }
             }
-            .frame(width: 24, height: 24)
+            .frame(width: 22, height: 22)
             .foregroundStyle(.white)
+            .padding(8)
+            .glassEffect(.regular.interactive(), in: .circle)
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
         }
-        .buttonStyle(.glass)
-        .buttonBorderShape(.circle)
+        .buttonStyle(.plain)
         .disabled(loading)
-        .padding(8)
+        .padding(4)
         .accessibilityLabel("Play \(name)")
     }
 }
