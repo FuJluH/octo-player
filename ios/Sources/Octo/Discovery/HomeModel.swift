@@ -85,7 +85,8 @@ final class HomeModel {
     /// Picked once, then again on a pull, when the library changes size, or after a server copy.
     private(set) var surprise: [LibraryAlbum] = []
     private(set) var artists: [LibraryArtist] = []
-    /// The signed-in server's stations, kept through a failed load.
+    /// The signed-in server's stations, Octo's own and internet radio added to it, kept through a
+    /// failed load.
     private(set) var stations: [Station] = []
     /// The lists Octo made for the listener, kept through a failed load.
     private(set) var madeForYou: [Station] = []
@@ -194,9 +195,10 @@ final class HomeModel {
         loadCharts()
     }
 
-    /// The server shelves Home draws now: a hidden one is not asked for.
+    /// The server shelves Home draws now: a hidden one is not asked for. Radio and Internet radio
+    /// both come from the server's stations.
     private var wantedStationShelves: Set<HomeSection> {
-        Set([HomeSection.stations, .madeForYou].filter { AppSettings.shared.homeSectionShown($0) })
+        Set([HomeSection.stations, .internetRadio, .madeForYou].filter { AppSettings.shared.homeSectionShown($0) })
     }
 
     /// The chart is wanted while its shelf shows, and while the library is empty, where it sits
@@ -251,7 +253,7 @@ final class HomeModel {
         guard stationsTask == nil, !wanted.isEmpty, let discovery else { return }
         stationsTask = Task { [weak self] in
             var failed = false
-            if wanted.contains(.stations) {
+            if wanted.contains(.stations) || wanted.contains(.internetRadio) {
                 do {
                     let got = try await discovery.stations()
                     if Task.isCancelled { return }

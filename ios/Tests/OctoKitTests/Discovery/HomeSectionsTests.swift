@@ -3,7 +3,7 @@ import Testing
 @testable import OctoKit
 
 @Suite struct HomeSectionsTests {
-    private let defaultIds = "pinned,recentlyPlayed,madeForYou,stations,recentlyAdded,mostPlayed,favoriteAlbums,charts,artists,"
+    private let defaultIds = "pinned,recentlyPlayed,madeForYou,stations,internetRadio,recentlyAdded,mostPlayed,favoriteAlbums,charts,artists,"
         + "somethingDifferent,notPlayedLately,neverFinished,neverPlayed"
 
     private func ids(_ entries: [HomeSectionEntry]) -> [String] { entries.map { ($0.shown ? "" : "-") + $0.section.rawValue } }
@@ -21,7 +21,7 @@ import Testing
     }
 
     @Test func aStoredOrderReadsBackTheSame() {
-        let stored = "charts,-pinned,neverPlayed,recentlyPlayed,madeForYou,stations,recentlyAdded,mostPlayed,favoriteAlbums,artists,"
+        let stored = "charts,-pinned,neverPlayed,recentlyPlayed,madeForYou,stations,-internetRadio,recentlyAdded,mostPlayed,favoriteAlbums,artists,"
             + "-somethingDifferent,notPlayedLately,neverFinished"
         let entries = homeSectionOrder(stored: stored)
         #expect(encodeHomeSections(entries) == stored)
@@ -42,24 +42,31 @@ import Testing
     }
 
     @Test func aMissingSectionGoesInAfterTheOneBeforeItByDefault() {
-        // "stations" is missing; "madeForYou" comes before it by default.
+        // "stations" and "internetRadio" are missing; "madeForYou" comes before them by default.
         let entries = homeSectionOrder(stored: "madeForYou,pinned,recentlyPlayed,recentlyAdded,mostPlayed,favoriteAlbums,charts,artists,"
             + "somethingDifferent,notPlayedLately,neverFinished,neverPlayed")
-        #expect(Array(ids(entries).prefix(4)) == ["madeForYou", "stations", "pinned", "recentlyPlayed"])
+        #expect(Array(ids(entries).prefix(5)) == ["madeForYou", "stations", "internetRadio", "pinned", "recentlyPlayed"])
         #expect(entries.first { $0.section == .stations }?.shown == true)
+    }
+
+    @Test func anOrderSavedBeforeInternetRadioGetsItRightAfterRadio() {
+        let entries = homeSectionOrder(stored: "-stations,charts,pinned,recentlyPlayed,madeForYou,recentlyAdded,mostPlayed,favoriteAlbums,"
+            + "artists,somethingDifferent,notPlayedLately,neverFinished,neverPlayed")
+        #expect(Array(ids(entries).prefix(3)) == ["-stations", "internetRadio", "charts"])
+        #expect(entries.count == HomeSection.allCases.count)
     }
 
     @Test func missingSectionsInARowKeepTheirDefaultOrder() {
         let entries = homeSectionOrder(stored: "-recentlyPlayed,neverPlayed")
-        #expect(ids(entries) == ["pinned", "-recentlyPlayed", "madeForYou", "stations", "recentlyAdded", "mostPlayed", "favoriteAlbums",
-                                 "charts", "artists", "somethingDifferent", "notPlayedLately", "neverFinished", "neverPlayed"])
+        #expect(ids(entries) == ["pinned", "-recentlyPlayed", "madeForYou", "stations", "internetRadio", "recentlyAdded", "mostPlayed",
+                                 "favoriteAlbums", "charts", "artists", "somethingDifferent", "notPlayedLately", "neverFinished", "neverPlayed"])
     }
 
     @Test func aMissingFirstSectionGoesFirst() {
         // "pinned" has nothing before it by default; "artists" and the rest follow "charts".
         let entries = homeSectionOrder(stored: "charts,recentlyPlayed")
         #expect(ids(entries) == ["pinned", "charts", "artists", "somethingDifferent", "notPlayedLately", "neverFinished", "neverPlayed",
-                                 "recentlyPlayed", "madeForYou", "stations", "recentlyAdded", "mostPlayed", "favoriteAlbums"])
+                                 "recentlyPlayed", "madeForYou", "stations", "internetRadio", "recentlyAdded", "mostPlayed", "favoriteAlbums"])
     }
 
     @Test func aMissingSectionFollowsTheNearestEarlierOneThere() {
@@ -76,8 +83,8 @@ import Testing
     }
 
     @Test func movingAsAListDragReportsIt() {
-        // Drag "charts" (7) to the top.
-        var entries = moveHomeSections(defaultHomeSections, fromOffsets: IndexSet(integer: 7), toOffset: 0)
+        // Drag "charts" (8) to the top.
+        var entries = moveHomeSections(defaultHomeSections, fromOffsets: IndexSet(integer: 8), toOffset: 0)
         #expect(Array(ids(entries).prefix(3)) == ["charts", "pinned", "recentlyPlayed"])
         // Drag "pinned" (now 1) down below "stations" (now 4): it lands before offset 5.
         entries = moveHomeSections(entries, fromOffsets: IndexSet(integer: 1), toOffset: 5)
@@ -107,6 +114,8 @@ import Testing
     }
 
     @Test func eachSectionHasHomesName() {
+        #expect(HomeSection.stations.title == "Radio")
+        #expect(HomeSection.internetRadio.title == "Internet radio")
         #expect(HomeSection.notPlayedLately.title == "Not played in 6 months")
         #expect(HomeSection.neverFinished.title == "Albums you never finished")
         #expect(HomeSection.neverPlayed.title == "Unplayed albums")

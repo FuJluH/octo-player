@@ -78,7 +78,8 @@ struct HomeView: View {
         case .recentlyPlayed:
             albumShelf(section.title, model.recentlyPlayed, destination: .library(.history(mostPlayed: false)))
         case .madeForYou: stationShelf(section.title, model.madeForYou, counts: true)
-        case .stations: stationShelf(section.title, model.stations, counts: false)
+        case .stations: stationShelf(section.title, octoRadio(model.stations), counts: false)
+        case .internetRadio: stationShelf(section.title, internetRadio(model.stations), counts: false)
         case .recentlyAdded: albumShelf(section.title, model.recentlyAdded)
         case .mostPlayed: songShelf(section.title, model.mostPlayed.map(\.asSong), destination: .library(.history(mostPlayed: true)))
         case .favoriteAlbums: albumShelf(section.title, model.favoriteAlbums, destination: .library(.favorites(.albums)))
@@ -136,9 +137,10 @@ struct HomeView: View {
         }
     }
 
-    /// The server's stations, or the lists it made for the listener (`counts` shows how many
-    /// songs each holds); tapping one opens its songs and its play button plays them, while an
-    /// added internet station plays its stream. Their titles are never buttons.
+    /// The server's stations, the internet radio stations added to it, or the lists it made for
+    /// the listener (`counts` shows how many songs each holds); tapping one opens its songs and
+    /// its play button plays them, while an internet radio station plays its stream. Their titles
+    /// are never buttons.
     @ViewBuilder
     private func stationShelf(_ title: String, _ stations: [Station], counts: Bool) -> some View {
         if !stations.isEmpty {

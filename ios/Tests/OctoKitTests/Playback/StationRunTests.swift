@@ -3,16 +3,16 @@ import Testing
 @testable import OctoKit
 
 @Suite struct StationSourceTest {
-    let mix = QueueSource.station(id: "or1234", name: "Your Mix")
+    let mix = QueueSource.station(id: "or1234", name: "Your Radio")
 
     @Test func aStationIsHeadedByItsName() {
-        #expect(queueSourceTitle(mix) == "Next from Your Mix")
+        #expect(queueSourceTitle(mix) == "Next from Your Radio")
         #expect(queueSourceTitle(.station(id: "or1", name: "")) == "Up next")
     }
 
     @Test func aStationIsSavedWithItsIdAndName() {
-        #expect(mix.encoded == "station:or1234:Your Mix")
-        #expect(queueSourceOf("station:or1234:Your Mix") == mix)
+        #expect(mix.encoded == "station:or1234:Your Radio")
+        #expect(queueSourceOf("station:or1234:Your Radio") == mix)
     }
 
     @Test func aStationSurvivesBeingSavedWithColonsInItsName() {
@@ -22,7 +22,7 @@ import Testing
     }
 
     @Test func aStationWithNoIdReadsBackAsAListWithNoName() {
-        #expect(queueSourceOf("station::Your Mix") == .none)
+        #expect(queueSourceOf("station::Your Radio") == .none)
         #expect(queueSourceOf("station:") == .none)
     }
 
@@ -37,7 +37,7 @@ import Testing
     }
 
     @Test func onlyOctosStationsPlayAsStations() {
-        #expect(serverListSource(id: "or1234", name: "Your Mix") == .station(id: "or1234", name: "Your Mix"))
+        #expect(serverListSource(id: "or1234", name: "Your Radio") == .station(id: "or1234", name: "Your Radio"))
         #expect(serverListSource(id: "og5678", name: "Deep Cuts") == .played("Deep Cuts"))
         #expect(serverListSource(id: "og5678", name: "") == .none)
         #expect(serverListSource(id: "or:12", name: "Odd") == .played("Odd"))
@@ -52,8 +52,8 @@ import Testing
 }
 
 @Suite struct StationTopUpTest {
-    let mix = QueueSource.station(id: "or1", name: "Your Mix")
-    let discovery = QueueSource.station(id: "or2", name: "Discovery")
+    let mix = QueueSource.station(id: "or1", name: "Your Radio")
+    let discovery = QueueSource.station(id: "or2", name: "Discovery Radio")
 
     func run(_ count: Int) -> [QueueSource] { Array(repeating: mix, count: count) }
 
@@ -95,13 +95,13 @@ import Testing
 }
 
 @Suite struct StationSongsQueuedTest {
-    let mix = QueueSource.station(id: "or1", name: "Your Mix")
+    let mix = QueueSource.station(id: "or1", name: "Your Radio")
 
     func item(_ id: String, _ source: QueueSource) -> QueueItem { QueueItem(trackId: id, uri: "", title: id, source: source) }
 
     @Test func onlyThatStationsSongsAreTold() {
-        let items = [item("a", mix), item("x", .you), item("b", mix), item("d", .station(id: "or2", name: "Discovery")),
-                     item("c", .station(id: "or1", name: "Your Mix")), item("e", .autoplay)]
+        let items = [item("a", mix), item("x", .you), item("b", mix), item("d", .station(id: "or2", name: "Discovery Radio")),
+                     item("c", .station(id: "or1", name: "Your Radio")), item("e", .autoplay)]
         #expect(stationSongsQueued(items, station: mix) == ["a", "b", "c"])
     }
 
@@ -123,7 +123,7 @@ import Testing
 @Suite struct StationSongsCallTest {
     static let answer = """
     {"subsonic-response":{"status":"ok","version":"1.16.1","type":"octo","openSubsonic":true,
-     "stationSongs":{"id":"or1234","name":"Your Mix","entry":[
+     "stationSongs":{"id":"or1234","name":"Your Radio","entry":[
       {"id":"s1","title":"Nikes","artist":"Frank Ocean","duration":314},
       {"id":77,"title":"Ivy","artist":"Frank Ocean","duration":"249","isExternal":true}]}}}
     """
@@ -131,14 +131,14 @@ import Testing
     @Test func theAnswerHasTheStationAndItsSongs() throws {
         let songs: StationSongs = try SubsonicClient.decode(Data(Self.answer.utf8), key: "stationSongs")
         #expect(songs.id == "or1234")
-        #expect(songs.name == "Your Mix")
+        #expect(songs.name == "Your Radio")
         #expect(songs.entry.map(\.id) == ["s1", "77"])
         #expect(songs.entry[1].duration == 249)
         #expect(songs.entry[1].isExternal)
     }
 
     @Test func aStationWithNothingMoreHasNoSongs() throws {
-        let json = #"{"subsonic-response":{"status":"ok","version":"1.16.1","stationSongs":{"id":"or1","name":"Your Mix"}}}"#
+        let json = #"{"subsonic-response":{"status":"ok","version":"1.16.1","stationSongs":{"id":"or1","name":"Your Radio"}}}"#
         let songs: StationSongs = try SubsonicClient.decode(Data(json.utf8), key: "stationSongs")
         #expect(songs.entry.isEmpty)
     }
@@ -176,8 +176,16 @@ import Testing
         #expect(!stationHasPlayButton(added))
     }
 
+    @Test func homeShowsOctosStationsAsRadioAndAddedStationsAsInternetRadio() {
+        let radio = Station(id: "or1234", name: "Your Radio", artwork: nil)
+        let kexp = Station(id: "7", name: "KEXP", artwork: nil, streamUrl: "https://kexp.example/live")
+        let discovery = Station(id: "or5678", name: "Discovery Radio", artwork: nil)
+        #expect(octoRadio([radio, kexp, discovery]) == [radio, discovery])
+        #expect(internetRadio([radio, kexp, discovery]) == [kexp])
+    }
+
     @Test func octosStationsAndMadeForYouListsOpenTheirSongs() {
-        let mix = Station(id: "or1234", name: "Your Mix", artwork: nil)
+        let mix = Station(id: "or1234", name: "Your Radio", artwork: nil)
         let deepCuts = Station(id: "og5678", name: "Deep Cuts", artwork: nil, songCount: 40)
         let blank = Station(id: "or9", name: "Blank", artwork: nil, streamUrl: "  ")
         for station in [mix, deepCuts, blank] {

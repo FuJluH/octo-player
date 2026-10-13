@@ -103,6 +103,14 @@ public func homeStations(_ stations: [RadioStation], sourceId: String) -> [Stati
     }
 }
 
+/// Octo's own stations among those Home shows, for its Radio shelf: the ones that play the songs
+/// they have lined up and keep going.
+public func octoRadio(_ stations: [Station]) -> [Station] { stations.filter(stationHasPlayButton) }
+
+/// The internet radio stations added to the server among those Home shows, for its Internet
+/// radio shelf: the ones that play a stream.
+public func internetRadio(_ stations: [Station]) -> [Station] { stations.filter { !stationHasPlayButton($0) } }
+
 /// What a search found beyond the library. `partAlbums` are albums the library holds some of the
 /// songs of, kept apart from those it holds none of, so the "Not in your library" title is never
 /// over one that partly is.
