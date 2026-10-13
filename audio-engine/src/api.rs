@@ -70,6 +70,10 @@ pub struct QueueItem {
     /// `StreamTitle` events.
     #[uniffi(default)]
     pub live: bool,
+    /// The source is an HLS playlist even though its address and its
+    /// server's content type do not say so.
+    #[uniffi(default)]
+    pub hls: bool,
 }
 
 /// What happens at the end of the queue or the song.
@@ -177,7 +181,8 @@ pub enum EngineEvent {
         position_ms: f64,
     },
     /// A live stream's title changed, as it is heard: usually "Artist -
-    /// Song" for what the station plays now.
+    /// Song" for what the station plays now. An empty title says the
+    /// stream no longer names what it plays.
     StreamTitle {
         item_id: String,
         title: String,

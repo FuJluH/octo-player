@@ -132,6 +132,7 @@ fn item(id: &str, path: &Path) -> QueueItem {
         genre: None,
         bpm: None,
         live: false,
+        hls: false,
     }
 }
 
@@ -1234,5 +1235,42 @@ fn a_live_radio_stream_plays_on_with_its_titles_and_takes_no_seek() {
     assert!(after > heard && after < heard + 2_000.0, "{heard} then {after}");
     assert_eq!(server.asked().len(), 1);
     assert_eq!(events.story(), ["start radio"]);
+    engine.shutdown();
+}
+
+#[test]
+fn a_live_stream_paused_a_long_while_starts_again_where_it_is_now() {
+    use crate::testing::http_server::ScriptServer;
+    let server = ScriptServer::start(|_, conn, stopped| super::live::icy_radio(stopped, conn));
+    let (engine, events, _, pump) = driven_engine();
+    let radio = QueueItem { source: server.url("/stream"), live: true, ..item("radio", Path::new("")) };
+    engine.load(vec![radio], 0, 0, true).unwrap();
+    play_until(&pump, &events, "start", 1_000, |e| matches!(e, EngineEvent::TrackStarted { .. }));
+    for _ in 0..20 {
+        pump.play();
+    }
+    // A short pause carries on over the same connection.
+    engine.pause().unwrap();
+    pump.play();
+    engine.play().unwrap();
+    for _ in 0..20 {
+        pump.play();
+    }
+    assert_eq!(server.asked().len(), 1);
+    // A long one (300 ms in tests) connects again, at the live edge.
+    engine.pause().unwrap();
+    pump.play();
+    std::thread::sleep(Duration::from_millis(400));
+    engine.play().unwrap();
+    let again = |e: &EngineEvent| matches!(e, EngineEvent::TrackStarted { .. });
+    for _ in 0..1_000 {
+        pump.play();
+        if events.all().iter().filter(|e| again(e)).count() == 2 {
+            break;
+        }
+    }
+    assert_eq!(events.all().iter().filter(|e| again(e)).count(), 2, "{:?}", events.story());
+    assert_eq!(server.asked().len(), 2);
+    assert!(engine.position().position_ms < 2_000.0, "{}", engine.position().position_ms);
     engine.shutdown();
 }

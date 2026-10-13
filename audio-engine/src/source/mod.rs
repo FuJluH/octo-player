@@ -44,10 +44,10 @@ pub fn is_remote(source: &str) -> bool {
 }
 
 /// Opens a file path, a `file://` address, or an HTTP(S) address, which
-/// may be an HLS playlist.
+/// may be an HLS playlist: by its extension, its content type, or `http.hls`.
 pub fn open(source: &str, http: HttpOptions) -> Result<Opened, Failure> {
     if is_remote(source) {
-        if hls::is_hls_url(source) {
+        if http.hls || hls::is_hls_url(source) {
             return hls::open(source, http);
         }
         return open_stream(source, http, 0);

@@ -401,3 +401,143 @@ fn an_icy_radio_stream_decodes_and_hands_on_titles_as_heard() {
     assert!(r.start_secs < 5.0, "{r:?}");
     assert_eq!(server.asked().len(), 1);
 }
+
+// Waits for a deck to fail, reading what it gives meanwhile.
+fn read_to_failure(deck: &Deck) -> crate::error::Failure {
+    let until = Instant::now() + Duration::from_secs(20);
+    let mut buf = vec![0.0; 4096];
+    loop {
+        let r = deck.read(&mut buf);
+        if let Some(f) = r.failure {
+            return f;
+        }
+        assert!(!r.finished, "it ended without a failure");
+        if r.frames == 0 {
+            assert!(Instant::now() < until, "it never failed");
+            thread::sleep(Duration::from_millis(2));
+        }
+    }
+}
+
+#[test]
+fn empty_segments_are_passed_over_and_the_stream_plays_on() {
+    let segments = adts_segments("tone-440-44k-stereo.aac");
+    let polls = AtomicU64::new(0);
+    let server = ScriptServer::start(move |asked, conn, _| {
+        let t = asked.target.as_str();
+        if t.ends_with(".m3u8") {
+            let n = polls.fetch_add(1, Ordering::SeqCst);
+            answer(conn, "application/vnd.apple.mpegurl", live_playlist(n, "aac", "", |_| None).as_bytes());
+        } else if let Some(seq) = number(t) {
+            match seq % 3 {
+                // Nothing at all, and only the timing tag.
+                0 => {
+                    let _ = conn.write_all(
+                        b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    );
+                }
+                1 => answer(conn, "audio/aac", &with_id3v2(&[], &[("TIT2", "timing")], &[])),
+                _ => answer(conn, "audio/aac", &segments[seq as usize % segments.len()]),
+            }
+        } else {
+            not_found(conn);
+        }
+    });
+    let deck = Deck::open(1, server.url("/live/radio.m3u8"), 0.0, live());
+    let sound = read_secs(&deck, 2.0);
+    let middle = &sound[sound.len() / 4..];
+    assert!((steady_frequency(middle, 44_100) - 440.0).abs() < 3.0, "{}", steady_frequency(middle, 44_100));
+}
+
+#[test]
+fn a_stream_whose_numbers_start_again_is_joined_again() {
+    let segments = adts_segments("tone-440-44k-stereo.aac");
+    let polls = AtomicU64::new(0);
+    let server = ScriptServer::start(move |asked, conn, _| {
+        let t = asked.target.as_str();
+        if t.ends_with(".m3u8") {
+            let n = polls.fetch_add(1, Ordering::SeqCst);
+            // The encoder starts over after four polls, numbering from 0.
+            let first = if n < 4 { 1_000 + n } else { n - 4 };
+            answer(
+                conn,
+                "application/vnd.apple.mpegurl",
+                live_playlist(first, "aac", "", |_| None).as_bytes(),
+            );
+        } else if let Some(seq) = number(t) {
+            answer(conn, "audio/aac", &segments[seq as usize % segments.len()]);
+        } else {
+            not_found(conn);
+        }
+    });
+    let deck = Deck::open(1, server.url("/live/radio.m3u8"), 0.0, live());
+    let sound = read_secs(&deck, 4.0);
+    let middle = &sound[sound.len() / 4..];
+    assert!((steady_frequency(middle, 44_100) - 440.0).abs() < 3.0, "{}", steady_frequency(middle, 44_100));
+    let fetched: Vec<u64> = server.asked().iter().filter_map(|a| number(&a.target)).collect();
+    let restart = fetched.iter().position(|&n| n < 1_000).expect("never joined again after the restart");
+    assert!(fetched[..restart].iter().all(|&n| n >= 1_000), "{fetched:?}");
+}
+
+#[test]
+fn a_live_playlist_that_stops_growing_fails() {
+    let segments = adts_segments("tone-440-44k-stereo.aac");
+    let server = ScriptServer::start(move |asked, conn, _| {
+        let t = asked.target.as_str();
+        if t.ends_with(".m3u8") {
+            answer(conn, "application/vnd.apple.mpegurl", live_playlist(0, "aac", "", |_| None).as_bytes());
+        } else if let Some(seq) = number(t) {
+            answer(conn, "audio/aac", &segments[seq as usize % segments.len()]);
+        } else {
+            not_found(conn);
+        }
+    });
+    let started = Instant::now();
+    let deck = Deck::open(1, server.url("/live/radio.m3u8"), 0.0, live());
+    let failure = read_to_failure(&deck);
+    assert_eq!(failure.kind, ErrorKind::Network);
+    assert!(failure.message.contains("stopped adding"), "{failure}");
+    // Three target durations of 0.3 s at least.
+    assert!(started.elapsed() >= Duration::from_millis(900));
+}
+
+#[test]
+fn segments_the_server_keeps_saying_are_missing_end_the_stream() {
+    let polls = AtomicU64::new(0);
+    let server = ScriptServer::start(move |asked, conn, _| {
+        if asked.target.ends_with(".m3u8") {
+            let n = polls.fetch_add(1, Ordering::SeqCst);
+            answer(conn, "application/vnd.apple.mpegurl", live_playlist(n, "aac", "", |_| None).as_bytes());
+        } else {
+            not_found(conn);
+        }
+    });
+    let deck = Deck::open(1, server.url("/live/radio.m3u8"), 0.0, live());
+    let failure = read_to_failure(&deck);
+    assert_eq!(failure.kind, ErrorKind::NotFound, "{failure}");
+    let missing = server.asked().iter().filter(|a| a.target.starts_with("/seg/")).count();
+    assert_eq!(missing, 8);
+}
+
+#[test]
+fn an_hls_station_with_a_plain_address_opens_as_hls_when_marked() {
+    let segments = adts_segments("tone-440-44k-stereo.aac");
+    let polls = AtomicU64::new(0);
+    let server = ScriptServer::start(move |asked, conn, _| {
+        let t = asked.target.as_str();
+        if t == "/stream" {
+            let n = polls.fetch_add(1, Ordering::SeqCst);
+            answer(conn, "application/octet-stream", live_playlist(n, "aac", "", |_| None).as_bytes());
+        } else if let Some(seq) = number(t).filter(|_| t.starts_with("/seg/")) {
+            answer(conn, "audio/aac", &segments[seq as usize % segments.len()]);
+        } else {
+            not_found(conn);
+        }
+    });
+    let marked = Deck::open(1, server.url("/stream"), 0.0, HttpOptions { hls: true, ..live() });
+    read_secs(&marked, 1.5);
+    // Unmarked, the playlist is read as a live stream of sound, which it is
+    // not: no sound ever comes, and the stream counts as gone.
+    let unmarked = Deck::open(2, server.url("/stream"), 0.0, live());
+    read_to_failure(&unmarked);
+}

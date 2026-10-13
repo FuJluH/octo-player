@@ -25,8 +25,8 @@ impl IcySplitter {
     }
 
     /// Adds the audio in `input` to `audio`, and for each metadata block
-    /// that ends in it, its title with where in `audio` the block sat. A
-    /// block without a title gives an empty one.
+    /// that ends in it with a `StreamTitle`, that title with where in
+    /// `audio` the block sat. An empty title is kept: it says there is none.
     pub fn feed(&mut self, mut input: &[u8], audio: &mut Vec<u8>, titles: &mut Vec<(usize, String)>) {
         while !input.is_empty() {
             if self.audio_left > 0 {
@@ -56,8 +56,8 @@ impl IcySplitter {
             }
             self.meta_left = None;
             self.audio_left = self.metaint;
-            if !self.meta.is_empty() {
-                titles.push((audio.len(), stream_title(&self.meta).unwrap_or_default()));
+            if let Some(title) = stream_title(&self.meta) {
+                titles.push((audio.len(), title));
             }
         }
     }

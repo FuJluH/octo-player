@@ -32,6 +32,15 @@ const MOST_HOPS: u32 = 4;
 // Fetches in a row that may fail before the stream counts as gone.
 const RETRIES: u32 = 4;
 
+// Segments in a row the server may say are not there before the stream
+// counts as gone.
+const MISSING_IN_A_ROW: u32 = 8;
+
+// A live playlist that adds nothing for this many target durations (and at
+// least twenty times the first reconnect wait, 20 s by default) has stopped.
+const STOPPED_AFTER_TARGETS: u32 = 3;
+const STOPPED_AFTER_WAITS: u32 = 20;
+
 /// Whether an address names an HLS playlist by its extension.
 pub fn is_hls_url(url: &str) -> bool {
     let path = url.split(['?', '#']).next().unwrap_or(url);
@@ -99,7 +108,14 @@ fn start(url: String, media: Media, http: HttpOptions) -> Result<Opened, Failure
     let worker = shared.clone();
     thread::Builder::new()
         .name("octo-hls".into())
-        .spawn(move || run(worker, url, media))
+        .spawn(move || {
+            let ended = worker.clone();
+            // Whatever goes wrong in there, the reader hears of it.
+            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(worker, url, media))).is_err() {
+                let broke = Failure::new(ErrorKind::Other, "reading the HLS stream broke down");
+                ended.end(Some(broke));
+            }
+        })
         .map_err(|e| Failure::new(ErrorKind::Other, format!("could not start fetching: {e}")))?;
     let reader = PeriodReader::new(shared.clone());
     Ok(Opened {
@@ -162,8 +178,12 @@ impl Shared {
         }
     }
 
-    // Queues a piece once there is room. False once nobody reads.
+    // Queues a piece once there is room. False once nobody reads. Nothing
+    // is queued for no bytes, which a reader would take for the end.
     fn push(&self, piece: Piece) -> bool {
+        if matches!(&piece, Piece::Bytes(bytes) if bytes.is_empty()) {
+            return !self.stale();
+        }
         let mut state = self.lock();
         loop {
             if state.closed || self.cancelled() {
@@ -238,9 +258,12 @@ impl Read for PeriodReader {
                     Some(Piece::Bytes(_)) => {
                         let Some(Piece::Bytes(bytes)) = state.pieces.pop_front() else { unreachable!() };
                         state.queued -= bytes.len();
+                        shared.wake.notify_all();
+                        if bytes.is_empty() {
+                            continue;
+                        }
                         self.current = bytes;
                         self.at = 0;
-                        shared.wake.notify_all();
                         break;
                     }
                     // Left for the next period to take.
@@ -358,6 +381,10 @@ fn run(shared: Arc<Shared>, url: String, first: Media) {
     // be MPEG-TS; it carries a packet or a PES packet cut between segments.
     let mut ts: Option<TsDemuxer> = None;
     let mut failures = 0u32;
+    // Segments in a row the server said were not there.
+    let mut missing = 0u32;
+    // When the playlist last added a segment.
+    let mut grew = Instant::now();
     loop {
         let media = match playlist.take() {
             Some(media) => media,
@@ -386,25 +413,35 @@ fn run(shared: Arc<Shared>, url: String, first: Media) {
         if let Err(failure) = check(&media) {
             return shared.end(Some(failure));
         }
-        let last = media.first_seq + media.segments.len() as u64;
+        let last = media.first_seq.saturating_add(media.segments.len() as u64);
+        // Live, start three segments from the newest, as players do.
+        let edge = last.saturating_sub(3).max(media.first_seq);
+        // Numbered from below where it was: the encoder started over.
+        let restarted = next.is_some_and(|n| last < n);
         let from = match next {
+            Some(n) if restarted => {
+                log::warn!("the HLS stream started its numbers again; joining at {edge} after {n}");
+                edge
+            }
             Some(n) if n < media.first_seq => {
                 log::warn!("the HLS stream moved on past {n}; carrying on at {}", media.first_seq);
                 media.first_seq
             }
             Some(n) => n,
-            // Live, start three segments from the newest, as players do.
-            None if !media.ended => last.saturating_sub(3).max(media.first_seq),
+            None if !media.ended => edge,
             None => media.first_seq,
         };
         let mut added = false;
+        let mut rejoin = restarted;
         for segment in media.segments.iter().filter(|s| s.seq >= from) {
             if shared.stale() {
                 return;
             }
-            // A new period: after a discontinuity, or when the init segment changes.
+            // A new period: after a discontinuity, when the init segment
+            // changes, or where the stream was joined again.
             let started = init.is_some();
-            let fresh = !started || segment.discontinuity || init.as_ref() != Some(&segment.map);
+            let fresh = !started || segment.discontinuity || rejoin || init.as_ref() != Some(&segment.map);
+            rejoin = false;
             if started && fresh && !shared.push(Piece::Break) {
                 return;
             }
@@ -424,10 +461,17 @@ fn run(shared: Arc<Shared>, url: String, first: Media) {
                 ts = None;
             }
             let mut bytes = match fetch_retrying(&shared, &segment.uri, segment.range, &mut failures) {
-                Fetched::Bytes(bytes) => bytes,
+                Fetched::Bytes(bytes) => {
+                    missing = 0;
+                    bytes
+                }
                 Fetched::Missing(failure) => {
+                    missing += 1;
+                    if missing >= MISSING_IN_A_ROW {
+                        return shared.end(Some(failure));
+                    }
                     log::warn!("skipping an HLS segment: {failure}");
-                    next = Some(segment.seq + 1);
+                    next = Some(segment.seq.saturating_add(1));
                     continue;
                 }
                 Fetched::Gone => return,
@@ -452,11 +496,19 @@ fn run(shared: Arc<Shared>, url: String, first: Media) {
             if !shared.push(Piece::Bytes(bytes)) {
                 return;
             }
-            next = Some(segment.seq + 1);
+            next = Some(segment.seq.saturating_add(1));
             added = true;
         }
         if media.ended {
             return shared.end(None);
+        }
+        let stopped_after =
+            (media.target * STOPPED_AFTER_TARGETS).max(shared.opts.live_backoff * STOPPED_AFTER_WAITS);
+        if added {
+            grew = Instant::now();
+        } else if grew.elapsed() > stopped_after {
+            let stopped = "the HLS stream stopped adding to its playlist";
+            return shared.end(Some(Failure::new(ErrorKind::Network, stopped)));
         }
         // A playlist with nothing new is asked again sooner.
         let wait = if added { media.target } else { media.target / 2 };
@@ -520,7 +572,10 @@ fn get(
         req = req.header(name, value);
     }
     if let Some((offset, len)) = range {
-        req = req.header("Range", format!("bytes={offset}-{}", offset + len.max(1) - 1));
+        let end = offset
+            .checked_add(len.max(1) - 1)
+            .ok_or_else(|| Failure::new(ErrorKind::InvalidArgument, "an HLS byte range runs past the end"))?;
+        req = req.header("Range", format!("bytes={offset}-{end}"));
     }
     let response =
         req.config().timeout_global(Some(Duration::from_secs(30))).build().call().map_err(|e| match e {
@@ -730,8 +785,9 @@ fn parse_media(lines: &[&str], base: &str) -> Media {
     let mut range_end: Option<(String, u64)> = None;
     for line in lines {
         if let Some(v) = line.strip_prefix("#EXT-X-TARGETDURATION:") {
-            if let Ok(secs) = v.trim().parse::<f64>() {
-                media.target = Duration::from_secs_f64(secs.clamp(0.2, 60.0));
+            let secs = v.trim().parse::<f64>().ok().filter(|s| s.is_finite());
+            if let Some(target) = secs.and_then(|s| Duration::try_from_secs_f64(s.clamp(0.2, 60.0)).ok()) {
+                media.target = target;
             }
         } else if let Some(v) = line.strip_prefix("#EXT-X-MEDIA-SEQUENCE:") {
             media.first_seq = v.trim().parse().unwrap_or(0);
@@ -759,14 +815,14 @@ fn parse_media(lines: &[&str], base: &str) -> Media {
         } else if !line.starts_with('#') {
             let uri = resolve(base, line);
             let n = *seq.get_or_insert(media.first_seq);
-            seq = Some(n + 1);
-            let part = range.take().map(|(len, offset)| {
+            seq = Some(n.saturating_add(1));
+            let part = range.take().and_then(|(len, offset)| {
                 let offset = offset.unwrap_or_else(|| match &range_end {
                     Some((u, end)) if *u == uri => *end,
                     _ => 0,
                 });
-                range_end = Some((uri.clone(), offset + len));
-                (offset, len)
+                range_end = Some((uri.clone(), offset.checked_add(len)?));
+                Some((offset, len))
             });
             media.segments.push(Segment {
                 seq: n,
@@ -907,5 +963,36 @@ mod tests {
         assert_eq!(bytes, b"\xff\xf1");
         assert!(is_transport_stream(&[0x47; 400]));
         assert!(!is_transport_stream(b"\xff\xf1rest"));
+    }
+
+    #[test]
+    fn odd_numbers_in_a_playlist_are_survived() {
+        let text = "#EXTM3U
+#EXT-X-TARGETDURATION:nan
+#EXT-X-MEDIA-SEQUENCE:18446744073709551615
+            #EXT-X-BYTERANGE:18446744073709551615@18446744073709551615
+#EXTINF:4,
+a.aac
+#EXTINF:4,
+b.aac
+";
+        let Playlist::Media(media) = parse(text, "http://h/x.m3u8") else { panic!() };
+        assert_eq!(media.target, Duration::from_secs(6));
+        assert_eq!(media.segments[0].range, None);
+        assert_eq!(media.segments[1].seq, u64::MAX);
+        for odd in ["inf", "-inf", "1e400", "-3"] {
+            let text = format!(
+                "#EXTM3U
+#EXT-X-TARGETDURATION:{odd}
+#EXTINF:4,
+a.aac
+"
+            );
+            let Playlist::Media(media) = parse(&text, "http://h/x.m3u8") else { panic!() };
+            assert!(
+                media.target >= Duration::from_millis(200) && media.target <= Duration::from_secs(60),
+                "{odd}"
+            );
+        }
     }
 }

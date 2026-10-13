@@ -143,6 +143,7 @@ fn main() {
             genre: None,
             bpm: None,
             live: live && s.contains("://"),
+            hls: false,
         })
         .collect();
     engine.load(items, 0, start, true).unwrap();

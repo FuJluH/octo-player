@@ -51,6 +51,8 @@ pub struct HttpOptions {
     pub live_backoff: Duration,
     /// Where a live stream's titles go once the reader reaches them.
     pub titles: Option<Arc<TitleSlot>>,
+    /// The address is an HLS playlist, whatever it looks like.
+    pub hls: bool,
 }
 
 impl Default for HttpOptions {
@@ -67,6 +69,7 @@ impl Default for HttpOptions {
             live: false,
             live_backoff: Duration::from_secs(1),
             titles: None,
+            hls: false,
         }
     }
 }
@@ -93,6 +96,12 @@ const CHUNK: usize = 64 << 10;
 
 // Connections in a row to an ended live stream before it counts as gone.
 const LIVE_RETRIES: u32 = 4;
+
+// A live connection counts as working, so the count of failures in a row
+// starts again, only once it has given this much or lasted this long: a
+// server that sends a little and hangs up each time is gone all the same.
+const LIVE_GOOD_BYTES: u64 = 64 << 10;
+const LIVE_GOOD_TIME: Duration = Duration::from_secs(10);
 
 // The most one read of a live stream gives, so the decoder's read-ahead
 // stays short and a title is reached close to when its sound is decoded.
@@ -416,7 +425,8 @@ impl Shared {
     }
 
     // Adds fetched bytes, and the titles found among them by where in
-    // `bytes` each starts. A title the same as the one before is dropped.
+    // `bytes` each starts. A title the same as the one before is dropped;
+    // an empty one, once there was another, says there is none now.
     fn append(&self, generation: u64, bytes: &[u8], titles: &mut Vec<(usize, String)>) -> bool {
         let mut state = self.lock();
         if state.generation != generation || state.closed {
@@ -424,7 +434,8 @@ impl Shared {
         }
         let end = state.buf_end();
         for (at, title) in titles.drain(..) {
-            if !title.is_empty() && state.last_title.as_ref() != Some(&title) {
+            let unchanged = state.last_title.as_deref().unwrap_or("") == title;
+            if !unchanged {
                 state.last_title = Some(title.clone());
                 state.titles.push_back((end + at as u64, title));
             }
@@ -579,6 +590,7 @@ fn fetch(shared: Arc<Shared>, generation: u64, mut offset: u64, mut body: Option
         };
         // Each connection counts to its first title from its own start.
         let mut icy = metaint.map(IcySplitter::new);
+        let (connected, mut given) = (Instant::now(), 0u64);
         loop {
             if !shared.wait_for_room(generation) {
                 return;
@@ -609,7 +621,10 @@ fn fetch(shared: Arc<Shared>, generation: u64, mut offset: u64, mut body: Option
                         return;
                     }
                     offset += bytes.len() as u64;
-                    failures = 0;
+                    given += n as u64;
+                    if !live || given >= LIVE_GOOD_BYTES || connected.elapsed() >= LIVE_GOOD_TIME {
+                        failures = 0;
+                    }
                 }
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
                 Err(e) if live => {
