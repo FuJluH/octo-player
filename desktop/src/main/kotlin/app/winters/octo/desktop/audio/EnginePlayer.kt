@@ -666,8 +666,9 @@ class EnginePlayer(
         if (queue.currentEntry?.key != key) {
             queue.jumpTo(key)
             lastShown = 0
-        } else if (key == lastStarted) {
-            // The same entry started again by itself: repeat one.
+        } else if (key == lastStarted && !isRadio(queue.currentEntry?.song?.id.orEmpty())) {
+            // The same entry started again by itself: repeat one. A live
+            // stream starts again only to catch up with its station.
             rounds++
         }
         lastStarted = key

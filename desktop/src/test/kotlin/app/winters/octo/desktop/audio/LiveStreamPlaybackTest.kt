@@ -111,4 +111,40 @@ class LiveStreamPlaybackTest {
         assertEquals(1, onServer.index)
         assertEquals(0, onServer.positionMs)
     }
+
+    @Test
+    fun aStationMarkedAsHlsOpensAsHls() {
+        val marked = Song(radioId(stream, "Jazz FM") + ":hls", "Jazz FM")
+        assertTrue(queueItem(QueueEntry(1, marked), sources).hls)
+        assertEquals(stream, queueItem(QueueEntry(1, marked), sources).source)
+        assertFalse(queueItem(QueueEntry(2, station), sources).hls)
+        assertFalse(queueItem(QueueEntry(3, song), sources).hls)
+    }
+
+    @Test
+    fun anEmptyStreamTitleShowsTheStationAgain() {
+        val engine = FakeEngine()
+        val player = EnginePlayer(engine, sources, Random(1), clock = { now })
+        player.play(listOf(station), 0)
+        val radio = engine.queue[0].id
+        engine.emit(EngineEvent.TrackStarted(radio, 0u, null))
+        engine.emit(EngineEvent.StreamTitle(radio, "Miles Davis - So What"))
+        engine.emit(EngineEvent.StreamTitle(radio, ""))
+        assertEquals("Jazz FM" to "Live radio", player.state.value.current!!.song.let { it.title to it.artist })
+        player.close()
+    }
+
+    // After a long pause the engine opens a station again where it is now;
+    // that start is no time round on repeat.
+    @Test
+    fun aStationStartedAgainIsNoRound() {
+        val engine = FakeEngine()
+        val player = EnginePlayer(engine, sources, Random(1), clock = { now })
+        player.play(listOf(station), 0)
+        val radio = engine.queue[0].id
+        engine.emit(EngineEvent.TrackStarted(radio, 0u, null))
+        engine.emit(EngineEvent.TrackStarted(radio, 0u, null))
+        assertEquals(0, player.state.value.rounds)
+        player.close()
+    }
 }

@@ -111,8 +111,14 @@ fun queueItem(entry: QueueEntry, sources: SongSources): QueueItem {
         genre = genreOf(song),
         bpm = song.bpm?.takeIf { it > 0 }?.toDouble(),
         live = live,
+        hls = live && sentAsHls(song.id),
     )
 }
+
+// Whether a station's id carries the mark of a stream sent as HLS, whose
+// address and server do not say so: a third part, "hls", after the
+// address and the name.
+internal fun sentAsHls(id: String): Boolean = isRadio(id) && id.split(':').getOrNull(3) == "hls"
 
 // Every genre a song has, in one line: a song in any genre that is never
 // mixed (classical, a podcast) gets the plain crossfade.
