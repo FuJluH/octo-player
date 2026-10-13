@@ -1,8 +1,9 @@
 package app.winters.octo.playback
 
-// How few of a station's songs may be left to come before more are added,
-// and how many are asked for each time.
-const val STATION_TOP_UP_AT = 5
+// How few songs may be left to come before more of a station's are added,
+// and how many are asked for each time: the queue keeps a long run of the
+// station ahead, so a slow answer never leaves it short.
+const val STATION_TOP_UP_AT = 20
 const val STATION_BATCH = 25
 
 // How many of the station's songs already queued go with the ask, so the

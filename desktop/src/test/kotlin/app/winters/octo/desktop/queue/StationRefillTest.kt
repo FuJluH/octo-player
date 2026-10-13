@@ -17,7 +17,7 @@ import kotlin.random.Random
 @OptIn(ExperimentalCoroutinesApi::class)
 class StationRefillTest {
     private val mix = QueueSource.Station("or3kZ9QpLmN2xY7wV1bC0a", "Your Mix")
-    private val lined = (1..8).map { Song("s$it", "Song $it", duration = 100) }
+    private val lined = (1..30).map { Song("s$it", "Song $it", duration = 100) }
 
     private class Setup(val player: SilentPlayer, val refill: StationRefill, val asked: MutableList<List<String>>)
 
@@ -48,8 +48,8 @@ class StationRefillTest {
         val s = setUp()
         s.player.play(lined, 0, false, mix)
         settle()
-        assertTrue("seven songs still to come", s.asked.isEmpty())
-        s.player.skipTo(s.player.state.value.queue[4].key)
+        assertTrue("twenty nine songs still to come", s.asked.isEmpty())
+        s.player.skipTo(s.player.state.value.queue[10].key)
         settle()
         assertEquals(listOf(lined.map { it.id }), s.asked)
         assertEquals(listOf("n0", "n1", "n2"), s.coming().takeLast(3).map { it.first })
@@ -59,9 +59,9 @@ class StationRefillTest {
     @Test
     fun itAsksOnceForEachEndOfTheQueue() = runTest {
         val s = setUp(batch = 0)
-        s.player.play(lined, 6, false, mix)
+        s.player.play(lined, 28, false, mix)
         settle()
-        s.player.skipTo(s.player.state.value.queue[7].key)
+        s.player.skipTo(s.player.state.value.queue[29].key)
         settle()
         assertEquals(1, s.asked.size)
         assertFalse("nothing came, so Autoplay may carry on", s.refill.keepsGoing(s.player.state.value))
@@ -72,16 +72,21 @@ class StationRefillTest {
         val s = setUp()
         s.player.play(lined, 0, false, mix)
         s.player.addToQueue(listOf(Song("mine", "Mine")))
-        s.player.skipTo(s.player.state.value.queue[5].key)
         settle()
-        assertEquals("mine" to QueueSource.You, s.coming()[2])
-        assertEquals(listOf("n0", "n1", "n2"), s.coming().drop(3).map { it.first })
+        assertTrue("thirty songs still to come", s.asked.isEmpty())
+        s.player.skipTo(s.player.state.value.queue[25].key)
+        settle()
+        assertEquals("mine" to QueueSource.You, s.coming()[4])
+        // The station's next songs follow, until a long run is ahead again.
+        assertEquals(listOf("n0", "n1", "n2"), s.coming().drop(5).take(3).map { it.first })
+        assertTrue(s.coming().drop(5).all { it.second == mix })
+        assertEquals(20, s.coming().size)
     }
 
     @Test
     fun aServerThatCannotSendThemLeavesTheStationToEnd() = runTest {
         val s = setUp(supported = false)
-        s.player.play(lined, 7, false, mix)
+        s.player.play(lined, 29, false, mix)
         settle()
         assertTrue(s.asked.isEmpty())
         assertFalse(s.refill.keepsGoing(s.player.state.value))
@@ -90,7 +95,7 @@ class StationRefillTest {
     @Test
     fun aListThatIsNotAStationIsNeverToppedUp() = runTest {
         val s = setUp()
-        s.player.play(lined, 7, false, QueueSource.Played("New Releases"))
+        s.player.play(lined, 29, false, QueueSource.Played("New Releases"))
         settle()
         assertTrue(s.asked.isEmpty())
         assertFalse(s.refill.keepsGoing(s.player.state.value))
@@ -99,7 +104,7 @@ class StationRefillTest {
     @Test
     fun whileTheStationKeepsGoingAutoplayStandsDown() = runTest {
         val s = setUp()
-        s.player.play(lined, 7, false, mix)
+        s.player.play(lined, 29, false, mix)
         settle()
         assertTrue(s.refill.keepsGoing(s.player.state.value))
     }

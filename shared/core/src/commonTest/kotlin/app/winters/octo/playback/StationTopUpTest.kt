@@ -10,15 +10,16 @@ class StationTopUpTest {
 
     @Test
     fun aStationRunningLowIsToppedUp() {
-        val sources = List(10) { mix }
-        assertNull(stationToTopUp(sources, current = 2), "seven songs still to come")
-        assertEquals(mix, stationToTopUp(sources, current = 5))
-        assertEquals(mix, stationToTopUp(sources, current = 9))
+        val sources = List(50) { mix }
+        assertNull(stationToTopUp(sources, current = 29), "twenty songs still to come")
+        assertEquals(mix, stationToTopUp(sources, current = 30))
+        assertEquals(mix, stationToTopUp(sources, current = 49))
     }
 
     @Test
     fun theStationCarriesOnAfterSongsQueuedBehindIt() {
         assertEquals(mix, stationToTopUp(List(10) { mix } + you, current = 9))
+        assertNull(stationToTopUp(List(10) { mix } + List(25) { you }, current = 10), "twenty four songs still to come")
         assertNull(stationToTopUp(List(10) { mix } + List(3) { you }, current = 10), "the station's songs are all played")
     }
 
