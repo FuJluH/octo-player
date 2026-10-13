@@ -266,7 +266,10 @@ func adminRoutes(_ server: FakeServer, statusOk: Bool = true, refreshing: @escap
         let signIn = signIn(server)
         let model = OctoAdminModel(admin: OctoAdmin(store: AdminStore()), signIn: { signIn })
         model.open()
-        #expect(await until("failed") { model.downloads != .loading && model.library != .loading && model.radio != .loading })
+        // Every section checked below has settled, the status too, before any is looked at.
+        #expect(await until("settled") {
+            model.status != .loading && model.downloads != .loading && model.library != .loading && model.radio != .loading
+        })
         #expect(model.status.value != nil)
         #expect(model.downloads == .failed("Couldn't load recent downloads just now. Pull down to try again."))
         #expect(model.library == .failed("Couldn't load the library folder just now. Pull down to try again."))
