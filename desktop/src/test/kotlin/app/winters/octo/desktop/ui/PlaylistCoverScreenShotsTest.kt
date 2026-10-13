@@ -96,7 +96,7 @@ class PlaylistCoverScreenShotsTest {
                 val count = if (id == "p8") 0 else 12
                 server.ok(""""playlist":{"id":"$id","name":"$name","owner":"$owner","comment":"Made for the drive home","songCount":$count,"changed":"2026-09-28T10:00:00Z"$cover,"entry":[$entries]}""")
             }
-            server.answer("getInternetRadioStations", """"internetRadioStations":{"internetRadioStation":[{"id":"st1","name":"Discover Weekly"},{"id":"st2","name":"Rock mix"}]}""")
+            server.answer("getInternetRadioStations", """"internetRadioStations":{"internetRadioStation":[{"id":"st1","name":"Discover Weekly","coverArt":"st1"},{"id":"st2","name":"Rock mix","coverArt":"st2"}]}""")
             server.fileBy("getCoverArt") { cover(it.url.queryParameter("id").orEmpty()) }
 
             val settings = SettingsStore(File(folder.root, "settings.json"))

@@ -64,10 +64,11 @@ data class Station(val id: String, val name: String, val artwork: String?, val s
 
 // The stations Home shows, from the server's internet radio stations. Octo's
 // own carry their id as their cover and play the songs they have lined up;
-// any other plays its stream, like on the Radio stations screen.
+// any other plays its stream, like on the Radio stations screen. An added
+// station with no stream has nothing to play and is left off.
 internal fun homeStations(stations: List<RadioStation>, sourceId: String): List<Station> =
-    stations.map {
-        val stream = it.streamUrl.takeIf { url -> it.coverArt != it.id && url.isNotBlank() }
+    stations.filter { it.coverArt == it.id || it.streamUrl.isNotBlank() }.map {
+        val stream = it.streamUrl.takeIf { _ -> it.coverArt != it.id }
         Station(it.id, it.name, ArtworkRef.Server(sourceId, it.coverArt ?: it.id).encode(), streamUrl = stream)
     }
 

@@ -64,8 +64,9 @@ fun homeChart(top: TopSongs): TopSongs = top.copy(entry = top.entry.filter { it.
 
 // Reads Home's shelves at once. A shelf the server cannot give is empty
 // rather than failing the page; only when every one fails does it throw.
-// Stations are asked for only from Octo, where each is a list of songs to
-// play; on other servers internet radio is a stream this app cannot play yet.
+// Stations are asked for only from Octo, where each of its own is a list of
+// songs to play (it carries its id as its cover). An internet radio station
+// added to the server is a stream this app cannot play yet, so it is left off.
 // With `stations` off (their shelf is hidden) they are not asked for at all,
 // and come back null.
 suspend fun loadHome(connection: Connection, stations: Boolean = true): HomeData = coroutineScope {
@@ -79,7 +80,7 @@ suspend fun loadHome(connection: Connection, stations: Boolean = true): HomeData
     val stationList = async {
         when {
             !stations -> null
-            connection.isOcto -> runCatching { client.radioStations() }.getOrNull()
+            connection.isOcto -> runCatching { client.radioStations().filter { it.coverArt == it.id } }.getOrNull()
             else -> emptyList()
         }
     }

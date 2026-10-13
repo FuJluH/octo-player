@@ -50,10 +50,23 @@ class HomeDataTest {
     @Test
     fun onlyOctoIsAskedForStations() = runBlocking {
         server.answer("getAlbumList2", albums("a1"))
-        server.answer("getInternetRadioStations", """"internetRadioStations":{"internetRadioStation":[{"id":"st1","name":"Discover Weekly"}]}""")
+        server.answer("getInternetRadioStations", """"internetRadioStations":{"internetRadioStation":[{"id":"st1","name":"Discover Weekly","coverArt":"st1"}]}""")
         val plain = loadHome(server.connection())
         assertEquals("a server without stations has none", emptyList<RadioStation>(), plain.stations)
         assertFalse("getInternetRadioStations" in server.endpoints())
+        val octo = loadHome(server.connection(listOf("octoAcquisitions:1")))
+        assertEquals(listOf("Discover Weekly"), octo.stations!!.map { it.name })
+    }
+
+    // An internet radio station added to the server is a stream, which this
+    // app cannot play yet, so Home leaves it off; Octo's own stay.
+    @Test
+    fun anAddedRadioStationIsLeftOffHome() = runBlocking {
+        server.answer("getAlbumList2", albums("a1"))
+        server.answer(
+            "getInternetRadioStations",
+            """"internetRadioStations":{"internetRadioStation":[{"id":"st1","name":"Discover Weekly","coverArt":"st1"},{"id":"r1","name":"City Radio","streamUrl":"https://radio.example.com/live.mp3","coverArt":"ra-r1"},{"id":"r2","name":"Town FM","streamUrl":"https://town.example.com/fm"}]}""",
+        )
         val octo = loadHome(server.connection(listOf("octoAcquisitions:1")))
         assertEquals(listOf("Discover Weekly"), octo.stations!!.map { it.name })
     }
@@ -63,11 +76,11 @@ class HomeDataTest {
     @Test
     fun aStationTheServerNoLongerHasLeavesTheShelf() {
         server.answer("getAlbumList2", albums("a1"))
-        server.answer("getInternetRadioStations", """"internetRadioStations":{"internetRadioStation":[{"id":"st1","name":"Discover Weekly"},{"id":"st2","name":"Chill"}]}""")
+        server.answer("getInternetRadioStations", """"internetRadioStations":{"internetRadioStation":[{"id":"st1","name":"Discover Weekly","coverArt":"st1"},{"id":"st2","name":"Chill","coverArt":"st2"}]}""")
         val store = HomeStore(server.connection(listOf("octoAcquisitions:1")), CoroutineScope(Dispatchers.Unconfined))
         store.refresh()
         waitFor { store.shelves.stations.size == 2 }
-        server.answer("getInternetRadioStations", """"internetRadioStations":{"internetRadioStation":[{"id":"st2","name":"Chill"},{"id":"st3","name":"Morning"}]}""")
+        server.answer("getInternetRadioStations", """"internetRadioStations":{"internetRadioStation":[{"id":"st2","name":"Chill","coverArt":"st2"},{"id":"st3","name":"Morning","coverArt":"st3"}]}""")
         store.stationGone("st1")
         assertFalse(store.shelves.stations.any { it.id == "st1" })
         waitFor { store.shelves.stations.map { it.id } == listOf("st2", "st3") }
@@ -92,7 +105,7 @@ class HomeDataTest {
 
     private val octo = listOf("octoAcquisitions:1")
     private val kept = KeptShelves(
-        stations = listOf(RadioStation("st1", "Morning"), RadioStation("st2", "Chill")),
+        stations = listOf(RadioStation("st1", "Morning", coverArt = "st1"), RadioStation("st2", "Chill", coverArt = "st2")),
         madeForYou = listOf(Playlist("og-new", "New Releases", octoList = "newReleases", songCount = 40)),
         chart = TopSongs(source = "apple", chart = "overall", entry = listOf(TopSong(1, song = Song("s1", "First")))),
     )
@@ -102,7 +115,7 @@ class HomeDataTest {
     private fun stationsAnswer(vararg stations: Pair<String, String>) {
         server.answer(
             "getInternetRadioStations",
-            """"internetRadioStations":{"internetRadioStation":[${stations.joinToString(",") { (id, name) -> """{"id":"$id","name":"$name"}""" }}]}""",
+            """"internetRadioStations":{"internetRadioStation":[${stations.joinToString(",") { (id, name) -> """{"id":"$id","name":"$name","coverArt":"$id"}""" }}]}""",
         )
     }
 
