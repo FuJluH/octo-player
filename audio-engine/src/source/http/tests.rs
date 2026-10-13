@@ -1,7 +1,7 @@
 use super::*;
 use crate::source::trust::Trust;
 use crate::testing::http_server::{Behaviour, SelfSigned, TestServer};
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom, Write};
 
 fn data(len: usize) -> Vec<u8> {
     (0..len).map(|i| (i * 7 + i / 251) as u8).collect()
@@ -219,4 +219,153 @@ fn content_range_parsing() {
     assert_eq!(range_total("bytes 0-99/1234"), Some(1234));
     assert_eq!(range_start("bytes 100-199/1234"), Some(100));
     assert_eq!(range_total("bytes 0-99/*"), None);
+}
+
+// Byte `p` of an endless broadcast.
+fn on_air(p: u64) -> u8 {
+    (p * 13 + p / 977) as u8
+}
+
+fn live() -> HttpOptions {
+    HttpOptions { live: true, live_backoff: Duration::from_millis(10), ..quick() }
+}
+
+// A metadata block holding `text`, as a server sends it.
+fn icy_block(text: &str) -> Vec<u8> {
+    let mut block = text.as_bytes().to_vec();
+    block.resize(block.len().div_ceil(16) * 16, 0);
+    let mut out = vec![(block.len() / 16) as u8];
+    out.extend_from_slice(&block);
+    out
+}
+
+// Reads `len` bytes in small pieces, taking the titles reached on the way.
+fn read_live(source: &mut HttpSource, slot: &TitleSlot, len: usize) -> (Vec<u8>, Vec<String>) {
+    let (mut out, mut titles) = (Vec::new(), Vec::new());
+    let mut buf = vec![0u8; 1000];
+    while out.len() < len {
+        let n = source.read(&mut buf).unwrap();
+        assert!(n > 0, "a live stream never ends");
+        out.extend_from_slice(&buf[..n]);
+        titles.extend(slot.take());
+    }
+    out.truncate(len);
+    (out, titles)
+}
+
+#[test]
+fn an_endless_icy_stream_gives_its_titles_and_clean_audio() {
+    use crate::testing::http_server::ScriptServer;
+    const METAINT: u64 = 8000;
+    let server = ScriptServer::start(|_, conn, stopped| {
+        let head =
+            "HTTP/1.1 200 OK\r\nContent-Type: audio/mpeg\r\nicy-metaint: 8000\r\nConnection: close\r\n\r\n";
+        if conn.write_all(head.as_bytes()).is_err() {
+            return;
+        }
+        for i in 0u64.. {
+            let audio: Vec<u8> = (i * METAINT..(i + 1) * METAINT).map(on_air).collect();
+            // Each title comes three times, with an empty one and an empty
+            // block among them.
+            let block = match (i, i % 3) {
+                (4, _) => vec![0],
+                (_, 1) => icy_block("StreamTitle='';"),
+                _ => icy_block(&format!("StreamTitle='Song {}';StreamUrl='';", i / 3)),
+            };
+            if stopped.load(Ordering::Acquire)
+                || conn.write_all(&audio).is_err()
+                || conn.write_all(&block).is_err()
+            {
+                return;
+            }
+        }
+    });
+    let slot = Arc::new(TitleSlot::default());
+    let opts = HttpOptions { titles: Some(slot.clone()), ..live() };
+    let mut source = HttpSource::open(&server.url("/radio"), opts).unwrap();
+    assert!(!source.is_seekable());
+    assert_eq!(source.byte_len(), None);
+    let (audio, titles) = read_live(&mut source, &slot, 160_000);
+    let expected: Vec<u8> = (0..160_000).map(on_air).collect();
+    assert!(audio == expected, "the audio came through changed");
+    let wanted: Vec<String> = (0..=6).map(|n| format!("Song {n}")).collect();
+    assert_eq!(titles, wanted);
+    let asked = &server.asked()[0];
+    assert_eq!(asked.header("icy-metadata"), Some("1"));
+    assert_eq!(asked.header("range"), None, "a live stream asks for no range");
+}
+
+#[test]
+fn a_live_stream_that_drops_reconnects_and_skips_nothing() {
+    use crate::testing::http_server::ScriptServer;
+    use std::sync::atomic::AtomicU64;
+    // Every connection gets 50 000 bytes from wherever the broadcast is,
+    // then the server hangs up.
+    let air = Arc::new(AtomicU64::new(0));
+    let clock = air.clone();
+    let server = ScriptServer::start(move |_, conn, _| {
+        let head = "HTTP/1.1 200 OK\r\nContent-Type: audio/mpeg\r\nContent-Length: 999999999\r\n\r\n";
+        if conn.write_all(head.as_bytes()).is_err() {
+            return;
+        }
+        let from = clock.fetch_add(50_000, Ordering::SeqCst);
+        let bytes: Vec<u8> = (from..from + 50_000).map(on_air).collect();
+        let _ = conn.write_all(&bytes);
+    });
+    let slot = TitleSlot::default();
+    let mut source = HttpSource::open(&server.url("/radio"), live()).unwrap();
+    // The length the server claims is no length for a live stream.
+    assert_eq!(source.byte_len(), None);
+    let (audio, _) = read_live(&mut source, &slot, 180_000);
+    let expected: Vec<u8> = (0..180_000).map(on_air).collect();
+    assert!(audio == expected, "bytes were lost or doubled across the reconnections");
+    let asked = server.asked();
+    assert!(asked.len() >= 4, "{}", asked.len());
+    assert!(asked.iter().all(|a| a.header("range").is_none()));
+}
+
+#[test]
+fn a_live_server_answering_200_after_a_stall_is_read_from_its_first_byte() {
+    // A server that ignores ranges and stalls on the first connection.
+    let body = data(300_000);
+    let server = TestServer::start(
+        body.clone(),
+        Behaviour {
+            ranges: false,
+            stall_after: Some(100_000),
+            content_type: "audio/mpeg",
+            ..Default::default()
+        },
+    );
+    let opts = HttpOptions { stall_timeout: Duration::from_millis(500), ..live() };
+    let mut source = HttpSource::open(&server.url(), opts).unwrap();
+    let slot = TitleSlot::default();
+    let (audio, _) = read_live(&mut source, &slot, 400_000);
+    // The new connection's bytes follow straight on, none thrown away.
+    let mut expected = body[..100_000].to_vec();
+    expected.extend_from_slice(&body);
+    assert!(audio == expected, "the new connection's start was skipped");
+    assert!(server.ranges_asked().is_empty(), "{:?}", server.ranges_asked());
+}
+
+#[test]
+fn a_live_stream_that_stays_gone_fails_clearly() {
+    use crate::testing::http_server::ScriptServer;
+    let answers = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let server = ScriptServer::start(move |_, conn, _| {
+        // The first answer has a little sound; every later one is empty.
+        let first = answers.fetch_add(1, Ordering::SeqCst) == 0;
+        let body = if first { vec![1u8; 1000] } else { Vec::new() };
+        let _ = conn.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: audio/mpeg\r\n\r\n");
+        let _ = conn.write_all(&body);
+    });
+    let started = Instant::now();
+    let mut source = HttpSource::open(&server.url("/radio"), live()).unwrap();
+    let mut out = Vec::new();
+    let err = source.read_to_end(&mut out).unwrap_err();
+    assert_eq!(out.len(), 1000);
+    assert!(err.to_string().contains("did not come back"), "{err}");
+    // Four tries after the first, waiting 10, 20, 40 and 80 ms.
+    assert_eq!(server.asked().len(), 5);
+    assert!(started.elapsed() >= Duration::from_millis(150));
 }

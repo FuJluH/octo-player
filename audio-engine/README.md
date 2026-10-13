@@ -20,7 +20,7 @@ same sound shaping as the Android app, and a sample-accurate clock.
 | `src/deck.rs` | One song decoding ahead on its own thread |
 | `src/decode.rs` | symphonia decoding, gapless trims, seeking, tags |
 | `src/opus.rs` | Opus through a pure Rust decoder |
-| `src/source/` | Files, and HTTP(S) streams with read-ahead and pinned certificates |
+| `src/source/` | Files, HTTP(S) streams with read-ahead and pinned certificates, live streams with ICY titles, HLS |
 | `src/sound/` | EQ, presets, limiter, balance, mono, ReplayGain |
 | `src/pace.rs` | Speed (pitch kept) and pitch shift |
 | `src/output/` | Device callback, audio clock, cpal and silent drivers |
@@ -78,6 +78,7 @@ same sound shaping as the Android app, and a sample-accurate clock.
 | Pause and resume | 10 ms fade |
 | Per-output profiles | The app keeps them: it gets `DeviceChanged` and calls `set_eq` and `set_dsp` |
 | Trusted self-signed certificates | `set_trusted_certificates`: the system's check first, then a SHA-256 pin for that host only |
+| Live streams | Internet radio (`live` items): reconnects, ICY titles as `StreamTitle`, HLS with AAC or fMP4 segments; MPEG-TS segments refused |
 | Skip silence | Not ported |
 
 <!-- markdownlint-enable MD013 -->
@@ -176,12 +177,42 @@ engine.position().positionMs          // audio clock, fractional ms
   `GaplessTransition`, `CrossfadeStarted`, `TransitionPlanned` (how the
   next song will follow, with an `automix:` line for the log), `Buffering`, `Ready`,
   `StateChanged`, `QueueEnded`, `Error` (with a kind), `DeviceChanged`
-  (with the device's format), `Position`. `TrackStarted` carries the song's
-  own format as decoded (codec, lossless, rate, channels, bits).
+  (with the device's format), `Position`, `StreamTitle` (a live stream's
+  title, as it is heard). `TrackStarted` carries the song's own format as
+  decoded (codec, lossless, rate, channels, bits).
 
 Server streams arrive as signed addresses from the app, as on Android, with
 optional extra headers per item. The engine reuses the address for range
 requests and reconnects.
+
+## Live streams
+
+A `QueueItem` with `live = true` is internet radio. It has no length and
+ignores seeks and start positions, and nothing is opened behind it until
+it fails or the listener moves on.
+
+- **HTTP.** Requests carry `Icy-MetaData: 1` and no range. A dropped or
+  ended connection is made again after 1, 2, 4 and 8 s, carrying on from
+  wherever the server is; then the stream fails as gone. The metadata
+  blocks an `icy-metaint` server puts in the audio are taken out, and each
+  new `StreamTitle` is sent as an event once the sound it starts with is
+  heard.
+- **Types.** `audio/aac`, `audio/aacp` and `audio/x-aac` are ADTS AAC,
+  `audio/mpeg` MP3 and `audio/ogg` Ogg; the bytes have the last word. A
+  codec that starts over (a new Ogg stream, say) gets a new decoder, and
+  one that comes back at another sample rate is changed back to the first.
+- **HLS.** An `.m3u8` address, or a playlist content type, opens as HLS.
+  A master playlist's best variant the engine decodes is played (sound
+  only first, then the highest bit rate). Segments are fetched in order
+  and joined; a live playlist is fetched again every target duration,
+  starting three segments from the newest. ADTS AAC, MP3 and fragmented
+  MP4 (init segment, then segments) play; a discontinuity or a new init
+  segment opens a fresh decoder. MPEG-TS segments and encrypted streams
+  are refused with a clear error. A plain M3U list opens its first entry.
+- **HE-AAC.** symphonia's AAC decoder has no SBR or PS, so HE-AAC plays its
+  AAC-LC core: half the sample rate, no rebuilt high band, and for HE-AAC
+  v2 its mono core. In ADTS that happens by itself; an MP4 config that
+  names SBR or PS is turned into its core's.
 
 ## Transitions
 
@@ -227,7 +258,9 @@ ID3 support.
 
 `cargo test` needs no sound device: engine tests play through the silent
 driver. WAV and FLAC files are made while the tests run; the MP3 and Opus
-fixtures are tones made by `tools/make-fixtures`.
+fixtures are tones made by `tools/make-fixtures`, the AAC ones by FFmpeg
+(see `tests/fixtures/README.md`). Live streams and HLS play from servers
+the tests run on the spot.
 
 ## Performance
 

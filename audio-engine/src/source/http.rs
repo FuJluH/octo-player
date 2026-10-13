@@ -5,6 +5,10 @@
 //! range, or, for a server that ignores ranges, fetches from the start again
 //! and skips. A dropped connection is picked up where it broke off, and a
 //! connection that goes quiet for too long is replaced.
+//!
+//! A live stream (internet radio) has no length and no ranges: it is never
+//! sought, a new connection carries on from wherever the server is now, and
+//! its in-stream titles are taken out of the audio.
 
 use std::collections::VecDeque;
 use std::io::{self, Read, Seek, SeekFrom};
@@ -16,6 +20,7 @@ use std::time::{Duration, Instant};
 use symphonia::core::io::MediaSource;
 
 use crate::error::{ErrorKind, Failure};
+use crate::source::icy::IcySplitter;
 use crate::source::trust::{PinnedTls, Trust};
 
 /// How a stream is fetched.
@@ -38,6 +43,14 @@ pub struct HttpOptions {
     pub starved: Option<Arc<AtomicBool>>,
     /// Set by the owner to make a waiting read give up at once.
     pub cancel: Option<Arc<AtomicBool>>,
+    /// A live stream: no length, never sought, and each new connection
+    /// asks for no range and carries on from wherever the server is.
+    pub live: bool,
+    /// The first wait before connecting to an ended live stream again. It
+    /// doubles each time, four times, before the stream counts as gone.
+    pub live_backoff: Duration,
+    /// Where a live stream's titles go once the reader reaches them.
+    pub titles: Option<Arc<TitleSlot>>,
 }
 
 impl Default for HttpOptions {
@@ -51,7 +64,24 @@ impl Default for HttpOptions {
             headers: Vec::new(),
             starved: None,
             cancel: None,
+            live: false,
+            live_backoff: Duration::from_secs(1),
+            titles: None,
         }
+    }
+}
+
+/// The newest title a live stream reached, until it is picked up.
+#[derive(Debug, Default)]
+pub struct TitleSlot(Mutex<Option<String>>);
+
+impl TitleSlot {
+    pub fn put(&self, title: String) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(title);
+    }
+
+    pub fn take(&self) -> Option<String> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).take()
     }
 }
 
@@ -60,6 +90,13 @@ impl Default for HttpOptions {
 const RANGE_JUMP: u64 = 512 << 10;
 
 const CHUNK: usize = 64 << 10;
+
+// Connections in a row to an ended live stream before it counts as gone.
+const LIVE_RETRIES: u32 = 4;
+
+// The most one read of a live stream gives, so the decoder's read-ahead
+// stays short and a title is reached close to when its sound is decoded.
+const LIVE_READ: usize = 4 << 10;
 
 /// A client for streams, trusting what the system trusts and the
 /// certificates pinned in `trust`. One per engine, shared by every stream,
@@ -117,6 +154,9 @@ struct State {
     closed: bool,
     last_progress: Instant,
     stalls: u32,
+    // A live stream's titles the reader has not reached, by where they start.
+    titles: VecDeque<(u64, String)>,
+    last_title: Option<String>,
 }
 
 impl State {
@@ -125,10 +165,14 @@ impl State {
     }
 }
 
+// A response's body, and how many audio bytes its server puts between
+// in-stream titles.
+type Body = (ureq::BodyReader<'static>, Option<usize>);
+
 // What asking for bytes from an offset gave.
 enum Opened {
     // The body, and how many bytes of it to skip to reach the offset.
-    Body(ureq::BodyReader<'static>, u64),
+    Body(Body, u64),
     // Nothing left at that offset.
     End,
 }
@@ -136,12 +180,14 @@ enum Opened {
 impl HttpSource {
     /// Opens a stream, failing fast when the server says no.
     pub fn open(url: &str, opts: HttpOptions) -> Result<Self, Failure> {
+        let live = opts.live;
         let response = request(url, &opts, 0)?;
         let status = response.status().as_u16();
         let header = |name: &str| {
             response.headers().get(name).and_then(|v| v.to_str().ok()).map(|s| s.trim().to_string())
         };
         let (ranges, len) = match status {
+            200..300 if live => (false, None),
             206 => (true, header("content-range").as_deref().and_then(range_total)),
             200 => (
                 header("accept-ranges").is_some_and(|v| v.eq_ignore_ascii_case("bytes")),
@@ -150,12 +196,13 @@ impl HttpSource {
             other => return Err(Failure::http(other)),
         };
         let content_type = header("content-type");
+        let metaint = if live { metaint(&response) } else { None };
         let shared = Arc::new(Shared {
             url: url.to_string(),
             opts,
             len,
             content_type,
-            partial: status == 206,
+            partial: status == 206 && !live,
             state: Mutex::new(State {
                 buf: VecDeque::new(),
                 buf_start: 0,
@@ -167,11 +214,13 @@ impl HttpSource {
                 closed: false,
                 last_progress: Instant::now(),
                 stalls: 0,
+                titles: VecDeque::new(),
+                last_title: None,
             }),
             wake: Condvar::new(),
         });
         let body = response.into_body().into_reader();
-        spawn_fetch(shared.clone(), 0, 0, Some(body));
+        spawn_fetch(shared.clone(), 0, 0, Some((body, metaint)));
         Ok(Self { shared, pos: 0 })
     }
 
@@ -206,6 +255,9 @@ impl Read for HttpSource {
         if out.is_empty() {
             return Ok(0);
         }
+        let most = if self.shared.opts.live { LIVE_READ } else { out.len() };
+        let len = most.min(out.len());
+        let out = &mut out[..len];
         let shared = self.shared.clone();
         let mut state = shared.lock();
         loop {
@@ -229,6 +281,7 @@ impl Read for HttpSource {
                 };
                 self.pos += n as u64;
                 state.reader_pos = self.pos;
+                self.reach_titles(&mut state);
                 self.set_starved(false);
                 shared.wake.notify_all();
                 return Ok(n);
@@ -242,7 +295,8 @@ impl Read for HttpSource {
                 return Err(failure.clone().into());
             }
             let jump = if state.ranges { RANGE_JUMP } else { u64::MAX };
-            if self.pos < state.buf_start || self.pos > end.saturating_add(jump) {
+            let away = self.pos < state.buf_start || self.pos > end.saturating_add(jump);
+            if away && !shared.opts.live {
                 restart(&shared, &mut state, self.pos);
             }
             state.reader_pos = self.pos;
@@ -270,6 +324,16 @@ impl Read for HttpSource {
 }
 
 impl HttpSource {
+    // Hands on the titles the reader has now reached.
+    fn reach_titles(&self, state: &mut State) {
+        while state.titles.front().is_some_and(|(at, _)| *at <= self.pos) {
+            let Some((_, title)) = state.titles.pop_front() else { break };
+            if let Some(slot) = &self.shared.opts.titles {
+                slot.put(title);
+            }
+        }
+    }
+
     fn set_starved(&self, on: bool) {
         if let Some(flag) = &self.shared.opts.starved {
             flag.store(on, Ordering::Relaxed);
@@ -294,14 +358,18 @@ impl Seek for HttpSource {
         };
         let target =
             target.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "seek before the start"))?;
-        self.pos = target;
         let shared = self.shared.clone();
         let mut state = shared.lock();
+        if shared.opts.live && target < state.buf_start {
+            // Only what is held, or ahead by reading on.
+            return Err(io::Error::new(io::ErrorKind::Unsupported, "a live stream cannot go back"));
+        }
+        self.pos = target;
         state.reader_pos = target;
         let jump = if state.ranges { RANGE_JUMP } else { u64::MAX };
         let within = target >= state.buf_start && target <= state.buf_end().saturating_add(jump);
         let past_end = shared.len.is_some_and(|len| target >= len);
-        if !within && !past_end {
+        if !within && !past_end && !shared.opts.live {
             restart(&shared, &mut state, target);
         }
         shared.wake.notify_all();
@@ -311,8 +379,8 @@ impl Seek for HttpSource {
 
 impl MediaSource for HttpSource {
     fn is_seekable(&self) -> bool {
-        // Always, by asking again from the start at worst.
-        true
+        // Always, by asking again from the start at worst; never live.
+        !self.shared.opts.live
     }
 
     fn byte_len(&self) -> Option<u64> {
@@ -345,10 +413,19 @@ impl Shared {
         }
     }
 
-    fn append(&self, generation: u64, bytes: &[u8]) -> bool {
+    // Adds fetched bytes, and the titles found among them by where in
+    // `bytes` each starts. A title the same as the one before is dropped.
+    fn append(&self, generation: u64, bytes: &[u8], titles: &mut Vec<(usize, String)>) -> bool {
         let mut state = self.lock();
         if state.generation != generation || state.closed {
             return false;
+        }
+        let end = state.buf_end();
+        for (at, title) in titles.drain(..) {
+            if !title.is_empty() && state.last_title.as_ref() != Some(&title) {
+                state.last_title = Some(title.clone());
+                state.titles.push_back((end + at as u64, title));
+            }
         }
         state.buf.extend(bytes);
         // Drop what the reader has left well behind.
@@ -392,6 +469,16 @@ impl Shared {
         }
         let response = request(&self.url, &self.opts, offset)?;
         let status = response.status().as_u16();
+        if self.opts.live {
+            // Wherever the server is now, from the first byte it sends.
+            return match status {
+                200..300 => {
+                    let metaint = metaint(&response);
+                    Ok(Opened::Body((response.into_body().into_reader(), metaint), 0))
+                }
+                other => Err(Failure::http(other)),
+            };
+        }
         match status {
             206 => {
                 let start = response
@@ -403,13 +490,13 @@ impl Shared {
                 if start > offset {
                     return Err(Failure::new(ErrorKind::Network, "server sent the wrong range"));
                 }
-                Ok(Opened::Body(response.into_body().into_reader(), offset - start))
+                Ok(Opened::Body((response.into_body().into_reader(), None), offset - start))
             }
             200 => {
                 if offset > 0 {
                     self.lock().ranges = false;
                 }
-                Ok(Opened::Body(response.into_body().into_reader(), offset))
+                Ok(Opened::Body((response.into_body().into_reader(), None), offset))
             }
             416 => Ok(Opened::End),
             other => Err(Failure::http(other)),
@@ -435,7 +522,7 @@ fn resume(shared: &Arc<Shared>, state: &mut State, pos: u64) {
     spawn_fetch(shared.clone(), state.generation, pos, None);
 }
 
-fn spawn_fetch(shared: Arc<Shared>, generation: u64, offset: u64, body: Option<ureq::BodyReader<'static>>) {
+fn spawn_fetch(shared: Arc<Shared>, generation: u64, offset: u64, body: Option<Body>) {
     let spawned = thread::Builder::new()
         .name("octo-http".into())
         .spawn(move || fetch(shared, generation, offset, body));
@@ -444,9 +531,12 @@ fn spawn_fetch(shared: Arc<Shared>, generation: u64, offset: u64, body: Option<u
     }
 }
 
-fn fetch(shared: Arc<Shared>, generation: u64, mut offset: u64, mut body: Option<ureq::BodyReader<'static>>) {
+fn fetch(shared: Arc<Shared>, generation: u64, mut offset: u64, mut body: Option<Body>) {
+    let live = shared.opts.live;
     let mut failures = 0u32;
     let mut chunk = vec![0u8; CHUNK];
+    let mut audio = Vec::with_capacity(CHUNK);
+    let mut titles = Vec::new();
     // Where the last broken connection ended, to spot a stream that always
     // ends early (a server's estimated length for a stream made smaller).
     let mut broke_at: Option<u64> = None;
@@ -454,10 +544,10 @@ fn fetch(shared: Arc<Shared>, generation: u64, mut offset: u64, mut body: Option
         if shared.stale(generation) {
             return;
         }
-        let mut reader = match body.take() {
-            Some(reader) => reader,
+        let (mut reader, metaint) = match body.take() {
+            Some(body) => body,
             None => match shared.open_at(offset) {
-                Ok(Opened::Body(mut reader, skip)) => {
+                Ok(Opened::Body((mut reader, metaint), skip)) => {
                     if !skip_bytes(&shared, generation, &mut reader, skip, &mut chunk) {
                         failures += 1;
                         if !backoff(&shared, generation, failures) {
@@ -465,7 +555,7 @@ fn fetch(shared: Arc<Shared>, generation: u64, mut offset: u64, mut body: Option
                         }
                         continue;
                     }
-                    reader
+                    (reader, metaint)
                 }
                 Ok(Opened::End) => {
                     shared.finish(generation);
@@ -485,23 +575,49 @@ fn fetch(shared: Arc<Shared>, generation: u64, mut offset: u64, mut body: Option
                 }
             },
         };
+        // Each connection counts to its first title from its own start.
+        let mut icy = metaint.map(IcySplitter::new);
         loop {
             if !shared.wait_for_room(generation) {
                 return;
             }
             match reader.read(&mut chunk) {
+                Ok(0) if live => {
+                    log::warn!("the live stream ended, connecting again");
+                    failures += 1;
+                    if !backoff(&shared, generation, failures) {
+                        return;
+                    }
+                    break;
+                }
                 Ok(0) => {
                     shared.finish(generation);
                     return;
                 }
                 Ok(n) => {
-                    if !shared.append(generation, &chunk[..n]) {
+                    let bytes = match &mut icy {
+                        Some(icy) => {
+                            audio.clear();
+                            icy.feed(&chunk[..n], &mut audio, &mut titles);
+                            &audio[..]
+                        }
+                        None => &chunk[..n],
+                    };
+                    if !shared.append(generation, bytes, &mut titles) {
                         return;
                     }
-                    offset += n as u64;
+                    offset += bytes.len() as u64;
                     failures = 0;
                 }
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                Err(e) if live => {
+                    log::warn!("the live stream broke off: {e}");
+                    failures += 1;
+                    if !backoff(&shared, generation, failures) {
+                        return;
+                    }
+                    break;
+                }
                 Err(e) => {
                     let ranges = shared.lock().ranges;
                     if !ranges && broke_at == Some(offset) {
@@ -546,17 +662,28 @@ fn skip_bytes(
 // Waits a little longer after each failure in a row. False when it is time
 // to give up, or the fetch is no longer wanted.
 fn backoff(shared: &Shared, generation: u64, failures: u32) -> bool {
-    if failures > shared.opts.max_retries {
+    let live = shared.opts.live;
+    if live && failures > LIVE_RETRIES {
+        let gone = "the live stream stopped and did not come back";
+        shared.fail(generation, Failure::new(ErrorKind::Network, gone));
+        return false;
+    }
+    if !live && failures > shared.opts.max_retries {
         shared.fail(generation, Failure::new(ErrorKind::Network, "the connection kept failing"));
         return false;
     }
-    let wait = Duration::from_millis(250u64 << failures.min(4));
+    let wait = if live {
+        // 1, 2, 4 and 8 times the first wait.
+        shared.opts.live_backoff * (1 << (failures - 1))
+    } else {
+        Duration::from_millis(250u64 << failures.min(4))
+    };
     let until = Instant::now() + wait;
     while Instant::now() < until {
         if shared.stale(generation) {
             return false;
         }
-        thread::sleep(Duration::from_millis(50));
+        thread::sleep(Duration::from_millis(50).min(wait));
     }
     true
 }
@@ -566,11 +693,23 @@ fn request(url: &str, opts: &HttpOptions, from: u64) -> Result<ureq::http::Respo
     for (name, value) in &opts.headers {
         req = req.header(name, value);
     }
-    // Always ask for a range: a server that supports them says so with 206.
-    req.header("Range", format!("bytes={from}-")).call().map_err(|e| match e {
+    req = if opts.live {
+        // A live stream has no ranges; its server may send titles.
+        req.header("Icy-MetaData", "1")
+    } else {
+        // Always ask for a range: a server that supports them says so with 206.
+        req.header("Range", format!("bytes={from}-"))
+    };
+    req.call().map_err(|e| match e {
         ureq::Error::StatusCode(status) => Failure::http(status),
         other => Failure::new(ErrorKind::Network, other.to_string()),
     })
+}
+
+// How many audio bytes a live server puts between its in-stream titles.
+fn metaint(response: &ureq::http::Response<ureq::Body>) -> Option<usize> {
+    let value = response.headers().get("icy-metaint")?.to_str().ok()?;
+    value.trim().parse().ok().filter(|&n| n > 0)
 }
 
 // "bytes 100-199/1234" gives 1234.

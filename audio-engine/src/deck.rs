@@ -2,6 +2,7 @@
 //! Opening, network waits and decoding all happen there, so the mixing
 //! thread never waits on any of them.
 
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
@@ -10,7 +11,10 @@ use std::time::Duration;
 use crate::decode::{Decoder, TrackInfo};
 use crate::error::Failure;
 use crate::fifo::Fifo;
-use crate::source::{self, http::HttpOptions};
+use crate::source::{
+    self,
+    http::{HttpOptions, TitleSlot},
+};
 
 /// How much decoded sound a deck keeps ready, in seconds.
 const AHEAD_SECS: f64 = 0.75;
@@ -48,6 +52,8 @@ struct State {
     seek_generation: u64,
     stop: bool,
     capacity: usize,
+    // A live stream's titles, by the time in it where they start.
+    titles: VecDeque<(f64, String)>,
 }
 
 struct Shared {
@@ -67,6 +73,7 @@ impl Shared {
 pub struct Deck {
     shared: Arc<Shared>,
     key: u64,
+    live: bool,
 }
 
 impl Deck {
@@ -76,7 +83,8 @@ impl Deck {
     }
 
     /// The same, decoding up to `first_secs` ahead before the first read
-    /// (never less than usual), so playback can wait for that much.
+    /// (never less than usual), so playback can wait for that much. A live
+    /// stream always starts where its server is.
     pub fn open_ahead(
         key: u64,
         source: String,
@@ -86,8 +94,11 @@ impl Deck {
     ) -> Deck {
         let starved = Arc::new(AtomicBool::new(false));
         let cancel = Arc::new(AtomicBool::new(false));
+        let live = http.live;
+        let start_secs = if live { 0.0 } else { start_secs };
         http.starved = Some(starved.clone());
         http.cancel = Some(cancel.clone());
+        http.titles = live.then(|| Arc::new(TitleSlot::default()));
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
                 pcm: Fifo::default(),
@@ -99,6 +110,7 @@ impl Deck {
                 seek_generation: 0,
                 stop: false,
                 capacity: 0,
+                titles: VecDeque::new(),
             }),
             wake: Condvar::new(),
             starved,
@@ -112,12 +124,28 @@ impl Deck {
             let mut state = shared.lock();
             state.status = DeckStatus::Failed(Failure::new(crate::error::ErrorKind::Other, e.to_string()));
         }
-        Deck { shared, key }
+        Deck { shared, key, live }
     }
 
     /// Which queue entry this deck plays.
     pub fn key(&self) -> u64 {
         self.key
+    }
+
+    /// Whether this is a live stream, which is never sought.
+    pub fn is_live(&self) -> bool {
+        self.live
+    }
+
+    /// The newest title of a live stream that starts by `heard_secs` into
+    /// it, when there is one not taken before.
+    pub fn take_title(&self, heard_secs: f64) -> Option<String> {
+        let mut state = self.shared.lock();
+        let mut latest = None;
+        while state.titles.front().is_some_and(|(at, _)| *at <= heard_secs) {
+            latest = state.titles.pop_front().map(|(_, title)| title);
+        }
+        latest
     }
 
     pub fn info(&self) -> Option<TrackInfo> {
@@ -176,8 +204,12 @@ impl Deck {
         DeckRead { frames, start_secs, finished: done && state.pcm.is_empty(), failure }
     }
 
-    /// Jumps to `secs`. What is buffered is dropped at once.
+    /// Jumps to `secs`. What is buffered is dropped at once. A live stream
+    /// stays where it is.
     pub fn seek(&self, secs: f64) {
+        if self.live {
+            return;
+        }
         let mut state = self.shared.lock();
         state.seek = Some(secs.max(0.0));
         state.seek_generation += 1;
@@ -293,11 +325,16 @@ fn run(shared: Arc<Shared>, source: String, http: HttpOptions, first_secs: f64) 
         }
         match result {
             Ok(true) => {
+                let rate = decoder.sample_rate() as f64;
+                let block_secs = offset + decoder.position_secs() - (block.len() / 2) as f64 / rate;
                 if state.pcm.is_empty() {
-                    let rate = decoder.sample_rate() as f64;
-                    state.head_secs = offset + decoder.position_secs() - (block.len() / 2) as f64 / rate;
+                    state.head_secs = block_secs;
                 }
                 state.pcm.push(&block);
+                // A title the stream reached while this was read starts with it.
+                if let Some(title) = http.titles.as_ref().and_then(|slot| slot.take()) {
+                    state.titles.push_back((block_secs, title));
+                }
             }
             Ok(false) => state.status = DeckStatus::Ended,
             Err(f) => {

@@ -270,3 +270,95 @@ fn serve(
     }
     stream.close();
 }
+
+/// A request as a scripted server saw it.
+#[derive(Clone, Debug)]
+pub struct Asked {
+    /// The path and query.
+    pub target: String,
+    /// Header names in lowercase, with their values.
+    pub headers: Vec<(String, String)>,
+}
+
+impl Asked {
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers.iter().find(|(n, _)| n.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str())
+    }
+}
+
+type Script = dyn Fn(&Asked, &mut TcpStream, &AtomicBool) + Send + Sync;
+
+/// A server whose answers the test writes in full, status line and all, for
+/// endless streams, playlists that change and servers that misbehave. The
+/// script is handed a flag that is set once the server is dropped, so an
+/// endless answer can stop.
+pub struct ScriptServer {
+    port: u16,
+    asked: Arc<Mutex<Vec<Asked>>>,
+    stopped: Arc<AtomicBool>,
+}
+
+impl ScriptServer {
+    pub fn start(script: impl Fn(&Asked, &mut TcpStream, &AtomicBool) + Send + Sync + 'static) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let stopped = Arc::new(AtomicBool::new(false));
+        let script: Arc<Script> = Arc::new(script);
+        let (log, stop) = (asked.clone(), stopped.clone());
+        thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                if stop.load(Ordering::Acquire) {
+                    return;
+                }
+                let (script, log, stop) = (script.clone(), log.clone(), stop.clone());
+                thread::spawn(move || {
+                    let mut stream = stream;
+                    let Some(request) = read_request(&mut stream) else { return };
+                    log.lock().unwrap().push(request.clone());
+                    script(&request, &mut stream, &stop);
+                    let _ = stream.flush();
+                    let _ = stream.shutdown(Shutdown::Both);
+                });
+            }
+        });
+        Self { port, asked, stopped }
+    }
+
+    pub fn url(&self, path: &str) -> String {
+        format!("http://127.0.0.1:{}{path}", self.port)
+    }
+
+    /// Every request so far, in order.
+    pub fn asked(&self) -> Vec<Asked> {
+        self.asked.lock().unwrap().clone()
+    }
+}
+
+impl Drop for ScriptServer {
+    fn drop(&mut self) {
+        self.stopped.store(true, Ordering::Release);
+    }
+}
+
+fn read_request(stream: &mut TcpStream) -> Option<Asked> {
+    let mut reader = BufReader::new(stream.try_clone().ok()?);
+    let mut line = String::new();
+    reader.read_line(&mut line).ok()?;
+    let target = line.split_whitespace().nth(1)?.to_string();
+    let mut headers = Vec::new();
+    loop {
+        line.clear();
+        if reader.read_line(&mut line).ok()? == 0 {
+            return None;
+        }
+        let trimmed = line.trim_end();
+        if trimmed.is_empty() {
+            break;
+        }
+        if let Some((name, value)) = trimmed.split_once(':') {
+            headers.push((name.trim().to_ascii_lowercase(), value.trim().to_string()));
+        }
+    }
+    Some(Asked { target, headers })
+}
