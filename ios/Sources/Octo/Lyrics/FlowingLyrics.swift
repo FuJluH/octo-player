@@ -108,6 +108,7 @@ final class FlowingModel {
         #endif
         engine.look = AppSettings.shared.lyricsLook
         engine.reduceMotion = calm
+        let fast = engine.look.bloomFast
         let nanos = Int(link.timestamp * 1e9)
         engine.frame(
             nanos,
@@ -116,7 +117,7 @@ final class FlowingModel {
             rate: rate,
             offsetMs: offsetMs,
             outputOffsetMs: outputOffsetMs,
-            prepare: { [lines] index in layout.prepare(index, lines[index]) },
+            prepare: { [lines] index in layout.prepare(index, lines[index], fast: fast) },
             release: { index in layout.release(index) }
         )
         frame = engine.frames
@@ -335,13 +336,15 @@ struct LyricPainter {
         let cold = st.status == .passed && !st.live
         let lift = calm ? 0 : look.fraction(.lift)
         let letters = calm || !st.live ? nil : box.glyphs
+        let fast = look.bloomFast
+        let held = letters == nil ? [] : heldWords(line.words, fast: fast)
         let lastGroup = (line.words.dropLast().lastIndex { $0.trailingSpace } ?? -1) + 1
         for (j, word) in line.words.enumerated() where j < box.words.count {
             let wb = box.words[j]
             var rise = 0.0
             if lift != 0 {
-                rise = cold ? -(line.isBackground ? BACKGROUND_LIFT_EM : LIFT_EM) * lift
-                    : liftEm(t, start: word.start, end: word.end, background: line.isBackground, lift: lift)
+                rise = cold ? -liftHeightEm(background: line.isBackground, fast: fast) * lift
+                    : liftEm(t, start: word.start, end: word.end, background: line.isBackground, lift: lift, fast: fast)
             }
             let riseY = CGFloat(rise) * box.em
             let shape = maskShape(wordWidth: Double(wb.width), lineHeight: Double(wb.rowHeight), softness: look.fraction(.fade))
@@ -349,7 +352,7 @@ struct LyricPainter {
             let glyphs = letters.flatMap { j < $0.count ? $0[j] : nil }
             let bloom = glyphs.flatMap { found in
                 emphasisFor(word.end - word.start, glyphs: found.count, last: j >= lastGroup,
-                            emphasis: look.fraction(.emphasis), glow: look.fraction(.glow))
+                            emphasis: look.fraction(.emphasis), glow: look.fraction(.glow), fast: fast, held: j < held.count && held[j])
             }
             let paint: (CGFloat) -> Void = { alpha in
                 paintWord(cg, wb, glyphs, bloom, word, t: t, rise: riseY, em: box.em, lift: lift, background: line.isBackground, alpha: alpha)
