@@ -59,6 +59,8 @@ struct HomeView: View {
             await model.reroll(for: "\(model.songCount ?? -1)|\(serverSync.last?.at ?? 0)")
         }
         .onChange(of: discovery.stationsFrom, initial: true) { _, _ in model.stationsSourceChanged() }
+        // A list found gone on its own page leaves Home.
+        .onChange(of: discovery.goneLists) { _, gone in model.listsGone(gone) }
         // A server shelf shown again, or the empty card's chart, is asked for then.
         .onChange(of: settings.homeSections) { _, _ in model.sectionsChanged() }
         .onChange(of: model.songCount == 0) { _, _ in model.sectionsChanged() }

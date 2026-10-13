@@ -42,17 +42,23 @@ public enum OctoListGroup: String, CaseIterable, Sendable, Hashable, Identifiabl
     }
 }
 
-/// Which of Octo's groups a server playlist belongs to, or nil for one Octo did not make for
-/// this listener: someone else's (the listener's name not blank and the owner another, case
-/// aside), the Liked Songs list, the listener's own and smart playlists. The server's own word
-/// for the kind decides, a decade and a year both being Years and a word not known More. An
-/// older server that says no kind marks Made for you lists only; past those, only a list with an
-/// id of Octo's own shape counts: a station's ("or") is Radio, one named like "1990s Mix" Years,
-/// any other More.
-public func octoListGroup(_ playlist: Playlist, listener: String) -> OctoListGroup? {
+/// Whether a playlist is the listener's: its owner is them, case aside, or either name is blank.
+func ownedByListener(_ playlist: Playlist, _ listener: String) -> Bool {
     let me = listener.trimmingCharacters(in: .whitespacesAndNewlines)
     let owner = (playlist.owner ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-    if !me.isEmpty, !owner.isEmpty, owner.lowercased() != me.lowercased() { return nil }
+    return me.isEmpty || owner.isEmpty || owner.lowercased() == me.lowercased()
+}
+
+/// Which of Octo's groups a server playlist belongs to, or nil for one Octo did not make for
+/// this listener: someone else's (see `ownedByListener`), the Liked Songs list, the listener's
+/// own and smart playlists. The server's own word for the kind decides, a decade and a year both
+/// being Years and a word not known More. An older server that says no kind marks Made for you
+/// lists only; past those, with `guess` (no list in the same answer says its kind), a read-only
+/// list with an id of Octo's own shape counts: a station's ("or") is Radio, one named like
+/// "1990s Mix" Years, any other More. Another server's own ids can have that shape, so a list
+/// the listener can change never counts by its id.
+public func octoListGroup(_ playlist: Playlist, listener: String, guess: Bool = true) -> OctoListGroup? {
+    guard ownedByListener(playlist, listener) else { return nil }
     if let group = playlist.octoGroup {
         switch group {
         case "forYou": return .forYou
@@ -67,7 +73,7 @@ public func octoListGroup(_ playlist: Playlist, listener: String) -> OctoListGro
         }
     }
     if let list = playlist.octoList { return list == octoListLiked ? nil : .forYou }
-    guard isDrawnCoverId(playlist.id) else { return nil }
+    guard guess, playlist.readonly, isDrawnCoverId(playlist.id) else { return nil }
     if playlist.id.hasPrefix(stationIdPrefix) { return .stations }
     return isDecadeMixName(playlist.name) ? .years : .more
 }
@@ -85,12 +91,14 @@ func leadingYear(_ name: String) -> Int? {
 }
 
 /// Octo's lists for the listener in their groups, in the groups' order; a group with none is left
-/// out. Made for you and Charts keep the server's order. Years has the decades first, then single
-/// years, each newest first, then by name. Every other group is by name, case aside.
+/// out. A server that marks the kind of any list is never guessed at by ids. Made for you and
+/// Charts keep the server's order. Years has the decades first, then single years, each newest
+/// first, then by name. Every other group is by name, case aside.
 public func octoListGroups(_ playlists: [Playlist], listener: String) -> [(group: OctoListGroup, lists: [Playlist])] {
+    let guess = !playlists.contains { $0.octoGroup != nil }
     var byGroup: [OctoListGroup: [Playlist]] = [:]
     for playlist in playlists {
-        if let group = octoListGroup(playlist, listener: listener) { byGroup[group, default: []].append(playlist) }
+        if let group = octoListGroup(playlist, listener: listener, guess: guess) { byGroup[group, default: []].append(playlist) }
     }
     return OctoListGroup.allCases.compactMap { group in
         guard let lists = byGroup[group], !lists.isEmpty else { return nil }
@@ -120,10 +128,11 @@ private func yearOrder(_ a: Playlist, _ b: Playlist) -> Bool {
     return nameOrder(a, b)
 }
 
-/// Whether a server list opens as the server has it, read-only: one Octo made, by its kind or by
-/// an id of Octo's own shape.
-public func opensAsServerList(_ playlist: Playlist) -> Bool {
-    playlist.octoGroup != nil || isDrawnCoverId(playlist.id)
+/// Whether a server list opens as the server has it, read-only: on a server that runs Octo, one
+/// of the listener's that Octo made, by its kind, or read-only with an id of Octo's own shape.
+public func opensAsServerList(_ playlist: Playlist, runsOcto: Bool, listener: String) -> Bool {
+    guard runsOcto, ownedByListener(playlist, listener) else { return false }
+    return playlist.octoGroup != nil || (playlist.readonly && isDrawnCoverId(playlist.id))
 }
 
 /// The mixes each of Home's mix shelves shows, from the server's playlists.

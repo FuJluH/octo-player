@@ -601,6 +601,7 @@ struct PlaylistsView: View {
     var body: some View {
         let order = state.order(.playlists)
         let claimed = Set(octoGroups.flatMap { $0.lists.map(\.id) })
+        let gone = discovery.goneLists
         let shown = sortPlaylists(playlists ?? [], order).filter { !claimed.contains(serverIds[$0.id] ?? $0.id) }
         ScrollViewReader { proxy in
             ScrollView {
@@ -687,9 +688,10 @@ struct PlaylistsView: View {
     /// server has it; a station there plays as a station.
     @ViewBuilder
     private var fromOcto: some View {
-        if !octoGroups.isEmpty {
+        let gone = discovery.goneLists
+        if octoGroups.contains(where: { $0.lists.contains { !gone.contains($0.id) } }) {
             SectionTitle("From Octo").padding(.top, 24).padding(.bottom, 4)
-            ForEach(octoGroups, id: \.group) { entry in
+            ForEach(octoGroups.filter { !$0.lists.allSatisfy { gone.contains($0.id) } }, id: \.group) { entry in
                 Text(entry.group.title)
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(OctoColor.textMuted)
@@ -697,7 +699,7 @@ struct PlaylistsView: View {
                     .padding(.top, 16)
                     .padding(.bottom, 4)
                     .accessibilityAddTraits(.isHeader)
-                ForEach(entry.lists) { list in
+                ForEach(entry.lists.filter { !gone.contains($0.id) }) { list in
                     NavigationLink(value: Route.playlist(list)) {
                         PlaylistLine(name: list.name, subtitle: songsCount(list.songCount)) {
                             Cover(id: list.coverArt ?? list.id, size: 56)
@@ -800,6 +802,7 @@ private struct LiveCoversKey: Hashable {
 struct PlaylistView: View {
     let playlist: Playlist
     @Environment(Library.self) private var library
+    @Environment(Session.self) private var session
     @State private var id: String?
     @State private var serverOnly = false
 
@@ -814,7 +817,7 @@ struct PlaylistView: View {
             }
         }
         .task {
-            if opensAsServerList(playlist) {
+            if opensAsServerList(playlist, runsOcto: session.runsOcto, listener: session.client?.credentials.username ?? "") {
                 serverOnly = true
                 return
             }
@@ -832,7 +835,7 @@ struct PlaylistView: View {
 /// A list on the server the library keeps no copy of, like a station or a Made for you list: its
 /// cover and name, Play and Shuffle, then the songs it has lined up now. It cannot be changed
 /// here. A station plays as a station, from a row, Play or Shuffle alike, adding more of its
-/// songs as it runs low.
+/// songs as it runs low. A list the server answers is gone says so, and leaves Home.
 struct ServerListPage: View {
     let playlist: Playlist
     @Environment(Discovery.self) private var discovery
@@ -892,7 +895,16 @@ struct ServerListPage: View {
 
     private func reload() async {
         page = .loading
-        if let state = await loadOnline({ try await discovery.stationSongs(playlist.id) }) { page = state }
+        do {
+            page = .ready(try await discovery.stationSongs(playlist.id))
+        } catch OctoError.notFound {
+            discovery.listGone(playlist.id)
+            page = .failed(stationGoneLine(playlist.name))
+        } catch {
+            // A read that was canceled keeps what the page had.
+            guard let words = userMessage(for: error) else { return }
+            page = .failed(words)
+        }
     }
 }
 

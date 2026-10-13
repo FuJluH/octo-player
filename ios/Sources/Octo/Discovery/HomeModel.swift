@@ -315,17 +315,27 @@ final class HomeModel {
                 player.playServerList(songs, id: id, name: name, octoGroup: station.octoGroup)
             } catch OctoError.notFound {
                 // Made anew on the server since the list was read: off Home, and read again.
-                stations.removeAll { $0.id == id }
-                madeForYou.removeAll { $0.id == id }
-                for section in Self.mixSections { mixes[section]?.removeAll { $0.id == id } }
-                stationsLoadedAt = nil
-                loadStations()
+                listsGone([id])
                 router.show(stationGoneLine(name))
             } catch {
                 router.show("Could not start \(name)")
             }
         }
     }
+
+    /// Lists the server no longer has: off Home, and the server's lists read again.
+    func listsGone(_ ids: Set<String>) {
+        let had = serverListCount
+        stations.removeAll { ids.contains($0.id) }
+        madeForYou.removeAll { ids.contains($0.id) }
+        for section in Self.mixSections { mixes[section]?.removeAll { ids.contains($0.id) } }
+        guard serverListCount != had else { return }
+        stationsLoadedAt = nil
+        loadStations()
+    }
+
+    /// How many stations, Made for you lists and mixes Home holds.
+    private var serverListCount: Int { stations.count + madeForYou.count + mixes.values.reduce(0) { $0 + $1.count } }
 
     // MARK: The cards
 

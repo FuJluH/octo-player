@@ -185,6 +185,12 @@ final class Discovery {
     /// Octo's lists for the listener in their groups; nothing on a server that does not run Octo.
     func octoListGroups() async throws -> [(group: OctoListGroup, lists: [Playlist])] { try await online.octoListGroups() }
 
+    /// Server lists found gone on their own pages, so Home can drop them.
+    private(set) var goneLists: Set<String> = []
+
+    /// A server list answered that it is gone.
+    func listGone(_ id: String) { goneLists.insert(id) }
+
     /// The songs a station, or a Made for you list, has lined up now.
     func stationSongs(_ id: String) async throws -> [Song] { try await online.stationSongs(id).map(\.asSong) }
 

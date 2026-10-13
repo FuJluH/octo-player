@@ -111,10 +111,36 @@ import Testing
         #expect(serverListSource(id: rock.id, name: rock.name, octoGroup: rock.octoGroup) == .played("Rock Mix"))
     }
 
+    @Test func theListenersOwnListIsNeverClaimedByItsId() {
+        // Another server's own ids can have Octo's shape; a list the listener can change is theirs.
+        #expect(octoListGroup(list(og(9), "1990s Mix", readonly: false), listener: "sam") == nil)
+        #expect(octoListGroup(list(Self.octoId("or", 9), "Road trip", readonly: false), listener: "sam") == nil)
+        #expect(octoListGroups([list(og(9), "Road trip", readonly: false)], listener: "sam").isEmpty)
+    }
+
+    @Test func aServerThatMarksItsListsIsNeverGuessedAt() {
+        let marked = list(og(1), "Rock Mix", group: "genre")
+        let unmarked = list(og(2), "1990s Mix")
+        let groups = octoListGroups([marked, unmarked], listener: "sam")
+        #expect(groups.map(\.group) == [.genres])
+        #expect(groups.flatMap(\.lists).map(\.id) == [marked.id])
+        #expect(octoListGroup(unmarked, listener: "sam", guess: false) == nil)
+        // Made for you lists marked the older way still count.
+        #expect(octoListGroup(list(og(3), "Deep Cuts", octoList: "deepCuts"), listener: "sam", guess: false) == .forYou)
+    }
+
     @Test func octosListsOpenAsTheServerHasThem() {
-        #expect(opensAsServerList(list("42", "Rock Mix", group: "genre")))
-        #expect(opensAsServerList(list(og(1), "Deep Cuts")))
-        #expect(!opensAsServerList(list("42", "Road trip", readonly: false)))
+        #expect(opensAsServerList(list("42", "Rock Mix", group: "genre"), runsOcto: true, listener: "sam"))
+        #expect(opensAsServerList(list(og(1), "Deep Cuts"), runsOcto: true, listener: "sam"))
+        #expect(opensAsServerList(list(og(1), "Deep Cuts", owner: nil), runsOcto: true, listener: "sam"))
+        #expect(!opensAsServerList(list("42", "Road trip", readonly: false), runsOcto: true, listener: "sam"))
+    }
+
+    @Test func onlyTheListenersListsOnOctoOpenAsTheServerHasThem() {
+        #expect(!opensAsServerList(list(og(1), "Deep Cuts"), runsOcto: false, listener: "sam"))
+        #expect(!opensAsServerList(list("42", "Rock Mix", group: "genre"), runsOcto: false, listener: "sam"))
+        #expect(!opensAsServerList(list(og(1), "Rock Mix", owner: "alex", group: "genre"), runsOcto: true, listener: "sam"))
+        #expect(!opensAsServerList(list(og(9), "Road trip", readonly: false), runsOcto: true, listener: "sam"))
     }
 
     @Test func theKindIsReadFromTheServersAnswer() throws {
