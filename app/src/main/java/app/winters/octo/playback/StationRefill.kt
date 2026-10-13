@@ -35,9 +35,15 @@ class StationRefill @Inject constructor(
     private var askedAfter: String? = null
     private var emptyAfter: String? = null
 
-    fun attach(player: OutputSwitch, scope: CoroutineScope) {
+    // Told when a top-up brought nothing, so Autoplay can look again.
+    private var settled: () -> Unit = {}
+
+    fun attach(player: OutputSwitch, scope: CoroutineScope, settled: () -> Unit = {}) {
         this.player = player
         this.scope = scope
+        this.settled = settled
+        askedAfter = null
+        emptyAfter = null
     }
 
     fun detach() {
@@ -45,6 +51,9 @@ class StationRefill @Inject constructor(
         job = null
         player = null
         scope = null
+        settled = {}
+        askedAfter = null
+        emptyAfter = null
     }
 
     // Whether the song is a station's that this keeps going, so Autoplay
@@ -56,12 +65,24 @@ class StationRefill @Inject constructor(
         val player = player ?: return
         if (job?.isActive == true || !discovery.keepsStationsGoing || player.repeatMode != Player.REPEAT_MODE_OFF) return
         val items = List(player.mediaItemCount) { player.getMediaItemAt(it) }
-        val station = stationToTopUp(items.map { it.queueSource }, player.currentMediaItemIndex) ?: return
-        val last = items.last().entryId ?: return
+        val current = player.currentMediaItemIndex
+        if (current !in items.indices) return
+        // The song on and those to come, in the order they will play, so a
+        // shuffled queue counts what is really left.
+        val ahead = (listOf(current) + upcoming(player)).map(items::get)
+        val station = stationToTopUp(ahead.map { it.queueSource }, 0) ?: return
+        val last = ahead.last().entryId ?: return
         if (last == askedAfter) return
         askedAfter = last
         val after = stationSongsQueued(items, station, { it.queueSource }, { it.mediaId })
         job = scope?.launch { topUp(player, station, last, after) }
+    }
+
+    // The entry that plays last, in play order.
+    private fun lastToPlay(player: OutputSwitch): String? {
+        val current = player.currentMediaItemIndex
+        if (player.mediaItemCount == 0 || current < 0) return null
+        return player.getMediaItemAt(upcoming(player).lastOrNull() ?: current).entryId
     }
 
     private suspend fun topUp(player: OutputSwitch, station: QueueSource.Station, last: String, after: List<String>) {
@@ -74,10 +95,13 @@ class StationRefill @Inject constructor(
             emptyList()
         }
         val items = playable.items(songs.map { it.id }.filterNot { it in after }).map { it.withSource(station) }
-        // Only while the station still ends the queue as it did.
-        val stillLast = player.mediaItemCount > 0 && player.getMediaItemAt(player.mediaItemCount - 1).entryId == last
+        // Only while the queue still ends as it did.
+        val stillLast = lastToPlay(player) == last
         if (items.isEmpty() || !stillLast) {
-            if (items.isEmpty()) emptyAfter = last
+            if (items.isEmpty()) {
+                emptyAfter = last
+                settled()
+            }
             Log.i("Octo", "station top-up: nothing added")
             return
         }

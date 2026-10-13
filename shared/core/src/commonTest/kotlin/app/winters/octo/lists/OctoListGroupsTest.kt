@@ -63,6 +63,23 @@ class OctoListGroupsTest {
     }
 
     @Test
+    fun aListWithNoOwnerCountsAsTheListeners() {
+        assertEquals(OctoListGroup.Genres, octoListGroup(octo(id("og", 1), "Pop Mix", "genre", owner = ""), me))
+    }
+
+    @Test
+    fun theListenersOwnPlaylistIsNeverTakenForOctosByItsId() {
+        // Navidrome's own ids can have the shape of Octo's.
+        val mine = Playlist(id("og", 7), "Road trip", owner = me)
+        assertNull(octoListGroup(mine, me))
+        // A server that marks its lists is never guessed at.
+        val unmarked = octo(id("og", 8), "Rock Mix")
+        val marked = octo(id("og", 9), "Pop Mix", "genre")
+        assertEquals(listOf(OctoListGroup.Genres), octoListGroups(listOf(marked, unmarked, mine), me).map { it.first })
+        assertEquals(listOf("Pop Mix"), octoListGroups(listOf(marked, unmarked, mine), me).single().second.map { it.name })
+    }
+
+    @Test
     fun groupsComeInTheirOrderAndYearsRunNewestFirst() {
         val lists = listOf(
             octo(id("og", 1), "Rock Mix", "genre"),

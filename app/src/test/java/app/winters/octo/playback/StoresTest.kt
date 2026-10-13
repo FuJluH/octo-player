@@ -40,6 +40,15 @@ class StoresTest {
         assertEquals(snapshot, queueFromRows(items, state))
     }
 
+    // A queue parked for another account keeps where each song came from,
+    // so a station played there keeps going when it comes back.
+    @Test
+    fun aParkedQueueKeepsWhereEachSongCameFrom() {
+        val snapshot = QueueSnapshot(listOf("a", "b"), emptyList(), 0, 0, 0, false, listOf("station:or1:Your Radio", "autoplay"))
+        assertEquals(snapshot, decodeQueue(encodeQueue(snapshot)))
+        assertEquals(emptyList<String>(), decodeQueue(encodeQueue(snapshot.copy(sources = emptyList())))!!.sources)
+    }
+
     @Test
     fun emptyQueueRestoresAsNothing() {
         assertNull(queueFromRows(emptyList(), null))

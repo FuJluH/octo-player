@@ -4,6 +4,7 @@ import app.winters.octo.desktop.player.SilentPlayer
 import app.winters.octo.playback.QueueSource
 import app.winters.octo.subsonic.Song
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -13,6 +14,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.random.Random
+import kotlinx.coroutines.flow.MutableStateFlow
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class StationRefillTest {
@@ -103,9 +105,42 @@ class StationRefillTest {
 
     @Test
     fun whileTheStationKeepsGoingAutoplayStandsDown() = runTest {
-        val s = setUp()
-        s.player.play(lined, 29, false, mix)
-        settle()
-        assertTrue(s.refill.keepsGoing(s.player.state.value))
+        val player = SilentPlayer(clock = { testScheduler.currentTime }, random = Random(1))
+        // A server still working on the station's next songs.
+        val refill = StationRefill(player, backgroundScope, supported = { true }) { _, _ -> awaitCancellation() }
+        refill.start()
+        val asked = mutableListOf<String>()
+        Autoplay(
+            player,
+            MutableStateFlow(true),
+            backgroundScope,
+            pick = { seed, _ -> asked += seed.id; listOf(Song("auto", "Autoplay's")) },
+            standsDown = refill::keepsGoing,
+            standsDownChanged = refill.settled,
+        ).start()
+        runCurrent()
+        val s = Setup(player, refill, mutableListOf())
+        s.player.play(lined.take(1), 0, false, mix)
+        advanceTimeBy(95_000)
+        runCurrent()
+        assertTrue("Autoplay leaves a station it keeps going alone", asked.isEmpty())
+    }
+
+    @Test
+    fun whenTheServerHasNothingMoreAutoplayCarriesOn() = runTest {
+        val s = setUp(batch = 0)
+        val asked = mutableListOf<String>()
+        Autoplay(
+            s.player,
+            MutableStateFlow(true),
+            backgroundScope,
+            pick = { seed, _ -> asked += seed.id; listOf(Song("auto", "Autoplay's")) },
+            standsDown = s.refill::keepsGoing,
+            standsDownChanged = s.refill.settled,
+        ).start()
+        s.player.play(lined.take(1), 0, false, mix)
+        advanceTimeBy(95_000)
+        runCurrent()
+        assertEquals(listOf("s1"), asked)
     }
 }

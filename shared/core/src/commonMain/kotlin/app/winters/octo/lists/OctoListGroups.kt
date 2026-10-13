@@ -17,17 +17,21 @@ enum class OctoListGroup(val title: String) {
 
 // The group of a list an Octo server made for `listener`, or null for any
 // other list: the listener's own, someone else's, a smart playlist, and
-// Liked Songs, which has a place of its own. The server says which kind a
-// list is (`octoGroup`); an older one does not, so its Made for you lists
-// are known by `octoList`, its stations by their ids, its decade mixes by
-// their names and the rest by the shape of Octo's ids. Only call it for a
-// server that runs Octo.
-fun octoListGroup(playlist: Playlist, listener: String): OctoListGroup? {
-    if (listener.isNotBlank() && !playlist.owner.orEmpty().equals(listener, ignoreCase = true)) return null
+// Liked Songs, which has a place of its own. A list with no owner counts as
+// the listener's. The server says which kind a list is (`octoGroup`); an
+// older one does not (`guess`), so its Made for you lists are known by
+// `octoList`, and its other read-only lists by the shape of Octo's ids:
+// stations by "or", decade mixes by their names, the rest as more from
+// Octo. A server that marks its lists is never guessed at, since
+// Navidrome's own ids can have the same shape. Only call it for a server
+// that runs Octo.
+fun octoListGroup(playlist: Playlist, listener: String, guess: Boolean = true): OctoListGroup? {
+    val owner = playlist.owner.orEmpty()
+    if (listener.isNotBlank() && owner.isNotBlank() && !owner.equals(listener, ignoreCase = true)) return null
     playlist.octoGroup?.let { return groupOf(it) }
     if (playlist.octoList == "liked") return null
     if (playlist.octoList != null) return OctoListGroup.ForYou
-    if (!isOctoListId(playlist.id)) return null
+    if (!guess || !playlist.readonly || !isOctoListId(playlist.id)) return null
     return when {
         playlist.id.startsWith("or") -> OctoListGroup.Stations
         DECADE_MIX.matches(playlist.name) -> OctoListGroup.Years
@@ -39,7 +43,8 @@ fun octoListGroup(playlist: Playlist, listener: String): OctoListGroup? {
 // groups are shown, groups with none left out. Years show the decades,
 // then the single years, each newest first; the others run by name.
 fun octoListGroups(playlists: List<Playlist>, listener: String): List<Pair<OctoListGroup, List<Playlist>>> {
-    val grouped = playlists.mapNotNull { list -> octoListGroup(list, listener)?.let { it to list } }.groupBy({ it.first }, { it.second })
+    val guess = playlists.none { it.octoGroup != null }
+    val grouped = playlists.mapNotNull { list -> octoListGroup(list, listener, guess)?.let { it to list } }.groupBy({ it.first }, { it.second })
     return OctoListGroup.entries.mapNotNull { group ->
         val lists = grouped[group] ?: return@mapNotNull null
         group to when (group) {

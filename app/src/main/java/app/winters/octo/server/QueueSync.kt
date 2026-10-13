@@ -6,15 +6,12 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
-import app.winters.octo.catalog.FIND_PREFIX
 import app.winters.octo.catalog.SourceDao
-import app.winters.octo.catalog.isFind
 import app.winters.octo.data.Session
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
 import app.winters.octo.discovery.Discovery
 import app.winters.octo.playback.QueueSnapshot
-import app.winters.octo.playback.isRadio
 import app.winters.octo.subsonic.INDEX_BASED_QUEUE
 import app.winters.octo.subsonic.PlayQueue
 import app.winters.octo.subsonic.PlayQueueByIndex
@@ -249,7 +246,7 @@ class QueueSync @Inject constructor(
     // save at a pause is skipped only when nothing did.
     private suspend fun save(session: Session, snapshot: QueueSnapshot, exact: Boolean) = saving.withLock {
         if (!enabled.first()) return@withLock
-        val serverIds = serverIdsOf(session.sourceId, snapshot.trackIds)
+        val serverIds = sources.serverIdsOf(session.sourceId, snapshot.trackIds)
         val queue = serverQueueOf(snapshot) { serverIds[it] }?.trimmed() ?: return@withLock
         val sent = lastSent?.takeIf { it.first == session.id }?.second
         if (sent == queue || (!exact && sent?.ids == queue.ids && sent.index == queue.index)) return@withLock
@@ -273,18 +270,6 @@ class QueueSync @Inject constructor(
         } catch (e: SubsonicException) {
             Log.w("Octo", "queue save failed: ${e.javaClass.simpleName}")
         }
-    }
-
-    // The server's id for each song that has one: a library song's copy on
-    // this server, or a find's own id. Radio stations have none.
-    private suspend fun serverIdsOf(sourceId: String, trackIds: List<String>): Map<String, String> {
-        val library = trackIds.filterNot { isFind(it) || isRadio(it) }.distinct()
-        val copies = library.chunked(900).flatMap { sources.copiesOf(it) }
-            .filter { it.sourceId == sourceId }
-            .groupBy { it.mergedId }
-            .mapValues { (_, group) -> group.map { it.nativeId }.min() }
-        val finds = trackIds.filter(::isFind).associateWith { it.removePrefix(FIND_PREFIX) }
-        return copies + finds
     }
 
     // The signed-in session, once the saved sign-in is back, or null.

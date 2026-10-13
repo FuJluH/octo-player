@@ -25,6 +25,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlin.random.Random
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 
 // Songs played this recently are not picked again, as on the phone.
 private const val RECENT_PLAYS = 50
@@ -52,8 +54,10 @@ class Autoplay(
     private val pick: suspend (seed: Song, exclude: Set<String>) -> List<Song>,
     private val leadMs: Long = AUTOPLAY_LEAD_MS,
     private val everyMs: Long = WATCH_EVERY_MS,
-    // Whether something else keeps the songs to come going (a station).
+    // Whether something else keeps the songs to come going (a station), and
+    // a flow that changes when that may have stopped being so.
     private val standsDown: (PlayerState) -> Boolean = { false },
+    private val standsDownChanged: Flow<Int> = flowOf(0),
 ) {
     // The last song's watch, and the entry it is for.
     private var watch: Job? = null
@@ -63,7 +67,7 @@ class Autoplay(
     @Volatile private var doneFor: Long? = null
 
     fun start(): Job = scope.launch {
-        combine(player.state, enabled) { state, on -> lastSong(state, on) }
+        combine(player.state, enabled, standsDownChanged) { state, on, _ -> lastSong(state, on) }
             .distinctUntilChanged()
             .collect { key -> check(key) }
     }

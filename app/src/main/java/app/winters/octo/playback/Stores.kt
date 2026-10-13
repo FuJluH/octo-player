@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
+import java.io.File
 
 // Looks up songs by id, keeping the order asked for and dropping any the
 // catalog no longer has. SQLite limits how many ids fit in one query.
@@ -95,6 +96,9 @@ data class QueueSnapshot(
     val positionMs: Long,
     val repeatMode: Int,
     val shuffle: Boolean,
+    // Where each song came from (QueueSource.encoded), one per song, so a
+    // station keeps going after a restart; empty when unknown.
+    val sources: List<String> = emptyList(),
 )
 
 fun QueueSnapshot.toRows(now: Long): Pair<List<QueueItemEntity>, QueueStateEntity> {
@@ -146,7 +150,7 @@ class QueueStore internal constructor(
     private val parked: ParkedQueues,
 ) {
     @Inject constructor(userDao: UserDao, @ApplicationContext context: Context) :
-        this(CatalogQueueRows(userDao), ParkedQueues(context.parkedQueueData))
+        this(CatalogQueueRows(userDao, File(context.filesDir, "queue-sources")), ParkedQueues(context.parkedQueueData))
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val work = Channel<suspend () -> Unit>(Channel.UNLIMITED)
@@ -208,12 +212,25 @@ interface QueueRows {
     suspend fun write(snapshot: QueueSnapshot)
 }
 
-private class CatalogQueueRows(private val userDao: UserDao) : QueueRows {
-    override suspend fun read(): QueueSnapshot? = queueFromRows(userDao.queueItems(), userDao.queueState())
+// The saved queue's rows in the catalog, and where each song came from in a
+// small file beside them, one word a line.
+private class CatalogQueueRows(private val userDao: UserDao, private val sourcesFile: File) : QueueRows {
+    override suspend fun read(): QueueSnapshot? {
+        val saved = queueFromRows(userDao.queueItems(), userDao.queueState()) ?: return null
+        val sources = runCatching { sourcesFile.readLines() }.getOrDefault(emptyList())
+        return if (sources.size == saved.trackIds.size) saved.copy(sources = sources) else saved
+    }
 
     override suspend fun write(snapshot: QueueSnapshot) {
         val (items, state) = snapshot.toRows(System.currentTimeMillis())
         userDao.saveQueue(items, state)
+        runCatching {
+            if (snapshot.sources.size == snapshot.trackIds.size && snapshot.sources.isNotEmpty()) {
+                sourcesFile.writeText(snapshot.sources.joinToString("\n") { it.replace('\n', ' ') })
+            } else {
+                sourcesFile.delete()
+            }
+        }
     }
 }
 
@@ -246,18 +263,19 @@ private class StoredQueue(
     val positionMs: Long = 0,
     val repeatMode: Int = 0,
     val shuffle: Boolean = false,
+    val sources: List<String> = emptyList(),
 )
 
 private val queueJson = Json { ignoreUnknownKeys = true }
 
 fun encodeQueue(queue: QueueSnapshot): String = queueJson.encodeToString(
     StoredQueue.serializer(),
-    StoredQueue(queue.trackIds, queue.shuffleOrder, queue.index, queue.positionMs, queue.repeatMode, queue.shuffle),
+    StoredQueue(queue.trackIds, queue.shuffleOrder, queue.index, queue.positionMs, queue.repeatMode, queue.shuffle, queue.sources),
 )
 
 fun decodeQueue(text: String): QueueSnapshot? = runCatching {
     val stored = queueJson.decodeFromString(StoredQueue.serializer(), text)
-    QueueSnapshot(stored.trackIds, stored.shuffleOrder, stored.index, stored.positionMs, stored.repeatMode, stored.shuffle)
+    QueueSnapshot(stored.trackIds, stored.shuffleOrder, stored.index, stored.positionMs, stored.repeatMode, stored.shuffle, stored.sources)
 }.getOrNull()
 
 @Singleton

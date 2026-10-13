@@ -354,6 +354,7 @@ class AppState(
             }
         },
         standsDown = stationRefill::keepsGoing,
+        standsDownChanged = stationRefill.settled,
     ).also { it.start() }
 
     // ---- End of the queue's edits ----
@@ -771,7 +772,8 @@ class AppState(
         // A station's page plays the station, which keeps going.
         val page = navigator.current.page
         if (source == null && page is Page.Playlist && isStationId(page.id)) {
-            playlists.firstOrNull { it.id == page.id }?.let { return playStation(songs, start, shuffle, page.id, it.name) }
+            playlists.firstOrNull { it.id == page.id && (it.octoGroup == null || it.octoGroup == "station") }
+                ?.let { return playStation(songs, start, shuffle, page.id, it.name) }
         }
         val listName = { id: String -> playlists.firstOrNull { it.id == id }?.name ?: liveLists.byId(id)?.name }
         val name = source ?: queueNameFor(navigator.current.page, songs, listName)

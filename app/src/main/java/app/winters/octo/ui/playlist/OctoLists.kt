@@ -62,7 +62,7 @@ fun LazyListScope.octoListRows(lists: List<Pair<OctoListGroup, List<Station>>>, 
             PlaylistLine(
                 list.name,
                 list.songCount?.let(::songs),
-                onClick = { onOpen(ServerListRoute(list.id, list.name, list.artwork, radio = list.isRadio)) },
+                onClick = { onOpen(ServerListRoute(list.id, list.name, list.artwork, radio = group == OctoListGroup.Stations && list.isRadio)) },
             ) {
                 Artwork(list.artwork, 56.dp)
             }

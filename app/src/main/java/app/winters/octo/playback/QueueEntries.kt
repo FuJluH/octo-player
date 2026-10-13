@@ -36,6 +36,14 @@ fun MediaItem.withSource(source: QueueSource): MediaItem = withSource(source.enc
 
 fun MediaItem.withSource(word: String): MediaItem = withExtras { putString(EXTRA_SOURCE, word) }
 
+// A saved song with the source it was saved with; Autoplay's are marked so
+// again. With no word saved, it is left as it is.
+fun withSavedSource(item: MediaItem, word: String?): MediaItem = when {
+    word.isNullOrEmpty() -> item
+    queueSourceOf(word) == QueueSource.Autoplay -> item.markedAutoplay()
+    else -> item.withSource(word)
+}
+
 // The same song with its extras changed, keeping everything else.
 private fun MediaItem.withExtras(change: Bundle.() -> Unit): MediaItem {
     val extras = Bundle(mediaMetadata.extras ?: Bundle.EMPTY).apply(change)

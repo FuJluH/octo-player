@@ -104,6 +104,12 @@ class PlaylistsViewModel @Inject constructor(
         // A playlist deleted on another device leaves the list, and one
         // made there comes in, without waiting for the next library copy.
         store.freshen()
+        // A list found gone on its own page leaves this one too.
+        viewModelScope.launch {
+            discovery.gone.collect { id ->
+                _octoLists.value = _octoLists.value.map { (group, lists) -> group to lists.filterNot { it.id == id } }.filter { it.second.isNotEmpty() }
+            }
+        }
         viewModelScope.launch {
             discovery.stationsFrom.collectLatest { server ->
                 if (server == null) {

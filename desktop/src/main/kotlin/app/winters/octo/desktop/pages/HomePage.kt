@@ -263,7 +263,7 @@ private fun StationCard(app: AppState, station: RadioStation, starting: Boolean,
         "Station",
         station.coverArt ?: station.id,
         onOpen = { app.navigator.go(Page.Playlist(station.id)) },
-        badge = { if (starting) Spinner(size = IconSize.Transport) else PlayButton(playing = false, enabled = true, size = ControlHeight.L, onClick = onPlay) },
+        badge = { if (starting) Spinner(size = IconSize.Transport) else PlayButton(playing = false, enabled = true, size = ControlHeight.L, label = "Play ${station.name}", onClick = onPlay) },
         picture = { modifier, shape -> StationPicture(app, station, modifier, shape) },
     )
 }

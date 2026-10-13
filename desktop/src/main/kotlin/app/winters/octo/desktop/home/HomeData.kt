@@ -15,7 +15,6 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.Serializable
 import app.winters.octo.lists.OctoListGroup
-import app.winters.octo.lists.octoListGroup
 import app.winters.octo.lists.octoListGroups
 
 // How many albums each shelf on Home holds at most. A shelf shows as many
@@ -73,7 +72,7 @@ fun homeChart(top: TopSongs): TopSongs = top.copy(entry = top.entry.filter { it.
 // rather than failing the page; only when every one fails does it throw.
 // Stations are asked for only from Octo, where each of its own is a list of
 // songs to play (it carries its id as its cover). An internet radio station
-// added to the server is a stream this app cannot play yet, so it is left off.
+// added to the server is a stream, which this app does not play, so it is left off.
 // With `stations` off (their shelf is hidden) they are not asked for at all,
 // and come back null.
 suspend fun loadHome(connection: Connection, stations: Boolean = true): HomeData = coroutineScope {
@@ -117,8 +116,10 @@ fun madeForYou(playlists: List<Playlist>): List<Playlist> =
 // The playlists the listener keeps, without the Made for you lists, which
 // have a shelf of their own on Home, and, on Octo (`isOcto`), without any
 // other list Octo made for `listener`.
-fun yourPlaylists(playlists: List<Playlist>, listener: String = "", isOcto: Boolean = false): List<Playlist> =
-    playlists.filter { it.octoList == null && !(isOcto && octoListGroup(it, listener) != null) }
+fun yourPlaylists(playlists: List<Playlist>, listener: String = "", isOcto: Boolean = false): List<Playlist> {
+    val octo = octoLists(playlists, listener, isOcto).flatMap { it.second }.mapTo(HashSet()) { it.id }
+    return playlists.filter { it.octoList == null && it.id !in octo }
+}
 
 // The lists Octo made for `listener`, by group, from the playlists the
 // sidebar holds; none from any other server.

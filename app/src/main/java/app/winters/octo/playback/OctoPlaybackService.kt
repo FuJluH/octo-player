@@ -186,7 +186,7 @@ class OctoPlaybackService : MediaLibraryService() {
         // The covers of the song on and the next ones, wherever it plays.
         coversAhead.attach(player)
         editor.attach(player)
-        stationRefill.attach(player, scope)
+        stationRefill.attach(player, scope) { autoplay.check() }
         autoplay.attach(player, scope)
         // Casting to a TV or speaker swaps the session's player to one that
         // drives the device, and back.
@@ -385,7 +385,8 @@ class OctoPlaybackService : MediaLibraryService() {
     // the saved song and place, or at the start when that song is gone.
     private suspend fun restoreQueue() {
         val saved = queue.load() ?: return
-        val each = playable.itemsEach(saved.trackIds)
+        // Each song back with where it came from, so a station keeps going.
+        val each = playable.itemsEach(saved.trackIds).mapIndexed { i, item -> item?.let { withSavedSource(it, saved.sources.getOrNull(i)) } }
         val items = each.filterNotNull()
         if (items.isEmpty() || player.mediaItemCount > 0) return
         val found = each.map { it != null }
@@ -460,6 +461,7 @@ class OctoPlaybackService : MediaLibraryService() {
             positionMs = player.currentPosition,
             repeatMode = player.repeatMode,
             shuffle = player.shuffleModeEnabled,
+            sources = List(player.mediaItemCount) { player.getMediaItemAt(it).queueSource.encoded() },
         )
     }
 

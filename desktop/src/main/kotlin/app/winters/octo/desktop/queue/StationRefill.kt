@@ -12,6 +12,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 // Keeps a station going, with the phone's rules: when few songs are left to
 // come and a station's are among them, it asks the server for the
@@ -31,6 +34,10 @@ class StationRefill(
     // which Autoplay may carry on.
     @Volatile private var askedAfter: Long? = null
     @Volatile private var emptyAfter: Long? = null
+
+    // Counts each top-up that brought nothing, so Autoplay looks again.
+    private val _settled = MutableStateFlow(0)
+    val settled: StateFlow<Int> = _settled.asStateFlow()
 
     fun start(): Job = scope.launch {
         player.state.map { due(it) }.distinctUntilChanged().collect { ask -> ask?.let(::topUp) }
@@ -58,16 +65,23 @@ class StationRefill(
         if (job?.isActive == true || ask.last == askedAfter) return
         askedAfter = ask.last
         val after = stationSongsQueued(player.state.value.queue, ask.station, { it.source }, { it.song.id })
-        job = scope.launch {
+        val running = scope.launch {
             val songs = runCatching { more(ask.station.id, after) }.getOrDefault(emptyList()).filterNot { it.id in after }
             val now = player.state.value
             // Only while the queue still ends where it did.
             val stillLast = (now.upcoming.lastOrNull() ?: now.current)?.key == ask.last
-            if (songs.isEmpty()) emptyAfter = ask.last
+            if (songs.isEmpty()) {
+                emptyAfter = ask.last
+                _settled.value++
+            }
             if (songs.isEmpty() || !stillLast) return@launch
             val ended = now.current != null && !now.playing && now.upcoming.isEmpty()
             player.addToQueue(songs, ask.station)
             if (ended) player.state.value.upcoming.firstOrNull()?.let { player.skipTo(it.key) }
         }
+        job = running
+        // The queue may have changed while the server answered: ask again
+        // for where it ends now.
+        running.invokeOnCompletion { scope.launch { due(player.state.value)?.let(::topUp) } }
     }
 }

@@ -41,6 +41,7 @@ import app.winters.octo.playback.STATION_BATCH
 import app.winters.octo.playback.isStationId
 import app.winters.octo.lists.OctoListGroup
 import app.winters.octo.lists.octoListGroups
+import app.winters.octo.server.serverIdsOf
 
 // Octo holds back songs found online when a search asks for 12 songs or
 // fewer, so always ask for more than that.
@@ -236,10 +237,12 @@ class Discovery @Inject constructor(
         get() = (sessions.state.value as? SessionState.SignedIn)?.session?.extensions
             ?.any { it == OCTO_STATIONS || it.startsWith("$OCTO_STATIONS:") } == true
 
-    // A station's next songs, none of `after` (its songs already queued).
+    // A station's next songs, none of `after` (its songs already queued, by
+    // the phone's ids; the server is told its own ids for them).
     suspend fun stationMore(id: String, after: List<String>): List<TrackEntity> {
         val (client, sourceId) = server() ?: return emptyList()
-        return resolve(client, sourceId, client.stationSongs(id, STATION_BATCH, after))
+        val serverIds = sources.serverIdsOf(sourceId, after)
+        return resolve(client, sourceId, client.stationSongs(id, STATION_BATCH, after.mapNotNull(serverIds::get)))
     }
 
     // The songs a station, or a Made for you list, has lined up now.

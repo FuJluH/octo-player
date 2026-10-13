@@ -60,7 +60,7 @@ class HomeDataTest {
     }
 
     // An internet radio station added to the server is a stream, which this
-    // app cannot play yet, so Home leaves it off; Octo's own stay.
+    // app does not play, so Home leaves it off; Octo's own stay.
     @Test
     fun anAddedRadioStationIsLeftOffHome() = runBlocking {
         server.answer("getAlbumList2", albums("a1"))
@@ -256,8 +256,8 @@ class HomeDataTest {
     @Test
     fun octosOwnListsAreNotTheListenersPlaylists() {
         val pop = Playlist("og00000000000000000001", "Pop Mix", owner = "ana", readonly = true, octoGroup = "genre")
-        val decade = Playlist("og00000000000000000002", "1990s Mix", owner = "ana", readonly = true)
-        val station = Playlist("or00000000000000000003", "Your Mix", owner = "ana", readonly = true)
+        val decade = Playlist("og00000000000000000002", "1990s Mix", owner = "ana", readonly = true, octoGroup = "decade")
+        val station = Playlist("or00000000000000000003", "Your Radio", owner = "ana", readonly = true, octoGroup = "station")
         val shared = Playlist("5f3c1", "Road trip", owner = "ben", readonly = true)
         val smart = Playlist("5f3c2", "Top rated", owner = "ana", readonly = true)
         val all = listOf(Playlist("mine", owner = "ana"), pop, decade, station, shared, smart)
@@ -266,7 +266,7 @@ class HomeDataTest {
         val groups = octoLists(all, "ana", isOcto = true).toMap()
         assertEquals(listOf("Pop Mix"), groups[OctoListGroup.Genres]?.map { it.name })
         assertEquals(listOf("1990s Mix"), groups[OctoListGroup.Years]?.map { it.name })
-        assertEquals(listOf("Your Mix"), groups[OctoListGroup.Stations]?.map { it.name })
+        assertEquals(listOf("Your Radio"), groups[OctoListGroup.Stations]?.map { it.name })
         assertTrue(octoLists(all, "ana", isOcto = false).isEmpty())
     }
 }

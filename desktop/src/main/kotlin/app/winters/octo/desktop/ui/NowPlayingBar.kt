@@ -374,7 +374,7 @@ private fun ColumnScope.SleepMenu(app: AppState, sleep: SleepState, back: () -> 
 // Play and pause: the one control in the glaze, a lit glass circle. While
 // waiting for sound, a spinner turns inside it.
 @Composable
-fun PlayButton(playing: Boolean, enabled: Boolean, size: Dp = FrameSize.PlayButtonLarge, waiting: Boolean = false, onClick: () -> Unit) {
+fun PlayButton(playing: Boolean, enabled: Boolean, size: Dp = FrameSize.PlayButtonLarge, waiting: Boolean = false, label: String? = null, onClick: () -> Unit) {
     val tip = rememberTooltipState()
     Glaze(
         Modifier
@@ -382,7 +382,7 @@ fun PlayButton(playing: Boolean, enabled: Boolean, size: Dp = FrameSize.PlayButt
             .hoverLift(CircleShape, clickable = enabled)
             .tooltipTarget(tip)
             .clickable(enabled = enabled, role = Role.Button, interactionSource = null, indication = FocusRing(CircleShape), onClick = onClick)
-            .semantics { contentDescription = if (playing) "Pause" else "Play" },
+            .semantics { contentDescription = label ?: if (playing) "Pause" else "Play" },
         light = GlazeLight.Lifted,
     ) {
         when {
