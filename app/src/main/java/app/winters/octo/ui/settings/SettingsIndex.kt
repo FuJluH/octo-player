@@ -207,6 +207,11 @@ object SettingsIndex {
         "immersive_bg_fps", SettingsPage.Appearance, "Frame rate", "How smoothly the background moves",
         listOf("fps", "battery", "smooth", "background"), section = "Player",
     )
+    val HomeSections = add(
+        "home_sections", SettingsPage.Appearance, "Home sections", "The order of Home's shelves, and which ones show",
+        listOf("home", "shelves", "sections", "order", "rearrange", "reorder", "move", "hide", "show", "layout", "customize", "edit home"),
+        section = "Home",
+    )
     val PlaylistCovers = add(
         "playlist_covers", SettingsPage.Appearance, PLAYLIST_COVERS_SETTING, "Designed covers, or the covers of their albums",
         listOf("playlist", "cover", "artwork", "mosaic", "picture", "designed"), section = "Playlists",

@@ -1,6 +1,7 @@
 package app.winters.octo.ui.home
 
 import app.winters.octo.discovery.CHARTS_ROW
+import app.winters.octo.discovery.ChartAnswer
 import app.winters.octo.discovery.ChartLists
 import app.winters.octo.subsonic.CHART_OVERALL
 import android.os.SystemClock
@@ -22,7 +23,11 @@ import app.winters.octo.discovery.Discovery
 import app.winters.octo.discovery.Station
 import app.winters.octo.favourites.PinStore
 import app.winters.octo.favourites.PinnedItem
+import app.winters.octo.home.HomeSection
+import app.winters.octo.home.HomeSectionEntry
 import app.winters.octo.home.Rediscovery
+import app.winters.octo.home.shows
+import app.winters.octo.home.answered
 import app.winters.octo.listening.PlayHistory
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.server.ServerSync
@@ -35,6 +40,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -56,6 +63,7 @@ class HomeViewModel @Inject constructor(
     pins: PinStore,
     favourites: FavouritesDao,
     private val chartLists: ChartLists,
+    keptFiles: KeptShelvesFiles,
 ) : ViewModel() {
     // What is pinned to the front of Home, in its order.
     val pinned: StateFlow<List<PinnedItem>> =
@@ -90,6 +98,11 @@ class HomeViewModel @Inject constructor(
     val librarySongs: StateFlow<Int?> =
         dao.libraryTrackCount().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+    // Home's shelves in their order, each shown or hidden. Null until read,
+    // so Home never draws the usual order before the listener's.
+    val sections: StateFlow<List<HomeSectionEntry>?> =
+        prefs.homeSections.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
     // Whether the phone access card was put away with "Not now". Null until read.
     val accessDismissed: StateFlow<Boolean?> =
         prefs.accessDismissed.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -103,7 +116,9 @@ class HomeViewModel @Inject constructor(
     var refreshing by mutableStateOf(false)
         private set
 
-    // The signed-in server's stations, kept through a failed load.
+    // The signed-in server's stations, kept through a failed load. Each of
+    // these three server shelves starts as the server last gave it, read
+    // from the app's cache, and changes only when an answer differs.
     var stations by mutableStateOf<List<Station>>(emptyList())
         private set
 
@@ -112,7 +127,7 @@ class HomeViewModel @Inject constructor(
         private set
 
     // The first songs of the server's chart of the moment, for Home's Charts
-    // row; empty on a server without charts.
+    // row; empty on a server without charts, kept through a failed load.
     var charts by mutableStateOf<List<TrackEntity>>(emptyList())
         private set
 
@@ -122,8 +137,23 @@ class HomeViewModel @Inject constructor(
 
     private var offersStations = false
     private var stationsJob: Job? = null
+    private var chartsJob: Job? = null
+
+    // The server whose shelves are shown, and where each server's are kept.
+    // Writes go one at a time, in the order they were made.
+    private var shelvesFrom: String? = null
+    private val kept = keptFiles.store
+    private val keeping = Dispatchers.IO.limitedParallelism(1)
     private var stationsLoadedAt: Long? = null
     private var stationsFailed = false
+
+    // The server shelves the last finished load asked for, whether the
+    // chart was asked for from the server in use, and whether the library
+    // has no songs (the empty card shows the chart whether its shelf is
+    // hidden or not).
+    private var stationsAsked = emptySet<HomeSection>()
+    private var chartsAsked = false
+    private var libraryEmpty = false
 
     init {
         viewModelScope.launch {
@@ -131,24 +161,59 @@ class HomeViewModel @Inject constructor(
                 .distinctUntilChanged()
                 .collect { reroll() }
         }
-        // A new sign-in or another kept server starts over, without the
-        // last one's list; signing out, or a server without stations, drops
-        // it. The server can turn out to be Octo after start, once its
-        // extensions are read again.
+        // A new sign-in or another kept server shows the shelves it gave
+        // last time at once, or none, and asks it again; signing out, or a
+        // server without stations, drops them. The server can turn out to be
+        // Octo after start, once its extensions are read again.
         viewModelScope.launch {
             discovery.stationsFrom.collect { server ->
                 offersStations = server != null
                 stationsJob?.cancel()
+                chartsJob?.cancel()
                 stationsLoadedAt = null
                 stationsFailed = false
-                stations = emptyList()
-                madeForYou = emptyList()
-                charts = emptyList()
+                stationsAsked = emptySet()
+                chartsAsked = false
+                shelvesFrom = server
+                val last = server?.let { withContext(Dispatchers.IO) { kept.read(it) } } ?: KeptShelves()
+                stations = answered(stations, last.stations)
+                madeForYou = answered(madeForYou, last.madeForYou)
+                charts = answered(charts, last.charts)
                 if (server != null) {
+                    sections.filterNotNull().first()
                     loadStations()
                     loadCharts()
                 }
             }
+        }
+        // A shelf shown again, or the library found empty: what Home now
+        // draws is asked for.
+        viewModelScope.launch {
+            combine(sections.filterNotNull(), dao.libraryTrackCount()) { entries, count -> entries to (count == 0) }
+                .distinctUntilChanged()
+                .collect { (_, empty) ->
+                    libraryEmpty = empty
+                    sectionsChanged()
+                }
+        }
+    }
+
+    // The server shelves Home draws now: a hidden one is not asked for.
+    private fun wantedStationShelves(): Set<HomeSection> {
+        val entries = sections.value ?: return emptySet()
+        return setOf(HomeSection.Stations, HomeSection.MadeForYou).filterTo(HashSet()) { entries.shows(it) }
+    }
+
+    // The chart is wanted while its shelf shows, and while the library is
+    // empty, where it sits under the empty card.
+    private fun wantsCharts(): Boolean = sections.value?.shows(HomeSection.Charts) == true || libraryEmpty
+
+    private fun sectionsChanged() {
+        if (shelvesFrom == null) return
+        loadCharts()
+        if (!stationsAsked.containsAll(wantedStationShelves())) {
+            stationsLoadedAt = null
+            loadStations()
         }
     }
 
@@ -198,9 +263,22 @@ class HomeViewModel @Inject constructor(
     // Plays a shelf of songs as shown, starting at the one tapped.
     fun play(tracks: List<TrackEntity>, index: Int) = playback.playTracks(tracks.map { it.id }, index)
 
+    // A server without charts empties the row; one that did not answer
+    // leaves it as it is.
     private fun loadCharts() {
-        viewModelScope.launch {
-            charts = chartLists.chart(CHART_OVERALL)?.songs?.take(CHARTS_ROW)?.map { it.track }.orEmpty()
+        if (shelvesFrom == null || chartsAsked || !wantsCharts()) return
+        chartsAsked = true
+        chartsJob = viewModelScope.launch {
+            val got = when (val answer = chartLists.answer(CHART_OVERALL)) {
+                is ChartAnswer.Got -> answer.list.songs.take(CHARTS_ROW).map { it.track }
+                ChartAnswer.None -> emptyList()
+                ChartAnswer.Failed -> {
+                    chartsAsked = false
+                    return@launch
+                }
+            }
+            charts = answered(charts, got)
+            keepShelves()
         }
     }
 
@@ -216,30 +294,61 @@ class HomeViewModel @Inject constructor(
 
     // Runs in the background so no other shelf waits on the server. The
     // stations and Made for you are read apart, so one failing never hides
-    // the other; either failing asks again when Home comes back.
+    // the other, and a hidden one is not read at all; either failing asks
+    // again when Home comes back. Each answer replaces its shelf only when
+    // it differs from what is shown.
     private fun loadStations() {
         if (stationsJob?.isActive == true) return
+        val wanted = wantedStationShelves()
+        if (wanted.isEmpty()) return
         stationsJob = viewModelScope.launch {
             var failed = false
-            try {
-                stations = withContext(Dispatchers.IO) { discovery.stations() }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                failed = true
-                Log.w("Octo", "stations failed to load: ${e.javaClass.simpleName}")
+            var answers = 0
+            if (HomeSection.Stations in wanted) {
+                try {
+                    val got = withContext(Dispatchers.IO) { discovery.stations() }
+                    stations = answered(stations, got)
+                    answers++
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    failed = true
+                    Log.w("Octo", "stations failed to load: ${e.javaClass.simpleName}")
+                }
             }
-            try {
-                madeForYou = withContext(Dispatchers.IO) { discovery.madeForYou() }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                failed = true
-                Log.w("Octo", "made for you failed to load: ${e.javaClass.simpleName}")
+            if (HomeSection.MadeForYou in wanted) {
+                try {
+                    val got = withContext(Dispatchers.IO) { discovery.madeForYou() }
+                    madeForYou = answered(madeForYou, got)
+                    answers++
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    failed = true
+                    Log.w("Octo", "made for you failed to load: ${e.javaClass.simpleName}")
+                }
             }
-            if (!failed) stationsLoadedAt = SystemClock.elapsedRealtime()
+            if (!failed) {
+                stationsLoadedAt = SystemClock.elapsedRealtime()
+                stationsAsked = wanted
+            }
             stationsFailed = failed
+            if (answers > 0) keepShelves()
+            // A shelf shown while this load ran is asked for now.
+            if (!failed && !wanted.containsAll(wantedStationShelves())) {
+                stationsLoadedAt = null
+                stationsJob = null
+                loadStations()
+            }
         }
+    }
+
+    // Keeps the server shelves as shown for the server in use, for the
+    // next start or a switch back to it.
+    private fun keepShelves() {
+        val server = shelvesFrom ?: return
+        val shelves = KeptShelves(stations, madeForYou, charts)
+        viewModelScope.launch(keeping) { kept.write(server, shelves) }
     }
 
     private suspend fun reroll() {

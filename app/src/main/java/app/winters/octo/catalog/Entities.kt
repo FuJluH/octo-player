@@ -5,6 +5,7 @@ import androidx.room.Embedded
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import kotlinx.serialization.Serializable
 
 // Ids are "<source>:<native id>", so one catalog can hold every source.
 
@@ -12,6 +13,8 @@ import androidx.room.PrimaryKey
     tableName = "track",
     indices = [Index("albumId"), Index("artistId"), Index("sourceId"), Index("sortKey"), Index("searchKey"), Index("relinkKey")],
 )
+// Serializable too, so Home can keep the chart songs it showed.
+@Serializable
 data class TrackEntity(
     @PrimaryKey val id: String,
     val sourceId: String,

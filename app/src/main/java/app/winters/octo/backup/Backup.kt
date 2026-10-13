@@ -166,6 +166,9 @@ data class Backup(
     val lyrics: LyricsBackup? = null,
     val offline: OfflineBackup? = null,
     val listenBrainz: ListenBrainzBackup? = null,
+    // Home's shelves in order, a hidden one led by "-", as kept under
+    // "home_sections". A backup without it leaves Home as it is.
+    val homeSections: String? = null,
     // The order each list was left in, by the list's name, as "<order>:asc"
     // or "<order>:desc". Lists never reordered are not named.
     val sortOrders: Map<String, String> = emptyMap(),
@@ -347,6 +350,7 @@ fun describeBackup(backup: Backup): List<String> = buildList {
         "lyrics".takeIf { backup.lyrics != null },
         "cache and downloads".takeIf { backup.offline != null },
         "scrobbling".takeIf { backup.listenBrainz != null },
+        "home sections".takeIf { backup.homeSections != null },
         "sort orders".takeIf { backup.sortOrders.isNotEmpty() },
     )
     if (settings.isNotEmpty()) add("Settings: ${settings.joinToString(", ")}")

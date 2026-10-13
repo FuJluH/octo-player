@@ -30,6 +30,9 @@ import app.winters.octo.sort.SortSettings
 import app.winters.octo.sound.EqPreset
 import app.winters.octo.sound.SoundEngine
 import app.winters.octo.sound.UserPresets
+import app.winters.octo.home.encodeHomeSections
+import app.winters.octo.home.homeSectionOrder
+import app.winters.octo.ui.home.HomePrefs
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -68,6 +71,7 @@ class Backups @Inject constructor(
     private val offline: OfflineSettings,
     private val listenBrainz: ListenBrainzStore,
     private val sorts: SortSettings,
+    private val home: HomePrefs,
 ) {
     // Everything as it is now.
     suspend fun make(now: Long = System.currentTimeMillis()): Backup = withContext(Dispatchers.IO) {
@@ -114,6 +118,7 @@ class Backups @Inject constructor(
             ),
             offline = offline.prefs.first().toBackup(playlistNames),
             listenBrainz = listenBrainz.current().let { ListenBrainzBackup(it.enabled, it.sendPlays, it.nowPlaying) },
+            homeSections = encodeHomeSections(home.homeSections.first()),
             sortOrders = sorts.saved(),
         )
     }
@@ -172,6 +177,7 @@ class Backups @Inject constructor(
             playlistSync.setNewOnServer(library.newPlaylistsOnServer)
         }
         backup.listenBrainz?.let { listenBrainz.restoreChoices(it.enabled, it.sendPlays, it.nowPlaying) }
+        backup.homeSections?.let { home.setHomeSections(homeSectionOrder(it)) }
         sorts.restore(backup.sortOrders)
         backup.lyrics?.let { lyrics.setKeepScreenOn(it.keepScreenOn) }
         backup.lyrics?.look?.let { lyricsLook.restore(it) }

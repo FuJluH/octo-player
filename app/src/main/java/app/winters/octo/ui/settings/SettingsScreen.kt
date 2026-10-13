@@ -337,7 +337,7 @@ fun SettingsPageScreen(page: SettingsPage, highlight: String?, onOpen: (NavKey) 
         SettingsPage.Playback -> PlaybackPage(onBack, highlight)
         // Sound opens its own page; this stands in should a stored route name it.
         SettingsPage.Sound -> SoundScreen(onBack)
-        SettingsPage.Appearance -> AppearancePage(onBack, highlight)
+        SettingsPage.Appearance -> AppearancePage(onOpen, onBack, highlight)
         SettingsPage.Library -> LibraryPage(onBack, highlight)
         SettingsPage.Server -> ServerPage(onOpen, onBack, highlight)
         SettingsPage.Streaming -> StreamingPage(onOpen, onBack, highlight)

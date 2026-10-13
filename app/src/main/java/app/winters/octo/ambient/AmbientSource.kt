@@ -15,6 +15,7 @@ import app.winters.octo.ui.nav.FoldersRoute
 import app.winters.octo.ui.nav.GenreRoute
 import app.winters.octo.ui.nav.GenresRoute
 import app.winters.octo.ui.nav.HomeRoute
+import app.winters.octo.ui.nav.HomeSectionsRoute
 import app.winters.octo.ui.nav.LibraryRoute
 import app.winters.octo.ui.nav.LikedRoute
 import app.winters.octo.ui.nav.OctoAdminRoute
@@ -57,7 +58,7 @@ fun areaOf(route: NavKey?): AmbientArea? = when (route) {
     is GenreRoute, is PlaylistRoute,
     -> AmbientArea.Library
     SettingsRoute, SoundRoute, SignInRoute, EditConnectionRoute, is ServerFormRoute, OctoAdminRoute, ImportRoute, FamilyRoute, is FamilyJoinRoute,
-    SharesRoute, RadioStationsRoute, is SettingsPageRoute,
+    SharesRoute, RadioStationsRoute, is SettingsPageRoute, HomeSectionsRoute,
     -> AmbientArea.Settings
     else -> null
 }

@@ -75,6 +75,13 @@ class SettingsIndexTest {
     }
 
     @Test
+    fun homeSectionsAreFoundByWhatTheyDo() {
+        assertEquals("Home sections", titles("rearrange").first())
+        assertEquals("Home sections", titles("edit home").first())
+        assertEquals("Appearance · Home", SettingsIndex.HomeSections.place)
+    }
+
+    @Test
     fun aResultSaysWhereItLives() {
         assertEquals("Appearance · Where it shows", SettingsIndex.AmbientHome.place)
         assertEquals("Lyrics", SettingsIndex.LyricsOnline.place)

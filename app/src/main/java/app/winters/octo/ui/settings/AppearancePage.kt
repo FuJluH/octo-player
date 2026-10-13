@@ -18,12 +18,17 @@ import app.winters.octo.covers.PlaylistCoverStyle
 import app.winters.octo.covers.playlistCoverStyleHelp
 import app.winters.octo.covers.playlistCoverStyleName
 import app.winters.octo.design.OctoIcons
+import app.winters.octo.home.DefaultHomeSections
+import app.winters.octo.home.homeSectionsSummary
+import app.winters.octo.ui.nav.HomeSectionsRoute
+import androidx.navigation3.runtime.NavKey
 import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.PlayerSettings
 import app.winters.octo.playlists.PlaylistArtSettings
 import app.winters.octo.ui.common.Choice
 import app.winters.octo.ui.common.ChoiceRequest
 import app.winters.octo.ui.common.LocalChoiceSheet
+import app.winters.octo.ui.settings.rows.ActionRow
 import app.winters.octo.ui.settings.rows.ChoiceRow
 import app.winters.octo.ui.settings.rows.SettingsGroup
 import app.winters.octo.ui.settings.rows.SettingsPageFrame
@@ -62,16 +67,20 @@ class MotionViewModel @Inject constructor(private val settings: PlayerSettings) 
 }
 
 // How the app looks: the artwork's colours glowing behind the pages, how
-// strongly and where, the player's background, and how much moves.
+// strongly and where, Home's sections, the player's background, and how
+// much moves.
 @Composable
 fun AppearancePage(
+    onOpen: (NavKey) -> Unit,
     onBack: () -> Unit,
     highlight: String?,
     vm: AmbienceViewModel = hiltViewModel(),
     motion: MotionViewModel = hiltViewModel(),
     covers: PlaylistCoversViewModel = hiltViewModel(),
+    home: HomeSectionsViewModel = hiltViewModel(),
 ) {
     val prefs = vm.prefs.collectAsStateWithLifecycle().value ?: AmbientPrefs()
+    val sections by home.sections.collectAsStateWithLifecycle()
     val motionPrefs by motion.prefs.collectAsStateWithLifecycle()
     val coverStyle by covers.style.collectAsStateWithLifecycle()
     val sheet = LocalChoiceSheet.current
@@ -106,6 +115,13 @@ fun AppearancePage(
                     helper = "The glow follows the page's album or artist, not the song.",
                 )
             }
+        }
+        SettingsGroup(title = "Home", icon = OctoIcons.Home) {
+            ActionRow(
+                SettingsIndex.HomeSections,
+                onClick = { onOpen(HomeSectionsRoute) },
+                helper = homeSectionsSummary(sections ?: DefaultHomeSections),
+            )
         }
         PlayerBackgroundSection()
         SettingsGroup(title = "Playlists", icon = OctoIcons.Playlists) {

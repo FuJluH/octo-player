@@ -401,6 +401,7 @@ private fun pagesFor(stack: NavBackStack<NavKey>): (NavKey) -> NavEntry<NavKey> 
         entry<FamilyJoinRoute> { route -> SignInScreen(back, join = parseFamilyLink(route.link)) }
         entry<ChartsRoute> { app.winters.octo.ui.charts.ChartsScreen(back) }
         entry<SoundRoute> { SoundScreen(back) }
+        entry<HomeSectionsRoute> { app.winters.octo.ui.settings.HomeSectionsPage(back) }
         entry<SharesRoute> { SharesScreen(back) }
         entry<RadioStationsRoute> { RadioStationsScreen(back) }
         entry<HistoryRoute> { HistoryScreen(it.mostPlayed, back) }

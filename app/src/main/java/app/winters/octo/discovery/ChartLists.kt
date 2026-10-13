@@ -27,6 +27,14 @@ data class ChartList(
     val songs: List<RankedTrack>,
 )
 
+// What asking for a chart came to: its list, no charts on the server, or
+// no answer (the server could not be reached, or another is in use now).
+sealed interface ChartAnswer {
+    data class Got(val list: ChartList) : ChartAnswer
+    data object None : ChartAnswer
+    data object Failed : ChartAnswer
+}
+
 // The Charts page's server side: which charts the server's country has
 // (Popular right now, Best New Songs, Trending Songs, the genres) and each
 // chart's songs, kept per server and chart. Only a server that lists
@@ -61,26 +69,36 @@ class ChartLists @Inject constructor(
     }
 
     // A chart's songs, kept an hour per server and chart: its songs are
-    // matched to that server's library.
-    suspend fun chart(chart: String): ChartList? {
-        val session = session() ?: return null
+    // matched to that server's library. Null when there is none to give.
+    suspend fun chart(chart: String): ChartList? = (answer(chart) as? ChartAnswer.Got)?.list
+
+    // The same, telling a server without charts from one that did not answer.
+    suspend fun answer(chart: String): ChartAnswer {
+        val session = session() ?: return ChartAnswer.Failed
         val key = "${serverKey(session)}|$chart"
         val now = System.currentTimeMillis()
-        lists[key]?.let { (at, kept) -> if (now - at < CHART_KEPT_MS) return kept }
-        if (!offers(session)) return null
-        val list = answerOf { session.client.topChart(chartSongs(chart), chart) } ?: return null
+        lists[key]?.let { (at, kept) -> if (now - at < CHART_KEPT_MS) return ChartAnswer.Got(kept) }
+        when (offersIfKnown(session)) {
+            null -> return ChartAnswer.Failed
+            false -> return ChartAnswer.None
+            true -> Unit
+        }
+        val list = answerOf { session.client.topChart(chartSongs(chart), chart) } ?: return ChartAnswer.Failed
         // Another server in use by the time it came: not this one's chart.
-        if (session()?.id != session.id) return null
+        if (session()?.id != session.id) return ChartAnswer.Failed
         val entries = list.entry.filter { it.song != null }
         val songs = rankTracks(entries, discovery.resolveInPlace(entries.map { it.song!! }))
-        return ChartList(chart, list.name, list.source, list.country, songs).also { lists[key] = now to it }
+        return ChartAnswer.Got(ChartList(chart, list.name, list.source, list.country, songs).also { lists[key] = now to it })
     }
 
-    private suspend fun offers(session: Session): Boolean {
+    private suspend fun offers(session: Session): Boolean = offersIfKnown(session) ?: false
+
+    // Whether the server has charts; null when it could not say.
+    private suspend fun offersIfKnown(session: Session): Boolean? {
         if ("$OCTO_TOP_SONGS:$OCTO_TOP_SONGS_CHARTS" in session.extensions) return true
         if (!session.runsOcto) return false
         offered[session.sourceId]?.let { return it }
-        val yes = session.client.supportsIfKnown(OCTO_TOP_SONGS, OCTO_TOP_SONGS_CHARTS) ?: return false
+        val yes = session.client.supportsIfKnown(OCTO_TOP_SONGS, OCTO_TOP_SONGS_CHARTS) ?: return null
         offered[session.sourceId] = yes
         return yes
     }
