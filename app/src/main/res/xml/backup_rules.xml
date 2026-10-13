@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The same for Android 11 and older: everything Android's backup copied
+     before, less the Live radio file with the last place. -->
+<full-backup-content>
+    <exclude domain="file" path="datastore/live_radio.preferences_pb" />
+</full-backup-content>

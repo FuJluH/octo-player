@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What Android's own cloud backup and device-to-device transfer copy
+     (Android 12 and newer): everything as before, less the Live radio file,
+     which holds the last place stations were found around. Octo's own
+     backups still carry the kept stations. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="datastore/live_radio.preferences_pb" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="datastore/live_radio.preferences_pb" />
+    </device-transfer>
+</data-extraction-rules>

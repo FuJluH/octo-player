@@ -73,8 +73,10 @@ class Backups @Inject constructor(
     private val listenBrainz: ListenBrainzStore,
     private val sorts: SortSettings,
     private val home: HomePrefs,
-    private val liveRadio: LiveRadioStore,
+    liveRadioStore: LiveRadioStore,
 ) {
+    private val liveRadio = LiveRadioBackup(liveRadioStore)
+
     // Everything as it is now.
     suspend fun make(now: Long = System.currentTimeMillis()): Backup = withContext(Dispatchers.IO) {
         val (playerPrefs, streamPrefs) = player.snapshot()
@@ -122,7 +124,7 @@ class Backups @Inject constructor(
             listenBrainz = listenBrainz.current().let { ListenBrainzBackup(it.enabled, it.sendPlays, it.nowPlaying) },
             homeSections = encodeHomeSections(home.homeSections.first()),
             sortOrders = sorts.saved(),
-            keptStations = liveRadio.keptNow().stations,
+            keptStations = liveRadio.saved(),
         )
     }
 
@@ -182,7 +184,7 @@ class Backups @Inject constructor(
         backup.listenBrainz?.let { listenBrainz.restoreChoices(it.enabled, it.sendPlays, it.nowPlaying) }
         backup.homeSections?.let { home.setHomeSections(homeSectionOrder(it)) }
         sorts.restore(backup.sortOrders)
-        liveRadio.restore(backup.keptStations)
+        liveRadio.restore(backup)
         backup.lyrics?.let { lyrics.setKeepScreenOn(it.keepScreenOn) }
         backup.lyrics?.look?.let { lyricsLook.restore(it) }
         plan.lyricsOffsets.forEach { (id, ms) -> lyrics.setOffset(id, ms) }

@@ -19,7 +19,12 @@ import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private val Context.liveRadioPrefs by preferencesDataStore("live_radio")
+// The store's name. Its file (datastore/live_radio.preferences_pb) is left
+// out of Android's own cloud backup and device transfer, by
+// res/xml/data_extraction_rules.xml and res/xml/backup_rules.xml.
+const val LIVE_RADIO_STORE = "live_radio"
+
+private val Context.liveRadioPrefs by preferencesDataStore(LIVE_RADIO_STORE)
 
 private val KEPT = stringPreferencesKey("kept")
 private val PLACE = stringPreferencesKey("place")
@@ -36,7 +41,8 @@ data class LiveSearch(
 )
 
 // What Live radio near you keeps on the phone: the stations kept, and the
-// last place, radius and order. None of it goes to a server.
+// last place, radius and order. None of it goes to a server or to Android's
+// cloud backup; Octo's own backups carry the kept stations only.
 @Singleton
 class LiveRadioStore internal constructor(private val store: DataStore<Preferences>) {
     @Inject constructor(@ApplicationContext context: Context) : this(context.liveRadioPrefs)
