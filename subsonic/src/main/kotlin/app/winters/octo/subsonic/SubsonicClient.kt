@@ -801,6 +801,16 @@ class SubsonicClient(
 
     suspend fun deleteRadioStation(id: String) = send("deleteInternetRadioStation", listOf("id" to id))
 
+    // Where a postal code (`code`) or a city (`name`, with `state` when
+    // known) is in `country` (ISO alpha-2), on a server that lists
+    // octoPlaces; null when the server does not know the place.
+    suspend fun place(code: String?, name: String?, state: String?, country: String): Place? =
+        try {
+            getOptional("getPlace", placeParams(code, name, state, country), "place", Place.serializer())
+        } catch (e: SubsonicException.NotFound) {
+            null
+        }
+
     // Like get, for params that may repeat a name.
     internal suspend fun <T> getWith(
         endpoint: String,
