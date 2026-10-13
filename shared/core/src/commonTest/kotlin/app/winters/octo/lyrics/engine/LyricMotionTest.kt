@@ -185,6 +185,65 @@ class LyricMotionTest {
         assertEquals(0.5, three.glow, 1e-9)
     }
 
+    private fun words(vararg seconds: Double): List<SyncWord> {
+        var t = 0.0
+        return seconds.map { d -> SyncWord("w", t, t + d, true).also { t += d } }
+    }
+
+    @Test
+    fun withFastSingingAWordHeldLongForItsLineBlooms() {
+        // A rap line: quick words and one dragged out.
+        val line = words(0.2, 0.25, 0.2, 0.7, 0.2, 0.3)
+        assertArrayEquals(booleanArrayOf(false, false, false, true, false, false), heldWords(line, fast = true))
+        // Without fast singing, only notes held a second or more.
+        assertArrayEquals(BooleanArray(6), heldWords(line, fast = false))
+        assertArrayEquals(booleanArrayOf(false, true), heldWords(words(0.3, 1.2), fast = false))
+    }
+
+    @Test
+    fun aWordIsNotHeldWhenTheWholeLineIsSlowOrItIsTooShort() {
+        // Long for nothing: every word about as long.
+        assertArrayEquals(BooleanArray(3), heldWords(words(0.7, 0.8, 0.75), fast = true))
+        // Long for its line, but under the floor.
+        assertArrayEquals(BooleanArray(3), heldWords(words(0.1, 0.5, 0.1), fast = true))
+        // A line of one word has nothing to be long against.
+        assertArrayEquals(BooleanArray(1), heldWords(words(0.9), fast = true))
+        assertArrayEquals(BooleanArray(0), heldWords(emptyList(), fast = true))
+    }
+
+    @Test
+    fun aFastHeldWordBloomsAsStronglyAsANoteHeldLonger() {
+        val quick = emphasisFor(0.7, 4, false, 1.0, 1.0, fast = true, held = true)!!
+        val asIf = emphasisFor(FAST_EMPHASIS_STRENGTH_S, 4, false, 1.0, 1.0, fast = true)!!
+        assertEquals(asIf.amount, quick.amount, 1e-9)
+        assertEquals(asIf.glow, quick.glow, 1e-9)
+        // Its letters still swell over the word's own length.
+        assertEquals(0.7, quick.run, 1e-9)
+        // Not held, nothing blooms, fast or not.
+        assertNull(emphasisFor(0.7, 4, false, 1.0, 1.0, fast = true, held = false))
+    }
+
+    @Test
+    fun withFastSingingHeldNotesGlowMoreAndOffNothingChanges() {
+        val old = emphasisFor(1.5, 4, false, 1.0, 1.0)!!
+        val fast = emphasisFor(1.5, 4, false, 1.0, 1.0, fast = true)!!
+        assertEquals(0.5 * 0.125, old.glow, 1e-9)
+        // Fast, it blooms at least as strongly as a note held FAST_EMPHASIS_STRENGTH_S.
+        val g = FAST_EMPHASIS_STRENGTH_S / 3
+        assertEquals(0.5 * g * sqrt(g), fast.glow, 1e-9)
+        assertTrue(fast.glow > old.glow * 2)
+        // Past three seconds the glow is the same either way.
+        assertEquals(emphasisFor(4.0, 4, false, 1.0, 1.0)!!.glow, emphasisFor(4.0, 4, false, 1.0, 1.0, fast = true)!!.glow, 1e-9)
+    }
+
+    @Test
+    fun withFastSingingWordsRiseALittleMore() {
+        assertEquals(LIFT_EM, liftOf(background = false, fast = false), 0.0)
+        assertEquals(FAST_LIFT_EM, liftOf(background = false, fast = true), 0.0)
+        assertEquals(FAST_BACKGROUND_LIFT_EM, liftOf(background = true, fast = true), 0.0)
+        assertEquals(-FAST_LIFT_EM, liftEm(5.0, 0.0, 1.0, background = false, lift = 1.0, fast = true), 1e-9)
+    }
+
     @Test
     fun theLastWordBloomsHarderAndLongerWithinTheLimits() {
         val last = emphasisFor(3.0, 4, true, 1.0, 1.0)!!

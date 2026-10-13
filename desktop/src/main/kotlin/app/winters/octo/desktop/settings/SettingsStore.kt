@@ -149,6 +149,8 @@ data class ListeningPrefs(
 data class LyricsPrefs(
     // Whether the online lyrics library (LRCLIB) may be asked, as on the phone.
     val online: Boolean = true,
+    // Fast singing blooms too, as on the phone (LyricsLook.bloomFast).
+    val bloomFast: Boolean = true,
     // How much later than written each song's words are heard, in ms; kept
     // only for songs that were moved.
     val offsets: Map<String, Long> = emptyMap(),

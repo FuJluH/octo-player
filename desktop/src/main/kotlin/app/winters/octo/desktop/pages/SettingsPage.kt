@@ -243,6 +243,11 @@ private fun LyricsRows(app: AppState, settings: AppSettings) {
             app.settings.update { it.copy(lyrics = it.lyrics.copy(online = on)) }
             app.lyrics.state.value.song?.let { song -> app.lyrics.sources.refresh(song.id) }
         }
+        SwitchRow(
+            "Bloom fast singing",
+            "A word held long for its line swells and glows too. Off, only notes held a second or more bloom.",
+            settings.lyrics.bloomFast,
+        ) { on -> app.settings.update { it.copy(lyrics = it.lyrics.copy(bloomFast = on)) } }
         OutputTimingRow(app, settings)
     }
 }

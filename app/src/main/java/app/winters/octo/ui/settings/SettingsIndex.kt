@@ -463,6 +463,10 @@ object SettingsIndex {
         "lyrics_keep_completed", SettingsPage.Lyrics, "Keep sung lines visible", "Lines already sung stay faintly on screen",
         listOf("history", "past", "completed", "previous"), section = "Look",
     )
+    val LyricsBloomFast = add(
+        "lyrics_bloom_fast", SettingsPage.Lyrics, "Bloom fast singing", "A word held long for its line swells and glows too",
+        listOf("glow", "bloom", "rap", "fast", "swell", "emphasis"), section = "Look",
+    )
     val LyricsArc = add(
         "lyrics_arc", SettingsPage.Lyrics, "Curved lyrics", "The lines bend around a drum",
         listOf("arc", "curve", "3d", "perspective", "wheel"), section = "Look",

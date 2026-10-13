@@ -67,9 +67,7 @@ import app.winters.octo.lyrics.engine.ARC_DEPTH
 import app.winters.octo.lyrics.engine.ARC_LIFT
 import app.winters.octo.lyrics.engine.ARC_PERSPECTIVE
 import app.winters.octo.lyrics.engine.ARC_YAW
-import app.winters.octo.lyrics.engine.BACKGROUND_LIFT_EM
 import app.winters.octo.lyrics.engine.Emphasis
-import app.winters.octo.lyrics.engine.LIFT_EM
 import app.winters.octo.lyrics.engine.LineState
 import app.winters.octo.lyrics.engine.LineStatus
 import app.winters.octo.lyrics.engine.LyricEngine
@@ -98,6 +96,7 @@ import app.winters.octo.player.measureLine
 import kotlinx.coroutines.delay
 import kotlin.math.ceil
 import kotlin.math.roundToLong
+import app.winters.octo.lyrics.engine.liftOf
 
 // The phone's flowing lyrics (player/FlowingLyrics.kt there), for the
 // desktop: the line being sung sits a little above the middle, the rest
@@ -227,7 +226,7 @@ fun FlowingLyrics(
                         rate().toDouble(),
                         offset,
                         outputOffset,
-                        prepare = { shown.prepare(it, lines[it], measurer) },
+                        prepare = { shown.prepare(it, lines[it], measurer, look.bloomFast) },
                         release = shown::release,
                     )
                     currentPictures.follow(engine.states, engine.shown.value, nanos)
@@ -445,14 +444,17 @@ private fun DrawScope.drawWords(engine: LyricEngine, st: LineState, box: LineBox
         val wb = box.words[j]
         val rise = when {
             lift == 0.0 -> 0.0
-            cold -> -(if (line.isBackground) BACKGROUND_LIFT_EM else LIFT_EM) * lift
-            else -> liftEm(t, word.start, word.end, line.isBackground, lift)
+            cold -> -liftOf(line.isBackground, look.bloomFast) * lift
+            else -> liftEm(t, word.start, word.end, line.isBackground, lift, look.bloomFast)
         } * box.em
         val shape = maskShape(wb.width.toDouble(), wb.rowHeight.toDouble(), look.fraction(LookDial.Fade))
         val progress = if (cold) 1.0 else fillProgress(t, word.start, word.end, shape.edge)
         val glyphs = letters?.getOrNull(j)
         val bloom = glyphs?.let {
-            emphasisFor(word.end - word.start, it.size, j >= lastGroup, look.fraction(LookDial.Emphasis), look.fraction(LookDial.Glow))
+            emphasisFor(
+                word.end - word.start, it.size, j >= lastGroup, look.fraction(LookDial.Emphasis), look.fraction(LookDial.Glow),
+                fast = look.bloomFast, held = box.held?.getOrNull(j) ?: true,
+            )
         }
         val paint: DrawScope.(Float) -> Unit = { alpha -> paintWord(wb, glyphs, bloom, word, t, rise.toFloat(), box.em, lift, line.isBackground, color, alpha) }
         when {
