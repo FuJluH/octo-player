@@ -110,6 +110,10 @@ public enum SettingsIndex {
     public static let ambientPageArtwork = SettingEntry("ambient_page_artwork", .appearance, "Album and artist pages use their own artwork",
                                                         "The glow follows the album or artist on the page", ["glow", "album", "artist", "cover"],
                                                         section: "Where it shows")
+    public static let homeSections = SettingEntry("home_sections", .appearance, "Home sections", "The order of Home's shelves, and which ones show",
+                                                  ["home", "shelves", "sections", "order", "rearrange", "reorder", "move", "hide", "show", "layout",
+                                                   "customize", "edit home"],
+                                                  section: "Home")
     public static let playerBackground = SettingEntry("immersive_background", .appearance, "Player background", "What fills the player behind the lyrics",
                                                       ["immersive", "wash", "artwork", "cover", "colour", "color", "blur", "classic", "mesh"], section: "Player")
     public static let liveBackground = SettingEntry("live_background", .appearance, "Live background", "The player's background drifting slowly",
@@ -299,7 +303,7 @@ public enum SettingsIndex {
         radioDiscovery, radioAdventure, radioVariety, radioFavorites, resumeWired, resumeBluetooth, resumeAlways,
         castKeepPlaying,
     ] + sound + [
-        ambient, ambientHome, ambientLibrary, ambientSearch, ambientSettings, ambientBar, ambientPageArtwork,
+        ambient, ambientHome, ambientLibrary, ambientSearch, ambientSettings, ambientBar, ambientPageArtwork, homeSections,
         playerBackground, liveBackground, backgroundBrightnessCap, backgroundSaturation, backgroundContrast, backgroundUseBpm,
         backgroundSpeed, backgroundFps, playlistCovers, reduceMotion,
         phoneAccess, phoneSongs, rescan, libraryOnly, musicFolders,

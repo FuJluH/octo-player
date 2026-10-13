@@ -6,7 +6,7 @@ import UIKit
 
 /// Every setting the Settings pages keep, in one place. Each group lives in its own preferences
 /// suite, under the same names the other Octo apps use ("player", "offline", "lyrics",
-/// "listenbrainz", "updates", "playlist_art", "library"), so any part of the app can read a value
+/// "listenbrainz", "updates", "playlist_art", "library", "home"), so any part of the app can read a value
 /// here and a backup carries the same keys. Changes apply at once: whatever reads a value sees
 /// the new one on its next look.
 @MainActor
@@ -30,6 +30,8 @@ final class AppSettings {
     private(set) var earlyVersions: Bool
     /// Whether a ready update goes in on its own; kept as "Ask" or "OnQuit".
     private(set) var installUpdates: String
+    /// Home's shelves in their order, each shown or hidden.
+    private(set) var homeSections: [HomeSectionEntry]
 
     /// True while the phone's connection is mobile data (not Wi-Fi, not a cable).
     private(set) var onMobileData = false
@@ -41,6 +43,7 @@ final class AppSettings {
     @ObservationIgnored private let updatesStore = UserDefaults(suiteName: "updates") ?? .standard
     @ObservationIgnored private let playlistArtStore = UserDefaults(suiteName: "playlist_art") ?? .standard
     @ObservationIgnored private let libraryStore = UserDefaults(suiteName: "library") ?? .standard
+    @ObservationIgnored private let homeStore = UserDefaults(suiteName: "home") ?? .standard
     @ObservationIgnored private let network = NWPathMonitor()
     @ObservationIgnored private weak var session: Session?
     @ObservationIgnored private var familyAppPicks: @MainActor () -> Bool = { true }
@@ -59,6 +62,7 @@ final class AppSettings {
         earlyVersions = updatesStore.object(forKey: Keys.earlyVersions) as? Bool ?? false
         let install = updatesStore.string(forKey: Keys.install)
         installUpdates = install == "OnQuit" ? "OnQuit" : "Ask"
+        homeSections = homeSectionOrder(stored: homeStore.string(forKey: homeSectionsKey))
         listenBrainz = readListenBrainz()
         migrateOldQuality()
         network.pathUpdateHandler = { [weak self] path in
@@ -372,6 +376,36 @@ final class AppSettings {
     func setEarlyVersions(_ on: Bool) {
         updatesStore.set(on, forKey: Keys.earlyVersions)
         earlyVersions = on
+    }
+
+    // MARK: Home
+
+    /// Home's shelves become exactly these, kept as one string under "home_sections".
+    func setHomeSections(_ entries: [HomeSectionEntry]) {
+        guard entries != homeSections else { return }
+        homeStore.set(encodeHomeSections(entries), forKey: homeSectionsKey)
+        homeSections = entries
+    }
+
+    /// Moves shelves as a list's drag reports it.
+    func moveHomeSections(fromOffsets offsets: IndexSet, toOffset destination: Int) {
+        setHomeSections(OctoKit.moveHomeSections(homeSections, fromOffsets: offsets, toOffset: destination))
+    }
+
+    func setHomeSectionShown(_ section: HomeSection, _ shown: Bool) {
+        setHomeSections(toggleHomeSection(homeSections, section, shown: shown))
+    }
+
+    /// Every shelf back in the default order and shown. Nothing is kept, so the order follows
+    /// the default should it change.
+    func resetHomeSections() {
+        homeStore.removeObject(forKey: homeSectionsKey)
+        homeSections = OctoKit.resetHomeSections()
+    }
+
+    /// Whether a shelf is drawn on Home.
+    func homeSectionShown(_ section: HomeSection) -> Bool {
+        homeSections.first { $0.section == section }?.shown ?? true
     }
 
     // MARK: ListenBrainz

@@ -45,6 +45,8 @@ enum Route: Hashable, Codable {
     case liveListFrom(query: String)
     /// The Sound page: equalizer, loudness, balance and headphone correction.
     case sound
+    /// The order of Home's shelves, and which ones show.
+    case homeSections
 }
 
 extension Route {
@@ -60,6 +62,7 @@ extension Route {
         case .favorites: .favorites
         case .library(let page): page.ambientPage
         case .sound: .sound
+        case .homeSections: .settingsPage
         case .onlineAlbum: .onlineAlbum
         case .onlineArtist: .onlineArtist
         case .charts: .charts
@@ -481,6 +484,7 @@ extension View {
                 case .liveListEditor(let id): LiveListEditView(id: id)
                 case .liveListFrom(let query): LiveListEditView(id: nil, start: LibraryQuery.fromJSON(query))
                 case .sound: SoundPage()
+                case .homeSections: HomeSectionsPage()
                 }
             }
             .background { PageBackdrop(page: route.ambientPage, route: route) }

@@ -245,6 +245,8 @@ public struct Backup: Sendable, Equatable {
     public var lyrics: LyricsBackup?
     public var offline: OfflineBackup?
     public var listenBrainz: ListenBrainzBackup?
+    /// Home's shelves in order, a hidden one led by "-", as stored under `homeSectionsKey`.
+    public var homeSections: String?
     /// The order each list was left in, by the list's name, as "<order>:asc" or "<order>:desc".
     public var sortOrders: [String: String] = [:]
 
@@ -297,6 +299,7 @@ public enum BackupFile {
             ("listenBrainz", backup.listenBrainz.map {
                 .object([("enabled", .bool($0.enabled)), ("sendPlays", .string($0.sendPlays.storedName)), ("nowPlaying", .bool($0.nowPlaying))])
             }),
+            ("homeSections", backup.homeSections.map { .string($0) }),
         ]
         top.append(("sortOrders", sortOrdersJSON(backup.sortOrders)))
         return OrderedJSON.fields(top).pretty()
@@ -449,6 +452,7 @@ public enum BackupFile {
         b.lyrics = part(o["lyrics"], LyricsBackup.self)
         b.offline = part(o["offline"], OfflinePrefs.self)
         b.listenBrainz = part(o["listenBrainz"], ListenBrainzBackup.self)
+        b.homeSections = o["homeSections"]?.text
         if case .object(let orders)? = o["sortOrders"] {
             for (list, order) in orders { if let order = order.text { b.sortOrders[list] = order } }
         }
@@ -709,6 +713,7 @@ public enum BackupPlanner {
             backup.lyrics != nil ? "lyrics" : nil,
             backup.offline != nil ? "cache and downloads" : nil,
             backup.listenBrainz != nil ? "scrobbling" : nil,
+            backup.homeSections != nil ? "home sections" : nil,
             backup.sortOrders.isEmpty ? nil : "sort orders",
         ].compactMap { $0 }
         if !settings.isEmpty { lines.append("Settings: " + settings.joined(separator: ", ")) }

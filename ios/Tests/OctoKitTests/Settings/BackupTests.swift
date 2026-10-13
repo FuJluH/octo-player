@@ -419,4 +419,21 @@ import Testing
         calendar.timeZone = TimeZone(identifier: "UTC")!
         #expect(BackupFile.suggestedName(Date(timeIntervalSince1970: 1_791_676_800), calendar: calendar) == "Octo backup 2026-10-11.json")
     }
+
+    @Test func homeSectionsGoThroughTheBackupAndBack() {
+        var backup = Backup()
+        backup.homeSections = "charts,-pinned,recentlyPlayed"
+        let text = BackupFile.encode(backup)
+        #expect(text.contains(#""homeSections": "charts,-pinned,recentlyPlayed""#))
+        #expect(BackupFile.decode(text) == .read(backup))
+        #expect(BackupPlanner.describe(backup).first == "Settings: home sections")
+    }
+
+    @Test func aBackupWithoutHomeSectionsLeavesThemAlone() {
+        let text = BackupFile.encode(Backup())
+        #expect(!text.contains("homeSections"))
+        guard case .read(let read) = BackupFile.decode(#"{"kind": "octo-settings", "homeSections": null}"#) else { Issue.record("not read"); return }
+        #expect(read.homeSections == nil)
+        #expect(BackupFile.decode(#"{"kind": "octo-settings", "homeSections": ["charts"]}"#) == .notABackup)
+    }
 }

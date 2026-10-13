@@ -2,8 +2,8 @@ import OctoKit
 import SwiftUI
 
 /// Home: the title, the cards that ask or offer something, then either the empty card with the
-/// charts or the shelves, in the other apps' order. A shelf with nothing in it is left out, title
-/// and all.
+/// charts or the shelves in the order kept in Settings, the hidden ones left out, and a way to
+/// change them at the end. A shelf with nothing in it is left out, title and all.
 struct HomeView: View {
     @Environment(Session.self) private var session
     @Environment(Player.self) private var player
@@ -14,6 +14,7 @@ struct HomeView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.refreshLibrary) private var refreshLibrary
     @State private var model = HomeModel()
+    @State private var settings = AppSettings.shared
     @State private var reading = false
 
     var body: some View {
@@ -29,31 +30,16 @@ struct HomeView: View {
                     // An empty library is where the charts help most: songs to start from.
                     songShelf("Charts", model.charts, destination: .charts)
                 } else if layout.shelves {
-                    pinnedShelf
-                    albumShelf("Recently played", model.recentlyPlayed, destination: .library(.history(mostPlayed: false)))
-                    stationShelf("Made for you", model.madeForYou.map { ($0.id, $0.name, coverId(of: $0.artwork) ?? $0.id, $0.songCount) })
-                    stationShelf("Stations", model.stations.map { ($0.id, $0.name, coverId(of: $0.artwork) ?? $0.id, nil) })
-                    songShelf("Charts", model.charts, destination: .charts)
-                    albumShelf("Recently added", model.recentlyAdded)
-                    albumShelf("Favorite albums", model.favoriteAlbums, destination: .library(.favorites(.albums)))
-                    songShelf("Most played", model.mostPlayed.map(\.asSong), destination: .library(.history(mostPlayed: true)))
-                    albumShelf("Something different", model.surprise)
-                    albumShelf("Not played in 6 months", model.revisit.notPlayedLately)
-                    albumShelf("Albums you never finished", model.revisit.neverFinished)
-                    albumShelf("Unplayed albums", model.revisit.neverPlayed)
-                    if !model.artists.isEmpty {
-                        SectionTitle("Artists").padding(.top, 18)
-                        SideScroller {
-                            ForEach(model.artists) { artist in
-                                ArtistCircle(id: artist.pageId(discovery.sourceId), name: artist.name, coverArt: coverId(of: artist.artwork),
-                                             library: artist)
-                            }
-                        }
+                    // Each shelf in its own stack, so a shelf moved in Settings moves as one.
+                    ForEach(settings.homeSections.filter(\.shown)) { entry in
+                        VStack(alignment: .leading, spacing: 0) { shelf(entry.section) }
                     }
+                    editHomeButton
                 }
             }
             .animation(.easeInOut(duration: 0.25), value: model.whatsNewDue)
             .animation(.easeInOut(duration: 0.25), value: layout)
+            .animation(.easeInOut(duration: 0.3), value: settings.homeSections)
         }
         .barClearance()
         // A pull looks at the library again first, then picks the random shelves from what it
@@ -73,6 +59,9 @@ struct HomeView: View {
             await model.reroll(for: "\(model.songCount ?? -1)|\(serverSync.last?.at ?? 0)")
         }
         .onChange(of: discovery.stationsFrom, initial: true) { _, _ in model.stationsSourceChanged() }
+        // A server shelf shown again, or the empty card's chart, is asked for then.
+        .onChange(of: settings.homeSections) { _, _ in model.sectionsChanged() }
+        .onChange(of: model.songCount == 0) { _, _ in model.sectionsChanged() }
         .onChange(of: scenePhase) { _, phase in if phase == .active { model.shown() } }
         // Home is in front again after another tab or the full player.
         .background { WakeWatch { model.shown() } }
@@ -80,6 +69,51 @@ struct HomeView: View {
     }
 
     // MARK: Shelves
+
+    /// One shelf of Home, by its id.
+    @ViewBuilder
+    private func shelf(_ section: HomeSection) -> some View {
+        switch section {
+        case .pinned: pinnedShelf
+        case .recentlyPlayed:
+            albumShelf(section.title, model.recentlyPlayed, destination: .library(.history(mostPlayed: false)))
+        case .madeForYou:
+            stationShelf(section.title, model.madeForYou.map { ($0.id, $0.name, coverId(of: $0.artwork) ?? $0.id, $0.songCount) })
+        case .stations:
+            stationShelf(section.title, model.stations.map { ($0.id, $0.name, coverId(of: $0.artwork) ?? $0.id, nil) })
+        case .recentlyAdded: albumShelf(section.title, model.recentlyAdded)
+        case .mostPlayed: songShelf(section.title, model.mostPlayed.map(\.asSong), destination: .library(.history(mostPlayed: true)))
+        case .favoriteAlbums: albumShelf(section.title, model.favoriteAlbums, destination: .library(.favorites(.albums)))
+        case .charts: songShelf(section.title, model.charts, destination: .charts)
+        case .artists: artistShelf
+        case .somethingDifferent: albumShelf(section.title, model.surprise)
+        case .notPlayedLately: albumShelf(section.title, model.revisit.notPlayedLately)
+        case .neverFinished: albumShelf(section.title, model.revisit.neverFinished)
+        case .neverPlayed: albumShelf(section.title, model.revisit.neverPlayed)
+        }
+    }
+
+    /// A row of the library's artists, picked at random.
+    @ViewBuilder
+    private var artistShelf: some View {
+        if !model.artists.isEmpty {
+            SectionTitle(HomeSection.artists.title).padding(.top, 18)
+            SideScroller {
+                ForEach(model.artists) { artist in
+                    ArtistCircle(id: artist.pageId(discovery.sourceId), name: artist.name, coverArt: coverId(of: artist.artwork),
+                                 library: artist)
+                }
+            }
+        }
+    }
+
+    /// A quiet way to the page that orders and hides the shelves, after the last one.
+    private var editHomeButton: some View {
+        GlazeButton("Edit Home", size: .small) { router.go(.homeSections) }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 32)
+            .padding(.bottom, 8)
+    }
 
     @ViewBuilder
     private func albumShelf(_ title: String, _ albums: [LibraryAlbum], destination: Route? = nil) -> some View {

@@ -38,14 +38,15 @@ final class SettingsNavigator {
     /// Runs one debug launch step:
     /// - `settings:PAGE` opens a settings page (`playback`, `sound`, `appearance`, `library`,
     ///   `server`, `streaming`, `audioquality`, `lyrics`, `scrobbling`, `backup`, `about`), and
-    ///   `settings:PAGE@ROW` lights that row as a search result does
+    ///   `settings:PAGE@ROW` lights that row as a search result does; `settings:homesections`
+    ///   opens the Home sections page
     /// - `settings-search:TEXT` types TEXT into the front page's search
     /// - `popup:NAME` opens that popover, sheet or question on the page in front: `speed`,
     ///   `change_password`, `disconnect` and `remove_server` (Server and sync), `delete_link`
     ///   (Shared links, the first), `add_station` (Radio stations, for an admin),
     ///   `reset_password` (Family, the first member), `paste_list` and `remove_list` (Import, the
     ///   first list), `rename_live_list` and `delete_live_list` (a live list), `save_playlist`
-    ///   (Up next). A choice row's answers and every other menu are system menus, which only a
+    ///   (Up next), `reset_home_sections` (Home sections). A choice row's answers and every other menu are system menus, which only a
     ///   finger opens.
     /// - `whatsnew` opens About and its What's new panel
     /// - `settings-state:NAME` shows a state a page reaches only with outside help (see
@@ -55,6 +56,10 @@ final class SettingsNavigator {
         case "settings":
             router.drive = .tab(.settings)
             try? await Task.sleep(for: .milliseconds(300))
+            if value.lowercased() == "homesections" {
+                router.go(.homeSections)
+                return
+            }
             let parts = value.split(separator: "@", maxSplits: 1).map(String.init)
             guard let page = SettingsPage.allCases.first(where: { $0.rawValue.lowercased() == parts.first?.lowercased() }) else { return }
             request = .page(SettingsRoute(page, highlight: parts.count > 1 ? parts[1] : nil))

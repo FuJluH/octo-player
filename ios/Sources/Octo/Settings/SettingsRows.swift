@@ -24,6 +24,7 @@ enum SettingsIcon {
     static let headphones = "headphones"
     static let cast = "airplay.audio"
     static let layout = "rectangle.3.group"
+    static let home = "house"
     static let playlists = "music.note.list"
     static let sparkle = "sparkle"
     static let addToLibrary = "plus"

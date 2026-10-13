@@ -95,6 +95,7 @@ final class Backups {
         b.offline = offline
         let lb = settings.listenBrainz
         b.listenBrainz = ListenBrainzBackup(enabled: lb.enabled, sendPlays: lb.sendPlays, nowPlaying: lb.nowPlaying)
+        b.homeSections = encodeHomeSections(settings.homeSections)
         return b
     }
 
@@ -149,6 +150,7 @@ final class Backups {
         if let lb = backup.listenBrainz {
             ListenBrainzSync.shared.restoreChoices(enabled: lb.enabled, sendPlays: lb.sendPlays, nowPlaying: lb.nowPlaying)
         }
+        if let sections = backup.homeSections { settings.setHomeSections(homeSectionOrder(stored: sections)) }
         await library?.restoreSortOrders(backup.sortOrders)
         if let lyrics = backup.lyrics {
             settings.setKeepScreenOn(lyrics.keepScreenOn)

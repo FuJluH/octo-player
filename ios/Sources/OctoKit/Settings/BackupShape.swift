@@ -203,6 +203,7 @@ extension BackupShape {
         BackupField("listenBrainz", fields(
             BackupField("enabled", .flag), BackupField("sendPlays", .choice), BackupField("nowPlaying", .flag)
         ), .nullable),
+        BackupField("homeSections", .text, .nullable),
         BackupField("sortOrders", .map(.text))
     )
 }

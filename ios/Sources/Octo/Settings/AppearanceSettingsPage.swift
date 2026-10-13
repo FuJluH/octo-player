@@ -3,7 +3,7 @@ import SwiftUI
 import UIKit
 
 /// How the app looks: the artwork's colors glowing behind the pages, how strongly and where,
-/// the player's background, playlist covers, and how much moves.
+/// Home's sections, the player's background, playlist covers, and how much moves.
 struct AppearanceSettingsPage: View {
     var highlight: String?
     @State private var settings = AppSettings.shared
@@ -29,6 +29,9 @@ struct AppearanceSettingsPage: View {
                     ToggleRow(SettingsIndex.ambientPageArtwork, isOn: ambient.pageArtwork,
                               helper: "The glow follows the page's album or artist, not the song.", onChange: settings.setAmbientPageArtwork)
                 }
+            }
+            SettingsGroup(title: "Home", icon: SettingsIcon.home) {
+                LinkRow(SettingsIndex.homeSections, helper: homeSectionsSummary(settings.homeSections), to: Route.homeSections)
             }
             playerBackground(prefs)
             SettingsGroup(title: "Playlists", icon: SettingsIcon.playlists) {

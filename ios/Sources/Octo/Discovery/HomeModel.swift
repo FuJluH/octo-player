@@ -107,6 +107,10 @@ final class HomeModel {
     @ObservationIgnored private var stationsFailed = false
     @ObservationIgnored private var stationsFrom: String??
     @ObservationIgnored private var rolledFor: String?
+    /// Whether the chart was asked for from the server in use.
+    @ObservationIgnored private var chartsAsked = false
+    /// The server shelves the last finished load asked for.
+    @ObservationIgnored private var stationsAsked: Set<HomeSection> = []
 
     /// What Home remembers between runs, in its own store ("home").
     private static let prefs = UserDefaults(suiteName: "home") ?? .standard
@@ -174,8 +178,11 @@ final class HomeModel {
         stationsTask?.cancel()
         chartsTask?.cancel()
         stationsTask = nil
+        chartsTask = nil
         stationsLoadedAt = nil
         stationsFailed = false
+        chartsAsked = false
+        stationsAsked = []
         // What this server gave last time shows at once, so Home does not shift when the
         // server answers; the answer then replaces it in place.
         let kept = server.flatMap(HomeShelfStore.read)
@@ -184,12 +191,39 @@ final class HomeModel {
         charts = kept?.charts ?? []
         guard server != nil else { return }
         loadStations()
+        loadCharts()
+    }
+
+    /// The server shelves Home draws now: a hidden one is not asked for.
+    private var wantedStationShelves: Set<HomeSection> {
+        Set([HomeSection.stations, .madeForYou].filter { AppSettings.shared.homeSectionShown($0) })
+    }
+
+    /// The chart is wanted while its shelf shows, and while the library is empty, where it sits
+    /// under the empty card whether its shelf is hidden or not.
+    private var wantsCharts: Bool { AppSettings.shared.homeSectionShown(.charts) || songCount == 0 }
+
+    /// Asks for the chart once a server, when Home draws it.
+    private func loadCharts() {
+        guard wantsCharts, !chartsAsked, let discovery, let from = stationsFrom, from != nil else { return }
+        chartsAsked = true
         chartsTask = Task { [weak self] in
             let list = await discovery.chart(Charts.overall)
             guard !Task.isCancelled, let self else { return }
             let songs = Array((list?.songs ?? []).prefix(chartsRow).map(\.track))
             if songs != self.charts { self.charts = songs }
             self.keepShelves()
+        }
+    }
+
+    /// A shelf shown again, or the library found empty: asks for what Home now draws and has not
+    /// asked for yet.
+    func sectionsChanged() {
+        guard let from = stationsFrom, from != nil else { return }
+        loadCharts()
+        if !wantedStationShelves.isSubset(of: stationsAsked) {
+            stationsLoadedAt = nil
+            loadStations()
         }
     }
 
@@ -211,32 +245,43 @@ final class HomeModel {
     }
 
     /// Runs in the background so no other shelf waits on the server. The stations and Made for you
-    /// are read apart, so one failing never hides the other.
+    /// are read apart, so one failing never hides the other, and a hidden one is not read at all.
     private func loadStations() {
-        guard stationsTask == nil, let discovery else { return }
+        let wanted = wantedStationShelves
+        guard stationsTask == nil, !wanted.isEmpty, let discovery else { return }
         stationsTask = Task { [weak self] in
             var failed = false
-            do {
-                let got = try await discovery.stations()
-                if Task.isCancelled { return }
-                if self?.stations != got { self?.stations = got }
-            } catch {
-                failed = true
+            if wanted.contains(.stations) {
+                do {
+                    let got = try await discovery.stations()
+                    if Task.isCancelled { return }
+                    if self?.stations != got { self?.stations = got }
+                } catch {
+                    failed = true
+                }
             }
-            do {
-                let got = try await discovery.madeForYou()
-                if Task.isCancelled { return }
-                if self?.madeForYou != got { self?.madeForYou = got }
-            } catch {
-                failed = true
+            if wanted.contains(.madeForYou) {
+                do {
+                    let got = try await discovery.madeForYou()
+                    if Task.isCancelled { return }
+                    if self?.madeForYou != got { self?.madeForYou = got }
+                } catch {
+                    failed = true
+                }
             }
             guard let self, !Task.isCancelled else { return }
             if !failed {
                 self.stationsLoadedAt = msSince1970()
+                self.stationsAsked = wanted
                 self.keepShelves()
             }
             self.stationsFailed = failed
             self.stationsTask = nil
+            // A shelf shown while this load ran is asked for now.
+            if !failed && !self.wantedStationShelves.isSubset(of: wanted) {
+                self.stationsLoadedAt = nil
+                self.loadStations()
+            }
         }
     }
 
