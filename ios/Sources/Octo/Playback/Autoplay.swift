@@ -4,7 +4,7 @@ import OctoKit
 /// Keeps music playing when the queue runs out. Near the end of the last song, with repeat off,
 /// it adds songs like it, marked as Autoplay's so the queue can tell them from the listener's
 /// own. The player calls `check` whenever the song, the queue, repeat or playing changes.
-/// Turning the setting off stops it adding.
+/// Turning the setting off stops it adding. A station the server keeps going is left to it.
 @MainActor
 final class Autoplay {
     private let data: DataServices
@@ -28,9 +28,9 @@ final class Autoplay {
         let key = item?.entryId
         let last = enabled && key != nil && key != doneFor && !(item?.isRadioStation ?? true)
             && engine.repeatMode == .off && engine.queue.nextOnEnd == nil
-            && (engine.isPlaying || engine.ended)
+            && (engine.isPlaying || engine.ended) && !player.stationKeepsGoing
         guard last, let key, let item else {
-            // Paused, repeat on, songs added, or switched off: stand down.
+            // Paused, repeat on, songs added, a station kept going, or switched off: stand down.
             stop()
             return
         }
@@ -73,8 +73,9 @@ final class Autoplay {
             playbackLog.info("autoplay: nothing to add")
             return
         }
-        // Only if the song is still the last one and the setting still on.
-        guard enabled, engine.currentItem?.entryId == key, engine.queue.nextOnEnd == nil else { return }
+        // Only if the song is still the last one, the setting still on, and no station is kept
+        // going meanwhile.
+        guard enabled, engine.currentItem?.entryId == key, engine.queue.nextOnEnd == nil, !player.stationKeepsGoing else { return }
         let first = engine.queue.count
         let ended = engine.ended
         player.addAutoplay(items)

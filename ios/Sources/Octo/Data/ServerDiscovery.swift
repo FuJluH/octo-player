@@ -79,6 +79,23 @@ final class ServerDiscovery {
         return await resolveFromServer(try await client.playlist(id).entry)
     }
 
+    /// More of a station's songs, past those already queued (`after`, by their library ids),
+    /// resolved like the songs it has lined up. Nothing when no server is signed in.
+    func moreStationSongs(_ id: String, after trackIds: [String]) async throws -> [LibraryTrack] {
+        guard let (client, sourceId) = server() else { return [] }
+        let after = await serverIds(trackIds, sourceId: sourceId)
+        return await resolveFromServer(try await client.stationSongs(id: id, after: after).entry)
+    }
+
+    /// The server's own ids for library songs, in order: a find's own, else the id of the song's
+    /// copy on this server. A song with no copy there is left out.
+    private func serverIds(_ trackIds: [String], sourceId: String) async -> [String] {
+        let copies = (try? await library.store.copies(of: trackIds.filter { !isFind($0) })) ?? []
+        var native: [String: String] = [:]
+        for copy in copies where copy.sourceId == sourceId && native[copy.mergedId] == nil { native[copy.mergedId] = copy.nativeId }
+        return trackIds.compactMap { id in isFind(id) ? String(id.dropFirst(findPrefix.count)) : native[id] }
+    }
+
     /// An album found online, with its songs.
     func album(_ id: String) async throws -> OnlineAlbumPage? {
         guard let (client, sourceId) = server() else { return nil }

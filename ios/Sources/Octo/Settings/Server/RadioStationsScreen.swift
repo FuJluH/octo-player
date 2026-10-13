@@ -111,7 +111,8 @@ struct RadioStationsScreen: View {
         }
     }
 
-    /// A station the server made plays the songs it has lined up; any other plays its stream.
+    /// A station the server made plays the songs it has lined up, as a station that keeps going;
+    /// any other plays its stream.
     private func play(_ station: ServerStationDetails, readOnly: Bool) {
         guard starting == nil else { return }
         let stream = station.streamUrl.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -125,7 +126,7 @@ struct RadioStationsScreen: View {
             do {
                 let songs = try await discovery.stationSongs(station.id)
                 if !songs.isEmpty {
-                    player.play(songs, from: 0)
+                    player.playServerList(songs, id: station.id, name: station.name)
                 } else if !stream.isEmpty, let song = radioSong(radioId(streamUrl: station.streamUrl, name: station.name)) {
                     player.play([song], from: 0)
                 }

@@ -105,6 +105,7 @@ final class Player {
     @ObservationIgnored private var tracker: PlayTracker!
     @ObservationIgnored private var sleepTimer: OctoKit.SleepTimer!
     @ObservationIgnored private var autoplay: Autoplay?
+    @ObservationIgnored private var stationRefill: StationRefill?
     @ObservationIgnored private var nowPlaying: NowPlayingCenter!
     @ObservationIgnored private var headset: HeadsetWatch!
     @ObservationIgnored private let queueStore = QueueStore(rows: QueueFile.standard, parked: ParkedQueues(PlayerTexts()))
@@ -153,6 +154,9 @@ final class Player {
         headset = HeadsetWatch(player: self)
         if let data {
             autoplay = Autoplay(data: data, player: self)
+            let refill = StationRefill(data: data, player: self)
+            refill.settled = { [weak self] in self?.autoplay?.check() }
+            stationRefill = refill
             data.serverSwitch.player = self
             data.serverSwitch.onForget("playback") { [weak self] account in
                 await self?.queueStore.forget(account)
@@ -255,6 +259,18 @@ final class Player {
 
     func shuffle(_ songs: [Song]) {
         play(songs, shuffled: true)
+    }
+
+    /// Plays one of the server's lists from `start`: a station as a station, which adds more of
+    /// its songs as it runs low, any other list under its name. A station shuffled has its songs
+    /// put in a new order and played in it, so the songs it adds later come after them.
+    func playServerList(_ songs: [Song], from start: Int = 0, id: String, name: String, shuffled: Bool = false) {
+        let source = serverListSource(id: id, name: name)
+        if shuffled && source.isStation {
+            play(songs.shuffled(), from: 0, source: source)
+        } else {
+            play(songs, from: start, source: source, shuffled: shuffled)
+        }
     }
 
     /// With nothing loaded, the play button shuffles the whole library.
@@ -493,6 +509,14 @@ final class Player {
         engine.add(items, at: engine.queue.count)
     }
 
+    /// More of a station's songs, at the end of the queue.
+    func addStationSongs(_ items: [QueueItem]) {
+        engine.add(items, at: engine.queue.count)
+    }
+
+    /// Whether a station in the queue is being kept going, so Autoplay leaves it alone.
+    var stationKeepsGoing: Bool { stationRefill?.keepsGoing ?? false }
+
     /// Takes out songs of the up-next list, by their place in it (after the song on now).
     func remove(at offsets: IndexSet) {
         let slots = Array(upNextSlots.dropFirst())
@@ -678,6 +702,7 @@ final class Player {
         tracker.moved(item?.trackId, length: item.map { lengths.lengthMs($0.trackId, listedMs: $0.durationMs) } ?? 0)
         saveQueue()
         serverQueue.changed(queueSnapshot(), items: engine.queue.items)
+        stationRefill?.check()
         autoplay?.check()
         nowPlaying.publish()
         updatePrefetch()
@@ -722,6 +747,7 @@ final class Player {
             self?.saveQueue()
         }
         serverQueue.changed(queueSnapshot(), items: engine.queue.items)
+        stationRefill?.check()
         autoplay?.check()
         nowPlaying.publish()
         updatePrefetch()
@@ -909,6 +935,7 @@ final class Player {
             // Profiles are asked only of a server whose Octo page answered at sign-in (at home).
             $0 = inUse.map { ProfileSession(sourceId: $0.sourceId, isOcto: probed, extensions: $0.extensions, client: $0.client) }
         }
+        stationRefill?.check()
         autoplay?.check()
     }
 
