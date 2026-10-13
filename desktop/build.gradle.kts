@@ -172,12 +172,12 @@ sourceSets.main {
 }
 
 // Writes the icon files for the window, tray and installers (icons/) from
-// the phone app's store icon. Run by hand when the icon changes; the files
-// are kept in the repository.
+// the square tools/appicon/make_app_icon.py draws (icons/octo-square.png).
+// Run by hand when the icon changes; the files are kept in the repository.
 val makeIcons by tasks.registering(JavaExec::class) {
     classpath = sourceSets.main.get().runtimeClasspath
     mainClass = "app.winters.octo.desktop.system.IconFilesKt"
-    args(rootProject.file("app/src/main/ic_launcher-playstore.png").absolutePath, file("icons").absolutePath)
+    args(file("icons/octo-square.png").absolutePath, file("icons").absolutePath)
 }
 
 dependencies {
