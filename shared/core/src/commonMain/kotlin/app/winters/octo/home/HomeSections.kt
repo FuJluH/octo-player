@@ -7,7 +7,7 @@ enum class HomeSection(val id: String, val title: String) {
     RecentlyPlayed("recentlyPlayed", "Recently played"),
     MadeForYou("madeForYou", "Made for you"),
     Stations("stations", "Radio"),
-    InternetRadio("internetRadio", "Internet radio"),
+    InternetRadio("internetRadio", "Live radio"),
     YearMixes("yearMixes", "Year mixes"),
     GenreMixes("genreMixes", "Genre mixes"),
     ArtistMixes("artistMixes", "Artist mixes"),
