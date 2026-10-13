@@ -59,6 +59,7 @@ import app.winters.octo.server.passwordDraftProblem
 import app.winters.octo.server.scanWords
 import app.winters.octo.server.serverKind
 import app.winters.octo.server.serverOffers
+import app.winters.octo.serverupdate.upToDateLine
 import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.subsonic.MusicFolder
 import app.winters.octo.ui.common.Choice
@@ -180,6 +181,8 @@ fun ServerPage(onOpen: (NavKey) -> Unit, onBack: () -> Unit, highlight: String?,
     val kept by vm.servers.collectAsStateWithLifecycle()
 
     SettingsPageFrame("Server and sync", onBack, highlight) {
+        // A newer Octo for the server in use, above everything else.
+        (state as? SessionState.SignedIn)?.session?.takeIf { it.runsOcto }?.let { ServerUpdateSection() }
         // Once a server is kept, the list of them leads the page.
         if (state !is SessionState.Loading && kept.servers.isNotEmpty()) ServerList(vm, onOpen, onChangePassword = { changing = true })
         when (val current = state) {
@@ -283,11 +286,14 @@ fun ServerPage(onOpen: (NavKey) -> Unit, onBack: () -> Unit, highlight: String?,
 // What the server is and offers, how quickly it answers, and when it last
 // looked through its folders.
 @Composable
-private fun ServerFacts(vm: ServerViewModel, session: Session) {
+private fun ServerFacts(vm: ServerViewModel, session: Session, updates: ServerUpdateViewModel = hiltViewModel()) {
     var look by remember(session) { mutableStateOf<ServerLook?>(null) }
     LaunchedEffect(session) { look = vm.look() }
+    val track by updates.track.collectAsStateWithLifecycle()
+    // Octo that knows it runs the newest release says so.
+    val kind = upToDateLine(track)?.takeIf { session.runsOcto } ?: serverKind(session.serverType, session.serverVersion)
     SettingsGroup(title = "Server", icon = OctoIcons.Info) {
-        InfoRow(SettingsIndex.ServerKind, serverKind(session.serverType, session.serverVersion), helper = offersOf(session.extensions))
+        InfoRow(SettingsIndex.ServerKind, kind, helper = offersOf(session.extensions))
         look?.answerMs?.let { InfoRow(SettingsIndex.ServerAnswer, "$it ms") }
         scanWords(look?.scan, System.currentTimeMillis())?.let { InfoRow(SettingsIndex.ServerScan, "", helper = it) }
     }
