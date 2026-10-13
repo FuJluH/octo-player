@@ -180,6 +180,7 @@ class OctoPlaybackService : MediaLibraryService() {
         tracker = PlayTracker(plays::started, plays::record, isPlaying = { player.isPlaying })
         player.addListener(tracker)
         player.addListener(Watcher())
+        player.addListener(RadioWatch(player, scope))
         sleep.attach(player)
         // Saving songs ahead is for the phone's own playing.
         prefetch.attach(local)

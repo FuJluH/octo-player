@@ -10,18 +10,23 @@ import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.core.net.toUri
 import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.ParserException
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.TransferListener
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.CacheKeyFactory
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.drm.DrmSessionManagerProvider
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy.LoadErrorInfo
 import androidx.media3.extractor.DefaultExtractorsFactory
 import app.winters.octo.catalog.SourceTrackEntity
@@ -44,6 +49,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import app.winters.octo.subsonic.OctoPurpose
 import app.winters.octo.subsonic.markedFor
 import okhttp3.OkHttpClient
+import java.io.FileNotFoundException
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -126,9 +132,12 @@ class Streams @Inject constructor(
 
     // What a deck loads songs with: phone files as they are, server songs
     // from their saved copy when there is one, otherwise signed as they open
-    // and saved as they play. One for each deck.
-    fun mediaSourceFactory(): MediaSource.Factory =
-        DefaultMediaSourceFactory(dataSourceFactory(networkFactory()), extractors()).setLoadErrorHandlingPolicy(Retries())
+    // and saved as they play. Radio stations open their streams as they are
+    // and keep trying through a dropped connection. One for each deck.
+    fun mediaSourceFactory(): MediaSource.Factory = RadioAwareSources(
+        songs = DefaultMediaSourceFactory(dataSourceFactory(networkFactory()), extractors()).setLoadErrorHandlingPolicy(Retries()),
+        radio = DefaultMediaSourceFactory(networkFactory(), extractors()).setLoadErrorHandlingPolicy(RadioRetries()),
+    )
 
     // What the scout reads songs with: the same chain the decks play from
     // (the pinned request, the saved copies, signing), so what it reads is
@@ -258,6 +267,43 @@ class Streams @Inject constructor(
                 super.getRetryDelayMsFor(loadErrorInfo)
             }
     }
+}
+
+// A station's stream is opened again after it drops, a few times, waiting
+// longer each time, even with no connection for a moment. A stream that
+// was refused or gone, or is not audio, fails at once.
+@OptIn(UnstableApi::class)
+internal class RadioRetries : DefaultLoadErrorHandlingPolicy() {
+    override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorInfo): Long =
+        radioRetryDelayMs(loadErrorInfo.errorCount, lastingRadioError(loadErrorInfo.exception))
+
+    override fun getMinimumLoadableRetryCount(dataType: Int): Int = RADIO_RETRIES
+}
+
+// Errors that opening the stream again would only repeat.
+internal fun lastingRadioError(error: IOException): Boolean = when (error) {
+    is ParserException, is FileNotFoundException, is HttpDataSource.CleartextNotPermittedException -> true
+    is HttpDataSource.InvalidResponseCodeException -> error.responseCode in 400..499 && error.responseCode != 408 && error.responseCode != 429
+    else -> false
+}
+
+// Radio stations go to their own loader, everything else to the songs'.
+@OptIn(UnstableApi::class)
+internal class RadioAwareSources(private val songs: MediaSource.Factory, private val radio: MediaSource.Factory) : MediaSource.Factory {
+    override fun setDrmSessionManagerProvider(drmSessionManagerProvider: DrmSessionManagerProvider): MediaSource.Factory = apply {
+        songs.setDrmSessionManagerProvider(drmSessionManagerProvider)
+        radio.setDrmSessionManagerProvider(drmSessionManagerProvider)
+    }
+
+    // Songs only: stations keep their own retries.
+    override fun setLoadErrorHandlingPolicy(loadErrorHandlingPolicy: LoadErrorHandlingPolicy): MediaSource.Factory = apply {
+        songs.setLoadErrorHandlingPolicy(loadErrorHandlingPolicy)
+    }
+
+    override fun getSupportedTypes(): IntArray = (songs.supportedTypes + radio.supportedTypes).distinct().toIntArray()
+
+    override fun createMediaSource(mediaItem: MediaItem): MediaSource =
+        if (isRadio(mediaItem.mediaId)) radio.createMediaSource(mediaItem) else songs.createMediaSource(mediaItem)
 }
 
 // The chain a song is read through. Server songs get their request pinned
