@@ -202,7 +202,16 @@ class RadioBrowser(
             addQueryParameter("limit", "$SEARCH_LIMIT")
         }.build()
         val body = get(url)
-        return json.decodeFromString<List<CatalogStation>>(body)
+        return try {
+            json.decodeFromString<List<CatalogStation>>(body)
+        } catch (e: kotlinx.serialization.SerializationException) {
+            // A server answering something else: another one next time.
+            chosen = null
+            throw IOException("The radio catalog sent an answer it could not read", e)
+        } catch (e: IllegalArgumentException) {
+            chosen = null
+            throw IOException("The radio catalog sent an answer it could not read", e)
+        }
     }
 
     // A server's address: a name stands for its https address.

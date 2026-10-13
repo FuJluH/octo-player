@@ -127,6 +127,17 @@ class RadioBrowserTest {
     }
 
     @Test
+    fun aServerAnsweringSomethingElseIsLeftForAnother() = runTest {
+        nearBody = "<html>busy</html>"
+        var asks = 0
+        val radio = RadioBrowser(OkHttpClient(), "Octo/test (Android)", servers = { asks++; listOf(server.url("/").toString()) }, now = { clock })
+        assertTrue(runCatching { radio.near(sf, 40_000.0, LiveSort.Distance) }.exceptionOrNull() is java.io.IOException)
+        nearBody = "[]"
+        radio.near(sf, 40_000.0, LiveSort.Distance)
+        assertEquals("a server was picked again", 2, asks)
+    }
+
+    @Test
     fun aStartedStationIsCounted() = runTest {
         catalog().started("abc-123")
         assertEquals("/json/url/abc-123", asked.single().url.encodedPath)
