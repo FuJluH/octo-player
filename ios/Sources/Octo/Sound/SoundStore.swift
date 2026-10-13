@@ -5,7 +5,7 @@ import OctoKit
 /// The sound settings, for the output playing now, and the listener's own presets. With "each
 /// output keeps its own sound" on, the speaker, a cable and each Bluetooth, USB, AirPlay or car
 /// device remember their own; otherwise one shared set is used everywhere. The audio path
-/// follows `current` on every change.
+/// follows `current` on every change, with crossfeed only where there can be headphones.
 @MainActor
 @Observable
 final class SoundStore {
@@ -41,7 +41,7 @@ final class SoundStore {
         perOutput = soundData.bool(forKey: Self.perOutputKey)
         presets = UserPresetRules.decode(presetData.string(forKey: Self.presetsKey))
         output = Self.routeOutput()
-        processor.update(SoundOutputs.current(saved, perOutput: perOutput, output: output))
+        processor.update(SoundOutputs.playing(SoundOutputs.current(saved, perOutput: perOutput, output: output), on: output))
         let center = NotificationCenter.default
         for name in [AVAudioSession.routeChangeNotification, AVAudioSession.mediaServicesWereResetNotification] {
             watchers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
@@ -107,8 +107,10 @@ final class SoundStore {
         publish()
     }
 
+    /// Hands the settings to the audio path, with crossfeed left off where there are no
+    /// headphones.
     private func publish() {
-        processor.update(current)
+        processor.update(SoundOutputs.playing(current, on: output))
     }
 
     /// The output from the outputs the sound is routed to now.
@@ -138,6 +140,6 @@ enum SoundPageRequest: Equatable {
     case savePreset
     /// Asks to delete one of the listener's own presets.
     case deletePreset(String)
-    /// Scrolls to a card: "loudness", "balance" or "correction".
+    /// Scrolls to a card: "loudness", "crossfeed", "balance" or "correction".
     case card(String)
 }

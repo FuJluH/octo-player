@@ -17,7 +17,7 @@ func shiftToEnd(_ buffers: [UnsafeMutablePointer<Float>], frames: Int, written: 
 extension SoundSettings {
     /// Whether these settings ask for any shaping at all.
     public var shapesSound: Bool {
-        eqEnabled || replayGain != .off || limiter || balance != 0 || mono
+        eqEnabled || replayGain != .off || limiter || balance != 0 || mono || crossfeed.on
     }
 }
 
@@ -56,8 +56,8 @@ struct Glide {
 }
 
 /// The sound shaping for one stream. In order: the level (ReplayGain and the equalizer's
-/// preamp), the equalizer's filters, mono and balance, then the limiter. Samples are floats,
-/// one buffer per channel, full scale at 1.
+/// preamp), the equalizer's filters (headphone correction, then the curve), crossfeed, mono and
+/// balance, then the limiter. Samples are floats, one buffer per channel, full scale at 1.
 public final class SoundShaper: @unchecked Sendable {
     public let sampleRate: Double
     public let channels: Int
@@ -73,6 +73,14 @@ public final class SoundShaper: @unchecked Sendable {
     private var fadingFrom: FilterBank?
     private var fadeLeft = 0
     private var fadeScratch: [[Float]] = []
+
+    /// The crossfeed on the first two channels, `CrossfeedCoefficients.none` while it is off.
+    private var feed = CrossfeedCoefficients.none
+    private var feedFilter = CrossfeedFilter()
+    /// While the crossfeed changes, the old one keeps running and fades out.
+    private var feedFrom = CrossfeedCoefficients.none
+    private var feedFromFilter = CrossfeedFilter()
+    private var feedFadeLeft = 0
 
     private let limiter: Limiter
     private var started = false
@@ -116,9 +124,21 @@ public final class SoundShaper: @unchecked Sendable {
         let toMono = stereo && settings.mono
         mono.to(toMono ? 1 : 0, frames: frames)
 
+        // With mono on there is nothing to blend.
+        let feeds = stereo && settings.crossfeed.on && !settings.mono
+        let nextFeed = feeds ? CrossfeedCoefficients(settings.crossfeed, sampleRate: sampleRate) : .none
+        if nextFeed != feed {
+            // Switched on from off, the filter starts from silence; otherwise it carries on.
+            if feed == .none && feedFadeLeft == 0 { feedFilter.clear() }
+            feedFrom = feed
+            feedFromFilter = feedFilter
+            feedFadeLeft = now ? 0 : glideFrames
+            feed = nextFeed
+        }
+
         // Sound that is left as it is passes through untouched; the limiter only catches peaks
         // the shaping could push over.
-        let untouched = bands.isEmpty && level == 1 && balance == 0 && !toMono
+        let untouched = bands.isEmpty && level == 1 && balance == 0 && !toMono && !feeds
         limiter.enabled = settings.limiter && !untouched
     }
 
@@ -129,6 +149,7 @@ public final class SoundShaper: @unchecked Sendable {
         guard input.count == channels, output.count == channels, frames > 0 else { return 0 }
         applyGain(input, frames)
         applyFilters(input, frames)
+        applyCrossfeed(input, frames)
         applyMix(input, frames)
         return limiter.process(input, frames: frames, output: output)
     }
@@ -182,6 +203,28 @@ public final class SoundShaper: @unchecked Sendable {
         if fadeLeft == 0 { fadingFrom = nil }
     }
 
+    /// Runs the crossfeed on the first two channels. While it changes, the old and the new
+    /// settings both run and the sound moves from one to the other over the glide.
+    private func applyCrossfeed(_ buffers: [UnsafeMutablePointer<Float>], _ frames: Int) {
+        guard channels >= 2 else { return }
+        let left = buffers[0], right = buffers[1]
+        if feedFadeLeft == 0 {
+            if feed != .none { feedFilter.process(left, right, frames: frames, feed) }
+            return
+        }
+        for i in 0..<frames {
+            let l = Double(left[i]), r = Double(right[i])
+            let new = feedFilter.process(l, r, feed)
+            let old = feedFromFilter.process(l, r, feedFrom)
+            let w = feedFadeLeft > 0 ? 1 - Double(feedFadeLeft) / Double(glideFrames) : 1
+            if feedFadeLeft > 0 { feedFadeLeft -= 1 }
+            left[i] = Float(old.left + (new.left - old.left) * w)
+            right[i] = Float(old.right + (new.right - old.right) * w)
+        }
+        feedFilter.flushDenormals()
+        feedFromFilter.flushDenormals()
+    }
+
     private func applyMix(_ buffers: [UnsafeMutablePointer<Float>], _ frames: Int) {
         guard channels >= 2 else { return }
         let still = !mono.moving && !left.moving && !right.moving
@@ -216,6 +259,12 @@ public struct AudioOutput: Sendable, Equatable {
 
     /// Every key this output's settings may be saved under, the current one first.
     public var keys: [String] { [key] + formerKeys }
+
+    /// Whether this output can be headphones, where crossfeed belongs: not the phone's speaker,
+    /// a car or an AirPlay device.
+    public var takesCrossfeed: Bool {
+        !(key == Self.phoneSpeaker.key || key.hasPrefix("airplay:") || key.hasPrefix("car:"))
+    }
 
     public static let phoneSpeaker = AudioOutput(key: "speaker", label: "iPhone speaker")
     public static let bluetoothPrefix = "bluetooth:"
@@ -282,6 +331,15 @@ public enum SoundOutputs {
     /// shared set, else the defaults.
     public static func current(_ saved: [String: SoundSettings], perOutput: Bool, output: AudioOutput) -> SoundSettings {
         (perOutput ? savedFor(saved, output) : nil) ?? saved[AudioOutput.shared] ?? SoundSettings()
+    }
+
+    /// The settings the audio path follows on an output: as saved, with crossfeed left off where
+    /// there are no headphones.
+    public static func playing(_ settings: SoundSettings, on output: AudioOutput) -> SoundSettings {
+        guard settings.crossfeed.on, !output.takesCrossfeed else { return settings }
+        var held = settings
+        held.crossfeed.on = false
+        return held
     }
 
     /// The saved sets after a change to the output playing now. With each output keeping its

@@ -134,6 +134,7 @@ final class AppSettings {
 
     func setCrossfade(_ on: Bool) { update { $0.crossfade = on } }
     func setCrossfadeSeconds(_ seconds: Int) { update { $0.crossfadeSeconds = seconds } }
+    func setCrossfadeCurve(_ curve: FadeCurve) { update { $0.crossfadeCurve = curve } }
     func setSmartTransitions(_ on: Bool) { update { $0.smartTransitions = on } }
     func setFilterSweeps(_ on: Bool) { update { $0.filterSweeps = on } }
     func setMatchTempo(_ on: Bool) { update { $0.matchTempo = on } }
@@ -431,6 +432,7 @@ final class AppSettings {
         static let liveBackground = "live_background"
         static let crossfade = "crossfade"
         static let crossfadeSeconds = "crossfade_seconds"
+        static let crossfadeCurve = "crossfade_curve"
         static let smartTransitions = "smart_transitions"
         static let filterSweeps = "filter_sweeps"
         static let matchTempo = "match_tempo"
@@ -514,6 +516,7 @@ final class AppSettings {
         p.background.speed = int(Keys.backgroundSpeed, d.background.speed)
         p.crossfade = bool(Keys.crossfade, d.crossfade)
         p.crossfadeSeconds = int(Keys.crossfadeSeconds, d.crossfadeSeconds)
+        p.crossfadeCurve = FadeCurve.stored(s.string(forKey: Keys.crossfadeCurve), or: d.crossfadeCurve)
         p.smartTransitions = bool(Keys.smartTransitions, d.smartTransitions)
         p.filterSweeps = bool(Keys.filterSweeps, d.filterSweeps)
         p.matchTempo = bool(Keys.matchTempo, d.matchTempo)
@@ -554,6 +557,7 @@ final class AppSettings {
         if old == nil || old!.background != new.background { writeBackground(new.background) }
         put(\.crossfade, Keys.crossfade)
         put(\.crossfadeSeconds, Keys.crossfadeSeconds)
+        put(\.crossfadeCurve, Keys.crossfadeCurve) { $0.storedName }
         put(\.smartTransitions, Keys.smartTransitions)
         put(\.filterSweeps, Keys.filterSweeps)
         put(\.matchTempo, Keys.matchTempo)

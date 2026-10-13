@@ -113,5 +113,7 @@ public struct SoundSearchEntry: Sendable, Equatable {
                          keywords: ["left", "right", "channel", "mono"]),
         SoundSearchEntry(id: "sound_correction", title: "Headphone correction", summary: "A correction for the headphones in use",
                          keywords: ["headphones", "correction", "profile", "tuning"]),
+        SoundSearchEntry(id: "sound_crossfeed", title: "Crossfeed", summary: "Blends a little of each side into the other on headphones",
+                         keywords: ["headphones", "stereo", "speakers", "fatigue", "blend", "chu moy", "meier", "binaural"]),
     ]
 }

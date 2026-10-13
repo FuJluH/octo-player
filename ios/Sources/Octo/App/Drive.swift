@@ -46,7 +46,7 @@ import UIKit
 ///   `menu:live` (a live list's options; `menu:live:rename`, `menu:live:delete`)
 /// - `sound`, `sound:graphic`, `sound:parametric`, `sound:preset:NAME`, `sound:editor`,
 ///   `sound:save`, `sound:own:NAME`, `sound:delete:NAME`, `sound:card:NAME`, `sound:eq:on|off`,
-///   `sound:each:on|off`
+///   `sound:each:on|off`, `sound:crossfeed:on|off|PRESET`
 ///   open the Sound page in that state (see `SoundDrive`)
 /// - `settings:PAGE`, `settings:PAGE@ROW`, `settings-search:TEXT`, `popup:ROW`, `whatsnew`,
 ///   `settings-state:NAME`: see `SettingsNavigator.drive`

@@ -12,8 +12,11 @@ import OctoKit
 /// - `sound:save` opens the "Save as preset" popover
 /// - `sound:own:NAME` saves the ten bands as an own preset and marks the curve as it
 /// - `sound:delete:NAME` asks to delete that own preset
-/// - `sound:card:loudness`, `sound:card:balance`, `sound:card:correction` scroll to that card
+/// - `sound:card:loudness`, `sound:card:balance`, `sound:card:correction`,
+///   `sound:card:crossfeed` scroll to that card
 /// - `sound:eq:on`, `sound:eq:off`, `sound:each:on`, `sound:each:off` set those switches
+/// - `sound:crossfeed:on`, `sound:crossfeed:off`, and `sound:crossfeed:PRESET` (natural,
+///   chumoy, janmeier, custom: on with that preset) set crossfeed and scroll to its card
 @MainActor
 enum SoundDrive {
     static func run(_ value: String, router: Router) {
@@ -62,6 +65,15 @@ enum SoundDrive {
             }
         case "each":
             store.setPerOutput(rest != "off")
+        case "crossfeed":
+            let preset = CrossfeedPreset.allCases.first { $0.rawValue.lowercased() == rest.lowercased() }
+            store.update { settings in
+                var s = settings
+                s.crossfeed.on = rest != "off"
+                if let preset { s.crossfeed.preset = preset }
+                return s
+            }
+            store.pageRequest = .card("crossfeed")
         default:
             break
         }

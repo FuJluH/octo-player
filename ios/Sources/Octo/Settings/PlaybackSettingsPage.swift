@@ -8,6 +8,7 @@ struct PlaybackSettingsPage: View {
     @State private var settings = AppSettings.shared
     @State private var navigator = SettingsNavigator.shared
     @State private var speedOpen = false
+    @State private var curveOpen = false
 
     var body: some View {
         let prefs = settings.player
@@ -16,6 +17,13 @@ struct PlaybackSettingsPage: View {
                 ToggleRow(SettingsIndex.crossfade, isOn: prefs.crossfade, helper: "Albums played in order stay gapless.", onChange: settings.setCrossfade)
                 if prefs.crossfade {
                     crossfadeLength(prefs.crossfadeSeconds)
+                    if prefs.smartTransitions {
+                        ActionRow(SettingsIndex.crossfadeCurve, helper: "Automix picks the curve for each transition.", enabled: false) {}
+                    } else {
+                        PopoverRow(SettingsIndex.crossfadeCurve, value: prefs.crossfadeCurve.label, isPresented: $curveOpen) {
+                            FadeCurveCard { curveOpen = false }.frame(width: 340)
+                        }
+                    }
                     ToggleRow(SettingsIndex.smartTransitions, isOn: prefs.smartTransitions,
                               helper: "Each blend starts where the two songs meet best, on the beat when it can. Off blends at the end of each song.",
                               onChange: settings.setSmartTransitions)
@@ -67,6 +75,9 @@ struct PlaybackSettingsPage: View {
             if popup == SettingsIndex.speed.id {
                 navigator.popup = nil
                 speedOpen = true
+            } else if popup == SettingsIndex.crossfadeCurve.id, settings.player.crossfade, !settings.player.smartTransitions {
+                navigator.popup = nil
+                curveOpen = true
             }
         }
     }
@@ -190,6 +201,106 @@ struct PaceCard: View {
         .padding(.horizontal, 20)
         .padding(.top, 8)
         .padding(.bottom, 18)
+    }
+}
+
+/// The crossfade curves to pick from, each with a small drawing of the two volumes: the song
+/// ending in a quiet line, the one coming in in the accent. The chosen one sits on an accent
+/// fill with a check.
+struct FadeCurveCard: View {
+    let picked: () -> Void
+    @State private var settings = AppSettings.shared
+
+    init(picked: @escaping () -> Void = {}) {
+        self.picked = picked
+    }
+
+    var body: some View {
+        let current = settings.player.crossfadeCurve
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Crossfade curve")
+                .font(.octoBody)
+                .foregroundStyle(OctoColor.textPrimary)
+                .frame(height: 40)
+                .padding(.horizontal, 8)
+                .accessibilityAddTraits(.isHeader)
+            ForEach(FadeCurve.allCases, id: \.self) { curve in
+                let chosen = curve == current
+                Button {
+                    settings.setCrossfadeCurve(curve)
+                    picked()
+                } label: {
+                    HStack(spacing: 12) {
+                        FadeCurveDrawing(curve: curve, chosen: chosen)
+                            .frame(width: 44, height: 30)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(curve.label).font(.octoBodySmall).foregroundStyle(OctoColor.textPrimary)
+                            Text(curve.detail)
+                                .font(.octoCaption)
+                                .foregroundStyle(OctoColor.textMuted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(OctoColor.accent)
+                            .opacity(chosen ? 1 : 0)
+                            .frame(width: 18)
+                            .accessibilityHidden(true)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(chosen ? OctoColor.accent.opacity(0.18) : .clear)
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .strokeBorder(chosen ? OctoColor.accent.opacity(0.55) : .clear, lineWidth: 1)
+                            }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(SettingsRowPress())
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(chosen ? [.isSelected] : [])
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
+        .sensoryFeedback(.selection, trigger: current)
+    }
+}
+
+/// The two volumes of one crossfade curve across a blend, drawn small.
+private struct FadeCurveDrawing: View {
+    let curve: FadeCurve
+    let chosen: Bool
+
+    var body: some View {
+        Canvas { context, size in
+            let points = 48
+            var out = Path()
+            var into = Path()
+            for step in 0...points {
+                let t = Double(step) / Double(points)
+                let gains = fadeGains(curve, t, overlapMs: 8_000)
+                let x = CGFloat(t) * size.width
+                let outPoint = CGPoint(x: x, y: (1 - CGFloat(gains.out)) * (size.height - 2) + 1)
+                let inPoint = CGPoint(x: x, y: (1 - CGFloat(gains.incoming)) * (size.height - 2) + 1)
+                if step == 0 {
+                    out.move(to: outPoint)
+                    into.move(to: inPoint)
+                } else {
+                    out.addLine(to: outPoint)
+                    into.addLine(to: inPoint)
+                }
+            }
+            let line = StrokeStyle(lineWidth: 1.75, lineCap: .round, lineJoin: .round)
+            context.stroke(out, with: .color(OctoColor.textSecondary.opacity(chosen ? 0.9 : 0.6)), style: line)
+            context.stroke(into, with: .color(OctoColor.accent), style: line)
+        }
     }
 }
 

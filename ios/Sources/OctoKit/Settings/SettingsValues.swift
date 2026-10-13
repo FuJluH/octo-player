@@ -529,6 +529,8 @@ public struct PlayerPrefs: Sendable, Equatable, Codable {
     public var background = BackgroundPrefs()
     public var crossfade = false
     public var crossfadeSeconds = 8
+    /// The curve of the crossfade while smart transitions are off.
+    public var crossfadeCurve: FadeCurve = .equalPower
     public var smartTransitions = true
     public var filterSweeps = true
     public var matchTempo = false
@@ -579,7 +581,7 @@ public struct PlayerPrefs: Sendable, Equatable, Codable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case liveBackground, background, crossfade, crossfadeSeconds, smartTransitions, filterSweeps, matchTempo, lyricsOnline,
+        case liveBackground, background, crossfade, crossfadeSeconds, crossfadeCurve, smartTransitions, filterSweeps, matchTempo, lyricsOnline,
              speed, keepPitch, pitchSemitones, skipSilence, autoplay, radioDiscovery, radioAdventure, radioVariety, radioFavorites,
              resumeWired, resumeBluetooth, resumeAlways, ambient, reduceMotion, castRenderers, castKeepPlaying, libraryOnly
     }
@@ -591,6 +593,7 @@ public struct PlayerPrefs: Sendable, Equatable, Codable {
         background = c.value(.background, or: d.background)
         crossfade = c.value(.crossfade, or: d.crossfade)
         crossfadeSeconds = c.value(.crossfadeSeconds, or: d.crossfadeSeconds)
+        crossfadeCurve = c.choice(.crossfadeCurve, or: d.crossfadeCurve)
         smartTransitions = c.value(.smartTransitions, or: d.smartTransitions)
         filterSweeps = c.value(.filterSweeps, or: d.filterSweeps)
         matchTempo = c.value(.matchTempo, or: d.matchTempo)

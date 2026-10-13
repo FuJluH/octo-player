@@ -900,7 +900,8 @@ final class Player {
         semitones = prefs.pitchSemitones
         engine.startAfterMs = AppSettings.shared.stream.startAfter.ms
         engine.automix = AutomixSettings(maxOverlapMs: prefs.crossfadeMs, smart: prefs.smartTransitions,
-                                         filterSweeps: prefs.filterSweeps, beatMatch: prefs.matchTempo)
+                                         filterSweeps: prefs.filterSweeps, beatMatch: prefs.matchTempo,
+                                         fadeCurve: prefs.crossfadeCurve)
         shared.crossfadeOn.store(prefs.crossfadeMs > 0, ordering: .relaxed)
         let inUse = session.inUse
         let probed = session.active?.isOcto ?? false

@@ -324,6 +324,7 @@ public enum BackupFile {
                 ("fps", .int(Int64(b.fps))), ("speed", .int(Int64(b.speed))),
             ])),
             ("crossfade", .bool(p.crossfade)), ("crossfadeSeconds", .int(Int64(p.crossfadeSeconds))),
+            ("crossfadeCurve", .string(p.crossfadeCurve.storedName)),
             ("smartTransitions", .bool(p.smartTransitions)), ("filterSweeps", .bool(p.filterSweeps)), ("matchTempo", .bool(p.matchTempo)),
             ("lyricsOnline", .bool(p.lyricsOnline)), ("speed", .double(Double(String(p.speed)) ?? Double(p.speed))),
             ("keepPitch", .bool(p.keepPitch)), ("pitchSemitones", .int(Int64(p.pitchSemitones))), ("skipSilence", .bool(p.skipSilence)),
@@ -391,6 +392,10 @@ public enum BackupFile {
             ("replayGain", .string(s.replayGain.rawValue)), ("replayGainPreampDb", .double(s.replayGainPreampDb)),
             ("replayGainFallbackDb", .double(s.replayGainFallbackDb)), ("preventClipping", .bool(s.preventClipping)),
             ("limiter", .bool(s.limiter)), ("balance", .double(s.balance)), ("mono", .bool(s.mono)),
+            ("crossfeed", .object([
+                ("on", .bool(s.crossfeed.on)), ("preset", .string(s.crossfeed.preset.rawValue)),
+                ("cutHz", .int(Int64(s.crossfeed.cutHz))), ("feedDb", .double(s.crossfeed.feedDb)),
+            ])),
         ])
     }
 

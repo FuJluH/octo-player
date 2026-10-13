@@ -59,12 +59,17 @@ public struct AutomixSettings: Sendable, Equatable, Hashable {
     public var filterSweeps: Bool
     /// Nudges the incoming song's speed to the outgoing song's tempo.
     public var beatMatch: Bool
+    /// The curve of the fixed crossfade, with smart transitions off. Planned transitions keep
+    /// their own curves.
+    public var fadeCurve: FadeCurve
 
-    public init(maxOverlapMs: Int, smart: Bool = true, filterSweeps: Bool = true, beatMatch: Bool = false) {
+    public init(maxOverlapMs: Int, smart: Bool = true, filterSweeps: Bool = true, beatMatch: Bool = false,
+                fadeCurve: FadeCurve = .equalPower) {
         self.maxOverlapMs = maxOverlapMs
         self.smart = smart
         self.filterSweeps = filterSweeps
         self.beatMatch = beatMatch
+        self.fadeCurve = fadeCurve
     }
 }
 
@@ -123,9 +128,12 @@ public struct TransitionPlan: Sendable, Equatable {
     public var late: Bool
     public var headroomDb: Double
     public var reason: String
+    /// A fixed crossfade's chosen curve, followed in place of the curve weight k when set.
+    public var curve: FadeCurve?
 
     public init(startMs: Int, entryMs: Int, overlapMs: Int, kind: TransitionKind, k: Double, filterStrength: Double,
-                beatMatchRate: Double?, beatMs: Double?, beatAnchorMs: Double?, late: Bool, headroomDb: Double, reason: String) {
+                beatMatchRate: Double?, beatMs: Double?, beatAnchorMs: Double?, late: Bool, headroomDb: Double, reason: String,
+                curve: FadeCurve? = nil) {
         self.startMs = startMs
         self.entryMs = entryMs
         self.overlapMs = overlapMs
@@ -138,6 +146,7 @@ public struct TransitionPlan: Sendable, Equatable {
         self.late = late
         self.headroomDb = headroomDb
         self.reason = reason
+        self.curve = curve
     }
 
     public var barLocked: Bool { beatMs != nil }
@@ -146,9 +155,15 @@ public struct TransitionPlan: Sendable, Equatable {
         overlapMs <= 0 ? 1 : min(max((outgoingMs - Double(startMs)) / Double(overlapMs), 0), 1)
     }
 
-    public func outGain(_ t: Double) -> Double { automixOutGain(t, k) }
+    public func outGain(_ t: Double) -> Double {
+        if let curve { return fadeGains(curve, t, overlapMs: overlapMs).out }
+        return automixOutGain(t, k)
+    }
 
-    public func inGain(_ t: Double) -> Double { automixInGain(t, k) }
+    public func inGain(_ t: Double) -> Double {
+        if let curve { return fadeGains(curve, t, overlapMs: overlapMs).incoming }
+        return automixInGain(t, k)
+    }
 
     /// The outgoing song's beats inside the blend as places through it (0 to 1). A beat within a
     /// twentieth of a beat of either end counts as the end itself and is left out.
@@ -194,7 +209,7 @@ public func planTransition(current: FadeSong, next: FadeSong?, tail: SectionAnal
     }
     let lenA = current.durationMs
     let lenB = next.durationMs
-    if !settings.smart { return fixedCrossfadePlan(lenA: lenA, length: plain, why: "smart transitions off") }
+    if !settings.smart { return fixedCrossfadePlan(lenA: lenA, length: plain, why: "smart transitions off", curve: settings.fadeCurve) }
     if let genre = [context.currentGenre, context.nextGenre].compactMap({ $0 }).first(where: isPlainCrossfadeGenre) {
         return crossfadePlan(lenA, plain, "genre \(genre)")
     }
@@ -389,13 +404,17 @@ private func gaplessPlan(_ current: FadeSong, _ reason: String) -> TransitionPla
                    reason: "gapless: \(reason)")
 }
 
-/// The equal-power crossfade at the end of the song, as it was before planned transitions: no
-/// curve weight, no filters and no headroom.
-public func fixedCrossfadePlan(lenA: Int, length: Int, why: String) -> TransitionPlan {
+/// The fixed crossfade at the end of the song: no filters, on the chosen curve. Equal power is
+/// the crossfade as it was before planned transitions, with no curve weight and no headroom;
+/// mix only plays both songs a little quieter through the overlap.
+public func fixedCrossfadePlan(lenA: Int, length: Int, why: String, curve: FadeCurve = .equalPower) -> TransitionPlan {
     let start = max(0, lenA - length)
+    let named = curve == .equalPower ? "" : ", \(curve.label.lowercased()) fade"
     return TransitionPlan(startMs: start, entryMs: 0, overlapMs: length, kind: .crossfade, k: 0, filterStrength: 0,
-                          beatMatchRate: nil, beatMs: nil, beatAnchorMs: nil, late: false, headroomDb: 0,
-                          reason: "crossfade at \(automixSeconds(start)) over \(automixSeconds(length)): \(why)")
+                          beatMatchRate: nil, beatMs: nil, beatAnchorMs: nil, late: false,
+                          headroomDb: curve == .mixOnly ? mixOnlyHeadroomDb : 0,
+                          reason: "crossfade at \(automixSeconds(start)) over \(automixSeconds(length)): \(why)\(named)",
+                          curve: curve == .equalPower ? nil : curve)
 }
 
 private func crossfadePlan(_ lenA: Int, _ length: Int, _ why: String) -> TransitionPlan {

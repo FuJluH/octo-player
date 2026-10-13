@@ -1,7 +1,7 @@
 import Foundation
 
-// How the sound is shaped: the equalizer, the level, loudness between songs, the limiter and
-// balance. The same model and rules as the other apps.
+// How the sound is shaped: the equalizer, the level, loudness between songs, crossfeed, the
+// limiter and balance. The same model and rules as the other apps.
 
 /// A bump or dip around one frequency, or a lift or cut of everything below or above one.
 public enum FilterType: String, Codable, Sendable, CaseIterable {
@@ -125,12 +125,14 @@ public struct SoundSettings: Codable, Sendable, Equatable {
     /// From -1 (all left) to 1 (all right).
     public var balance = 0.0
     public var mono = false
+    /// Blends a little of each side into the other, for headphones.
+    public var crossfeed = Crossfeed()
 
     public init() {}
 
     enum CodingKeys: String, CodingKey {
         case eqEnabled, mode, graphicGains, filters, preset, preampDb, autoPreamp, correction, replayGain
-        case replayGainPreampDb, replayGainFallbackDb, preventClipping, limiter, balance, mono
+        case replayGainPreampDb, replayGainFallbackDb, preventClipping, limiter, balance, mono, crossfeed
     }
 
     public init(from decoder: Decoder) throws {
@@ -152,6 +154,7 @@ public struct SoundSettings: Codable, Sendable, Equatable {
         limiter = try c.decodeIfPresent(Bool.self, forKey: .limiter) ?? d.limiter
         balance = try c.decodeIfPresent(Double.self, forKey: .balance) ?? d.balance
         mono = try c.decodeIfPresent(Bool.self, forKey: .mono) ?? d.mono
+        crossfeed = try c.decodeIfPresent(Crossfeed.self, forKey: .crossfeed) ?? d.crossfeed
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -174,6 +177,7 @@ public struct SoundSettings: Codable, Sendable, Equatable {
         if limiter != d.limiter { try c.encode(limiter, forKey: .limiter) }
         if balance != d.balance { try c.encode(balance, forKey: .balance) }
         if mono != d.mono { try c.encode(mono, forKey: .mono) }
+        if crossfeed != d.crossfeed { try c.encode(crossfeed, forKey: .crossfeed) }
     }
 
     /// The filters the equalizer applies now: the headphone correction first, then the

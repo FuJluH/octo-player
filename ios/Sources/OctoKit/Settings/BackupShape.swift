@@ -135,7 +135,10 @@ extension BackupShape {
             BackupField("preampDb", .decimal, .required), BackupField("filters", .list(eqFilter), .required)
         ), .nullable),
         BackupField("replayGain", .choice), BackupField("replayGainPreampDb", .decimal), BackupField("replayGainFallbackDb", .decimal),
-        BackupField("preventClipping", .flag), BackupField("limiter", .flag), BackupField("balance", .decimal), BackupField("mono", .flag)
+        BackupField("preventClipping", .flag), BackupField("limiter", .flag), BackupField("balance", .decimal), BackupField("mono", .flag),
+        BackupField("crossfeed", fields(
+            BackupField("on", .flag), BackupField("preset", .choice), BackupField("cutHz", .int), BackupField("feedDb", .decimal)
+        ))
     )
 
     static let player = fields(
@@ -144,7 +147,8 @@ extension BackupShape {
             BackupField("mode", .choice), BackupField("brightnessCap", .int), BackupField("saturation", .int),
             BackupField("contrast", .decimal), BackupField("useBpm", .flag), BackupField("fps", .int), BackupField("speed", .int)
         )),
-        BackupField("crossfade", .flag), BackupField("crossfadeSeconds", .int), BackupField("smartTransitions", .flag),
+        BackupField("crossfade", .flag), BackupField("crossfadeSeconds", .int), BackupField("crossfadeCurve", .choice),
+        BackupField("smartTransitions", .flag),
         BackupField("filterSweeps", .flag), BackupField("matchTempo", .flag), BackupField("lyricsOnline", .flag),
         BackupField("speed", .decimal), BackupField("keepPitch", .flag), BackupField("pitchSemitones", .int),
         BackupField("skipSilence", .flag), BackupField("autoplay", .flag), BackupField("radioDiscovery", .choice),

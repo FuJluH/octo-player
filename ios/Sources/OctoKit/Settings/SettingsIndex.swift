@@ -64,6 +64,8 @@ public enum SettingsIndex {
                                                ["fade", "blend", "gapless", "transition", "mix"])
     public static let crossfadeLength = SettingEntry("crossfade_length", .playback, "Longest blend", "The most seconds two songs blend for",
                                                      ["fade", "seconds", "duration", "crossfade length"])
+    public static let crossfadeCurve = SettingEntry("crossfade_curve", .playback, "Crossfade curve", "How the two volumes cross in a blend",
+                                                    ["curve", "fade", "linear", "s-curve", "equal power", "logarithmic", "loudness", "dj", "overlap"])
     public static let smartTransitions = SettingEntry("smart_transitions", .playback, "Smart transitions", "Each blend starts where the songs meet best",
                                                       ["automix", "dj", "mix", "transition", "beat", "outro"])
     public static let filterSweeps = SettingEntry("filter_sweeps", .playback, "Filter sweeps", "Songs thin out as they cross",
@@ -299,7 +301,7 @@ public enum SettingsIndex {
 
     /// Every setting, in the order written.
     public static let all: [SettingEntry] = [
-        crossfade, crossfadeLength, smartTransitions, filterSweeps, matchTempo, speed, skipSilence, autoplay,
+        crossfade, crossfadeLength, crossfadeCurve, smartTransitions, filterSweeps, matchTempo, speed, skipSilence, autoplay,
         radioDiscovery, radioAdventure, radioVariety, radioFavorites, resumeWired, resumeBluetooth, resumeAlways,
         castKeepPlaying,
     ] + sound + [

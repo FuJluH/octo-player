@@ -52,6 +52,84 @@ public func automixInGain(_ t: Double, _ k: Double) -> Double {
     return max(0, 1 - out * out).squareRoot()
 }
 
+/// How the two volumes cross in a plain crossfade, the one played with smart transitions off.
+public enum FadeCurve: String, StoredChoice, Codable {
+    /// Steady loudness between two different songs: the squares of the volumes add up to one.
+    case equalPower = "EqualPower"
+    /// Straight lines, with a slight dip in the middle.
+    case linear = "Linear"
+    /// Holds each song longer, then swaps them quickly around the middle.
+    case sCurve = "SCurve"
+    /// The same step down in decibels every moment, to -60 dB, then silence; mirrored coming in.
+    case evenLoudness = "EvenLoudness"
+    /// Both songs at full volume, the outgoing one cut quickly at the end and the incoming one
+    /// brought in quickly at the start, with headroom against overs.
+    case mixOnly = "MixOnly"
+
+    public var label: String {
+        switch self {
+        case .equalPower: "Equal power"
+        case .linear: "Linear"
+        case .sCurve: "S-curve"
+        case .evenLoudness: "Even in loudness"
+        case .mixOnly: "Mix only"
+        }
+    }
+
+    public var detail: String {
+        switch self {
+        case .equalPower: "Steady loudness from one song to the next."
+        case .linear: "A straight fade, a little quieter in the middle."
+        case .sCurve: "Holds each song longer, then swaps them quickly."
+        case .evenLoudness: "Every second of the fade is the same step down."
+        case .mixOnly: "Both songs play in full over each other, like a DJ."
+        }
+    }
+}
+
+/// How far an even-in-loudness fade falls, at `evenLoudnessFloorAt` through it, before it ends
+/// in silence.
+public let evenLoudnessFloorDb = -60.0
+public let evenLoudnessFloorAt = 0.95
+
+/// The outgoing volume of an even-in-loudness fade at `t`: the same number of decibels down
+/// every moment until the floor, then a straight line to silence at the end.
+func evenLoudnessGain(_ t: Double) -> Double {
+    if t <= evenLoudnessFloorAt { return pow(10, evenLoudnessFloorDb * t / evenLoudnessFloorAt / 20) }
+    return pow(10, evenLoudnessFloorDb / 20) * (1 - t) / (1 - evenLoudnessFloorAt)
+}
+
+/// How long a mix-only fade takes to cut the outgoing song at the end, and to bring in the
+/// incoming one at the start.
+public let mixOnlyRampMs = 300.0
+
+/// How much quieter both songs play through a mix-only overlap.
+public let mixOnlyHeadroomDb = 3.0
+
+/// The outgoing and incoming volumes at `t` through a crossfade (0 to 1) of `overlapMs`, on
+/// `curve`. Every curve starts at (1, 0), ends at (0, 1) and never goes above 1. Equal power is
+/// the same as the planned curves with no S weight.
+public func fadeGains(_ curve: FadeCurve, _ t: Double, overlapMs: Int) -> (out: Double, incoming: Double) {
+    let p = clamp01(t)
+    switch curve {
+    case .equalPower:
+        return (automixOutGain(p, 0), automixInGain(p, 0))
+    case .linear:
+        return (1 - p, p)
+    case .sCurve:
+        let out = 1 - sCurve(p)
+        return (out, max(0, 1 - out * out).squareRoot())
+    case .evenLoudness:
+        return (clamp01(evenLoudnessGain(p)), clamp01(evenLoudnessGain(1 - p)))
+    case .mixOnly:
+        // The quick fades take their real length, up to half the overlap each.
+        let ramp = overlapMs > 0 ? min(0.5, mixOnlyRampMs / Double(overlapMs)) : 0.5
+        let out = p >= 1 ? 0 : p <= 1 - ramp ? 1 : cos((p - (1 - ramp)) / ramp * Double.pi / 2)
+        let into = p >= ramp ? 1 : sin(p / ramp * Double.pi / 2)
+        return (clamp01(out), clamp01(into))
+    }
+}
+
 /// Moves from `from` to `to` on a log scale as u goes from 0 to 1.
 private func logBetween(_ from: Double, _ to: Double, _ u: Double) -> Double { from * pow(to / from, clamp01(u)) }
 

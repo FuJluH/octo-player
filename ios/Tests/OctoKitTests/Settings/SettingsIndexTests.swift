@@ -38,7 +38,7 @@ private let longDashes: [Character] = ["\u{2014}", "\u{2013}"]
     }
 
     @Test func theTitleComesFirst() {
-        #expect(Array(titles("crossfade").prefix(2)) == ["Crossfade", "Longest blend"])
+        #expect(Array(titles("crossfade").prefix(2)) == ["Crossfade", "Crossfade curve"])
         #expect(titles("CROSS").first == "Crossfade")
     }
 

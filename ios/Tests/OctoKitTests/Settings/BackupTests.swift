@@ -47,7 +47,7 @@ import Testing
         backup.player = PlayerPrefs()
         let text = BackupFile.encode(backup)
         for key in ["liveBackground", "crossfade", "crossfadeSeconds", "lyricsOnline", "speed", "keepPitch", "pitchSemitones", "skipSilence",
-                    "resumeWired", "resumeBluetooth", "resumeAlways", "smartTransitions", "filterSweeps", "matchTempo", "radioDiscovery",
+                    "resumeWired", "resumeBluetooth", "resumeAlways", "smartTransitions", "filterSweeps", "matchTempo", "radioDiscovery", "crossfadeCurve",
                     "ambient", "background", "castRenderers", "castKeepPlaying", "libraryOnly", "reduceMotion"] {
             #expect(text.contains("\"\(key)\""), "\(key) is missing")
         }

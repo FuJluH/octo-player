@@ -57,6 +57,7 @@ struct SoundCard<Content: View>: View {
 struct SoundSwitchCard<Content: View>: View {
     let title: String
     @Binding var isOn: Bool
+    var enabled = true
     @ViewBuilder let content: Content
 
     var body: some View {
@@ -67,7 +68,7 @@ struct SoundSwitchCard<Content: View>: View {
                     .foregroundStyle(OctoColor.textPrimary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityAddTraits(.isHeader)
-                Toggle(title, isOn: $isOn).labelsHidden().tint(OctoColor.accent)
+                Toggle(title, isOn: $isOn).labelsHidden().tint(OctoColor.accent).disabled(!enabled)
             }
             .padding(.horizontal, 4)
             content

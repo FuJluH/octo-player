@@ -2,8 +2,8 @@ import OctoKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Everything that shapes the sound: the equalizer and its presets, loudness, balance, and a
-/// correction for the headphones in use. Changes go to the output playing now.
+/// Everything that shapes the sound: the equalizer and its presets, loudness, balance, a
+/// correction for the headphones in use, and crossfeed. Changes go to the output playing now.
 struct SoundPage: View {
     @Environment(SoundStore.self) private var store
     @State private var model: SoundPageModel?
@@ -56,6 +56,7 @@ private struct SoundPageContent: View {
                         loudnessCard(settings).id("loudness")
                         balanceCard(settings).id("balance")
                         correctionCard(settings).id("correction")
+                        crossfeedCard(settings).id("crossfeed")
                     }
                 }
                 .padding(.top, 8 + detailTopGap)
@@ -300,6 +301,50 @@ private struct SoundPageContent: View {
             SoundChoiceLine(label: "Export my curve\u{2026}", value: "Saves it as a ParametricEQ.txt file") {
                 exportFile = SoundTextFile(text: model.curveFile())
                 exporting = true
+            }
+        }
+    }
+
+    /// Crossfeed for headphones: a preset, or the cut and feed set by hand. It stays off on the
+    /// speaker, a car and AirPlay, and rests while mono is on.
+    private func crossfeedCard(_ settings: SoundSettings) -> some View {
+        let crossfeed = settings.crossfeed
+        let headphones = store.output.takesCrossfeed
+        let presets = CrossfeedPreset.allCases
+        return SoundSwitchCard(title: "Crossfeed", isOn: Binding(get: { headphones && crossfeed.on }, set: { on in
+            model.change { var s = $0; s.crossfeed.on = on; return s }
+        }), enabled: headphones) {
+            Text(CrossfeedWords.about).font(.octoCaption).foregroundStyle(OctoColor.textMuted).padding(.horizontal, 4)
+            if !headphones {
+                Text(CrossfeedWords.headphonesOnly).font(.octoBodySmall).foregroundStyle(OctoColor.textSecondary).padding(.horizontal, 4)
+            } else {
+                if settings.mono && crossfeed.on {
+                    Text(CrossfeedWords.monoOn).font(.octoCaption).foregroundStyle(OctoColor.textSecondary).padding(.horizontal, 4)
+                }
+                SoundSegmented(options: presets.map(\.label), selected: presets.firstIndex(of: crossfeed.preset) ?? 0) { index in
+                    // Picking a strength turns crossfeed on, so the change is heard.
+                    model.change { var s = $0; s.crossfeed.preset = presets[index]; s.crossfeed.on = true; return s }
+                }
+                Text("\(crossfeed.preset.detail) \(CrossfeedWords.values(crossfeed)).")
+                    .font(.octoCaption)
+                    .foregroundStyle(OctoColor.textMuted)
+                    .padding(.horizontal, 4)
+                if crossfeed.preset == .custom {
+                    let cutRange = Double(Crossfeed.cutRange.lowerBound)...Double(Crossfeed.cutRange.upperBound)
+                    SoundValueSlider(label: "Cut", value: Double(crossfeed.cutHz), range: cutRange,
+                                     reading: SoundEdits.readHz(Double(crossfeed.cutHz)), step: 10,
+                                     toFraction: CrossfeedWords.cutFraction, fromFraction: CrossfeedWords.cutValue) { hz in
+                        model.preview { var s = $0; s.crossfeed.cutHz = Int(hz.rounded()); s.crossfeed.on = true; return s }
+                    }
+                    SoundValueSlider(label: "Feed", value: crossfeed.feedDb, range: Crossfeed.feedRange,
+                                     reading: CrossfeedWords.readFeed(crossfeed.feedDb), step: 0.5) { db in
+                        model.preview { var s = $0; s.crossfeed.feedDb = db; s.crossfeed.on = true; return s }
+                    }
+                    Text(CrossfeedWords.customHelp)
+                        .font(.octoCaption)
+                        .foregroundStyle(OctoColor.textMuted)
+                        .padding(.horizontal, 4)
+                }
             }
         }
     }

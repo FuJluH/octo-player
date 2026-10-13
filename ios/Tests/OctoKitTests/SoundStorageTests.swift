@@ -187,8 +187,8 @@ import Testing
         #expect(SoundBackupWords.lines(perOutput: false, profiles: nil, presets: Array(two.prefix(1))) == ["1 equalizer preset"])
     }
 
-    @Test func theSoundPageHasFiveSearchEntries() {
-        #expect(SoundSearchEntry.all.map(\.title) == ["Sound for each output", "Equalizer", "Loudness", "Balance", "Headphone correction"])
-        #expect(Set(SoundSearchEntry.all.map(\.id)).count == 5)
+    @Test func theSoundPageHasSixSearchEntries() {
+        #expect(SoundSearchEntry.all.map(\.title) == ["Sound for each output", "Equalizer", "Loudness", "Balance", "Headphone correction", "Crossfeed"])
+        #expect(Set(SoundSearchEntry.all.map(\.id)).count == 6)
     }
 }
