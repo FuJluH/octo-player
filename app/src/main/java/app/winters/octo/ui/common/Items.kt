@@ -75,6 +75,11 @@ private const val MoreOptions = "More options"
 
 private val RowShape = RoundedCornerShape(12.dp)
 
+// How far song, artist and playlist rows sit from the screen's sides, and a
+// picked row's pill closer still, so lists run near the edges.
+val ListRowSide = 12.dp
+val ListRowPickInset = 4.dp
+
 // Opens the menu on a long press, with a little buzz, floating beside
 // what was held. Held down, it gives a little and springs back.
 private fun Modifier.pressOrHold(haptics: HapticFeedback, spot: PressSpot, onClick: () -> Unit, onLongClick: (() -> Unit)?): Modifier = composed {
@@ -327,7 +332,7 @@ private fun SongLine(
     ) {
         // A picked song sits in the selected row's pill: the darker pill,
         // lightly tinted with the accent.
-        if (picked) SelectedRow(Modifier.matchParentSize().padding(horizontal = 8.dp, vertical = 2.dp), RowShape)
+        if (picked) SelectedRow(Modifier.matchParentSize().padding(horizontal = ListRowPickInset, vertical = 2.dp), RowShape)
         Box(
             Modifier
                 .fillMaxWidth()
@@ -360,7 +365,7 @@ private fun SongLine(
                 }
                 // At least a row tall; taller when large text needs it.
                 .heightIn(min = 56.dp)
-                .padding(horizontal = 20.dp, vertical = 4.dp)
+                .padding(horizontal = ListRowSide, vertical = 4.dp)
                 // With no connection, a song that cannot play is drawn faint.
                 .alpha(if (LocalOfflineMarks.current.isOutOfReach(song)) OutOfReachAlpha else 1f),
             contentAlignment = Alignment.CenterStart,
@@ -527,7 +532,7 @@ fun ArtistRow(artist: ArtistEntity, onClick: () -> Unit) {
             .pressOrHold(LocalHapticFeedback.current, LocalPressSpot.current, onClick) { menus.open(CollectionTarget.Artist(artist.id)) }
             // At least a row tall; taller when large text needs it.
             .heightIn(min = 64.dp)
-            .padding(horizontal = 20.dp, vertical = 4.dp),
+            .padding(horizontal = ListRowSide, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {

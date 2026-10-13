@@ -42,6 +42,7 @@ import app.winters.octo.design.artworkRim
 import app.winters.octo.design.elevation3
 import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.CloudMark
+import app.winters.octo.ui.common.ListRowSide
 import app.winters.octo.ui.common.PlayRow
 import app.winters.octo.ui.common.QuietIconAction
 import app.winters.octo.ui.common.asLength
@@ -115,7 +116,7 @@ fun PlaylistLine(
             )
             // At least a row tall; taller when large text needs it.
             .heightIn(min = 72.dp)
-            .padding(horizontal = 20.dp, vertical = 4.dp),
+            .padding(horizontal = ListRowSide, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
