@@ -252,16 +252,17 @@ import Testing
         a.tags = ["rock", "indie"]
         a.bitrate = 96
         a.hls = true
-        backup.liveStations = [a, station("b")]
+        backup.keptStations = [a, station("b")]
+        #expect(BackupFile.encode(backup).contains(#""keptStations": ["#))
         guard case .read(let back) = BackupFile.decode(BackupFile.encode(backup)) else {
             Issue.record("not read back")
             return
         }
-        #expect(back.liveStations == backup.liveStations)
+        #expect(back.keptStations == backup.keptStations)
         #expect(BackupPlanner.describe(back).contains("2 kept radio stations"))
         guard case .read(let none) = BackupFile.decode(#"{"kind":"octo-settings"}"#) else { return }
-        #expect(none.liveStations.isEmpty)
-        #expect(BackupFile.decode(#"{"kind":"octo-settings","liveStations":[{"name":"no id"}]}"#) == .notABackup)
+        #expect(none.keptStations.isEmpty)
+        #expect(BackupFile.decode(#"{"kind":"octo-settings","keptStations":[{"name":"no id"}]}"#) == .notABackup)
     }
 }
 

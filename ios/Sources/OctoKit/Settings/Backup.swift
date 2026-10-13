@@ -250,7 +250,7 @@ public struct Backup: Sendable, Equatable {
     /// The order each list was left in, by the list's name, as "<order>:asc" or "<order>:desc".
     public var sortOrders: [String: String] = [:]
     /// The live radio stations kept on the phone, newest first.
-    public var liveStations: [LiveStation] = []
+    public var keptStations: [LiveStation] = []
 
     public init() {}
 }
@@ -304,7 +304,7 @@ public enum BackupFile {
             ("homeSections", backup.homeSections.map { .string($0) }),
         ]
         top.append(("sortOrders", sortOrdersJSON(backup.sortOrders)))
-        top.append(("liveStations", .array(backup.liveStations.map(liveStationJSON))))
+        top.append(("keptStations", .array(backup.keptStations.map(liveStationJSON))))
         return OrderedJSON.fields(top).pretty()
     }
 
@@ -472,7 +472,7 @@ public enum BackupFile {
         if case .object(let orders)? = o["sortOrders"] {
             for (list, order) in orders { if let order = order.text { b.sortOrders[list] = order } }
         }
-        b.liveStations = part(o["liveStations"], [LiveStation].self) ?? []
+        b.keptStations = part(o["keptStations"], [LiveStation].self) ?? []
         return b
     }
 
@@ -745,7 +745,7 @@ public enum BackupPlanner {
         if !backup.favoriteAlbums.isEmpty { lines.append(plural(backup.favoriteAlbums.count, "favorite album", "favorite albums")) }
         if !backup.favoriteArtists.isEmpty { lines.append(plural(backup.favoriteArtists.count, "favorite artist", "favorite artists")) }
         if !backup.pins.isEmpty { lines.append(plural(backup.pins.count, "pin on Home", "pins on Home")) }
-        if !backup.liveStations.isEmpty { lines.append(plural(backup.liveStations.count, "kept radio station", "kept radio stations")) }
+        if !backup.keptStations.isEmpty { lines.append(plural(backup.keptStations.count, "kept radio station", "kept radio stations")) }
         if let offsets = backup.lyrics?.offsets, !offsets.isEmpty { lines.append("Lyrics timing for " + plural(offsets.count, "song", "songs")) }
         if let outputs = backup.lyrics?.outputOffsets, !outputs.isEmpty {
             lines.append("Lyrics timing for " + plural(outputs.count, "sound output", "sound outputs"))

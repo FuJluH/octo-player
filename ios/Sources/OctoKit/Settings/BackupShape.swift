@@ -209,7 +209,7 @@ extension BackupShape {
         ), .nullable),
         BackupField("homeSections", .text, .nullable),
         BackupField("sortOrders", .map(.text)),
-        BackupField("liveStations", .list(liveStation))
+        BackupField("keptStations", .list(liveStation))
     )
 
     /// A kept live radio station.

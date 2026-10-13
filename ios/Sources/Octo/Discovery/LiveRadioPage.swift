@@ -207,7 +207,8 @@ struct LiveStationRow<Items: View>: View {
     }
 }
 
-/// A station's menu: Keep (or stop keeping) it on the phone, and Add to server.
+/// A station's menu: Keep (or stop keeping) it on the phone, and, for the server's admin, Add to
+/// your server.
 struct LiveStationMenuItems: View {
     let station: LiveStation
     @Binding var adding: String?
@@ -228,18 +229,14 @@ struct LiveStationMenuItems: View {
                 router.done("Kept \(station.name). It shows on Home under Live radio.")
             }
         }
-        if session.client != nil {
-            Button("Add to server", systemImage: "plus.circle") { addToServer() }
+        if session.client != nil && controls.isAdmin {
+            Button("Add to your server", systemImage: "plus.circle") { addToServer() }
         }
     }
 
     /// Adds the station to the server's own stations; only an admin may.
     private func addToServer() {
-        guard adding == nil else { return }
-        guard controls.isAdmin else {
-            router.show("Only an admin of this server can add stations to it. Keep it to have it on this phone.")
-            return
-        }
+        guard adding == nil, controls.isAdmin else { return }
         adding = station.uuid
         let controls = controls
         Task {
