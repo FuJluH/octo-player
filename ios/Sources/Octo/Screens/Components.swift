@@ -164,7 +164,7 @@ struct TrackRow: View {
             if selecting { selection?.toggle(key) } else { onTap() }
         } label: {
             face
-                .padding(.horizontal, 20)
+                .padding(.horizontal, ListRow.side)
                 .padding(.vertical, 4)
                 .frame(minHeight: 56)
                 .contentShape(Rectangle())
@@ -180,7 +180,7 @@ struct TrackRow: View {
                             .strokeBorder(LinearGradient(colors: [.white.opacity(0.12), .black.opacity(0.25)], startPoint: .top, endPoint: .bottom),
                                           lineWidth: 1)
                     }
-                    .padding(.horizontal, 8)
+                    .padding(.horizontal, ListRow.pickInset)
                     .padding(.vertical, 2)
             }
         }
@@ -440,7 +440,7 @@ struct SongRow: View {
                 case .trailing: EmptyView()
                 }
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, ListRow.side)
             .padding(.vertical, 4)
             .frame(minHeight: 56)
             .contentShape(Rectangle())
@@ -457,7 +457,7 @@ struct SongRow: View {
                             .strokeBorder(LinearGradient(colors: [.white.opacity(0.12), .black.opacity(0.25)], startPoint: .top, endPoint: .bottom),
                                           lineWidth: 1)
                     }
-                    .padding(.horizontal, 8)
+                    .padding(.horizontal, ListRow.pickInset)
                     .padding(.vertical, 2)
             }
         }
@@ -683,7 +683,7 @@ struct ArtistRow: View {
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, ListRow.side)
             .padding(.vertical, 4)
             .frame(minHeight: 64)
             .contentShape(Rectangle())
@@ -789,7 +789,7 @@ struct PlaylistLine<Picture: View>: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, ListRow.side)
         .padding(.vertical, 4)
         .frame(minHeight: 72)
         .contentShape(Rectangle())
@@ -879,4 +879,11 @@ extension LibraryState {
             artistId: prefixed(album.artistId), year: album.year, songCount: album.songCount,
             durationMs: Int64(album.duration) * 1_000, addedAt: 0, artwork: art)
     }
+}
+
+/// How far list rows sit from the screen's sides: songs, artists and playlists run close to the
+/// edges, and a picked row's pill closer still.
+enum ListRow {
+    static let side: CGFloat = 12
+    static let pickInset: CGFloat = 4
 }

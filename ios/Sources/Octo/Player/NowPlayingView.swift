@@ -35,7 +35,7 @@ struct NowPlayingView: View {
     @State private var lyricsLayer = false
 
     // The pull and the artwork's swipe.
-    @State private var pull: CGFloat = 0
+    @State private var pull = PlayerPull()
     @State private var axis: DragAxis = .undecided
     /// The artwork has made its one decision for this drag and left it to the pull.
     @State private var artDecided = false
@@ -82,8 +82,6 @@ struct NowPlayingView: View {
                 let sideways = area.width > area.height
                 let roomy = !sideways || area.height >= 360
                 let cap = size.height * Self.pullShare
-                let travel = min(max(pull, 0), cap)
-                let pulled = cap > 0 ? travel / cap : 0
                 ZStack {
                     PlayerBackground(prefs: settings.player.background, colors: colors, cover: look.cover,
                                      coverId: player.current?.coverArt, live: settings.player.liveBackground, calm: calm,
@@ -104,9 +102,7 @@ struct NowPlayingView: View {
                                                           cancelled: dragTakenOver))
                 }
                 .frame(width: size.width, height: size.height)
-                .clipShape(RoundedRectangle(cornerRadius: travel > 0 ? 28 * min(pulled * 5, 1) : 0, style: .continuous))
-                .scaleEffect(1 - 0.06 * pulled)
-                .offset(y: travel)
+                .modifier(PulledFrame(pull: pull, cap: cap))
                 .contentShape(Rectangle())
                 .gesture(playerDrag(cap: cap, folded: lyrics.open && !sideways))
             }
@@ -507,7 +503,7 @@ struct NowPlayingView: View {
                     slopOrigin = dy
                 } else if moved >= Self.slop {
                     axis = .vertical
-                    pull = min(max((moved - Self.slop) * 0.82, 0), cap)
+                    pull.distance = min(max((moved - Self.slop) * 0.82, 0), cap)
                     lastDy = dy
                     return
                 }
@@ -515,7 +511,7 @@ struct NowPlayingView: View {
         }
         switch axis {
         case .vertical:
-            pull = min(max(pull + (dy - lastDy) * 0.82, 0), cap)
+            pull.distance = min(max(pull.distance + (dy - lastDy) * 0.82, 0), cap)
             lastDy = dy
         case .horizontal:
             card = dx * 0.55
@@ -533,10 +529,10 @@ struct NowPlayingView: View {
         switch taken {
         case .vertical:
             let speed = velocity.height
-            if speed > 1200 || (pull > cap / 2 && speed > -150) {
+            if speed > 1200 || (pull.distance > cap / 2 && speed > -150) {
                 close()
             } else {
-                withAnimation(.octoSpring(0.8, 400)) { pull = 0 }
+                withAnimation(.octoSpring(0.8, 400)) { pull.distance = 0 }
             }
         case .horizontal:
             finishSwipe(t.width, velocity.width)
@@ -551,7 +547,7 @@ struct NowPlayingView: View {
         resetDrag()
         switch taken {
         case .vertical:
-            withAnimation(.octoSpring(0.8, 400)) { pull = 0 }
+            withAnimation(.octoSpring(0.8, 400)) { pull.distance = 0 }
         case .horizontal:
             finishSwipe(0, 0)
         case .undecided:
@@ -666,5 +662,28 @@ struct NowPlayingView: View {
             if let mode = modes[request.value] { settings.setBackground { $0.mode = mode } }
         default: break
         }
+    }
+}
+
+/// How far the player is pulled down. Only `PulledFrame` reads it, so a pull moves the frame
+/// without the player inside it being laid out again.
+@MainActor
+@Observable
+final class PlayerPull {
+    var distance: CGFloat = 0
+}
+
+/// The pulled player: rounded at the corners, a little smaller, and moved down by the pull.
+private struct PulledFrame: ViewModifier {
+    let pull: PlayerPull
+    let cap: CGFloat
+
+    func body(content: Content) -> some View {
+        let travel = min(max(pull.distance, 0), cap)
+        let pulled = cap > 0 ? travel / cap : 0
+        content
+            .clipShape(RoundedRectangle(cornerRadius: travel > 0 ? 28 * min(pulled * 5, 1) : 0, style: .continuous))
+            .scaleEffect(1 - 0.06 * pulled)
+            .offset(y: travel)
     }
 }

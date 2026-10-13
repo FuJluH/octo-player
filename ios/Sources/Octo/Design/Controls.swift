@@ -413,14 +413,18 @@ private struct GlowLine: View, Animatable {
         Canvas { context, size in
             let y = size.height / 2
             let stroke = 3.5 + (8 - 3.5) * line
-            let end = size.width * fraction
+            // The ends sit in by half the thickest line, so the round caps are drawn whole.
+            let cap: CGFloat = 4
+            let start = cap
+            let finish = max(cap, size.width - cap)
+            let end = start + (finish - start) * fraction
             var track = Path()
-            track.move(to: CGPoint(x: 0, y: y))
-            track.addLine(to: CGPoint(x: size.width, y: y))
+            track.move(to: CGPoint(x: start, y: y))
+            track.addLine(to: CGPoint(x: finish, y: y))
             context.stroke(track, with: .color(trackColor), style: StrokeStyle(lineWidth: stroke, lineCap: .round))
-            guard end > 0 else { return }
+            guard fraction > 0 else { return }
             var lit = Path()
-            lit.move(to: CGPoint(x: 0, y: y))
+            lit.move(to: CGPoint(x: start, y: y))
             lit.addLine(to: CGPoint(x: end, y: y))
             // Glow radius 12 at rest and 24 held, in pixels; alpha 0.4 at rest and 0.8 held.
             let radius = (12 + 12 * glow) / 3

@@ -181,6 +181,9 @@ private struct TabButton: View {
     var body: some View {
         Button(action: action) {
             IconView(selected ? item.selectedIcon : item.icon, size: 23, color: selected ? OctoColor.accent : .white)
+                // The outline and filled symbols swap at once; only the color moves. The system's
+                // own symbol replace would shrink the icon out of sight and back.
+                .contentTransition(.identity)
                 .opacity(showIcon ? 1 : 0)
                 .animation(.octo(OctoSprings.state), value: selected)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
