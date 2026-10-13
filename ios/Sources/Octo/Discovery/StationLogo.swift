@@ -9,7 +9,9 @@ actor StationLogos {
     static let shared = StationLogos()
 
     nonisolated(unsafe) private let cache = NSCache<NSString, UIImage>()
-    private var failed = Set<String>()
+    /// When each logo last failed; it is tried again once `retryAfter` has passed.
+    private var failed: [String: Date] = [:]
+    private static let retryAfter: TimeInterval = 10 * 60
     private var running: [String: Task<UIImage?, Never>] = [:]
     private let session: URLSession = {
         let config = URLSessionConfiguration.default
@@ -29,14 +31,19 @@ actor StationLogos {
     func image(_ address: String, pixels: Int) async -> UIImage? {
         let key = "\(pixels)|\(address)"
         if let kept = cache.object(forKey: key as NSString) { return kept }
-        if failed.contains(key) { return nil }
+        if let at = failed[key], Date().timeIntervalSince(at) < Self.retryAfter { return nil }
         if let running = running[key] { return await running.value }
         let session = session
         let task = Task<UIImage?, Never> { await Self.fetch(address, pixels: pixels, session: session) }
         running[key] = task
         let image = await task.value
         running[key] = nil
-        if let image { cache.setObject(image, forKey: key as NSString) } else { failed.insert(key) }
+        if let image {
+            cache.setObject(image, forKey: key as NSString)
+            failed[key] = nil
+        } else {
+            failed[key] = Date()
+        }
         return image
     }
 

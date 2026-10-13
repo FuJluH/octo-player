@@ -67,14 +67,14 @@ final class LiveRadioStore {
         let rounded = next.rounded
         place = rounded
         if let data = try? JSONEncoder().encode(rounded) { store.set(data, forKey: Keys.place) }
-        load()
+        load(fresh: true)
     }
 
     func setRadius(_ index: Int) {
         guard index != radiusIndex, radiusChoices.indices.contains(index) else { return }
         radiusIndex = index
         store.set(index, forKey: Keys.radius)
-        load()
+        load(fresh: true)
     }
 
     func setSort(_ next: LiveSort) {
@@ -86,14 +86,21 @@ final class LiveRadioStore {
     // MARK: Finding
 
     /// Asks the catalog for the stations around the place, kept answers first. Asking again
-    /// while one is on the way starts over.
-    func load() {
+    /// while one is on the way starts over. `fresh` (a new place or radius) shows the spinner in
+    /// place of the stations found for the old one.
+    @discardableResult
+    func load(fresh: Bool = false) -> Task<Void, Never>? {
         guard let place else {
             found = .noPlace
-            return
+            return nil
         }
         loading?.cancel()
-        if case .ready = found {} else { found = .loading }
+        if fresh {
+            found = .loading
+        } else if case .ready = found {
+        } else {
+            found = .loading
+        }
         let radius = radius.meters
         let browser = browser
         loading = Task { [weak self] in
@@ -106,6 +113,12 @@ final class LiveRadioStore {
                 self?.found = .failed("Couldn't reach the radio station list. Check the connection and try again.")
             }
         }
+        return loading
+    }
+
+    /// A pull on the page: asks again and waits for the answer.
+    func refresh() async {
+        await load()?.value
     }
 
     /// The page is open again: the stations are asked for again, the kept answer coming at once
@@ -118,7 +131,9 @@ final class LiveRadioStore {
 
     /// Plays a station, and tells the catalog it was started.
     func play(_ station: LiveStation, on player: Player) {
-        guard let song = radioSong(radioId(streamUrl: station.streamUrl, name: station.name)) else { return }
+        guard var song = radioSong(radioId(streamUrl: station.streamUrl, name: station.name)) else { return }
+        // An HLS station whose address does not say so is queued as one.
+        if station.isHls { song.contentType = hlsPlaylistTypes[0] }
         player.play([song], from: 0)
         let browser = browser
         let uuid = station.uuid

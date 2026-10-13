@@ -122,6 +122,8 @@ final class DeckSource: @unchecked Sendable {
         do {
             song = try open(token)
         } catch {
+            // Whatever the opening started (a stream on its way) stops with it.
+            token.cancel()
             fail(error)
             return
         }
@@ -184,6 +186,7 @@ final class DeckSource: @unchecked Sendable {
                 read = try decoder.read(into: decodeInto, frames: block)
             } catch {
                 if condition.withLock({ closed }) { return }
+                token.cancel()
                 fail(error)
                 return
             }

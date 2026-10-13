@@ -52,7 +52,7 @@ struct PlayableItems {
         let orders = albumOrders(songs)
         return songs.enumerated().map { index, song in
             if let item = byId[song.id] { return item.withSource(source) }
-            if isRadio(song.id) { return radioItem(song.id, source: source) }
+            if isRadio(song.id) { return radioItem(song.id, mimeType: song.contentType, source: source) }
             if isOpenedFile(song.id) { return openedFileItem(song.id, source: source) }
             // Without the library (a preview), a song streams from the server in use.
             guard streamUnknown, data == nil, context.sourceId != nil else { return nil }
@@ -152,9 +152,11 @@ struct PlayableItems {
         return item
     }
 
-    private func radioItem(_ id: String, source: QueueSource) -> QueueItem? {
+    /// A station; `mimeType` names an HLS one whose address does not say so.
+    private func radioItem(_ id: String, mimeType: String? = nil, source: QueueSource) -> QueueItem? {
         guard let station = radioOf(id) else { return nil }
-        return QueueItem(trackId: id, uri: station.stream, title: radioTitle(id) ?? station.stream, artist: radioArtist, source: source)
+        return QueueItem(trackId: id, uri: station.stream, title: radioTitle(id) ?? station.stream, artist: radioArtist,
+                         mimeType: mimeType, source: source)
     }
 
     private func openedFileItem(_ id: String, source: QueueSource) -> QueueItem? {

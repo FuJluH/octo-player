@@ -162,26 +162,8 @@ enum SongOpener {
                 // A live station: read as it comes, with no length and no end; an HLS one by
                 // its playlist, any other with its ICY titles.
                 guard OnlineWatch.shared.online else { throw PlayError(.ioUnspecified, detail: "No connection") }
-                if looksLikeHls(uri) {
-                    let hls = HlsBytes(url: url)
-                    token.adopt(hls)
-                    if token.isCancelled { throw PlayError(.ioUnspecified, detail: "stopped") }
-                    return OpenedSong(decoder: try LiveStreamDecoder(bytes: hls, mimeType: nil, outputRate: outputRate), bytes: hls)
-                }
-                let live = LiveBytes(request: URLRequest(url: url)) { title in LiveTitleBoard.post(trackId, title) }
-                token.adopt(live)
-                if token.isCancelled { throw PlayError(.ioUnspecified, detail: "stopped") }
-                do {
-                    return OpenedSong(decoder: try LiveStreamDecoder(bytes: live, mimeType: mime, outputRate: outputRate), bytes: live)
-                } catch {
-                    // A station that answered with an HLS playlist is read as HLS.
-                    guard let playlist = live.playlistAddress else { throw error }
-                    live.cancel()
-                    let hls = HlsBytes(url: playlist)
-                    token.adopt(hls)
-                    if token.isCancelled { throw PlayError(.ioUnspecified, detail: "stopped") }
-                    return OpenedSong(decoder: try LiveStreamDecoder(bytes: hls, mimeType: nil, outputRate: outputRate), bytes: hls)
-                }
+                return try openStation(url, hls: looksLikeHls(uri) || isHlsPlaylistType(mime), trackId: trackId, mime: mime,
+                                       token: token, outputRate: outputRate)
             case "http", "https":
                 let remote = try RemoteFile(online: { OnlineWatch.shared.online }) {
                     guard OnlineWatch.shared.online else { throw PlayError(.ioUnspecified, detail: "No connection") }
@@ -193,6 +175,37 @@ enum SongOpener {
                 // A song of the phone's media library.
                 return OpenedSong(decoder: try AssetDecoder(url: url, outputRate: outputRate), bytes: nil)
             }
+        }
+    }
+
+    /// Opens a live station at `url`: as HLS, or as a stream with ICY titles. A stream that
+    /// answers with an HLS playlist is read as HLS, and an HLS address that holds a plain playlist
+    /// of whole streams plays its first stream, at most `hops` times over. A source whose sound
+    /// cannot start is stopped at once.
+    private static func openStation(_ url: URL, hls: Bool, trackId: String, mime: String?, token: OpenToken,
+                                    outputRate: Double, hops: Int = 3) throws -> OpenedSong {
+        if token.isCancelled { throw PlayError(.ioUnspecified, detail: "stopped") }
+        if hls {
+            let bytes = HlsBytes(url: url)
+            token.adopt(bytes)
+            do {
+                return OpenedSong(decoder: try LiveStreamDecoder(bytes: bytes, mimeType: nil, outputRate: outputRate), bytes: bytes)
+            } catch {
+                bytes.cancel()
+                guard hops > 0, let entry = bytes.plainEntry else { throw error }
+                return try openStation(entry, hls: looksLikeHls(entry.absoluteString), trackId: trackId, mime: nil, token: token,
+                                       outputRate: outputRate, hops: hops - 1)
+            }
+        }
+        let bytes = LiveBytes(request: URLRequest(url: url)) { title in LiveTitleBoard.post(trackId, title) }
+        token.adopt(bytes)
+        do {
+            return OpenedSong(decoder: try LiveStreamDecoder(bytes: bytes, mimeType: isHlsPlaylistType(mime) ? nil : mime,
+                                                             outputRate: outputRate), bytes: bytes)
+        } catch {
+            bytes.cancel()
+            guard hops > 0, let playlist = bytes.playlistAddress else { throw error }
+            return try openStation(playlist, hls: true, trackId: trackId, mime: nil, token: token, outputRate: outputRate, hops: hops - 1)
         }
     }
 }

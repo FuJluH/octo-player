@@ -34,7 +34,7 @@ struct LiveRadioPage: View {
             .animation(.easeInOut(duration: 0.2), value: radio.sort)
         }
         .barClearance()
-        .refreshable { radio.load() }
+        .refreshable { await radio.refresh() }
         .onAppear { radio.shownAgain() }
         .sheet(isPresented: $choosing) {
             PlaceChooser(inSheet: true) { place in
@@ -268,7 +268,7 @@ private struct ChoiceChip: View {
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 14)
-        .frame(minHeight: 40)
+        .frame(minHeight: 44)
         .glassEffect(.regular.interactive(), in: .capsule)
         .contentShape(Capsule())
     }
@@ -299,7 +299,7 @@ struct PlaceChooser: View {
             }
             AccentButton("Use my location", size: .medium, loading: locating) { useLocation() }
             Text("Octo uses your location only to find radio stations near you, and sends just the area, never your exact spot. "
-                 + (placeServer != nil ? "Places are looked up on your Octo server." : "Places are looked up by your phone's place service."))
+                 + lookupNote)
                 .font(.octoCaption)
                 .foregroundStyle(OctoColor.textMuted)
             Text("Or type a ZIP or postal code, or a city")
@@ -334,10 +334,16 @@ struct PlaceChooser: View {
         .modifier(ChooserBackground(inSheet: inSheet))
     }
 
-    /// The server in use when it looks up places itself; nil sends the look-up to the phone's
-    /// own place service.
-    private var placeServer: SubsonicClient? {
-        serverLooksUpPlaces(session.extensions) ? session.client : nil
+    /// How places are looked up for the server in use.
+    private var resolver: PlaceResolver { PlaceFinder.resolver(extensions: session.extensions, client: session.client) }
+
+    /// Where the page says places are looked up.
+    private var lookupNote: String {
+        switch resolver.lookup {
+        case .server: "Places are looked up on your Octo server."
+        case .serverUnreachable: "Places are looked up on your Octo server, which can't be reached right now."
+        case .phone: "Places are looked up by your phone's place service."
+        }
     }
 
     private func useLocation() {
@@ -345,10 +351,11 @@ struct PlaceChooser: View {
         problem = nil
         denied = false
         locating = true
+        let resolver = resolver
         Task {
             defer { locating = false }
             do {
-                chosen(try await finder.finder.here(server: placeServer))
+                chosen(try await finder.finder.here(resolver))
             } catch PlaceFinder.Problem.denied {
                 denied = true
                 problem = "Location is off for Octo. Turn it on in Settings, or type a place instead."
@@ -363,14 +370,15 @@ struct PlaceChooser: View {
         guard !words.isEmpty, !looking else { return }
         problem = nil
         looking = true
+        let resolver = resolver
         Task {
             defer { looking = false }
             do {
-                chosen(try await finder.finder.place(for: words, country: country, server: placeServer))
-            } catch PlaceFinder.Problem.notFound {
-                problem = "Couldn't find \"\(words)\" there. Check the spelling or the country."
+                chosen(try await resolver.typed(words, country: country))
+            } catch PlaceProblem.serverUnreachable {
+                problem = "Your Octo server can't be reached right now, so the place can't be looked up. Try again once it's back."
             } catch {
-                problem = "Couldn't reach your Octo server to look that up. Try again."
+                problem = "Couldn't find \"\(words)\" there. Check the spelling or the country."
             }
         }
     }

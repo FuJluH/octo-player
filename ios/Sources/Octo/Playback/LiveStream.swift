@@ -37,7 +37,9 @@ final class LiveTitleBoard {
 /// A live station's bytes as they arrive: no length and no end. Reads wait for them; the download
 /// waits while a good stretch sits unread (a long pause), so the phone does not fill up. ICY
 /// metadata is asked for and taken out of the sound, its titles handed to `onTitle`. A stream
-/// that fails or ends is asked for again after 1, 2, 4 and 8 s; after that it has failed.
+/// that fails or ends is asked for again as `LiveReconnect` says; then it has failed. A station
+/// that answers with a playlist (by its type, or `#EXTM3U` at its start) stops at once and names
+/// it in `playlistAddress`, for the opener to read as HLS.
 final class LiveBytes: NSObject, LiveByteSource, URLSessionDataDelegate, @unchecked Sendable {
     private let condition = NSCondition()
     private let request: URLRequest
@@ -50,11 +52,12 @@ final class LiveBytes: NSObject, LiveByteSource, URLSessionDataDelegate, @unchec
     private var task: URLSessionDataTask?
     /// The ICY metadata reader for the connection in use, when the station sends metadata.
     private var icy: IcyReader?
-    /// Tries made since the stream last played a good stretch.
-    private var retries = 0
-    /// Sound bytes the connection in use has given.
-    private var received = 0
-    /// The HLS playlist the station answered with instead of a stream, if it did.
+    private var reconnect = LiveReconnect()
+    /// Whether any sound came yet, on any connection.
+    private var heardAny = false
+    /// The address the connection in use answered from.
+    private var answeredFrom: URL?
+    /// The playlist the station answered with instead of a stream, if it did.
     private var playlist: URL?
     private lazy var session: URLSession = {
         let queue = OperationQueue()
@@ -70,9 +73,6 @@ final class LiveBytes: NSObject, LiveByteSource, URLSessionDataDelegate, @unchec
     /// Unread bytes past this hold the download; under the lower mark it carries on.
     private static let holdAbove = 1 << 20
     private static let carryOnBelow = 256 << 10
-    /// A connection that gave this much sound played a good stretch: the next failure starts the
-    /// waits over.
-    private static let goodStretch = 128 << 10
 
     init(request: URLRequest, onTitle: (@Sendable (String?) -> Void)? = nil) {
         var asked = request
@@ -87,8 +87,8 @@ final class LiveBytes: NSObject, LiveByteSource, URLSessionDataDelegate, @unchec
     /// Opens a connection. Called with the lock held.
     private func connect() {
         icy = nil
-        received = 0
         held = false
+        reconnect.connected()
         let next = session.dataTask(with: request)
         task = next
         next.resume()
@@ -96,7 +96,7 @@ final class LiveBytes: NSObject, LiveByteSource, URLSessionDataDelegate, @unchec
 
     var contentType: String? { condition.withLock { type } }
 
-    /// The HLS playlist the station answered with instead of a stream, once it has.
+    /// The playlist the station answered with instead of a stream, once it has.
     var playlistAddress: URL? { condition.withLock { playlist } }
 
     /// A live stream has no length.
@@ -138,25 +138,36 @@ final class LiveBytes: NSObject, LiveByteSource, URLSessionDataDelegate, @unchec
         session.invalidateAndCancel()
     }
 
+    /// Fails for good. Called with the lock held.
+    private func failNow(_ why: PlayError) {
+        task = nil
+        if failure == nil { failure = why }
+        condition.broadcast()
+    }
+
     /// The connection in use stopped: asks again after the next wait, or fails once the waits
-    /// are used up. Called with the lock held.
+    /// are used up or the answer refused the stream. Called with the lock held.
     private func lost(_ why: PlayError) {
         task = nil
         guard !cancelled, failure == nil else { return }
-        guard retries < liveReconnectDelays.count else {
-            failure = why
-            condition.broadcast()
-            return
-        }
-        let wait = liveReconnectDelays[retries]
-        retries += 1
-        playbackLog.info("live stream lost (\(why.detail, privacy: .public)), again in \(wait, privacy: .public) s")
-        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + wait) { [weak self] in
-            guard let self else { return }
-            self.condition.withLock {
-                if !self.cancelled && self.failure == nil && self.task == nil { self.connect() }
+        switch reconnect.lost(status: why.code == .badHttpStatus ? why.httpStatus : nil) {
+        case .fail:
+            failNow(why)
+        case .again(let wait):
+            playbackLog.info("live stream lost (\(why.detail, privacy: .public)), again in \(wait, privacy: .public) s")
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + wait) { [weak self] in
+                guard let self else { return }
+                self.condition.withLock {
+                    if !self.cancelled && self.failure == nil && self.task == nil { self.connect() }
+                }
             }
         }
+    }
+
+    /// The station answered with a playlist: stops, naming it. Called with the lock held.
+    private func answeredWithPlaylist() {
+        playlist = answeredFrom ?? request.url
+        failNow(PlayError(.parsingManifestUnsupported, detail: "a playlist"))
     }
 
     // MARK: Session delegate
@@ -179,29 +190,21 @@ final class LiveBytes: NSObject, LiveByteSource, URLSessionDataDelegate, @unchec
             completionHandler(.cancel)
             return
         }
+        answeredFrom = response.url
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            let why = PlayError(.badHttpStatus, httpStatus: http.statusCode, detail: "HTTP \(http.statusCode)")
             completionHandler(.cancel)
-            if liveStatusRetries(http.statusCode) {
-                lost(why)
-            } else {
-                task = nil
-                failure = why
-                condition.broadcast()
-            }
+            lost(PlayError(.badHttpStatus, httpStatus: http.statusCode, detail: "HTTP \(http.statusCode)"))
             return
         }
-        if let http = response as? HTTPURLResponse, let every = http.value(forHTTPHeaderField: "icy-metaint").flatMap({ Int($0) }), every > 0 {
+        if !heardAny, isHlsPlaylistType(response.mimeType) {
+            completionHandler(.cancel)
+            answeredWithPlaylist()
+            return
+        }
+        if let http = response as? HTTPURLResponse,
+           let every = http.value(forHTTPHeaderField: "icy-metaint").flatMap({ Int($0.trimmingCharacters(in: .whitespaces)) }),
+           every > 0 {
             icy = IcyReader(interval: every)
-        }
-        if hlsPlaylistTypes.contains(response.mimeType?.lowercased() ?? "") {
-            // An HLS playlist where a stream was expected: the opener reads it as HLS instead.
-            playlist = response.url ?? request.url
-            task = nil
-            failure = PlayError(.parsingManifestUnsupported, detail: "an HLS playlist")
-            condition.broadcast()
-            completionHandler(.cancel)
-            return
         }
         if type == nil { type = response.mimeType }
         completionHandler(.allow)
@@ -214,17 +217,23 @@ final class LiveBytes: NSObject, LiveByteSource, URLSessionDataDelegate, @unchec
             condition.unlock()
             return
         }
+        if !heardAny && startsLikePlaylist(data) {
+            dataTask.cancel()
+            answeredWithPlaylist()
+            condition.unlock()
+            return
+        }
         if var reader = icy {
             let split = reader.feed(data)
             icy = reader
             buffer.append(split.sound)
-            received += split.sound.count
+            reconnect.heard(split.sound.count)
             titles = split.titles
         } else {
             buffer.append(data)
-            received += data.count
+            reconnect.heard(data.count)
         }
-        if received >= Self.goodStretch { retries = 0 }
+        heardAny = true
         if !held && buffer.count > Self.holdAbove {
             held = true
             dataTask.suspend()
@@ -248,9 +257,6 @@ final class LiveBytes: NSObject, LiveByteSource, URLSessionDataDelegate, @unchec
         }
     }
 }
-
-/// The types an HLS playlist is sent as.
-let hlsPlaylistTypes: Set<String> = ["application/vnd.apple.mpegurl", "application/x-mpegurl", "audio/mpegurl", "audio/x-mpegurl"]
 
 /// Turns a live station into sound as its bytes arrive: the stream is cut into packets as it
 /// comes and decoded to the decks' rate. It has no length, and no place in it can be chosen.
