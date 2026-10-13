@@ -57,6 +57,14 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import android.util.Log
+import app.winters.octo.discovery.Discovery
+import app.winters.octo.discovery.Station
+import app.winters.octo.home.answered
+import app.winters.octo.lists.OctoListGroup
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.withContext
 
 @HiltViewModel
 class PlaylistsViewModel @Inject constructor(
@@ -65,6 +73,8 @@ class PlaylistsViewModel @Inject constructor(
     private val sorting: SortSettings,
     liveListStore: LiveListStore,
     liveSongs: LiveListSongs,
+    private val discovery: Discovery,
+    private val keptOcto: KeptOctoListsFiles,
 ) : ViewModel() {
     // The live lists, in the order they were made, above the playlists.
     val liveLists: StateFlow<List<LiveList>> =
@@ -81,6 +91,11 @@ class PlaylistsViewModel @Inject constructor(
         combine(store.playlists, sorting.order(SortList.Playlists)) { list, order -> Sorted(sortPlaylists(list, order), order, null) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+    // The lists an Octo server made for the listener, by group, as it last
+    // gave them and then as it gives them now; none on any other server.
+    private val _octoLists = MutableStateFlow<List<Pair<OctoListGroup, List<Station>>>>(emptyList())
+    val octoLists: StateFlow<List<Pair<OctoListGroup, List<Station>>>> = _octoLists
+
     // How the last playlist file import went, shown until the page closes.
     private val _importState = MutableStateFlow<ImportState?>(null)
     val importState: StateFlow<ImportState?> = _importState
@@ -89,6 +104,24 @@ class PlaylistsViewModel @Inject constructor(
         // A playlist deleted on another device leaves the list, and one
         // made there comes in, without waiting for the next library copy.
         store.freshen()
+        viewModelScope.launch {
+            discovery.stationsFrom.collectLatest { server ->
+                if (server == null) {
+                    _octoLists.value = emptyList()
+                    return@collectLatest
+                }
+                withContext(Dispatchers.IO) { keptOcto.store.read(server) }?.let { _octoLists.value = answered(_octoLists.value, it.read()) }
+                try {
+                    val got = withContext(Dispatchers.IO) { discovery.octoLists() }
+                    _octoLists.value = answered(_octoLists.value, got)
+                    withContext(Dispatchers.IO) { keptOcto.store.write(server, KeptOctoLists.of(got)) }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.w("Octo", "Octo lists failed to load: ${e.javaClass.simpleName}")
+                }
+            }
+        }
     }
 
     fun setOrder(order: SortOrder) {
@@ -119,13 +152,14 @@ fun playlistsLead(importNote: Boolean): List<PlaylistsLead> =
 
 // Every playlist: ways to make or import one, then the listener's own and
 // the server's in the chosen order, the one changed last at the top to
-// begin with.
+// begin with, then the lists Octo made, by kind.
 @Composable
 fun PlaylistsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: PlaylistsViewModel = hiltViewModel()) {
     val playlists by vm.playlists.collectAsStateWithLifecycle()
     val importState by vm.importState.collectAsStateWithLifecycle()
     val liveLists by vm.liveLists.collectAsStateWithLifecycle()
     val liveCovers by vm.liveCovers.collectAsStateWithLifecycle()
+    val octoLists by vm.octoLists.collectAsStateWithLifecycle()
     val sheets = LocalPlaylistSheets.current
     val menus = LocalSongMenu.current.collections
     val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(vm::importFile) }
@@ -166,6 +200,7 @@ fun PlaylistsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: PlaylistsV
                     }
                 }
             }
+            octoListRows(octoLists, onOpen)
         }
         BackButton(onBack)
     }

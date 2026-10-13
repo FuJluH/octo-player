@@ -262,6 +262,10 @@ data class Playlist(
     // Shorter words for the list's cover than its name, when the server
     // gives them ("Popular" for "Popular right now").
     val octoCoverTitle: String? = null,
+    // Which kind of list Octo made this as ("genre", "decade", "year",
+    // "country", "artist", "chart", "forYou", "liked", "station"), from a
+    // server that says; otherwise null.
+    val octoGroup: String? = null,
 )
 
 @Serializable

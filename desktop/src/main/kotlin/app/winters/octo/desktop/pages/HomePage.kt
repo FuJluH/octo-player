@@ -70,6 +70,8 @@ import app.winters.octo.subsonic.RadioStation
 import app.winters.octo.subsonic.SubsonicException
 import kotlinx.coroutines.launch
 import app.winters.octo.desktop.ui.PlayButton
+import app.winters.octo.desktop.home.octoLists
+import app.winters.octo.home.mixGroup
 
 // Home: picking up where another device left off, what was played lately,
 // the lists Octo made for the listener and its stations, what came in, what
@@ -89,7 +91,13 @@ fun HomePage(app: AppState, visit: Visit) {
     val index = (library as? LibraryState.Ready)?.index
     LaunchedEffect(store, index) { index?.let(store::rediscover) }
     val settings by app.settings.state.collectAsState()
-    val playlists = remember(app.playlists, settings.frame.pinnedPlaylists) { pinnedFirst(yourPlaylists(app.playlists), settings.frame.pinnedPlaylists) }
+    val listener = app.connection?.client?.username.orEmpty()
+    val isOcto = app.connection?.isOcto == true
+    val playlists = remember(app.playlists, settings.frame.pinnedPlaylists, listener, isOcto) {
+        pinnedFirst(yourPlaylists(app.playlists, listener, isOcto), settings.frame.pinnedPlaylists)
+    }
+    // Octo's mixes by group, for the shelves of mixes.
+    val mixes = remember(app.playlists, listener, isOcto) { octoLists(app.playlists, listener, isOcto).toMap() }
     // The server shelves show as the server last gave them until it answers.
     val shelves = store.shelves
     val forYou = shelves.madeForYou
@@ -153,6 +161,10 @@ fun HomePage(app: AppState, visit: Visit) {
                                 }
                             }
                         }
+                        HomeSection.YearMixes, HomeSection.GenreMixes, HomeSection.ArtistMixes, HomeSection.CountryMixes ->
+                            mixes[entry.section.mixGroup]?.takeIf { it.isNotEmpty() }?.let { lists ->
+                                moving(key = "shelf:${entry.section.id}") { ShelfRow(entry.section.title, lists, { it.id }, null) { PlaylistCard(app, it) } }
+                            }
                         HomeSection.Charts -> app.search?.charts?.let { chartsRow(app, it, store) }
                         HomeSection.RecentlyAdded -> albums(app, entry.section.title, home.recentlyAdded) { app.navigator.go(Page.RecentlyAdded) }
                         HomeSection.MostPlayed ->

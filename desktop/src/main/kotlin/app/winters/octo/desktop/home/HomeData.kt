@@ -14,6 +14,9 @@ import app.winters.octo.subsonic.TopSongs
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.Serializable
+import app.winters.octo.lists.OctoListGroup
+import app.winters.octo.lists.octoListGroup
+import app.winters.octo.lists.octoListGroups
 
 // How many albums each shelf on Home holds at most. A shelf shows as many
 // as fit across the window.
@@ -50,6 +53,10 @@ val DesktopHomeSections: Set<HomeSection> = setOf(
     HomeSection.RecentlyPlayed,
     HomeSection.MadeForYou,
     HomeSection.Stations,
+    HomeSection.YearMixes,
+    HomeSection.GenreMixes,
+    HomeSection.ArtistMixes,
+    HomeSection.CountryMixes,
     HomeSection.RecentlyAdded,
     HomeSection.MostPlayed,
     HomeSection.FavoriteAlbums,
@@ -108,8 +115,15 @@ fun madeForYou(playlists: List<Playlist>): List<Playlist> =
         .sortedBy { OCTO_LIST_KINDS.indexOf(it.octoList).takeIf { i -> i >= 0 } ?: OCTO_LIST_KINDS.size }
 
 // The playlists the listener keeps, without the Made for you lists, which
-// have a shelf of their own on Home.
-fun yourPlaylists(playlists: List<Playlist>): List<Playlist> = playlists.filter { it.octoList == null }
+// have a shelf of their own on Home, and, on Octo (`isOcto`), without any
+// other list Octo made for `listener`.
+fun yourPlaylists(playlists: List<Playlist>, listener: String = "", isOcto: Boolean = false): List<Playlist> =
+    playlists.filter { it.octoList == null && !(isOcto && octoListGroup(it, listener) != null) }
+
+// The lists Octo made for `listener`, by group, from the playlists the
+// sidebar holds; none from any other server.
+fun octoLists(playlists: List<Playlist>, listener: String, isOcto: Boolean): List<Pair<OctoListGroup, List<Playlist>>> =
+    if (isOcto) octoListGroups(playlists, listener) else emptyList()
 
 // The playlists with the pinned ones first, in the order they were pinned,
 // as the sidebar lists them.

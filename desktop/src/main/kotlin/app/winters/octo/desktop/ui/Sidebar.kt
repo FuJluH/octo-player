@@ -83,6 +83,7 @@ import app.winters.octo.subsonic.Playlist
 import app.winters.octo.ui.family.FAMILY
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.launch
+import app.winters.octo.desktop.home.octoLists
 
 // A place in the sidebar: the page, its name and icon.
 private class Place(val page: Page, val label: String, val icon: ImageVector)
@@ -149,7 +150,11 @@ fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier, r
                 }
             }
             val pinned = frame.pinnedPlaylists
-            val playlists = app.playlists.sortedBy { pinned.indexOf(it.id).takeIf { i -> i >= 0 } ?: Int.MAX_VALUE }
+            val listener = app.connection?.client?.username.orEmpty()
+            val isOcto = app.connection?.isOcto == true
+            // Octo's own lists have a group of their own, below the listener's.
+            val fromOcto = octoLists(app.playlists, listener, isOcto).flatMap { it.second }
+            val playlists = app.playlists.filter { it !in fromOcto }.sortedBy { pinned.indexOf(it.id).takeIf { i -> i >= 0 } ?: Int.MAX_VALUE }
             group(app, "playlists", "Playlists", rail, frame.foldedGroups, action = {
                 val pointer = LocalPointer.current
                 IconAction(OctoIcons.AddToLibrary, "New playlist or live list", { showNewListMenu(app, pointer.point) }, size = ControlSize, iconSize = IconSize.Table, tint = OctoColors.TextSecondary)
@@ -158,6 +163,13 @@ fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier, r
                 items(liveLists, key = { "ll:${it.id}" }) { list -> LiveListRow(app, list, lit == SidebarItem.LiveListItem(list.id), rail) }
                 items(playlists, key = { "pl:${it.id}" }) { playlist ->
                     PlaylistRow(app, playlist, lit == SidebarItem.PlaylistItem(playlist.id), rail, playlist.id in pinned)
+                }
+            }
+            if (fromOcto.isNotEmpty()) {
+                group(app, "from-octo", "From Octo", rail, frame.foldedGroups) {
+                    items(fromOcto, key = { "octo:${it.id}" }) { playlist ->
+                        PlaylistRow(app, playlist, lit == SidebarItem.PlaylistItem(playlist.id), rail, playlist.id in pinned)
+                    }
                 }
             }
         }

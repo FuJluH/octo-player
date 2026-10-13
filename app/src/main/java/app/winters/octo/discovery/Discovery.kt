@@ -39,6 +39,8 @@ import javax.inject.Singleton
 import app.winters.octo.subsonic.OCTO_STATIONS
 import app.winters.octo.playback.STATION_BATCH
 import app.winters.octo.playback.isStationId
+import app.winters.octo.lists.OctoListGroup
+import app.winters.octo.lists.octoListGroups
 
 // Octo holds back songs found online when a search asks for 12 songs or
 // fewer, so always ask for more than that.
@@ -206,6 +208,18 @@ class Discovery @Inject constructor(
         if (!session.runsOcto) return emptyList()
         val (client, sourceId) = server() ?: return emptyList()
         return homeStations(client.radioStations(), sourceId)
+    }
+
+    // Every list Octo made for the listener, by group, each shown as a card
+    // with its name, cover and song count: the Playlists page's "From Octo"
+    // and Home's shelves of mixes.
+    suspend fun octoLists(): List<Pair<OctoListGroup, List<Station>>> {
+        val session = (sessions.state.value as? SessionState.SignedIn)?.session ?: return emptyList()
+        if (!session.runsOcto) return emptyList()
+        val (client, sourceId) = server() ?: return emptyList()
+        return octoListGroups(client.playlists(), client.username).map { (group, lists) ->
+            group to lists.map { Station(it.id, it.name, ArtworkRef.Server(sourceId, it.coverArt ?: it.id).encode(), it.songCount) }
+        }
     }
 
     // The lists Octo made for the listener, from its playlists.

@@ -51,6 +51,9 @@ import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import kotlin.coroutines.cancellation.CancellationException
 import app.winters.octo.discovery.isRadio
+import app.winters.octo.lists.OctoListGroup
+import app.winters.octo.home.MixShelves
+import app.winters.octo.home.mixGroup
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
@@ -128,6 +131,11 @@ class HomeViewModel @Inject constructor(
     var madeForYou by mutableStateOf<List<Station>>(emptyList())
         private set
 
+    // Octo's mixes for the listener by group (years, genres, artists,
+    // countries), for Home's shelves of mixes; kept through a failed load.
+    var mixes by mutableStateOf<Map<OctoListGroup, List<Station>>>(emptyMap())
+        private set
+
     // The first songs of the server's chart of the moment, for Home's Charts
     // row; empty on a server without charts, kept through a failed load.
     var charts by mutableStateOf<List<TrackEntity>>(emptyList())
@@ -164,6 +172,7 @@ class HomeViewModel @Inject constructor(
             discovery.gone.collect { id ->
                 stations = stations.filterNot { it.id == id }
                 madeForYou = madeForYou.filterNot { it.id == id }
+                mixes = mixes.mapValues { (_, lists) -> lists.filterNot { it.id == id } }
                 stationsLoadedAt = null
                 loadStations()
             }
@@ -190,6 +199,7 @@ class HomeViewModel @Inject constructor(
                 val last = server?.let { withContext(Dispatchers.IO) { kept.read(it) } } ?: KeptShelves()
                 stations = answered(stations, last.stations)
                 madeForYou = answered(madeForYou, last.madeForYou)
+                mixes = answered(mixes, keptMixes(last.mixes))
                 charts = answered(charts, last.charts)
                 if (server != null) {
                     sections.filterNotNull().first()
@@ -213,7 +223,7 @@ class HomeViewModel @Inject constructor(
     // The server shelves Home draws now: a hidden one is not asked for.
     private fun wantedStationShelves(): Set<HomeSection> {
         val entries = sections.value ?: return emptySet()
-        return setOf(HomeSection.Stations, HomeSection.MadeForYou).filterTo(HashSet()) { entries.shows(it) }
+        return (setOf(HomeSection.Stations, HomeSection.MadeForYou) + MixShelves).filterTo(HashSet()) { entries.shows(it) }
     }
 
     // The chart is wanted while its shelf shows, and while the library is
@@ -345,6 +355,18 @@ class HomeViewModel @Inject constructor(
                     Log.w("Octo", "made for you failed to load: ${e.javaClass.simpleName}")
                 }
             }
+            if (wanted.any { it in MixShelves }) {
+                try {
+                    val got = withContext(Dispatchers.IO) { discovery.octoLists() }.toMap().filterKeys { group -> MixShelves.any { it.mixGroup == group } }
+                    mixes = answered(mixes, got)
+                    answers++
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    failed = true
+                    Log.w("Octo", "mixes failed to load: ${e.javaClass.simpleName}")
+                }
+            }
             if (!failed) {
                 stationsLoadedAt = SystemClock.elapsedRealtime()
                 stationsAsked = wanted
@@ -364,9 +386,13 @@ class HomeViewModel @Inject constructor(
     // next start or a switch back to it.
     private fun keepShelves() {
         val server = shelvesFrom ?: return
-        val shelves = KeptShelves(stations, madeForYou, charts)
+        val shelves = KeptShelves(stations, madeForYou, charts, mixes.mapKeys { it.key.name })
         viewModelScope.launch(keeping) { kept.write(server, shelves) }
     }
+
+    // Mixes as kept, by group; a group this app no longer knows is dropped.
+    private fun keptMixes(kept: Map<String, List<Station>>): Map<OctoListGroup, List<Station>> =
+        kept.mapNotNull { (name, lists) -> OctoListGroup.entries.firstOrNull { it.name == name }?.let { it to lists } }.toMap()
 
     private suspend fun reroll() {
         surprise = dao.randomAlbums(20)

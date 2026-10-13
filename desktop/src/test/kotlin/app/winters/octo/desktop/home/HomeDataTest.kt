@@ -27,6 +27,7 @@ import org.junit.Assert.fail
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import app.winters.octo.lists.OctoListGroup
 
 class HomeDataTest {
     private val server = FakeServer()
@@ -248,5 +249,24 @@ class HomeDataTest {
         assertEquals(listOf("og-liked", "og-new", "og-re", "og-deep", "og-later"), madeForYou(playlists).map { it.id })
         assertEquals(listOf("mine"), yourPlaylists(playlists).map { it.id })
         assertTrue("a server without the lists marks none", madeForYou(listOf(Playlist("a"), Playlist("b"))).isEmpty())
+    }
+
+    // On Octo, its mixes and stations leave "Your playlists" for their own
+    // shelves; someone else's and a smart playlist stay, read-only or not.
+    @Test
+    fun octosOwnListsAreNotTheListenersPlaylists() {
+        val pop = Playlist("og00000000000000000001", "Pop Mix", owner = "ana", readonly = true, octoGroup = "genre")
+        val decade = Playlist("og00000000000000000002", "1990s Mix", owner = "ana", readonly = true)
+        val station = Playlist("or00000000000000000003", "Your Mix", owner = "ana", readonly = true)
+        val shared = Playlist("5f3c1", "Road trip", owner = "ben", readonly = true)
+        val smart = Playlist("5f3c2", "Top rated", owner = "ana", readonly = true)
+        val all = listOf(Playlist("mine", owner = "ana"), pop, decade, station, shared, smart)
+        assertEquals(listOf("mine", "5f3c1", "5f3c2"), yourPlaylists(all, "ana", isOcto = true).map { it.id })
+        assertEquals(all.map { it.id }, yourPlaylists(all, "ana", isOcto = false).map { it.id })
+        val groups = octoLists(all, "ana", isOcto = true).toMap()
+        assertEquals(listOf("Pop Mix"), groups[OctoListGroup.Genres]?.map { it.name })
+        assertEquals(listOf("1990s Mix"), groups[OctoListGroup.Years]?.map { it.name })
+        assertEquals(listOf("Your Mix"), groups[OctoListGroup.Stations]?.map { it.name })
+        assertTrue(octoLists(all, "ana", isOcto = false).isEmpty())
     }
 }

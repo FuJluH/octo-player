@@ -11,12 +11,14 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 // Home's server shelves as a server last gave them: its stations, the
-// lists it made for the listener and the first songs of its chart.
+// lists it made for the listener, the first songs of its chart and its
+// mixes by group (OctoListGroup's name).
 @Serializable
 data class KeptShelves(
     val stations: List<Station> = emptyList(),
     val madeForYou: List<Station> = emptyList(),
     val charts: List<TrackEntity> = emptyList(),
+    val mixes: Map<String, List<Station>> = emptyMap(),
 )
 
 // Where they are kept: one file per kept server, in the app's cache.

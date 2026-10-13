@@ -62,6 +62,7 @@ import app.winters.octo.ui.nav.FavouritesRoute
 import app.winters.octo.ui.nav.HistoryRoute
 import app.winters.octo.ui.nav.ServerListRoute
 import app.winters.octo.discovery.isRadio
+import app.winters.octo.home.mixGroup
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -111,6 +112,8 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
                             HomeSection.RecentlyPlayed -> shelf(title, recentlyPlayed, onOpen, onTitle = { onOpen(HistoryRoute()) })
                             HomeSection.MadeForYou -> stationShelf(title, vm.madeForYou, vm.startingStation, onOpen, vm::playStation)
                             HomeSection.Stations -> stationShelf(title, vm.stations, vm.startingStation, onOpen, vm::playStation)
+                            HomeSection.YearMixes, HomeSection.GenreMixes, HomeSection.ArtistMixes, HomeSection.CountryMixes ->
+                                stationShelf(title, vm.mixes[entry.section.mixGroup].orEmpty(), vm.startingStation, onOpen, vm::playStation)
                             HomeSection.RecentlyAdded -> shelf(title, recent.orEmpty(), onOpen)
                             HomeSection.MostPlayed -> songShelf(title, mostPlayed, vm::play, onTitle = { onOpen(HistoryRoute(mostPlayed = true)) })
                             HomeSection.FavoriteAlbums -> shelf(title, favouriteAlbums, onOpen, onTitle = { onOpen(FavouritesRoute(albums = true)) })
