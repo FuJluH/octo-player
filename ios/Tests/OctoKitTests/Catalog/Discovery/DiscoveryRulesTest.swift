@@ -169,6 +169,18 @@ import Testing
         #expect(stations.allSatisfy { $0.songCount == nil })
     }
 
+    @Test func anAddedStationPlaysItsStreamAndOneWithoutIsLeftOff() throws {
+        let json = #"[{"id":"or3kZ9QpLmN2xY7wV1bC0a","name":"Your Mix","streamUrl":"https://octo/radio/stream/abc","coverArt":"or3kZ9QpLmN2xY7wV1bC0a"},"# +
+            #"{"id":"rs-1","name":"City Radio","streamUrl":"https://radio.example.com/live.mp3","coverArt":"ra-rs-1"},"# +
+            #"{"id":"rs-2","name":"Town FM","streamUrl":"https://town.example.com/fm"},{"id":"rs-3","name":"Empty","coverArt":"ra-rs-3"}]"#
+        let stations = homeStations(try JSONDecoder().decode([RadioStation].self, from: Data(json.utf8)), sourceId: source)
+        #expect(stations.map(\.id) == ["or3kZ9QpLmN2xY7wV1bC0a", "rs-1", "rs-2"])
+        #expect(stations[0].streamUrl == nil)
+        #expect(stations[1].streamUrl == "https://radio.example.com/live.mp3")
+        #expect(stations[1].artwork == ArtworkRef.server(sourceId: source, coverId: "ra-rs-1").encode())
+        #expect(stations[2].artwork == ArtworkRef.server(sourceId: source, coverId: "rs-2").encode())
+    }
+
     // A library album on the server
 
     @Test func aLibraryAlbumIsTheServerAlbumMostOfItsSongsCameFrom() {

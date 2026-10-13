@@ -65,24 +65,41 @@ public struct OnlineArtist: Sendable, Hashable, Identifiable {
 }
 
 /// A station the server runs, played as the list of songs it has lined up. A Made for you list is
-/// shown and played the same way, with its song count.
+/// shown and played the same way, with its song count. An internet radio station added to the
+/// server has its stream instead.
 public struct Station: Sendable, Hashable, Identifiable, Codable {
     public var id: String
     public var name: String
     public var artwork: String?
     public var songCount: Int?
+    public var streamUrl: String?
 
-    public init(id: String, name: String, artwork: String?, songCount: Int? = nil) {
+    public init(id: String, name: String, artwork: String?, songCount: Int? = nil, streamUrl: String? = nil) {
         self.id = id
         self.name = name
         self.artwork = artwork
         self.songCount = songCount
+        self.streamUrl = streamUrl
     }
 
     /// One of Octo's stations, its cover drawn from its id when it has none of its own.
     public init(_ station: RadioStation, sourceId: String) {
         self.init(id: station.id, name: station.name,
                   artwork: ArtworkRef.server(sourceId: sourceId, coverId: station.coverArt ?? station.id).encode())
+    }
+}
+
+/// The stations Home shows, from the server's internet radio stations. Octo's own carry their id
+/// as their cover and play the songs they have lined up; any other plays its stream, like on the
+/// Radio stations screen. An added station with no stream has nothing to play and is left off.
+public func homeStations(_ stations: [RadioStation], sourceId: String) -> [Station] {
+    stations.compactMap { station in
+        if looksGenerated(station, isOcto: true) { return Station(station, sourceId: sourceId) }
+        let stream = (station.streamUrl ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !stream.isEmpty else { return nil }
+        var added = Station(station, sourceId: sourceId)
+        added.streamUrl = stream
+        return added
     }
 }
 

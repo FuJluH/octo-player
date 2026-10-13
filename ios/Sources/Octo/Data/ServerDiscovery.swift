@@ -60,11 +60,11 @@ final class ServerDiscovery {
         return radioSongs(seed: seed, similar: similar)
     }
 
-    /// The stations the server runs: only Octo's. Other servers list internet radio, which is a
-    /// stream, not songs, so nothing is shown for them.
+    /// The stations Octo runs, and the internet radio stations added to it, which play their
+    /// stream. Other servers list only internet radio, so nothing is shown for them.
     func stations() async throws -> [Station] {
         guard offersStations, let (client, sourceId) = server() else { return [] }
-        return try await client.stations().map { Station($0, sourceId: sourceId) }
+        return homeStations(try await client.stations(), sourceId: sourceId)
     }
 
     /// The lists Octo made for the listener, from its playlists.

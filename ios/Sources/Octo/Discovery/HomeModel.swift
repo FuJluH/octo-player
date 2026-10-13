@@ -285,9 +285,14 @@ final class HomeModel {
         }
     }
 
-    /// Plays what a station has lined up today. Taps while one is on the way are ignored.
+    /// Plays what a station has lined up today, or an added station's stream. Taps while one is
+    /// on the way are ignored.
     func playStation(id: String, name: String) {
         guard startingStation == nil, let discovery, let player, let router else { return }
+        if let stream = stations.first(where: { $0.id == id })?.streamUrl {
+            if let song = radioSong(radioId(streamUrl: stream, name: name)) { player.play([song], from: 0) }
+            return
+        }
         startingStation = id
         Task {
             defer { startingStation = nil }
