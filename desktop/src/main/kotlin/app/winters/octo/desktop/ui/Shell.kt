@@ -97,6 +97,7 @@ import app.winters.octo.desktop.actionFor
 import app.winters.octo.desktop.library.Cover
 import app.winters.octo.desktop.library.LocalCovers
 import app.winters.octo.desktop.nav.Page
+import app.winters.octo.desktop.pages.LiveRadioPage
 import app.winters.octo.desktop.pages.AlbumPage
 import app.winters.octo.desktop.pages.AlbumsPage
 import app.winters.octo.desktop.pages.ArtistPage
@@ -458,6 +459,7 @@ private fun PageHost(app: AppState) {
             Page.Imports -> ImportPage(app, visit)
             Page.Charts -> ChartsPage(app, visit)
             Page.Family -> FamilyPage(app, visit)
+            Page.LiveRadio -> LiveRadioPage(app, visit)
             Page.Settings -> SettingsPage(app, visit)
             Page.Sound -> SoundPage(app, visit)
             is Page.Album -> AlbumPage(app, visit, page.id)

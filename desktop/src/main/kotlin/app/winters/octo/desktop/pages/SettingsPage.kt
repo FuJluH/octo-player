@@ -88,6 +88,7 @@ fun SettingsPage(app: AppState, visit: Visit) {
             PageSection("offline", "Offline", OctoIcons.Download, detail = "Songs kept here to play without a connection.") { OfflineRows(app, settings) },
             PageSection("listening", "Listening", OctoIcons.Headphones) { ListeningRows(app, settings) },
             PageSection("lyrics", "Lyrics", OctoIcons.Lyrics) { LyricsRows(app, settings) },
+            PageSection("stations", "Radio stations", OctoIcons.Radio, detail = "Live stations on your server, and near you.") { RadioStationRows(app) },
             if (discord) PageSection("discord", "Discord", DiscordMark, detail = "Show what you're playing to your friends.", brand = true) { DiscordRows(app) } else null,
             PageSection("system", "System", OctoIcons.System) {
                 SystemRows(app)

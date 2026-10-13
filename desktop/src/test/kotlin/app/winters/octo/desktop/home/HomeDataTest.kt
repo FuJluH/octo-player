@@ -49,27 +49,38 @@ class HomeDataTest {
     }
 
     @Test
-    fun onlyOctoIsAskedForStations() = runBlocking {
+    fun onlyOctoFillsTheRadioShelf() = runBlocking {
         server.answer("getAlbumList2", albums("a1"))
         server.answer("getInternetRadioStations", """"internetRadioStations":{"internetRadioStation":[{"id":"st1","name":"Discover Weekly","coverArt":"st1"}]}""")
         val plain = loadHome(server.connection())
-        assertEquals("a server without stations has none", emptyList<RadioStation>(), plain.stations)
-        assertFalse("getInternetRadioStations" in server.endpoints())
+        assertEquals("a server without Octo's stations has none", emptyList<RadioStation>(), plain.stations)
+        assertEquals("and a station with no stream is not live radio", emptyList<RadioStation>(), plain.live)
         val octo = loadHome(server.connection(listOf("octoAcquisitions:1")))
         assertEquals(listOf("Discover Weekly"), octo.stations!!.map { it.name })
     }
 
-    // An internet radio station added to the server is a stream, which this
-    // app does not play, so Home leaves it off; Octo's own stay.
+    // An internet radio station added to the server is a stream: it goes on
+    // the Live radio shelf, from any server, and Octo's own stay on Radio.
     @Test
-    fun anAddedRadioStationIsLeftOffHome() = runBlocking {
+    fun anAddedRadioStationGoesOnTheLiveRadioShelf() = runBlocking {
         server.answer("getAlbumList2", albums("a1"))
-        server.answer(
-            "getInternetRadioStations",
-            """"internetRadioStations":{"internetRadioStation":[{"id":"st1","name":"Discover Weekly","coverArt":"st1"},{"id":"r1","name":"City Radio","streamUrl":"https://radio.example.com/live.mp3","coverArt":"ra-r1"},{"id":"r2","name":"Town FM","streamUrl":"https://town.example.com/fm"}]}""",
-        )
+        val stations = """"internetRadioStations":{"internetRadioStation":[{"id":"st1","name":"Discover Weekly","coverArt":"st1"},{"id":"r1","name":"City Radio","streamUrl":"https://radio.example.com/live.mp3","coverArt":"ra-r1"},{"id":"r2","name":"Town FM","streamUrl":"https://town.example.com/fm"}]}"""
+        server.answer("getInternetRadioStations", stations)
         val octo = loadHome(server.connection(listOf("octoAcquisitions:1")))
         assertEquals(listOf("Discover Weekly"), octo.stations!!.map { it.name })
+        assertEquals(listOf("City Radio", "Town FM"), octo.live!!.map { it.name })
+        val plain = loadHome(server.connection())
+        assertEquals(listOf("City Radio", "Town FM"), plain.live!!.map { it.name })
+        assertEquals("the stations are read once for both shelves", 2, server.endpoints().count { it == "getInternetRadioStations" })
+    }
+
+    @Test
+    fun withBothRadioShelvesHiddenTheServerIsNotAsked() = runBlocking {
+        server.answer("getAlbumList2", albums("a1"))
+        val home = loadHome(server.connection(listOf("octoAcquisitions:1")), stations = false, live = false)
+        assertFalse("getInternetRadioStations" in server.endpoints())
+        assertNull(home.stations)
+        assertNull(home.live)
     }
 
     // A station Octo has since made anew is taken off the shelf at once,
@@ -194,7 +205,7 @@ class HomeDataTest {
     fun hiddenStationsAreNotAskedForUntilShownAgain() {
         server.answer("getAlbumList2", albums("a1"))
         stationsAnswer("st1" to "Morning")
-        var sections = toggleHomeSection(DefaultHomeSections, HomeSection.Stations, shown = false)
+        var sections = toggleHomeSection(toggleHomeSection(DefaultHomeSections, HomeSection.Stations, shown = false), HomeSection.InternetRadio, shown = false)
         val store = HomeStore(server.connection(octo), CoroutineScope(Dispatchers.Unconfined), sections = { sections })
         store.refresh()
         waitFor { store.data != null }
@@ -203,6 +214,19 @@ class HomeDataTest {
         sections = DefaultHomeSections
         store.sectionsChanged()
         waitFor { store.shelves.stations.map { it.id } == listOf("st1") }
+    }
+
+    @Test
+    fun theLiveStreamsAreKeptForNextTime() {
+        val connection = server.connection()
+        server.answer("getAlbumList2", albums("a1"))
+        server.answer("getInternetRadioStations", """"internetRadioStations":{"internetRadioStation":[{"id":"r1","name":"City Radio","streamUrl":"https://radio.example.com/live.mp3"}]}""")
+        val store = HomeStore(connection, CoroutineScope(Dispatchers.Unconfined), kept = shelfStore())
+        store.refresh()
+        waitFor { store.shelves.live.map { it.id } == listOf("r1") }
+        waitFor { shelfStore().read(connection.server.key)?.live?.map { it.id } == listOf("r1") }
+        val again = HomeStore(connection, CoroutineScope(Dispatchers.Unconfined), kept = shelfStore())
+        assertEquals("before anything is asked", listOf("City Radio"), again.shelves.live.map { it.name })
     }
 
     @Test

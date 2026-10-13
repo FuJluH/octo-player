@@ -95,6 +95,8 @@ import app.winters.octo.desktop.queue.StationRefill
 import app.winters.octo.playback.STATION_BATCH
 import app.winters.octo.playback.isStationId
 import app.winters.octo.subsonic.OCTO_STATIONS
+import app.winters.octo.desktop.liveradio.LiveRadioModel
+import app.winters.octo.liveradio.RadioBrowser
 
 // How long a notice said in passing stays up.
 const val PASSING_NOTICE_MS = 6_000L
@@ -139,6 +141,8 @@ class AppState(
     homeShelves: File? = null,
     // Opens a web page for the Import page; the screenshots open none.
     browse: (String) -> Unit = { openInBrowser(it) },
+    // The live radio catalog; tests give one at a pretend address.
+    radioCatalog: RadioBrowser = RadioBrowser(catalogHttp(http), liveRadioAgent()),
 ) {
     // The Sound page's settings, kept on the engine; none for the silent player.
     val sound: SoundController? = (player as? SoundTarget)?.let { SoundController(it, settings, scope) }
@@ -195,6 +199,10 @@ class AppState(
 
     // The Import page, on an Octo server.
     val imports = ImportModel({ connection?.client }, scope, openUrl = browse)
+
+    // Live radio near the listener, from the Radio Browser catalog, and the
+    // stations kept on this computer.
+    val liveRadio = LiveRadioModel(settings, radioCatalog, { connection }, scope)
 
     // Family, on an Octo server with it on: the account's abilities, which song actions and
     // the Family page follow.
@@ -538,6 +546,7 @@ class AppState(
         imports.forget()
         family.forget()
         serverFacts.forget()
+        liveRadio.forget()
         // The family decides what adding an outside song does and who picks
         // the stream quality, so it is read before the first song plays.
         if (connection.family) scope.launch { family.plan() }
@@ -625,6 +634,7 @@ class AppState(
             health.forget()
             family.forget()
             serverFacts.forget()
+            liveRadio.forget()
             playlists = emptyList()
             fullPlayer = false
             navigator.startOver()
@@ -956,3 +966,14 @@ class AppState(
 
 // How long the sidebar's playlists count as fresh when the window comes back.
 const val PLAYLISTS_FRESH_MS = 60_000L
+
+// What the app calls itself to the radio catalog: "Octo/1.7.0 (desktop)".
+fun liveRadioAgent(version: String? = System.getProperty("octo.version")): String =
+    "Octo/${version?.trim()?.takeIf(String::isNotEmpty) ?: "dev"} (desktop)"
+
+// The app's connections, naming the app to the catalog as liveRadioAgent
+// does, over the name every other host hears.
+private fun catalogHttp(http: OkHttpClient): OkHttpClient {
+    val agent = liveRadioAgent()
+    return http.newBuilder().addNetworkInterceptor { chain -> chain.proceed(chain.request().newBuilder().header("User-Agent", agent).build()) }.build()
+}

@@ -1,5 +1,7 @@
 package app.winters.octo.desktop.home
 
+import app.winters.octo.desktop.liveradio.isOctoStation
+import app.winters.octo.desktop.liveradio.liveStationsOf
 import app.winters.octo.desktop.server.Connection
 import app.winters.octo.discovery.CHARTS_ROW
 import app.winters.octo.home.HomeSection
@@ -31,6 +33,9 @@ data class HomeData(
     val mostPlayed: List<Album> = emptyList(),
     val favourites: List<Album> = emptyList(),
     val stations: List<RadioStation>? = emptyList(),
+    // The live streams added to the server, for the Live radio shelf; null
+    // the same way.
+    val live: List<RadioStation>? = emptyList(),
 ) {
     // No album shelf has anything; the stations are counted apart (HomeStore).
     val isEmpty get() = recentlyAdded.isEmpty() && recentlyPlayed.isEmpty() && mostPlayed.isEmpty() && favourites.isEmpty()
@@ -42,6 +47,7 @@ data class HomeData(
 @Serializable
 data class KeptShelves(
     val stations: List<RadioStation> = emptyList(),
+    val live: List<RadioStation> = emptyList(),
     val madeForYou: List<Playlist> = emptyList(),
     val chart: TopSongs? = null,
 )
@@ -52,6 +58,7 @@ val DesktopHomeSections: Set<HomeSection> = setOf(
     HomeSection.RecentlyPlayed,
     HomeSection.MadeForYou,
     HomeSection.Stations,
+    HomeSection.InternetRadio,
     HomeSection.YearMixes,
     HomeSection.GenreMixes,
     HomeSection.ArtistMixes,
@@ -70,12 +77,13 @@ fun homeChart(top: TopSongs): TopSongs = top.copy(entry = top.entry.filter { it.
 
 // Reads Home's shelves at once. A shelf the server cannot give is empty
 // rather than failing the page; only when every one fails does it throw.
-// Stations are asked for only from Octo, where each of its own is a list of
-// songs to play (it carries its id as its cover). An internet radio station
-// added to the server is a stream, which this app does not play, so it is left off.
-// With `stations` off (their shelf is hidden) they are not asked for at all,
-// and come back null.
-suspend fun loadHome(connection: Connection, stations: Boolean = true): HomeData = coroutineScope {
+// The server's stations are read once for two shelves: Octo's own, each a
+// list of songs to play (it carries its id as its cover), for Radio, and
+// the live streams added to any server, for Live radio. With `stations`
+// off (the Radio shelf is hidden) Octo's are not looked for, and with
+// `live` off the streams are not; either left out comes back null, and with
+// both off the server is not asked at all.
+suspend fun loadHome(connection: Connection, stations: Boolean = true, live: Boolean = true): HomeData = coroutineScope {
     val client = connection.client
     suspend fun <T> shelf(read: suspend () -> T): Result<T> =
         runCatching { read() }.onFailure { if (it !is SubsonicException) throw it }
@@ -83,12 +91,9 @@ suspend fun loadHome(connection: Connection, stations: Boolean = true): HomeData
     val played = async { shelf { client.albumList(AlbumListType.RECENT, SHELF_SIZE) } }
     val most = async { shelf { client.albumList(AlbumListType.FREQUENT, SHELF_SIZE) } }
     val starred = async { shelf { newestFavourites(client.starred().album) } }
-    val stationList = async {
-        when {
-            !stations -> null
-            connection.isOcto -> runCatching { client.radioStations().filter { it.coverArt == it.id } }.getOrNull()
-            else -> emptyList()
-        }
+    val isOcto = connection.isOcto
+    val serverStations = async {
+        if (live || (stations && isOcto)) runCatching { client.radioStations() } else null
     }
     val shelves = listOf(added.await(), played.await(), most.await(), starred.await())
     shelves.firstOrNull { it.isFailure }?.takeIf { shelves.all { s -> s.isFailure } }?.exceptionOrNull()?.let { throw it }
@@ -97,7 +102,12 @@ suspend fun loadHome(connection: Connection, stations: Boolean = true): HomeData
         recentlyPlayed = shelves[1].getOrDefault(emptyList()),
         mostPlayed = shelves[2].getOrDefault(emptyList()),
         favourites = shelves[3].getOrDefault(emptyList()),
-        stations = stationList.await(),
+        stations = when {
+            !stations -> null
+            !isOcto -> emptyList()
+            else -> serverStations.await()?.getOrNull()?.filter { isOctoStation(it, isOcto = true) }
+        },
+        live = if (live) serverStations.await()?.getOrNull()?.let { liveStationsOf(it, isOcto) } else null,
     )
 }
 

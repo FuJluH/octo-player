@@ -42,6 +42,9 @@ class SizesTest {
         "ui/PlaylistPictures.kt",
         "pages/ServersSection.kt",
         "ui/Opening.kt",
+        "pages/LiveRadioPage.kt",
+        "pages/RadioStationsSection.kt",
+        "ui/LiveRadioParts.kt",
     )
 
     private val root = File("src/main/kotlin/app/winters/octo/desktop")

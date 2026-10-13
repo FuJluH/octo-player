@@ -84,6 +84,7 @@ import app.winters.octo.ui.family.FAMILY
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.launch
 import app.winters.octo.desktop.home.octoLists
+import app.winters.octo.desktop.liveradio.LIVE_RADIO
 
 // A place in the sidebar: the page, its name and icon.
 private class Place(val page: Page, val label: String, val icon: ImageVector)
@@ -140,6 +141,8 @@ fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier, r
                 YourPlaces.forEach { place ->
                     item(key = "p:${place.label}") { NavRow(place.label, place.icon, lit == SidebarItem.Top(place.page), rail) { go(place.page) } }
                 }
+                // Live radio from the radio catalog, on any server.
+                item(key = "p:live-radio") { NavRow(LIVE_RADIO, OctoIcons.Radio, lit == SidebarItem.Top(Page.LiveRadio), rail) { go(Page.LiveRadio) } }
                 // Only an Octo server imports; the page itself says when one is too old to.
                 if (app.connection?.isOcto == true) {
                     item(key = "p:imports") { NavRow("Import", OctoIcons.Download, lit == SidebarItem.Top(Page.Imports), rail) { go(Page.Imports) } }

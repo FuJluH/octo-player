@@ -99,13 +99,23 @@ fun SearchPage(app: AppState, visit: Visit) {
         when (state) {
             SearchState.Idle -> {
                 item(key = "idle") { Txt("Type at least two letters in the search field.", OctoType.bodySmall, OctoColors.TextMuted, Modifier.padding(top = Space.Page)) }
+                item(key = "live-radio") { LiveRadioSearchRow(app) }
                 topChart(app, model.tops)
             }
             SearchState.Looking -> item(key = "looking") { LoadingLine("Searching") }
             is SearchState.Failed -> item(key = "failed") { FailedLine(state.message, model::again) }
-            is SearchState.Done -> before(app, state.found)
+            is SearchState.Done -> {
+                if (asksForRadio(model.text)) item(key = "live-radio") { LiveRadioSearchRow(app) }
+                before(app, state.found)
+            }
         }
     }
+}
+
+// Whether a search looks for radio, which the Live radio page finds.
+fun asksForRadio(text: String): Boolean {
+    val words = text.lowercase().split(Regex("[^a-z]+")).filter { it.isNotEmpty() }
+    return words.any { it == "radio" || it == "station" || it == "stations" || it == "fm" }
 }
 
 private fun seeAll(app: AppState, more: Boolean): String? = if (more && app.search?.filter == SearchFilter.All) "See all" else null

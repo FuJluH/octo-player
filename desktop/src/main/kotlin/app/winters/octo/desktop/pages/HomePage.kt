@@ -72,6 +72,14 @@ import kotlinx.coroutines.launch
 import app.winters.octo.desktop.ui.PlayButton
 import app.winters.octo.desktop.home.octoLists
 import app.winters.octo.home.mixGroup
+import app.winters.octo.desktop.liveradio.FIND_STATIONS_NEAR
+import app.winters.octo.desktop.liveradio.LIVE_RADIO
+import app.winters.octo.desktop.liveradio.ShelfStation
+import app.winters.octo.desktop.liveradio.liveShelf
+import app.winters.octo.desktop.playLive
+import app.winters.octo.desktop.ui.FindStationsArt
+import app.winters.octo.desktop.ui.StationArt
+import app.winters.octo.desktop.ui.liveStationMenu
 
 // Home: picking up where another device left off, what was played lately,
 // the lists Octo made for the listener and its stations, what came in, what
@@ -86,6 +94,7 @@ fun HomePage(app: AppState, visit: Visit) {
     LaunchedEffect(store) {
         store.refresh()
         app.refreshPlaylistsIfOld()
+        app.liveRadio.checkAdmin()
     }
     val library = app.library?.state?.collectAsState()?.value
     val index = (library as? LibraryState.Ready)?.index
@@ -104,7 +113,9 @@ fun HomePage(app: AppState, visit: Visit) {
     val stored = settings.appearance.homeSections
     val sections = remember(stored) { homeSectionOrder(stored) }
     // Stations shown again are asked for then.
-    LaunchedEffect(store, sections.shows(HomeSection.Stations)) { store.sectionsChanged() }
+    LaunchedEffect(store, sections.shows(HomeSection.Stations), sections.shows(HomeSection.InternetRadio)) { store.sectionsChanged() }
+    // The Live radio shelf: the server's streams and the stations kept here.
+    val live = remember(shelves.live, settings.liveRadio.kept) { liveShelf(shelves.live, app.liveRadio.kept(settings.liveRadio).stations) }
     val home = store.data
     val failure = store.failure
     val found = store.rediscovered
@@ -188,8 +199,14 @@ fun HomePage(app: AppState, visit: Visit) {
                         HomeSection.NeverPlayed -> found?.let {
                             albums(app, AlbumShelf.NeverPlayed.title, it.neverPlayed, whole = it.neverPlayed.size < SHELF_SIZE, seeAll = open(AlbumShelf.NeverPlayed))
                         }
+                        // Always shown, since it opens with the way to find stations.
+                        HomeSection.InternetRadio -> moving(key = "shelf:live") {
+                            ShelfRow(entry.section.title, listOf<ShelfStation?>(null) + live, { it?.streamUrl ?: "find" }, { app.navigator.go(Page.LiveRadio) }) { station ->
+                                if (station == null) FindStationsCard(app) else LiveShelfCard(app, station)
+                            }
+                        }
                         // Shelves only the phone draws.
-                        HomeSection.Pinned, HomeSection.Artists, HomeSection.SomethingDifferent, HomeSection.InternetRadio -> Unit
+                        HomeSection.Pinned, HomeSection.Artists, HomeSection.SomethingDifferent -> Unit
                     }
                 }
                 moving(key = "edit-home") {
@@ -265,6 +282,35 @@ private fun StationCard(app: AppState, station: RadioStation, starting: Boolean,
         onOpen = { app.navigator.go(Page.Playlist(station.id)) },
         badge = { if (starting) Spinner(size = IconSize.Transport) else PlayButton(playing = false, enabled = true, size = ControlHeight.L, label = "Play ${station.name}", onClick = onPlay) },
         picture = { modifier, shape -> StationPicture(app, station, modifier, shape) },
+    )
+}
+
+// The first card on the Live radio shelf: the way to the Live radio page.
+@Composable
+private fun FindStationsCard(app: AppState) {
+    MediaCard(
+        FIND_STATIONS_NEAR,
+        LIVE_RADIO,
+        null,
+        onOpen = { app.navigator.go(Page.LiveRadio) },
+        picture = { modifier, shape -> FindStationsArt(modifier, shape) },
+    )
+}
+
+// A live station on the shelf: a click or its play button plays it. One
+// kept here has its menu on a right click.
+@Composable
+private fun LiveShelfCard(app: AppState, station: ShelfStation) {
+    val kept = station.kept
+    val play = { app.playLive(station.name, station.streamUrl, kept?.uuid.orEmpty()) }
+    MediaCard(
+        station.name,
+        if (station.serverId != null) "On your server" else "Kept here",
+        null,
+        onOpen = play,
+        onMenu = kept?.let { liveStationMenu(app, it, kept = true) },
+        badge = { PlayButton(playing = false, enabled = true, size = ControlHeight.L, label = "Play ${station.name}", onClick = play) },
+        picture = { modifier, shape -> StationArt(app, station.logo, station.name, station.streamUrl, modifier, shape, station.coverArt) },
     )
 }
 

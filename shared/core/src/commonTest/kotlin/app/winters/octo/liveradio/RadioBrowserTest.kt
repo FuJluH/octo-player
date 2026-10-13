@@ -110,6 +110,15 @@ class RadioBrowserTest {
     }
 
     @Test
+    fun aPlaceWithNoCoordinatesIsSearchedByItsStateOnly() = runTest {
+        regionalBody = "[${station("c", "Quiet FM", null, 5, state = "Texas")}]"
+        val found = catalog().near(LivePlace(0.0, 0.0, "Austin", state = "Texas", countryCode = "US"), 40_000.0, LiveSort.Distance)
+        assertEquals(listOf("c"), found.map { it.uuid })
+        assertTrue(asked.none { it.url.queryParameter("geo_lat") != null })
+        assertEquals("Texas", asked.single().url.queryParameter("state"))
+    }
+
+    @Test
     fun aStartedStationIsCounted() = runTest {
         catalog().started("abc-123")
         assertEquals("/json/url/abc-123", asked.single().url.encodedPath)
