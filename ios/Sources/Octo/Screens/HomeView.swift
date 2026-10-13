@@ -13,7 +13,6 @@ struct HomeView: View {
     @Environment(ServerSync.self) private var serverSync
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.refreshLibrary) private var refreshLibrary
-    @Environment(\.shellAwake) private var awake
     @State private var model = HomeModel()
     @State private var reading = false
 
@@ -76,7 +75,7 @@ struct HomeView: View {
         .onChange(of: discovery.stationsFrom, initial: true) { _, _ in model.stationsSourceChanged() }
         .onChange(of: scenePhase) { _, phase in if phase == .active { model.shown() } }
         // Home is in front again after another tab or the full player.
-        .onChange(of: awake) { _, now in if now { model.shown() } }
+        .background { WakeWatch { model.shown() } }
         .whatsNewPanel(isPresented: $reading) { model.dismissWhatsNew() }
     }
 

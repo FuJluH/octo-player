@@ -16,8 +16,6 @@ struct SearchView: View {
     @AppStorage(SearchModel.hintAddedKey) private var hintAdded = false
     @AppStorage(SearchModel.hintShownKey) private var hintShown = 0
     @FocusState private var focused: Bool
-    @Environment(\.shellAwake) private var awake
-    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         @Bindable var model = model
@@ -44,8 +42,7 @@ struct SearchView: View {
         .onChange(of: session.activeId) { _, _ in model.serverChanged() }
         .onChange(of: session.client == nil) { _, _ in model.serverChanged() }
         .onChange(of: library.stamp(.playlists)) { _, _ in model.playlistsChanged() }
-        .onChange(of: awake) { _, now in if now { model.shownAgain() } }
-        .onChange(of: scenePhase) { _, phase in if phase == .active && awake { model.shownAgain() } }
+        .background { WakeWatch(alsoOnActive: true) { model.shownAgain() } }
         #if DEBUG
         .onReceive(NotificationCenter.default.publisher(for: .driveSearch)) { note in
             if let text = note.object as? String { model.text = text }

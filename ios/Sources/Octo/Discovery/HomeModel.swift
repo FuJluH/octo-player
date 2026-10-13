@@ -176,21 +176,34 @@ final class HomeModel {
         stationsTask = nil
         stationsLoadedAt = nil
         stationsFailed = false
-        stations = []
-        madeForYou = []
-        charts = []
+        // What this server gave last time shows at once, so Home does not shift when the
+        // server answers; the answer then replaces it in place.
+        let kept = server.flatMap(HomeShelfStore.read)
+        stations = kept?.stations ?? []
+        madeForYou = kept?.madeForYou ?? []
+        charts = kept?.charts ?? []
         guard server != nil else { return }
         loadStations()
         chartsTask = Task { [weak self] in
             let list = await discovery.chart(Charts.overall)
-            guard !Task.isCancelled else { return }
-            self?.charts = Array((list?.songs ?? []).prefix(chartsRow).map(\.track))
+            guard !Task.isCancelled, let self else { return }
+            let songs = Array((list?.songs ?? []).prefix(chartsRow).map(\.track))
+            if songs != self.charts { self.charts = songs }
+            self.keepShelves()
         }
+    }
+
+    /// Keeps the stations, Made for you and the chart for the next start.
+    private func keepShelves() {
+        guard let from = stationsFrom, let server = from else { return }
+        HomeShelfStore.write(HomeShelves(stations: stations, madeForYou: madeForYou, charts: charts), for: server)
     }
 
     /// Home is on screen again: ask for the stations if the last try failed or the list is old.
     func shown() {
-        access = Self.phoneAccess()
+        // Set only when it changed: every assignment redraws Home.
+        let now = Self.phoneAccess()
+        if now != access { access = now }
         guard let from = stationsFrom, from != nil else { return }
         if stationsDue(now: msSince1970(), loadedAt: stationsLoadedAt, failed: stationsFailed, loading: stationsTask != nil) {
             loadStations()
@@ -206,19 +219,22 @@ final class HomeModel {
             do {
                 let got = try await discovery.stations()
                 if Task.isCancelled { return }
-                self?.stations = got
+                if self?.stations != got { self?.stations = got }
             } catch {
                 failed = true
             }
             do {
                 let got = try await discovery.madeForYou()
                 if Task.isCancelled { return }
-                self?.madeForYou = got
+                if self?.madeForYou != got { self?.madeForYou = got }
             } catch {
                 failed = true
             }
             guard let self, !Task.isCancelled else { return }
-            if !failed { self.stationsLoadedAt = msSince1970() }
+            if !failed {
+                self.stationsLoadedAt = msSince1970()
+                self.keepShelves()
+            }
             self.stationsFailed = failed
             self.stationsTask = nil
         }
@@ -286,4 +302,33 @@ final class HomeModel {
 
     /// Reading the notes or closing the card puts it away until the next update.
     func dismissWhatsNew() { WhatsNewStore.shared.markSeen() }
+}
+
+/// The stations, Made for you lists and chart one server gave last.
+struct HomeShelves: Codable {
+    var stations: [Station] = []
+    var madeForYou: [Station] = []
+    var charts: [Song] = []
+}
+
+/// Home's server shelves kept on the phone between runs, one file a server, in Caches.
+enum HomeShelfStore {
+    private static var folder: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("home", isDirectory: true)
+    }
+
+    private static func file(_ server: String) -> URL {
+        folder.appendingPathComponent((server.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? server) + ".json")
+    }
+
+    static func read(_ server: String) -> HomeShelves? {
+        guard let data = try? Data(contentsOf: file(server)) else { return nil }
+        return try? JSONDecoder().decode(HomeShelves.self, from: data)
+    }
+
+    static func write(_ shelves: HomeShelves, for server: String) {
+        guard let data = try? JSONEncoder().encode(shelves) else { return }
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? data.write(to: file(server), options: .atomic)
+    }
 }

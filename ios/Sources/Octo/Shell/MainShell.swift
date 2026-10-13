@@ -127,6 +127,15 @@ struct MainShell: View {
     @State private var leaving: AppTab?
     @State private var reselects: [AppTab: Int] = [:]
     @State private var drift = AmbientDrift()
+    /// The player stays in place, faded out, until its cover has flown home, and only then is
+    /// taken down; the pages under it wake at the same moment. Both are heavy, so neither lands
+    /// in the middle of the closing animation.
+    @State private var playerMounted = false
+    @State private var pagesCovered = false
+    /// A new player for each opening, so one opened again while the last still lingers starts
+    /// fresh.
+    @State private var playerOpening = 0
+    @State private var takeDown: Task<Void, Never>?
     @Namespace private var art
 
     private var hasTrack: Bool { player.current != nil }
@@ -142,6 +151,7 @@ struct MainShell: View {
         ZStack {
             OctoColor.background.ignoresSafeArea()
             tabs
+                .onChange(of: playerOpen && hasTrack, initial: true) { _, open in playerShown(open) }
 
             OctoBar(tab: tab, playerMode: barPlayer, select: select, roundButton: roundButton,
                     showTabs: { barPlayer = false }, openPlayer: openPlayer,
@@ -160,10 +170,14 @@ struct MainShell: View {
             .opacity(playerOpen && hasTrack ? 0 : 1)
             .animation(.octoTween(fixed: 300), value: playerOpen && hasTrack)
 
-            if playerOpen && hasTrack {
-                NowPlayingView(dismiss: closePlayer)
-                    .transition(.asymmetric(insertion: .opacity.animation(.octoTween(fixed: 400)),
-                                            removal: .opacity.animation(.octoTween(fixed: 300))))
+            if playerMounted && hasTrack {
+                PlayerHost(dismiss: closePlayer)
+                    .equatable()
+                    .id(playerOpening)
+                    .opacity(playerOpen ? 1 : 0)
+                    .animation(.octoTween(fixed: 300), value: playerOpen)
+                    .allowsHitTesting(playerOpen)
+                    .transition(.asymmetric(insertion: .opacity.animation(.octoTween(fixed: 400)), removal: .identity))
                     .zIndex(1)
             }
             // The cover flying between the bar and the player, above both.
@@ -269,14 +283,14 @@ struct MainShell: View {
             ForEach(AppTab.allCases, id: \.self) { item in
                 let front = item == tab
                 NavigationStack(path: path(item)) {
-                    root(item)
+                    TabRoot(item: item).equatable()
                         .background { PageBackdrop(page: item.rootPage, route: nil) }
                         .pageMotion(rootBack: item == .home ? nil : { select(.home) })
                         .routes()
                         .environment(\.tabReselects, reselects[item, default: 0])
                         .background(ScrollTopProbe(signal: reselects[item, default: 0]))
                 }
-                .environment(\.shellAwake, front && !(playerOpen && hasTrack))
+                .environment(\.shellAwake, front && !pagesCovered)
                 .opacity(front ? 1 : 0)
                 .animation(front ? .octoTween(220, OctoEasing.standard, scale: motion, delay: 40)
                                  : .octoTween(100, OctoEasing.standard, scale: motion), value: tab)
@@ -300,15 +314,6 @@ struct MainShell: View {
         paths = restored
     }
 
-    @ViewBuilder
-    private func root(_ item: AppTab) -> some View {
-        switch item {
-        case .home: HomeView()
-        case .search: SearchView()
-        case .library: LibraryView()
-        case .settings: SettingsView()
-        }
-    }
 
     private func path(_ item: AppTab) -> Binding<NavigationPath> {
         Binding(get: { paths[item] ?? NavigationPath() }, set: { paths[item] = $0 })
@@ -343,6 +348,28 @@ struct MainShell: View {
 
     /// Asked for, the player opens; with nothing loaded it waits and opens when a song loads.
     private func openPlayer() { playerOpen = true }
+
+    /// The player opened or closed: mounted at once on opening (a fresh one when the last still
+    /// lingers), and on closing taken down and the pages woken 0.7 s later, once the cover is home.
+    private func playerShown(_ open: Bool) {
+        takeDown?.cancel()
+        if open {
+            if playerMounted { playerOpening += 1 }
+            playerMounted = true
+            pagesCovered = true
+            return
+        }
+        guard playerMounted else {
+            pagesCovered = false
+            return
+        }
+        takeDown = Task {
+            try? await Task.sleep(for: .milliseconds(700))
+            guard !Task.isCancelled else { return }
+            playerMounted = false
+            pagesCovered = false
+        }
+    }
 
     private func closePlayer() { playerOpen = false }
 
@@ -475,5 +502,48 @@ struct PageBackdrop: View {
             AmbientBackdrop(page: page, route: route, awake: awake)
         }
         .ignoresSafeArea()
+    }
+}
+
+/// The full player as the shell holds it. The shell is drawn again whenever anything it watches
+/// changes; the player is not drawn again with it, only when something the player itself watches
+/// changes, since laying the whole player out takes several frames.
+private struct PlayerHost: View, Equatable {
+    let dismiss: () -> Void
+
+    nonisolated static func == (lhs: PlayerHost, rhs: PlayerHost) -> Bool { true }
+
+    var body: some View { NowPlayingView(dismiss: dismiss) }
+}
+
+/// Calls `action` when the page wakes (the player stops covering it, or its tab comes back), and
+/// with `alsoOnActive` when the app comes back while the page is awake. Only this small view
+/// watches, so waking never lays the whole page out again.
+struct WakeWatch: View {
+    var alsoOnActive = false
+    let action: () -> Void
+    @Environment(\.shellAwake) private var awake
+    @Environment(\.scenePhase) private var scenePhase
+
+    var body: some View {
+        Color.clear
+            .onChange(of: awake) { _, now in if now { action() } }
+            .onChange(of: scenePhase) { _, phase in if alsoOnActive && phase == .active && awake { action() } }
+    }
+}
+
+/// A tab's first page. It takes nothing from the shell but which tab it is, so the shell being
+/// drawn again (the player opening or closing, a song changing) never lays the page out again;
+/// the page still redraws for everything it watches itself.
+private struct TabRoot: View, Equatable {
+    let item: AppTab
+
+    var body: some View {
+        switch item {
+        case .home: HomeView()
+        case .search: SearchView()
+        case .library: LibraryView()
+        case .settings: SettingsView()
+        }
     }
 }

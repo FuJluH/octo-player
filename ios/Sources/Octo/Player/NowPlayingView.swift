@@ -25,31 +25,20 @@ struct NowPlayingView: View {
     @State private var flight = CoverFlight.shared
 
     // The way in and out.
-    @State private var dolly = 0.0
-    @State private var closing = false
-    @State private var corner: CGFloat = 50
-    @State private var rise: CGFloat = 28
-    @State private var riseAlpha = 0.0
+    /// The opening and closing: read only by the parts that move with it, so the player is not
+    /// laid out again for each step.
+    @State private var entrance = PlayerEntrance()
     @State private var fold = 0.0
     @State private var lyricsAlpha = 0.0
     @State private var lyricsLayer = false
 
     // The pull and the artwork's swipe.
     @State private var pull = PlayerPull()
-    @State private var axis: DragAxis = .undecided
-    /// The artwork has made its one decision for this drag and left it to the pull.
-    @State private var artDecided = false
-    /// Where the pull's slop is measured from: the touch, or the last point the finger went past
-    /// it upward.
-    @State private var slopOrigin: CGFloat = 0
-    @State private var lastDy: CGFloat = 0
-    @State private var card: CGFloat = 0
-    /// Counts the artwork's settles, so a new swipe calls off one still under way.
-    @State private var settle = 0
-    @State private var armed = false
+    /// The drag's own bookkeeping, changed on every move and never drawn.
+    @State private var book = DragBook()
+    @State private var swipe = ArtSwipe()
     @State private var ticks = 0
-    @State private var stage: CGRect = .zero
-    @State private var cardFrame: CGRect = .zero
+    @State private var places = ArtPlaces()
     @GestureState private var dragging = false
 
     // What opens over the player.
@@ -85,7 +74,7 @@ struct NowPlayingView: View {
                 ZStack {
                     PlayerBackground(prefs: settings.player.background, colors: colors, cover: look.cover,
                                      coverId: player.current?.coverArt, live: settings.player.liveBackground, calm: calm,
-                                     playing: player.isPlaying, bpm: facts.bpm, dolly: dolly, closing: closing,
+                                     playing: player.isPlaying, bpm: facts.bpm, entrance: entrance,
                                      focused: focused)
                     Group {
                         if sideways {
@@ -111,7 +100,7 @@ struct NowPlayingView: View {
         .background(PlayerStatusBar(dark: colors.dark))
         .sensoryFeedback(.impact(flexibility: .rigid, intensity: 0.8), trigger: ticks)
         .onChange(of: dragging) { _, now in
-            guard !now, axis != .undecided else {
+            guard !now, book.axis != .undecided else {
                 if !now { resetDrag() }
                 return
             }
@@ -176,8 +165,7 @@ struct NowPlayingView: View {
                 } else {
                     controls(roomy: true)
                         .padding(.bottom, 16)
-                        .offset(y: rise)
-                        .opacity(riseAlpha)
+                        .modifier(Rising(entrance: entrance))
                         .transition(swap)
                 }
             }
@@ -216,8 +204,7 @@ struct NowPlayingView: View {
                         Spacer(minLength: 0)
                         topLine
                         controls(roomy: roomy)
-                            .offset(y: rise)
-                            .opacity(riseAlpha)
+                            .modifier(Rising(entrance: entrance))
                         Spacer(minLength: 0)
                     }
                     .transition(swap)
@@ -280,23 +267,22 @@ struct NowPlayingView: View {
         GeometryReader { box in
             let side = max(0, min(maxSide, box.size.width, box.size.height))
             let folded = folds ? fold : 0
-            let swiped = 1 - 0.5 * min(abs(card) / max(box.size.width / 2, 1), 1)
-            Cover(id: player.current?.coverArt, size: side, radius: side * corner / 100, online: player.current?.isExternal ?? false)
+            PlayerCardCover(entrance: entrance, coverId: player.current?.coverArt, side: side, online: player.current?.isExternal ?? false)
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
                     flight.cardPlaced(frame)
-                    cardFrame = frame
+                    places.card = frame
                 }
                 .elevation3()
                 .opacity(flight.hidesCard ? 0 : 1)
                 .scaleEffect(player.isPlaying ? 1 : 0.84)
                 .animation(.octoSpring(0.6, 300), value: player.isPlaying)
                 .scaleEffect(1 - 0.08 * folded)
-                .opacity((1 - folded) * swiped)
-                .offset(x: card)
+                .opacity(1 - folded)
+                .modifier(SwipedCard(swipe: swipe, width: box.size.width))
                 .frame(width: box.size.width, height: box.size.height)
                 .accessibilityHidden(true)
         }
-        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { stage = $0 }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { places.stage = $0 }
     }
 
     // MARK: Controls
@@ -413,20 +399,20 @@ struct NowPlayingView: View {
     private func arrive() {
         flight.playerOpening(player.current?.coverArt)
         showLyrics(lyrics.open, animated: false)
-        withAnimation(PlayerDolly.open) { dolly = 1 }
-        withAnimation(.octoSpring(1, 1500)) { corner = 3 }
-        withAnimation(.octoSpring(0.68, 400)) { rise = 0 }
-        withAnimation(.octoTween(fixed: 380, OctoEasing.standard, delay: 80)) { riseAlpha = 1 }
+        withAnimation(PlayerDolly.open) { entrance.dolly = 1 }
+        withAnimation(.octoSpring(1, 1500)) { entrance.corner = 3 }
+        withAnimation(.octoSpring(0.68, 400)) { entrance.rise = 0 }
+        withAnimation(.octoTween(fixed: 380, OctoEasing.standard, delay: 80)) { entrance.riseAlpha = 1 }
     }
 
     /// Closes the player: the background draws back and the cover rounds as it flies home. `then`
     /// opens a page in its place as the player goes.
     private func close(then go: (() -> Void)? = nil) {
-        guard !closing else { return }
-        closing = true
+        guard !entrance.closing else { return }
+        entrance.closing = true
         flight.playerClosing(player.current?.coverArt)
-        withAnimation(PlayerDolly.close) { dolly = 0 }
-        withAnimation(.octoSpring(1, 1500)) { corner = 50 }
+        withAnimation(PlayerDolly.close) { entrance.dolly = 0 }
+        withAnimation(.octoSpring(1, 1500)) { entrance.corner = 50 }
         DispatchQueue.main.async {
             go?()
             withAnimation(.octoSpring(1, 400)) { dismiss() }
@@ -472,7 +458,7 @@ struct NowPlayingView: View {
         DragGesture(minimumDistance: Self.slop, coordinateSpace: .global)
             .updating($dragging) { _, state, _ in state = true }
             .onChanged { value in
-                dragMoved(value.translation, cap: cap, onCard: !folded && cardFrame.contains(value.startLocation))
+                dragMoved(value.translation, cap: cap, onCard: !folded && places.card.contains(value.startLocation))
             }
             .onEnded { value in dragEnded(value.translation, value.velocity, cap: cap) }
     }
@@ -484,37 +470,37 @@ struct NowPlayingView: View {
     private func dragMoved(_ t: CGSize, cap: CGFloat, onCard: Bool) {
         let dx = t.width
         let dy = t.height
-        if axis == .undecided {
-            if onCard && !artDecided {
+        if book.axis == .undecided {
+            if onCard && !book.artDecided {
                 switch dragAxis(dx, dy, slop: Self.slop) {
                 case .horizontal:
-                    axis = .horizontal
+                    book.axis = .horizontal
                     // A new swipe takes over from one still settling.
-                    settle += 1
+                    book.settle += 1
                 case .vertical:
-                    artDecided = true
+                    book.artDecided = true
                 case .undecided:
                     break
                 }
             }
-            if axis == .undecided {
-                let moved = dy - slopOrigin
+            if book.axis == .undecided {
+                let moved = dy - book.slopOrigin
                 if moved <= -Self.slop {
-                    slopOrigin = dy
+                    book.slopOrigin = dy
                 } else if moved >= Self.slop {
-                    axis = .vertical
+                    book.axis = .vertical
                     pull.distance = min(max((moved - Self.slop) * 0.82, 0), cap)
-                    lastDy = dy
+                    book.lastDy = dy
                     return
                 }
             }
         }
-        switch axis {
+        switch book.axis {
         case .vertical:
-            pull.distance = min(max(pull.distance + (dy - lastDy) * 0.82, 0), cap)
-            lastDy = dy
+            pull.distance = min(max(pull.distance + (dy - book.lastDy) * 0.82, 0), cap)
+            book.lastDy = dy
         case .horizontal:
-            card = dx * 0.55
+            swipe.offset = dx * 0.55
             mark(abs(dx) >= Self.skipAt)
         case .undecided:
             break
@@ -524,7 +510,7 @@ struct NowPlayingView: View {
     /// The finger lifted: a flick down or a pull past half the way closes, unless it was moving
     /// back up; a swipe of the artwork skips or springs back.
     private func dragEnded(_ t: CGSize, _ velocity: CGSize, cap: CGFloat) {
-        let taken = axis
+        let taken = book.axis
         resetDrag()
         switch taken {
         case .vertical:
@@ -543,7 +529,7 @@ struct NowPlayingView: View {
 
     /// A drag taken over by something else ends as if it went nowhere.
     private func dragTakenOver() {
-        let taken = axis
+        let taken = book.axis
         resetDrag()
         switch taken {
         case .vertical:
@@ -556,16 +542,16 @@ struct NowPlayingView: View {
     }
 
     private func resetDrag() {
-        axis = .undecided
-        artDecided = false
-        slopOrigin = 0
-        lastDy = 0
+        book.axis = .undecided
+        book.artDecided = false
+        book.slopOrigin = 0
+        book.lastDy = 0
     }
 
     /// One tick each time the finger passes the point where letting go skips.
     private func mark(_ past: Bool) {
-        guard past != armed else { return }
-        armed = past
+        guard past != book.armed else { return }
+        book.armed = past
         if past { ticks += 1 }
     }
 
@@ -574,27 +560,27 @@ struct NowPlayingView: View {
     /// A new swipe calls off a settle still under way.
     private func finishSwipe(_ offset: CGFloat, _ velocity: CGFloat) {
         let result = swipeSkip(offset: Double(offset), velocity: Double(velocity), distance: Double(Self.skipAt), fling: 900)
-        if result != .stay && !armed { ticks += 1 }
-        armed = false
-        settle += 1
-        let token = settle
-        let width = max(stage.width, 1)
+        if result != .stay && !book.armed { ticks += 1 }
+        book.armed = false
+        book.settle += 1
+        let token = book.settle
+        let width = max(places.stage.width, 1)
         switch result {
         case .stay:
-            withAnimation(.octoSpring(0.8, 400)) { card = 0 }
+            withAnimation(.octoSpring(0.8, 400)) { swipe.offset = 0 }
         case .next, .previous:
             let way: CGFloat = result == .next ? -1 : 1
             withAnimation(.octoTween(fixed: 120)) {
-                card = way * width / 2
+                swipe.offset = way * width / 2
             } completion: {
-                guard token == settle else { return }
+                guard token == book.settle else { return }
                 if result == .next { player.next() } else { player.previous() }
                 var still = Transaction()
                 still.disablesAnimations = true
-                withTransaction(still) { card = -way * width * 0.2 }
+                withTransaction(still) { swipe.offset = -way * width * 0.2 }
                 DispatchQueue.main.async {
-                    guard token == settle else { return }
-                    withAnimation(.octoSpring(0.8, 300)) { card = 0 }
+                    guard token == book.settle else { return }
+                    withAnimation(.octoSpring(0.8, 300)) { swipe.offset = 0 }
                 }
             }
         }
@@ -660,6 +646,27 @@ struct NowPlayingView: View {
         case "background":
             let modes: [String: BackgroundMode] = ["immersive": .immersive, "artwork": .artwork, "color": .color, "classic": .classic]
             if let mode = modes[request.value] { settings.setBackground { $0.mode = mode } }
+        case "pulltest", "swipetest":
+            // A finger's moves fed to the drag one display frame apart: down to a third of the
+            // screen (or sideways), held, then let go without closing or skipping.
+            let height = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen.bounds.height ?? 852
+            let cap = height * Self.pullShare
+            let sideways = request.name == "swipetest"
+            Task {
+                #if DEBUG
+                BodyTrace.mark("\(request.name) start")
+                #endif
+                for step in 0...90 {
+                    let move = CGFloat(step) * 3
+                    dragMoved(sideways ? CGSize(width: move * 0.8, height: 0) : CGSize(width: 0, height: move),
+                              cap: cap, onCard: sideways)
+                    try? await Task.sleep(for: .milliseconds(8))
+                }
+                #if DEBUG
+                BodyTrace.mark("\(request.name) release")
+                #endif
+                dragEnded(.zero, .zero, cap: cap)
+            }
         default: break
         }
     }
@@ -685,5 +692,84 @@ private struct PulledFrame: ViewModifier {
             .clipShape(RoundedRectangle(cornerRadius: travel > 0 ? 28 * min(pulled * 5, 1) : 0, style: .continuous))
             .scaleEffect(1 - 0.06 * pulled)
             .offset(y: travel)
+    }
+}
+
+/// Where the artwork is on screen, for the gestures. Not watched: it changes on every frame of a
+/// pull or a swipe, and nothing drawn depends on it.
+private final class ArtPlaces {
+    var card: CGRect = .zero
+    var stage: CGRect = .zero
+}
+
+/// How far the artwork is swiped sideways. Only `SwipedCard` reads it, so a swipe moves the card
+/// without the player around it being laid out again.
+@MainActor
+@Observable
+final class ArtSwipe {
+    var offset: CGFloat = 0
+}
+
+/// The swiped card: moved sideways and fading as it goes, down to half at half the stage's width.
+private struct SwipedCard: ViewModifier {
+    let swipe: ArtSwipe
+    let width: CGFloat
+
+    func body(content: Content) -> some View {
+        let swiped = 1 - 0.5 * min(abs(swipe.offset) / max(width / 2, 1), 1)
+        content
+            .opacity(swiped)
+            .offset(x: swipe.offset)
+    }
+}
+
+/// A drag's bookkeeping on the player: which way it went, where its slop is measured from, the
+/// last finger height, the swipe's settles and whether a release would skip. Not watched: it
+/// changes on every move, and nothing drawn depends on it.
+private final class DragBook {
+    var axis: DragAxis = .undecided
+    /// The artwork has made its one decision for this drag and left it to the pull.
+    var artDecided = false
+    /// Where the pull's slop is measured from: the touch, or the last point the finger went past
+    /// it upward.
+    var slopOrigin: CGFloat = 0
+    var lastDy: CGFloat = 0
+    /// Counts the artwork's settles, so a new swipe calls off one still under way.
+    var settle = 0
+    var armed = false
+}
+
+/// The player coming in and going: the background's dolly from 0 to 1, the card's corners (a share
+/// of its side, from round to nearly square), and the controls rising into place.
+@MainActor
+@Observable
+final class PlayerEntrance {
+    var dolly = 0.0
+    var closing = false
+    var corner: CGFloat = 50
+    var rise: CGFloat = 28
+    var riseAlpha = 0.0
+}
+
+/// The controls rising into place as the player opens.
+private struct Rising: ViewModifier {
+    let entrance: PlayerEntrance
+
+    func body(content: Content) -> some View {
+        content
+            .offset(y: entrance.rise)
+            .opacity(entrance.riseAlpha)
+    }
+}
+
+/// The card's cover, its corners following the opening and closing.
+private struct PlayerCardCover: View {
+    let entrance: PlayerEntrance
+    let coverId: String?
+    let side: CGFloat
+    let online: Bool
+
+    var body: some View {
+        Cover(id: coverId, size: side, radius: side * entrance.corner / 100, online: online)
     }
 }

@@ -20,6 +20,7 @@ import SwiftUI
 /// - `songs-search:TEXT` opens Songs with the search open and the words typed
 /// - `songs-filter:CHIPS` opens Songs with chips on, comma separated: favorites, week, month,
 ///   year, never, lately, lossless, rating4 (any stars), decade1990 (any decade)
+/// - `shufflelibrary` plays the whole library shuffled, as a list's Shuffle button does
 /// - `menu:live` (or `menu:live=NAME`) lays a live list's options out on a sheet;
 ///   `menu:live:rename` and `menu:live:delete` ask its name and its delete question
 @MainActor
@@ -32,7 +33,7 @@ enum LibraryDrive {
     /// Adds the library's steps to the drive.
     static func install(router: Router) {
         Drive.steps.append { name, value in
-            guard ["page", "album", "artist", "playlist", "genre", "menu", "info", "sort", "pick", "songs-search", "songs-filter"]
+            guard ["page", "album", "artist", "playlist", "genre", "menu", "info", "sort", "pick", "songs-search", "songs-filter", "shufflelibrary"]
                 .contains(name) else {
                 return false
             }
@@ -51,6 +52,8 @@ enum LibraryDrive {
         switch name {
         case "page":
             if let route = route(value) { router.go(route) }
+        case "shufflelibrary":
+            actions.play(await library.tracks(), shuffled: true)
         case "album":
             if let album = await library.search(value, artists: 0, albums: 5, songs: 0).albums.first { router.go(.album(album.asAlbum)) }
         case "artist":

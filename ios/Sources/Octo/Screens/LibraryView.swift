@@ -220,7 +220,7 @@ struct AlbumsView: View {
                             ListPlayLine(count: countText(sorted.items.count, "album", "albums")) {
                                 playAll(sorted.items, shuffled: false)
                             } shuffle: {
-                                Task { actions.play(await library.tracks(), shuffled: true) }
+                                playAll(sorted.items, shuffled: true)
                             } extra: {
                                 QuietButton("Random album") {
                                     if let album = sorted.items.randomElement() { router.go(.album(album.asAlbum)) }
@@ -288,9 +288,9 @@ struct ArtistsView: View {
                             EmptyLibraryNote()
                         } else {
                             ListPlayLine(count: countText(sorted.items.count, "artist", "artists")) {
-                                playAll(sorted.items)
+                                playAll(sorted.items, shuffled: false)
                             } shuffle: {
-                                Task { actions.play(await library.tracks(), shuffled: true) }
+                                playAll(sorted.items, shuffled: true)
                             }
                             FirstRowMark().id("first")
                             LetterRuns(items: sorted.items, headings: sorted.headings, id: \.id) { _, artist in
@@ -318,11 +318,12 @@ struct ArtistsView: View {
     }
 
     /// Plays every artist in the order shown, artist by artist, each album by album.
-    private func playAll(_ artists: [LibraryArtist]) {
+    /// Plays the songs of the artists shown, in the order shown, or shuffled.
+    private func playAll(_ artists: [LibraryArtist], shuffled: Bool) {
         Task {
             let places = await library.trackPlaces()
             let ids = songsInGroupOrder(places, groupOf: \.artistId, groups: artists.map(\.id))
-            actions.play(await library.tracks(ids: ids))
+            actions.play(await library.tracks(ids: ids), shuffled: shuffled)
         }
     }
 }

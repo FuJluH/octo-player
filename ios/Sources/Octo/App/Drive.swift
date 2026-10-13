@@ -218,7 +218,10 @@ final class HitchProbe: NSObject {
         if let last {
             let gap = now - last
             worst = max(worst, gap)
-            if gap > (link.targetTimestamp - link.timestamp) * 1.8 + 0.004 { late += 1 }
+            if gap > (link.targetTimestamp - link.timestamp) * 1.8 + 0.004 {
+                late += 1
+                log.notice("app late frame \(gap * 1000, format: .fixed(precision: 1)) ms")
+            }
         } else {
             since = now
         }

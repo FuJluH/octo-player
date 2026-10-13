@@ -66,7 +66,7 @@ public struct OnlineArtist: Sendable, Hashable, Identifiable {
 
 /// A station the server runs, played as the list of songs it has lined up. A Made for you list is
 /// shown and played the same way, with its song count.
-public struct Station: Sendable, Hashable, Identifiable {
+public struct Station: Sendable, Hashable, Identifiable, Codable {
     public var id: String
     public var name: String
     public var artwork: String?

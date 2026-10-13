@@ -20,8 +20,7 @@ struct PlayerBackground: View {
     let calm: Bool
     let playing: Bool
     let bpm: Int?
-    let dolly: Double
-    let closing: Bool
+    let entrance: PlayerEntrance
     let focused: Bool
 
     var body: some View {
@@ -44,13 +43,13 @@ struct PlayerBackground: View {
             if WashGPU.shared != nil {
                 ImmersiveWash(inputs: WashInputs(cover: cover, bpm: paceBpm(bpm, useBpm: prefs.useBpm), fpsLimit: prefs.fps,
                                                  speed: Float(prefs.speed) / 100, moving: live && !calm, focused: focused,
-                                                 closing: closing))
+                                                 closing: entrance.closing))
             } else {
                 // A phone whose graphics cannot run the wash shows the still artwork in its place.
-                StillArtwork(cover: cover, dolly: dolly)
+                StillArtwork(cover: cover, dolly: entrance.dolly)
             }
         case .artwork:
-            StillArtwork(cover: cover, dolly: dolly)
+            StillArtwork(cover: cover, dolly: entrance.dolly)
         case .color:
             Color(argb: colors.dominant.map { prepareColor($0, prefs.tuning) } ?? colors.base)
                 .animation(.timingCurve(0.65, 0, 0.35, 1, duration: 0.5), value: colors.dominant)
