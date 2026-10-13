@@ -287,4 +287,14 @@ class SettingsStoreTest {
         assertEquals(listOf("w", "h"), store.current.servers.map { it.id })
         assertEquals("h", store.current.activeServer)
     }
+
+    // Home's order is kept under the same key as on the phone.
+    @Test
+    fun homeSectionsAreKeptUnderTheirOwnKey() {
+        val stored = "charts,-pinned,recentlyPlayed"
+        SettingsStore(file()).update { it.copy(appearance = it.appearance.copy(homeSections = stored)) }
+        assertTrue(file().readText().contains("\"home_sections\": \"$stored\"") || file().readText().contains("\"home_sections\":\"$stored\""))
+        assertEquals(stored, SettingsStore(file()).current.appearance.homeSections)
+        assertNull(AppSettings().appearance.homeSections)
+    }
 }

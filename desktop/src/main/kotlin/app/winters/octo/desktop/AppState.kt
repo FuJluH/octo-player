@@ -18,6 +18,7 @@ import app.winters.octo.desktop.health.HealthModel
 import app.winters.octo.desktop.home.HomeStore
 import app.winters.octo.desktop.home.KeptShelves
 import app.winters.octo.home.HomeShelfStore
+import app.winters.octo.home.homeSectionOrder
 import app.winters.octo.desktop.library.LibraryStore
 import app.winters.octo.desktop.listening.PlayReporter
 import app.winters.octo.desktop.livelists.LiveListStore
@@ -448,7 +449,7 @@ class AppState(
             store,
             if (connection.acquires) Fetches(connection.client, scope, onArrived = { store.load() }, onAsked = { downloads?.wake() }) else null,
             SearchModel(connection, { store.index }, { playlists }, scope, { settings.current.libraryOnly }),
-            HomeStore(connection, scope, kept = keptShelves),
+            HomeStore(connection, scope, kept = keptShelves, sections = { homeSectionOrder(settings.current.appearance.homeSections) }),
             // Any Octo server: whether it can look for FLACs is asked live,
             // since the extensions saved at sign-in may be older than it.
             // How the looking goes is the drawer's to show; only a refusal

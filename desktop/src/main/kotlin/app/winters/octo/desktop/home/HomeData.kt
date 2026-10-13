@@ -2,6 +2,7 @@ package app.winters.octo.desktop.home
 
 import app.winters.octo.desktop.server.Connection
 import app.winters.octo.discovery.CHARTS_ROW
+import app.winters.octo.home.HomeSection
 import app.winters.octo.server.serverTime
 import app.winters.octo.subsonic.Album
 import app.winters.octo.subsonic.OCTO_LIST_KINDS
@@ -43,6 +44,21 @@ data class KeptShelves(
     val chart: TopSongs? = null,
 )
 
+// The shelves this app draws on Home, of all Home's sections. The others
+// keep their places in the order the listener saved.
+val DesktopHomeSections: Set<HomeSection> = setOf(
+    HomeSection.RecentlyPlayed,
+    HomeSection.MadeForYou,
+    HomeSection.Stations,
+    HomeSection.RecentlyAdded,
+    HomeSection.MostPlayed,
+    HomeSection.FavoriteAlbums,
+    HomeSection.Charts,
+    HomeSection.NotPlayedLately,
+    HomeSection.NeverFinished,
+    HomeSection.NeverPlayed,
+)
+
 // The part of a chart Home's row shows: its first songs.
 fun homeChart(top: TopSongs): TopSongs = top.copy(entry = top.entry.filter { it.song != null }.take(CHARTS_ROW))
 
@@ -50,7 +66,9 @@ fun homeChart(top: TopSongs): TopSongs = top.copy(entry = top.entry.filter { it.
 // rather than failing the page; only when every one fails does it throw.
 // Stations are asked for only from Octo, where each is a list of songs to
 // play; on other servers internet radio is a stream this app cannot play yet.
-suspend fun loadHome(connection: Connection): HomeData = coroutineScope {
+// With `stations` off (their shelf is hidden) they are not asked for at all,
+// and come back null.
+suspend fun loadHome(connection: Connection, stations: Boolean = true): HomeData = coroutineScope {
     val client = connection.client
     suspend fun <T> shelf(read: suspend () -> T): Result<T> =
         runCatching { read() }.onFailure { if (it !is SubsonicException) throw it }
@@ -58,8 +76,12 @@ suspend fun loadHome(connection: Connection): HomeData = coroutineScope {
     val played = async { shelf { client.albumList(AlbumListType.RECENT, SHELF_SIZE) } }
     val most = async { shelf { client.albumList(AlbumListType.FREQUENT, SHELF_SIZE) } }
     val starred = async { shelf { newestFavourites(client.starred().album) } }
-    val stations = async {
-        if (connection.isOcto) runCatching { client.radioStations() }.getOrNull() else emptyList()
+    val stationList = async {
+        when {
+            !stations -> null
+            connection.isOcto -> runCatching { client.radioStations() }.getOrNull()
+            else -> emptyList()
+        }
     }
     val shelves = listOf(added.await(), played.await(), most.await(), starred.await())
     shelves.firstOrNull { it.isFailure }?.takeIf { shelves.all { s -> s.isFailure } }?.exceptionOrNull()?.let { throw it }
@@ -68,7 +90,7 @@ suspend fun loadHome(connection: Connection): HomeData = coroutineScope {
         recentlyPlayed = shelves[1].getOrDefault(emptyList()),
         mostPlayed = shelves[2].getOrDefault(emptyList()),
         favourites = shelves[3].getOrDefault(emptyList()),
-        stations = stations.await(),
+        stations = stationList.await(),
     )
 }
 

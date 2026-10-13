@@ -93,5 +93,8 @@ enum class ServerForm {
 // The equalizer and everything else that shapes the sound.
 @Serializable data object SoundRoute : NavKey
 
+// The order of Home's shelves, and which ones show.
+@Serializable data object HomeSectionsRoute : NavKey
+
 // What was played: the latest plays by day, or the most played songs.
 @Serializable data class HistoryRoute(val mostPlayed: Boolean = false) : NavKey

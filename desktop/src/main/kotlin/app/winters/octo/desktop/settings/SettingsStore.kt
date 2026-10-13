@@ -7,6 +7,7 @@ import app.winters.octo.desktop.system.SystemPrefs
 import app.winters.octo.desktop.discord.DiscordPrefs
 import app.winters.octo.desktop.hotkeys.HotkeyPrefs
 import app.winters.octo.covers.PlaylistCoverStyle
+import app.winters.octo.home.HOME_SECTIONS_KEY
 import app.winters.octo.livelists.accountKey
 import app.winters.octo.server.serverName
 import app.winters.octo.server.settleServers
@@ -14,6 +15,7 @@ import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.update.UpdatePrefs
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
@@ -269,6 +271,9 @@ data class Appearance(
     val textSize: Int = 0,
     // Playlists' pictures: designed for each one, or their album mosaics.
     val playlistCovers: PlaylistCoverStyle = PlaylistCoverStyle.Designed,
+    // Home's shelves in order, a hidden one led by "-", as the phone keeps
+    // them; null for the usual order, all shown.
+    @SerialName(HOME_SECTIONS_KEY) val homeSections: String? = null,
 )
 
 // The window's colours: the playing cover blurred into a glow across the

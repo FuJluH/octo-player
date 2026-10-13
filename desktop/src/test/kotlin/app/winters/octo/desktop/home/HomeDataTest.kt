@@ -3,7 +3,10 @@ package app.winters.octo.desktop.home
 import app.winters.octo.desktop.FakeServer
 import app.winters.octo.desktop.server.Connection
 import app.winters.octo.desktop.settings.key
+import app.winters.octo.home.DefaultHomeSections
+import app.winters.octo.home.HomeSection
 import app.winters.octo.home.HomeShelfStore
+import app.winters.octo.home.toggleHomeSection
 import app.winters.octo.subsonic.Album
 import app.winters.octo.subsonic.Playlist
 import app.winters.octo.subsonic.RadioStation
@@ -171,6 +174,21 @@ class HomeDataTest {
         assertNull(store.shelves.chart)
         assertTrue(store.shelves.madeForYou.isEmpty())
         waitFor { shelfStore().read(connection.server.key)?.let { it.chart == null && it.madeForYou.isEmpty() } == true }
+    }
+
+    @Test
+    fun hiddenStationsAreNotAskedForUntilShownAgain() {
+        server.answer("getAlbumList2", albums("a1"))
+        stationsAnswer("st1" to "Morning")
+        var sections = toggleHomeSection(DefaultHomeSections, HomeSection.Stations, shown = false)
+        val store = HomeStore(server.connection(octo), CoroutineScope(Dispatchers.Unconfined), sections = { sections })
+        store.refresh()
+        waitFor { store.data != null }
+        assertFalse("getInternetRadioStations" in server.endpoints())
+        assertNull("not asked is not an empty answer", store.data!!.stations)
+        sections = DefaultHomeSections
+        store.sectionsChanged()
+        waitFor { store.shelves.stations.map { it.id } == listOf("st1") }
     }
 
     @Test

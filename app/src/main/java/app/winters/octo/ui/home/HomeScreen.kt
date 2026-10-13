@@ -1,7 +1,9 @@
 package app.winters.octo.ui.home
 
 import app.winters.octo.ui.nav.ChartsRoute
+import app.winters.octo.ui.nav.HomeSectionsRoute
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -12,6 +14,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -34,6 +37,7 @@ import androidx.navigation3.runtime.NavKey
 import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.design.AccentButton
+import app.winters.octo.design.ButtonSize
 import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoColors
@@ -41,6 +45,8 @@ import app.winters.octo.design.OctoType
 import app.winters.octo.design.glassPanel
 import app.winters.octo.device.Access
 import app.winters.octo.discovery.Station
+import app.winters.octo.home.EDIT_HOME
+import app.winters.octo.home.HomeSection
 import app.winters.octo.ui.common.AlbumCard
 import app.winters.octo.ui.common.ArtistCircle
 import app.winters.octo.ui.common.LibrarySourceActions
@@ -67,6 +73,7 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
     val pinned by vm.pinned.collectAsStateWithLifecycle()
     val favouriteAlbums by vm.favouriteAlbums.collectAsStateWithLifecycle()
     val rediscovery by vm.rediscovery.collectAsStateWithLifecycle()
+    val sections by vm.sections.collectAsStateWithLifecycle()
 
     LifecycleResumeEffect(Unit) {
         vm.onShown()
@@ -91,29 +98,31 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
                     songShelf("Charts", vm.charts, vm::play, onTitle = { onOpen(ChartsRoute) })
                 }
                 layout.shelves -> {
-                    pinnedShelf(pinned, onOpen)
-                    shelf("Recently played", recentlyPlayed, onOpen, onTitle = { onOpen(HistoryRoute()) })
-                    stationShelf("Made for you", vm.madeForYou, vm.startingStation, vm::playStation)
-                    stationShelf("Stations", vm.stations, vm.startingStation, vm::playStation)
-                    songShelf("Charts", vm.charts, vm::play, onTitle = { onOpen(ChartsRoute) })
-                    shelf("Recently added", recent.orEmpty(), onOpen)
-                    shelf("Favorite albums", favouriteAlbums, onOpen, onTitle = { onOpen(FavouritesRoute(albums = true)) })
-                    songShelf("Most played", mostPlayed, vm::play, onTitle = { onOpen(HistoryRoute(mostPlayed = true)) })
-                    shelf("Something different", vm.surprise, onOpen)
-                    shelf("Not played in 6 months", rediscovery.notPlayedLately, onOpen)
-                    shelf("Albums you never finished", rediscovery.neverFinished, onOpen)
-                    shelf("Unplayed albums", rediscovery.neverPlayed, onOpen)
-                    if (vm.artists.isNotEmpty()) {
-                        item { SectionTitle("Artists", Modifier.padding(top = 18.dp)) }
-                        item {
-                            LazyRow(
-                                contentPadding = PaddingValues(horizontal = 20.dp),
-                                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                            ) {
-                                items(vm.artists, key = { it.id }) { artist ->
-                                    ArtistCircle(artist) { onOpen(ArtistRoute(artist.id)) }
-                                }
-                            }
+                    // The shelves in the order kept in Settings, the hidden
+                    // ones left out, then a way to change them. Nothing is
+                    // drawn until the order is read.
+                    val order = sections
+                    order?.filter { it.shown }.orEmpty().forEach { entry ->
+                        val title = entry.section.title
+                        when (entry.section) {
+                            HomeSection.Pinned -> pinnedShelf(pinned, onOpen)
+                            HomeSection.RecentlyPlayed -> shelf(title, recentlyPlayed, onOpen, onTitle = { onOpen(HistoryRoute()) })
+                            HomeSection.MadeForYou -> stationShelf(title, vm.madeForYou, vm.startingStation, vm::playStation)
+                            HomeSection.Stations -> stationShelf(title, vm.stations, vm.startingStation, vm::playStation)
+                            HomeSection.RecentlyAdded -> shelf(title, recent.orEmpty(), onOpen)
+                            HomeSection.MostPlayed -> songShelf(title, mostPlayed, vm::play, onTitle = { onOpen(HistoryRoute(mostPlayed = true)) })
+                            HomeSection.FavoriteAlbums -> shelf(title, favouriteAlbums, onOpen, onTitle = { onOpen(FavouritesRoute(albums = true)) })
+                            HomeSection.Charts -> songShelf(title, vm.charts, vm::play, onTitle = { onOpen(ChartsRoute) })
+                            HomeSection.Artists -> artistShelf(vm, onOpen)
+                            HomeSection.SomethingDifferent -> shelf(title, vm.surprise, onOpen)
+                            HomeSection.NotPlayedLately -> shelf(title, rediscovery.notPlayedLately, onOpen)
+                            HomeSection.NeverFinished -> shelf(title, rediscovery.neverFinished, onOpen)
+                            HomeSection.NeverPlayed -> shelf(title, rediscovery.neverPlayed, onOpen)
+                        }
+                    }
+                    if (order != null) moving(key = "edit-home") {
+                        Box(Modifier.fillMaxWidth().padding(top = 32.dp, bottom = 8.dp), contentAlignment = Alignment.Center) {
+                            GlazeButton(EDIT_HOME, onClick = { onOpen(HomeSectionsRoute) }, size = ButtonSize.Small)
                         }
                     }
                 }
@@ -122,15 +131,38 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
     }
 }
 
-private fun androidx.compose.foundation.lazy.LazyListScope.shelf(
+// A part of Home that glides to its new place when the shelves are
+// reordered or one is shown or hidden.
+private fun LazyListScope.moving(key: String, content: @Composable () -> Unit) {
+    item(key = key) { Box(Modifier.animateItem()) { content() } }
+}
+
+// A row of the library's artists, picked at random.
+private fun LazyListScope.artistShelf(vm: HomeViewModel, onOpen: (NavKey) -> Unit) {
+    if (vm.artists.isEmpty()) return
+    val title = HomeSection.Artists.title
+    moving(key = "title:$title") { SectionTitle(title, Modifier.padding(top = 18.dp)) }
+    moving(key = "row:$title") {
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            items(vm.artists, key = { it.id }) { artist ->
+                ArtistCircle(artist) { onOpen(ArtistRoute(artist.id)) }
+            }
+        }
+    }
+}
+
+private fun LazyListScope.shelf(
     title: String,
     albums: List<AlbumEntity>,
     onOpen: (NavKey) -> Unit,
     onTitle: (() -> Unit)? = null,
 ) {
     if (albums.isEmpty()) return
-    item(key = "title:$title") { ShelfTitle(title, onTitle) }
-    item(key = "row:$title") {
+    moving(key = "title:$title") { ShelfTitle(title, onTitle) }
+    moving(key = "row:$title") {
         LazyRow(
             contentPadding = PaddingValues(horizontal = 20.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -143,15 +175,15 @@ private fun androidx.compose.foundation.lazy.LazyListScope.shelf(
 }
 
 // A row of songs; tapping one plays the row from that song.
-private fun androidx.compose.foundation.lazy.LazyListScope.songShelf(
+private fun LazyListScope.songShelf(
     title: String,
     tracks: List<TrackEntity>,
     onPlay: (List<TrackEntity>, Int) -> Unit,
     onTitle: (() -> Unit)? = null,
 ) {
     if (tracks.isEmpty()) return
-    item(key = "title:$title") { ShelfTitle(title, onTitle) }
-    item(key = "row:$title") {
+    moving(key = "title:$title") { ShelfTitle(title, onTitle) }
+    moving(key = "row:$title") {
         LazyRow(
             contentPadding = PaddingValues(horizontal = 20.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -190,15 +222,15 @@ private fun ShelfTitle(title: String, onClick: (() -> Unit)?) {
 
 // The server's stations, or the lists it made for the listener; tapping
 // one plays what it has lined up.
-private fun androidx.compose.foundation.lazy.LazyListScope.stationShelf(
+private fun LazyListScope.stationShelf(
     title: String,
     stations: List<Station>,
     starting: String?,
     onPlay: (Station) -> Unit,
 ) {
     if (stations.isEmpty()) return
-    item(key = "title:$title") { SectionTitle(title, Modifier.padding(top = 18.dp)) }
-    item(key = "row:$title") {
+    moving(key = "title:$title") { SectionTitle(title, Modifier.padding(top = 18.dp)) }
+    moving(key = "row:$title") {
         LazyRow(
             contentPadding = PaddingValues(horizontal = 20.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp),

@@ -29,6 +29,10 @@ import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.home.AlbumShelf
 import app.winters.octo.desktop.home.SHELF_SIZE
 import app.winters.octo.desktop.home.pinnedFirst
+import app.winters.octo.home.EDIT_HOME
+import app.winters.octo.home.HomeSection
+import app.winters.octo.home.homeSectionOrder
+import app.winters.octo.home.shows
 import app.winters.octo.desktop.home.yourPlaylists
 import app.winters.octo.desktop.library.Cover
 import app.winters.octo.desktop.library.LibraryState
@@ -88,6 +92,10 @@ fun HomePage(app: AppState, visit: Visit) {
     // The server shelves show as the server last gave them until it answers.
     val shelves = store.shelves
     val forYou = shelves.madeForYou
+    val stored = settings.appearance.homeSections
+    val sections = remember(stored) { homeSectionOrder(stored) }
+    // Stations shown again are asked for then.
+    LaunchedEffect(store, sections.shows(HomeSection.Stations)) { store.sectionsChanged() }
     val home = store.data
     val failure = store.failure
     val found = store.rediscovered
@@ -114,46 +122,70 @@ fun HomePage(app: AppState, visit: Visit) {
                 app.search?.charts?.let { chartsRow(app, it, store) }
             }
             else -> {
-                albums(app, "Recently played", home.recentlyPlayed) { app.navigator.go(Page.History) }
-                if (forYou.isNotEmpty()) {
-                    item(key = "shelf:foryou") { ShelfRow("Made for you", forYou, { it.id }, null) { PlaylistCard(app, it) } }
-                }
-                if (shelves.stations.isNotEmpty()) {
-                    item(key = "shelf:stations") {
-                        ShelfRow("Stations", shelves.stations, { it.id }, null) { station ->
-                            StationCard(app, station, starting == station.id) {
-                                if (starting != null) return@StationCard
-                                starting = station.id
-                                app.scope.launch {
-                                    try {
-                                        app.play(connection.client.playlist(station.id).entry)
-                                    } catch (e: SubsonicException.NotFound) {
-                                        store.stationGone(station.id)
-                                        app.notice = "${station.name} isn't on the server any more."
-                                    } catch (e: SubsonicException) {
-                                        app.notice = "Couldn't start ${station.name}: ${e.userMessage()}"
-                                    } finally {
-                                        starting = null
+                // The shelves in the order saved in Settings, the hidden ones
+                // left out, then a way to change them.
+                sections.filter { it.shown }.forEach { entry ->
+                    when (entry.section) {
+                        HomeSection.RecentlyPlayed -> albums(app, entry.section.title, home.recentlyPlayed) { app.navigator.go(Page.History) }
+                        HomeSection.MadeForYou -> if (forYou.isNotEmpty()) {
+                            moving(key = "shelf:foryou") { ShelfRow(entry.section.title, forYou, { it.id }, null) { PlaylistCard(app, it) } }
+                        }
+                        HomeSection.Stations -> if (shelves.stations.isNotEmpty()) {
+                            moving(key = "shelf:stations") {
+                                ShelfRow(entry.section.title, shelves.stations, { it.id }, null) { station ->
+                                    StationCard(app, station, starting == station.id) {
+                                        if (starting != null) return@StationCard
+                                        starting = station.id
+                                        app.scope.launch {
+                                            try {
+                                                app.play(connection.client.playlist(station.id).entry)
+                                            } catch (e: SubsonicException.NotFound) {
+                                                store.stationGone(station.id)
+                                                app.notice = "${station.name} isn't on the server any more."
+                                            } catch (e: SubsonicException) {
+                                                app.notice = "Couldn't start ${station.name}: ${e.userMessage()}"
+                                            } finally {
+                                                starting = null
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
+                        HomeSection.Charts -> app.search?.charts?.let { chartsRow(app, it, store) }
+                        HomeSection.RecentlyAdded -> albums(app, entry.section.title, home.recentlyAdded) { app.navigator.go(Page.RecentlyAdded) }
+                        HomeSection.MostPlayed ->
+                            albums(app, entry.section.title, home.mostPlayed, whole = home.mostPlayed.size < SHELF_SIZE, seeAll = open(AlbumShelf.MostPlayed))
+                        HomeSection.FavoriteAlbums -> {
+                            albums(app, entry.section.title, home.favourites) {
+                                app.navigator.go(Page.Favourites)
+                                app.navigator.keepTab(app.navigator.current, "Albums")
+                            }
+                            // The listener's playlists go with their favorite albums.
+                            if (playlists.isNotEmpty()) {
+                                moving(key = "shelf:playlists") { ShelfRow("Your playlists", playlists, { it.id }, null) { PlaylistCard(app, it) } }
+                            }
+                        }
+                        HomeSection.NotPlayedLately -> found?.let {
+                            albums(app, AlbumShelf.NotPlayedLately.title, it.notPlayedLately, whole = it.notPlayedLately.size < SHELF_SIZE, seeAll = open(AlbumShelf.NotPlayedLately))
+                        }
+                        HomeSection.NeverFinished -> found?.let {
+                            albums(app, AlbumShelf.NeverFinished.title, it.neverFinished, whole = it.neverFinished.size < SHELF_SIZE, seeAll = open(AlbumShelf.NeverFinished))
+                        }
+                        HomeSection.NeverPlayed -> found?.let {
+                            albums(app, AlbumShelf.NeverPlayed.title, it.neverPlayed, whole = it.neverPlayed.size < SHELF_SIZE, seeAll = open(AlbumShelf.NeverPlayed))
+                        }
+                        // Shelves only the phone draws.
+                        HomeSection.Pinned, HomeSection.Artists, HomeSection.SomethingDifferent -> Unit
                     }
                 }
-                app.search?.charts?.let { chartsRow(app, it, store) }
-                albums(app, "Recently added", home.recentlyAdded) { app.navigator.go(Page.RecentlyAdded) }
-                albums(app, "Most played", home.mostPlayed, whole = home.mostPlayed.size < SHELF_SIZE, seeAll = open(AlbumShelf.MostPlayed))
-                albums(app, "Favorite albums", home.favourites) {
-                    app.navigator.go(Page.Favourites)
-                    app.navigator.keepTab(app.navigator.current, "Albums")
-                }
-                if (playlists.isNotEmpty()) {
-                    item(key = "shelf:playlists") { ShelfRow("Your playlists", playlists, { it.id }, null) { PlaylistCard(app, it) } }
-                }
-                if (found != null) {
-                    albums(app, AlbumShelf.NotPlayedLately.title, found.notPlayedLately, whole = found.notPlayedLately.size < SHELF_SIZE, seeAll = open(AlbumShelf.NotPlayedLately))
-                    albums(app, AlbumShelf.NeverFinished.title, found.neverFinished, whole = found.neverFinished.size < SHELF_SIZE, seeAll = open(AlbumShelf.NeverFinished))
-                    albums(app, AlbumShelf.NeverPlayed.title, found.neverPlayed, whole = found.neverPlayed.size < SHELF_SIZE, seeAll = open(AlbumShelf.NeverPlayed))
+                moving(key = "edit-home") {
+                    Box(Modifier.fillMaxWidth().padding(top = Space.Section), contentAlignment = Alignment.Center) {
+                        GlazeCapsule(null, EDIT_HOME, {
+                            showSection("Settings", "look")
+                            app.navigator.go(Page.Settings)
+                        })
+                    }
                 }
             }
         }
@@ -165,7 +197,13 @@ fun HomePage(app: AppState, visit: Visit) {
 // out when they all fit.
 private fun LazyListScope.albums(app: AppState, title: String, albums: List<Album>, whole: Boolean = false, seeAll: (() -> Unit)?) {
     if (albums.isEmpty()) return
-    item(key = "shelf:$title") { ShelfRow(title, albums, { it.id }, seeAll, whole) { AlbumCard(app, it) } }
+    moving(key = "shelf:$title") { ShelfRow(title, albums, { it.id }, seeAll, whole) { AlbumCard(app, it) } }
+}
+
+// A part of Home that glides to its new place when the shelves are
+// reordered or one is shown or hidden.
+internal fun LazyListScope.moving(key: String, content: @Composable () -> Unit) {
+    item(key = key) { Box(Modifier.animateItem()) { content() } }
 }
 
 // A shelf: its name, See all at the right when it leads to more, and one

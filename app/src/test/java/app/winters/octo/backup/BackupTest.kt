@@ -357,4 +357,23 @@ class BackupTest {
         val off = describeBackup(withEverything.copy(listenBrainz = ListenBrainzBackup(enabled = false)))
         assertTrue(off.none { it.startsWith("ListenBrainz") })
     }
+
+    @Test
+    fun homeSectionsGoThroughTheBackupAndBack() {
+        val backup = Backup(homeSections = "charts,-pinned,recentlyPlayed")
+        val text = encodeBackup(backup)
+        assertTrue(text.contains("\"homeSections\": \"charts,-pinned,recentlyPlayed\""))
+        assertTrue("it comes before the sort orders", text.indexOf("\"homeSections\"") < text.indexOf("\"sortOrders\""))
+        assertEquals(BackupRead.Read(backup), decodeBackup(text))
+        assertEquals("Settings: home sections", describeBackup(backup).first())
+    }
+
+    @Test
+    fun aBackupWithoutHomeSectionsLeavesThemAlone() {
+        val text = encodeBackup(Backup())
+        assertFalse(text.contains("homeSections"))
+        val read = decodeBackup("{\"kind\": \"octo-settings\", \"homeSections\": null}") as BackupRead.Read
+        assertEquals(null, read.backup.homeSections)
+        assertEquals(BackupRead.NotABackup, decodeBackup("{\"kind\": \"octo-settings\", \"homeSections\": [\"charts\"]}"))
+    }
 }

@@ -3,8 +3,13 @@ package app.winters.octo.ui.home
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import app.winters.octo.device.Access
+import app.winters.octo.home.HOME_SECTIONS_KEY
+import app.winters.octo.home.HomeSectionEntry
+import app.winters.octo.home.encodeHomeSections
+import app.winters.octo.home.homeSectionOrder
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -35,6 +40,7 @@ fun homeLayout(access: Access, accessDismissed: Boolean?, librarySongs: Int?): H
 
 private val Context.homePrefs by preferencesDataStore("home")
 private val ACCESS_DISMISSED = booleanPreferencesKey("phone_access_dismissed")
+private val HOME_SECTIONS = stringPreferencesKey(HOME_SECTIONS_KEY)
 
 // What Home remembers between runs.
 @Singleton
@@ -45,5 +51,19 @@ class HomePrefs @Inject constructor(@ApplicationContext private val context: Con
 
     suspend fun dismissAccess() {
         context.homePrefs.edit { it[ACCESS_DISMISSED] = true }
+    }
+
+    // Home's shelves in their order, each shown or hidden.
+    val homeSections: Flow<List<HomeSectionEntry>> =
+        context.homePrefs.data.map { homeSectionOrder(it[HOME_SECTIONS]) }.distinctUntilChanged()
+
+    suspend fun setHomeSections(entries: List<HomeSectionEntry>) {
+        context.homePrefs.edit { it[HOME_SECTIONS] = encodeHomeSections(entries) }
+    }
+
+    // Every shelf back in the default order and shown. Nothing is kept, so
+    // the order follows the default should it change.
+    suspend fun resetHomeSections() {
+        context.homePrefs.edit { it.remove(HOME_SECTIONS) }
     }
 }

@@ -23,7 +23,10 @@ import app.winters.octo.discovery.Discovery
 import app.winters.octo.discovery.Station
 import app.winters.octo.favourites.PinStore
 import app.winters.octo.favourites.PinnedItem
+import app.winters.octo.home.HomeSection
+import app.winters.octo.home.HomeSectionEntry
 import app.winters.octo.home.Rediscovery
+import app.winters.octo.home.shows
 import app.winters.octo.home.answered
 import app.winters.octo.listening.PlayHistory
 import app.winters.octo.playback.PlaybackConnection
@@ -37,6 +40,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -93,6 +98,11 @@ class HomeViewModel @Inject constructor(
     val librarySongs: StateFlow<Int?> =
         dao.libraryTrackCount().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+    // Home's shelves in their order, each shown or hidden. Null until read,
+    // so Home never draws the usual order before the listener's.
+    val sections: StateFlow<List<HomeSectionEntry>?> =
+        prefs.homeSections.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
     // Whether the phone access card was put away with "Not now". Null until read.
     val accessDismissed: StateFlow<Boolean?> =
         prefs.accessDismissed.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -137,6 +147,14 @@ class HomeViewModel @Inject constructor(
     private var stationsLoadedAt: Long? = null
     private var stationsFailed = false
 
+    // The server shelves the last finished load asked for, whether the
+    // chart was asked for from the server in use, and whether the library
+    // has no songs (the empty card shows the chart whether its shelf is
+    // hidden or not).
+    private var stationsAsked = emptySet<HomeSection>()
+    private var chartsAsked = false
+    private var libraryEmpty = false
+
     init {
         viewModelScope.launch {
             combine(dao.libraryTrackCount(), serverSync.last.map { it?.at }) { count, syncedAt -> count to syncedAt }
@@ -154,16 +172,48 @@ class HomeViewModel @Inject constructor(
                 chartsJob?.cancel()
                 stationsLoadedAt = null
                 stationsFailed = false
+                stationsAsked = emptySet()
+                chartsAsked = false
                 shelvesFrom = server
                 val last = server?.let { withContext(Dispatchers.IO) { kept.read(it) } } ?: KeptShelves()
                 stations = answered(stations, last.stations)
                 madeForYou = answered(madeForYou, last.madeForYou)
                 charts = answered(charts, last.charts)
                 if (server != null) {
+                    sections.filterNotNull().first()
                     loadStations()
                     loadCharts()
                 }
             }
+        }
+        // A shelf shown again, or the library found empty: what Home now
+        // draws is asked for.
+        viewModelScope.launch {
+            combine(sections.filterNotNull(), dao.libraryTrackCount()) { entries, count -> entries to (count == 0) }
+                .distinctUntilChanged()
+                .collect { (_, empty) ->
+                    libraryEmpty = empty
+                    sectionsChanged()
+                }
+        }
+    }
+
+    // The server shelves Home draws now: a hidden one is not asked for.
+    private fun wantedStationShelves(): Set<HomeSection> {
+        val entries = sections.value ?: return emptySet()
+        return setOf(HomeSection.Stations, HomeSection.MadeForYou).filterTo(HashSet()) { entries.shows(it) }
+    }
+
+    // The chart is wanted while its shelf shows, and while the library is
+    // empty, where it sits under the empty card.
+    private fun wantsCharts(): Boolean = sections.value?.shows(HomeSection.Charts) == true || libraryEmpty
+
+    private fun sectionsChanged() {
+        if (shelvesFrom == null) return
+        loadCharts()
+        if (!stationsAsked.containsAll(wantedStationShelves())) {
+            stationsLoadedAt = null
+            loadStations()
         }
     }
 
@@ -216,11 +266,16 @@ class HomeViewModel @Inject constructor(
     // A server without charts empties the row; one that did not answer
     // leaves it as it is.
     private fun loadCharts() {
+        if (shelvesFrom == null || chartsAsked || !wantsCharts()) return
+        chartsAsked = true
         chartsJob = viewModelScope.launch {
             val got = when (val answer = chartLists.answer(CHART_OVERALL)) {
                 is ChartAnswer.Got -> answer.list.songs.take(CHARTS_ROW).map { it.track }
                 ChartAnswer.None -> emptyList()
-                ChartAnswer.Failed -> return@launch
+                ChartAnswer.Failed -> {
+                    chartsAsked = false
+                    return@launch
+                }
             }
             charts = answered(charts, got)
             keepShelves()
@@ -239,36 +294,52 @@ class HomeViewModel @Inject constructor(
 
     // Runs in the background so no other shelf waits on the server. The
     // stations and Made for you are read apart, so one failing never hides
-    // the other; either failing asks again when Home comes back. Each
-    // answer replaces its shelf only when it differs from what is shown.
+    // the other, and a hidden one is not read at all; either failing asks
+    // again when Home comes back. Each answer replaces its shelf only when
+    // it differs from what is shown.
     private fun loadStations() {
         if (stationsJob?.isActive == true) return
+        val wanted = wantedStationShelves()
+        if (wanted.isEmpty()) return
         stationsJob = viewModelScope.launch {
             var failed = false
             var answers = 0
-            try {
-                val got = withContext(Dispatchers.IO) { discovery.stations() }
-                stations = answered(stations, got)
-                answers++
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                failed = true
-                Log.w("Octo", "stations failed to load: ${e.javaClass.simpleName}")
+            if (HomeSection.Stations in wanted) {
+                try {
+                    val got = withContext(Dispatchers.IO) { discovery.stations() }
+                    stations = answered(stations, got)
+                    answers++
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    failed = true
+                    Log.w("Octo", "stations failed to load: ${e.javaClass.simpleName}")
+                }
             }
-            try {
-                val got = withContext(Dispatchers.IO) { discovery.madeForYou() }
-                madeForYou = answered(madeForYou, got)
-                answers++
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                failed = true
-                Log.w("Octo", "made for you failed to load: ${e.javaClass.simpleName}")
+            if (HomeSection.MadeForYou in wanted) {
+                try {
+                    val got = withContext(Dispatchers.IO) { discovery.madeForYou() }
+                    madeForYou = answered(madeForYou, got)
+                    answers++
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    failed = true
+                    Log.w("Octo", "made for you failed to load: ${e.javaClass.simpleName}")
+                }
             }
-            if (!failed) stationsLoadedAt = SystemClock.elapsedRealtime()
+            if (!failed) {
+                stationsLoadedAt = SystemClock.elapsedRealtime()
+                stationsAsked = wanted
+            }
             stationsFailed = failed
             if (answers > 0) keepShelves()
+            // A shelf shown while this load ran is asked for now.
+            if (!failed && !wanted.containsAll(wantedStationShelves())) {
+                stationsLoadedAt = null
+                stationsJob = null
+                loadStations()
+            }
         }
     }
 
