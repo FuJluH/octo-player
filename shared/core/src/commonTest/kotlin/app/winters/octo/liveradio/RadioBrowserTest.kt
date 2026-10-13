@@ -1,5 +1,7 @@
 package app.winters.octo.liveradio
 
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
@@ -147,5 +149,81 @@ class RadioBrowserTest {
     fun aStationWithNoStreamIsLeftOut() {
         assertNull(CatalogStation(uuid = "x", name = "Nothing").toLive())
         assertEquals("http://plain", CatalogStation(uuid = "y", url = "http://plain").toLive()!!.streamUrl)
+    }
+
+    @Test
+    fun aStateIsAskedForByItsExactNameAndCheckedAgain() = runTest {
+        val kansas = LivePlace(39.05, -95.68, "Topeka, Kansas", state = "Kansas", countryCode = "US")
+        regionalBody = "[${station("k", "Kansas FM", null, 5, state = "kansas")},${station("a", "Arkansas FM", null, 50, state = "Arkansas")}]"
+        val found = catalog().near(kansas, 40_000.0, LiveSort.Distance)
+        assertEquals(listOf("k"), found.map { it.uuid })
+        val regional = asked.first { it.url.queryParameter("countrycode") != null }
+        assertEquals("Kansas", regional.url.queryParameter("state"))
+        assertEquals("true", regional.url.queryParameter("stateExact"))
+    }
+
+    @Test
+    fun aPlaceWithNoStateIsNotAskedForAnExactOne() = runTest {
+        catalog().near(LivePlace(51.5, -0.12, "London", countryCode = "GB"), 10_000.0, LiveSort.Distance)
+        val regional = asked.first { it.url.queryParameter("countrycode") != null }
+        assertNull(regional.url.queryParameter("state"))
+        assertNull(regional.url.queryParameter("stateExact"))
+    }
+
+    @Test
+    fun aFailingServerIsLeftForAnotherWithinTheSameAsk() = runTest {
+        MockWebServer().use { broken ->
+            broken.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse = MockResponse.Builder().code(503).build()
+            }
+            broken.start()
+            nearBody = "[${station("a", "KQED", 9094.3, 50)}]"
+            val radio = RadioBrowser(
+                OkHttpClient(),
+                "Octo/test (Android)",
+                servers = { listOf(broken.url("/").toString(), server.url("/").toString()) },
+                now = { clock },
+                pick = { it.first() },
+            )
+            assertEquals(listOf("a"), radio.near(sf, 40_000.0, LiveSort.Distance).map { it.uuid })
+            assertTrue("the broken server was tried first", broken.requestCount > 0)
+        }
+    }
+
+    @Test
+    fun withNoOtherServerTheAskFails() = runTest {
+        nearBody = "<html>busy</html>"
+        assertTrue(runCatching { catalog().near(sf, 40_000.0, LiveSort.Distance) }.exceptionOrNull() is java.io.IOException)
+    }
+
+    @Test
+    fun staleAnswersAreLetGo() = runTest {
+        val radio = catalog()
+        radio.near(sf, 40_000.0, LiveSort.Distance)
+        radio.near(sf, 80_000.0, LiveSort.Distance)
+        assertEquals(2, radio.keptCount())
+        clock = 7 * 60 * 60 * 1000L
+        radio.near(sf, 10_000.0, LiveSort.Distance)
+        assertEquals(1, radio.keptCount())
+    }
+
+    @Test
+    fun cancellingAnAskStopsItsRequest() {
+        MockWebServer().use { slow ->
+            slow.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse =
+                    MockResponse.Builder().code(200).body("[]").headersDelay(10, java.util.concurrent.TimeUnit.SECONDS).build()
+            }
+            slow.start()
+            val radio = RadioBrowser(OkHttpClient(), "Octo/test (Android)", servers = { listOf(slow.url("/").toString()) }, now = { clock })
+            val took = kotlin.system.measureTimeMillis {
+                kotlinx.coroutines.runBlocking {
+                    val ask = launch(kotlinx.coroutines.Dispatchers.IO) { radio.near(sf, 40_000.0, LiveSort.Distance) }
+                    kotlinx.coroutines.delay(300)
+                    ask.cancelAndJoin()
+                }
+            }
+            assertTrue("cancelled in $took ms", took < 5_000)
+        }
     }
 }

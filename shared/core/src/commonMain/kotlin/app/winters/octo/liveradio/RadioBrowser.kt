@@ -1,19 +1,24 @@
 package app.winters.octo.liveradio
 
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import java.io.IOException
 import java.net.InetAddress
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlin.math.roundToInt
 
 // A live radio station from the Radio Browser catalog, as an app shows,
@@ -132,17 +137,23 @@ internal fun mergeStations(near: List<LiveStation>, regional: List<LiveStation>,
 internal fun rounded(value: Double): Double = (value * 100).roundToInt() / 100.0
 
 // The Radio Browser catalog of live radio stations. It is asked through one
-// of its servers (`servers`, names or full addresses), picked at random, with
-// the app's own name so its keepers know who asks; answers are kept for six
-// hours per place and radius. `userAgent` is like "Octo/1.7 (Android)".
+// of its servers (`servers`, names or full addresses), picked at random
+// (`pick`), with the app's own name so its keepers know who asks; a server
+// that fails is left for another one of the list, once, within the same
+// ask. Answers are kept for six hours per place and radius. `userAgent` is
+// like "Octo/1.7 (Android)".
 class RadioBrowser(
     private val http: OkHttpClient,
     private val userAgent: String,
     private val servers: suspend () -> List<String> = ::catalogServers,
     private val now: () -> Long = System::currentTimeMillis,
+    private val pick: (List<String>) -> String = { it.random() },
 ) {
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
-    private var chosen: String? = null
+
+    // The server in use, and the list it was picked from.
+    @Volatile private var chosen: String? = null
+    @Volatile private var pickedFrom: List<String> = emptyList()
     private val kept = HashMap<String, Pair<Long, List<LiveStation>>>()
 
     // The stations around `place` within `radiusMeters`, those this app
@@ -157,7 +168,7 @@ class RadioBrowser(
         val lat = rounded(place.latitude)
         val lon = rounded(place.longitude)
         val key = "$lat,$lon,${radiusMeters.roundToInt()},${place.state},${place.countryCode}"
-        val found = kept[key]?.takeIf { now() - it.first < KEEP_MS }?.second ?: run {
+        val found = keptFor(key) ?: run {
             val near = if (place.located) {
                 search(
                     "geo_lat" to "$lat",
@@ -169,15 +180,24 @@ class RadioBrowser(
             }
             // From the state and country, only the stations the catalog cannot
             // place: one it can place was in the circle search if near enough.
+            // The catalog matches a state by part of its name (Kansas finds
+            // Arkansas), so it is asked for the exact name and checked again.
+            val state = place.state.trim()
             val regional = if (place.countryCode.isNotBlank()) {
-                rows(*listOfNotNull("countrycode" to place.countryCode, place.state.takeIf { it.isNotBlank() }?.let { "state" to it }).toTypedArray())
+                val params = listOfNotNull(
+                    "countrycode" to place.countryCode,
+                    state.takeIf { it.isNotEmpty() }?.let { "state" to it },
+                    ("stateExact" to "true").takeIf { state.isNotEmpty() },
+                )
+                rows(*params.toTypedArray())
+                    .filter { state.isEmpty() || it.state.trim().equals(state, ignoreCase = true) }
                     .filter { !place.located || it.geoLat == null || it.geoLong == null }
                     .mapNotNull { it.toLive() }
             } else {
                 emptyList()
             }
             val all = mergeStations(near, regional, LiveSort.Distance)
-            kept[key] = now() to all
+            keep(key, all)
             all
         }
         mergeStations(found.filter(playable), emptyList(), sort)
@@ -187,14 +207,29 @@ class RadioBrowser(
     // so popular stations rise for everyone. A failure is of no matter.
     suspend fun started(uuid: String) {
         withContext(Dispatchers.IO) {
-            runCatching { get(base().newBuilder().addPathSegments("json/url").addPathSegment(uuid).build()) }
+            runCatching { asking { base -> get(base.newBuilder().addPathSegments("json/url").addPathSegment(uuid).build()) } }
         }
     }
 
+    // An answer kept for `key` that is still fresh.
+    private fun keptFor(key: String): List<LiveStation>? = synchronized(kept) {
+        kept[key]?.takeIf { now() - it.first < KEEP_MS }?.second
+    }
+
+    // Keeps an answer, and lets go of the ones gone stale.
+    private fun keep(key: String, stations: List<LiveStation>) = synchronized(kept) {
+        val at = now()
+        kept.entries.removeAll { at - it.value.first >= KEEP_MS }
+        kept[key] = at to stations
+    }
+
+    // How many answers are kept, for tests.
+    internal fun keptCount(): Int = synchronized(kept) { kept.size }
+
     private suspend fun search(vararg params: Pair<String, String>): List<LiveStation> = rows(*params).mapNotNull { it.toLive() }
 
-    private suspend fun rows(vararg params: Pair<String, String>): List<CatalogStation> {
-        val url = base().newBuilder().addPathSegments("json/stations/search").apply {
+    private suspend fun rows(vararg params: Pair<String, String>): List<CatalogStation> = asking { base ->
+        val url = base.newBuilder().addPathSegments("json/stations/search").apply {
             params.forEach { (name, value) -> addQueryParameter(name, value) }
             addQueryParameter("hidebroken", "true")
             addQueryParameter("order", "clickcount")
@@ -202,44 +237,73 @@ class RadioBrowser(
             addQueryParameter("limit", "$SEARCH_LIMIT")
         }.build()
         val body = get(url)
-        return try {
+        try {
             json.decodeFromString<List<CatalogStation>>(body)
         } catch (e: kotlinx.serialization.SerializationException) {
-            // A server answering something else: another one next time.
-            chosen = null
             throw IOException("The radio catalog sent an answer it could not read", e)
         } catch (e: IllegalArgumentException) {
-            chosen = null
             throw IOException("The radio catalog sent an answer it could not read", e)
         }
+    }
+
+    // Runs one ask against the server in use. When it fails (no answer, an
+    // error, something unreadable), another server of the same list is
+    // asked once; when that fails too, the next ask picks anew.
+    private suspend fun <T> asking(ask: suspend (HttpUrl) -> T): T {
+        val first = server()
+        try {
+            return ask(address(first))
+        } catch (e: IOException) {
+            currentCoroutineContext().ensureActive()
+            chosen = null
+            val others = pickedFrom.filter { it != first }
+            if (others.isEmpty()) throw e
+            val other = pick(others)
+            chosen = other
+            try {
+                return ask(address(other))
+            } catch (again: IOException) {
+                chosen = null
+                throw again
+            }
+        }
+    }
+
+    // The server in use, or one picked from the list now.
+    private suspend fun server(): String {
+        chosen?.let { return it }
+        val list = runCatching { servers() }.getOrDefault(emptyList()).filter { it.isNotBlank() }.distinct()
+        pickedFrom = list
+        val server = if (list.isEmpty()) FALLBACK_SERVER else pick(list)
+        chosen = server
+        return server
     }
 
     // A server's address: a name stands for its https address.
-    private suspend fun base(): HttpUrl {
-        val server = chosen ?: (runCatching { servers() }.getOrDefault(emptyList()).filter { it.isNotBlank() }.randomOrNull() ?: FALLBACK_SERVER)
-        chosen = server
-        return (if ("://" in server) server else "https://$server/").toHttpUrl()
-    }
+    private fun address(server: String): HttpUrl = (if ("://" in server) server else "https://$server/").toHttpUrl()
 
-    private suspend fun get(url: HttpUrl): String {
-        currentCoroutineContext().ensureActive()
+    // One request, given up on the moment the ask is cancelled.
+    private suspend fun get(url: HttpUrl): String = suspendCancellableCoroutine { done ->
         val call = http.newCall(Request.Builder().url(url).header("User-Agent", userAgent).build())
-        val stop = currentCoroutineContext()[Job]?.invokeOnCompletion { if (it != null) call.cancel() }
-        try {
-            return call.execute().use { response ->
-                if (!response.isSuccessful) {
-                    // Another server next time.
-                    chosen = null
-                    throw IOException("The radio catalog answered HTTP ${response.code}")
+        done.invokeOnCancellation { call.cancel() }
+        call.enqueue(
+            object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    done.resumeWithException(e)
                 }
-                response.body.string()
-            }
-        } catch (e: IOException) {
-            chosen = null
-            throw e
-        } finally {
-            stop?.dispose()
-        }
+
+                override fun onResponse(call: Call, response: Response) {
+                    try {
+                        response.use {
+                            if (!it.isSuccessful) throw IOException("The radio catalog answered HTTP ${it.code}")
+                            done.resume(it.body.string())
+                        }
+                    } catch (e: IOException) {
+                        done.resumeWithException(e)
+                    }
+                }
+            },
+        )
     }
 
     private companion object {
