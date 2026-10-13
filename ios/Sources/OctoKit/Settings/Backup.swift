@@ -249,6 +249,8 @@ public struct Backup: Sendable, Equatable {
     public var homeSections: String?
     /// The order each list was left in, by the list's name, as "<order>:asc" or "<order>:desc".
     public var sortOrders: [String: String] = [:]
+    /// The live radio stations kept on the phone, newest first.
+    public var liveStations: [LiveStation] = []
 
     public init() {}
 }
@@ -302,6 +304,7 @@ public enum BackupFile {
             ("homeSections", backup.homeSections.map { .string($0) }),
         ]
         top.append(("sortOrders", sortOrdersJSON(backup.sortOrders)))
+        top.append(("liveStations", .array(backup.liveStations.map(liveStationJSON))))
         return OrderedJSON.fields(top).pretty()
     }
 
@@ -311,6 +314,14 @@ public enum BackupFile {
         func place(_ key: String) -> Int { lists.firstIndex(of: key) ?? lists.count }
         let ordered = orders.sorted { a, b in place(a.key) != place(b.key) ? place(a.key) < place(b.key) : a.key < b.key }
         return .object(ordered.map { ($0.key, .string($0.value)) })
+    }
+
+    /// A kept station in the shape the other apps keep it, without a distance.
+    static func liveStationJSON(_ s: LiveStation) -> OrderedJSON {
+        .object([("uuid", .string(s.uuid)), ("name", .string(s.name)), ("streamUrl", .string(s.streamUrl)),
+                 ("favicon", .string(s.favicon)), ("codec", .string(s.codec)), ("bitrate", .int(Int64(s.bitrate))),
+                 ("hls", .bool(s.hls)), ("country", .string(s.country)), ("countryCode", .string(s.countryCode)),
+                 ("state", .string(s.state)), ("tags", .strings(s.tags)), ("clicks", .int(Int64(s.clicks)))])
     }
 
     static func playerJSON(_ p: PlayerPrefs) -> OrderedJSON {
@@ -461,6 +472,7 @@ public enum BackupFile {
         if case .object(let orders)? = o["sortOrders"] {
             for (list, order) in orders { if let order = order.text { b.sortOrders[list] = order } }
         }
+        b.liveStations = part(o["liveStations"], [LiveStation].self) ?? []
         return b
     }
 
@@ -733,6 +745,7 @@ public enum BackupPlanner {
         if !backup.favoriteAlbums.isEmpty { lines.append(plural(backup.favoriteAlbums.count, "favorite album", "favorite albums")) }
         if !backup.favoriteArtists.isEmpty { lines.append(plural(backup.favoriteArtists.count, "favorite artist", "favorite artists")) }
         if !backup.pins.isEmpty { lines.append(plural(backup.pins.count, "pin on Home", "pins on Home")) }
+        if !backup.liveStations.isEmpty { lines.append(plural(backup.liveStations.count, "kept radio station", "kept radio stations")) }
         if let offsets = backup.lyrics?.offsets, !offsets.isEmpty { lines.append("Lyrics timing for " + plural(offsets.count, "song", "songs")) }
         if let outputs = backup.lyrics?.outputOffsets, !outputs.isEmpty {
             lines.append("Lyrics timing for " + plural(outputs.count, "sound output", "sound outputs"))

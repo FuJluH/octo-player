@@ -109,7 +109,7 @@ private func positiveMod(_ a: Float, _ b: Float) -> Float {
 
 /// Every kind of page, as the glow sees it.
 public enum AmbientPage: Sendable, Equatable {
-    case home, charts, search
+    case home, charts, search, liveRadio
     case library, albums, artists, songs, genres, genre, folders, playlists, playlist, liked, downloads, favorites
     case album, artist, onlineAlbum, onlineArtist
     case settings, settingsPage, sound, signIn, editConnection, serverForm, octoAdmin, importList, family, familyJoin
@@ -121,7 +121,7 @@ public enum AmbientPage: Sendable, Equatable {
 /// pages wherever they were opened from. A page not listed gets no glow.
 public func areaOf(_ page: AmbientPage?) -> AmbientArea? {
     switch page {
-    case .home, .charts: .home
+    case .home, .charts, .liveRadio: .home
     case .search: .search
     case .library, .albums, .artists, .songs, .genres, .folders, .playlists, .liked, .downloads, .favorites,
          .album, .artist, .onlineAlbum, .onlineArtist, .genre, .playlist:

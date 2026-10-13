@@ -208,6 +208,15 @@ extension BackupShape {
             BackupField("enabled", .flag), BackupField("sendPlays", .choice), BackupField("nowPlaying", .flag)
         ), .nullable),
         BackupField("homeSections", .text, .nullable),
-        BackupField("sortOrders", .map(.text))
+        BackupField("sortOrders", .map(.text)),
+        BackupField("liveStations", .list(liveStation))
+    )
+
+    /// A kept live radio station.
+    static let liveStation = fields(
+        BackupField("uuid", .text, .required), BackupField("name", .text), BackupField("streamUrl", .text, .required),
+        BackupField("favicon", .text), BackupField("codec", .text), BackupField("bitrate", .int), BackupField("hls", .flag),
+        BackupField("country", .text), BackupField("countryCode", .text), BackupField("state", .text),
+        BackupField("tags", .list(.text)), BackupField("clicks", .int)
     )
 }
