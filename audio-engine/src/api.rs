@@ -65,7 +65,7 @@ pub struct QueueItem {
     /// it runs at double or half time.
     #[uniffi(default)]
     pub bpm: Option<f64>,
-    /// A live stream, such as internet radio: it has no length and cannot be
+    /// A live stream, such as live radio: it has no length and cannot be
     /// sought, a dropped connection is made again, and its titles arrive as
     /// `StreamTitle` events.
     #[uniffi(default)]

@@ -1,4 +1,4 @@
-//! Live streams end to end: HLS playlists and internet radio, from a local
+//! Live streams end to end: HLS playlists and live radio, from a local
 //! server through the decoder.
 
 use std::io::Write;

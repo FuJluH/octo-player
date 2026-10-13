@@ -6,7 +6,7 @@
 //! and skips. A dropped connection is picked up where it broke off, and a
 //! connection that goes quiet for too long is replaced.
 //!
-//! A live stream (internet radio) has no length and no ranges: it is never
+//! A live stream (live radio) has no length and no ranges: it is never
 //! sought, a new connection carries on from wherever the server is now, and
 //! its in-stream titles are taken out of the audio.
 

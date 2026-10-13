@@ -696,6 +696,8 @@ impl Player {
     // Starts the current entry from `secs`, replacing whatever plays.
     fn start_current(&mut self, secs: f64, transition: Transition, reason: EndReason) {
         let Some(index) = self.current else { return };
+        // A live stream starts wherever its server is.
+        let secs = if self.queue[index].item.live { 0.0 } else { secs };
         if !self.ensure_output() {
             // With a song already loaded, carry on with this one once a
             // device opens.

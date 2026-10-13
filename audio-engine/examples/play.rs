@@ -6,7 +6,7 @@
 //!   --volume <0..1>        --crossfade <ms>       --speed <0.5..2>
 //!   --pitch <factor>       --eq <preset name>     --replaygain <off|track|album|smart>
 //!   --start <ms>           --device <id>          --list-devices
-//!   --silent               --seconds <n>          --live (streams are internet radio)
+//!   --silent               --seconds <n>          --live (streams are live radio)
 //!
 //! While playing, type a line and press Enter:
 //!   p  pause or resume     n  next song           s <secs>  seek

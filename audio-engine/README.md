@@ -78,7 +78,7 @@ same sound shaping as the Android app, and a sample-accurate clock.
 | Pause and resume | 10 ms fade |
 | Per-output profiles | The app keeps them: it gets `DeviceChanged` and calls `set_eq` and `set_dsp` |
 | Trusted self-signed certificates | `set_trusted_certificates`: the system's check first, then a SHA-256 pin for that host only |
-| Live streams | Internet radio (`live` items): reconnects, ICY titles as `StreamTitle`, HLS with AAC or fMP4 segments; MPEG-TS segments refused |
+| Live streams | Live radio (`live` items): reconnects, ICY titles as `StreamTitle`, HLS with AAC or fMP4 segments; MPEG-TS segments refused |
 | Skip silence | Not ported |
 
 <!-- markdownlint-enable MD013 -->
@@ -187,7 +187,7 @@ requests and reconnects.
 
 ## Live streams
 
-A `QueueItem` with `live = true` is internet radio. It has no length and
+A `QueueItem` with `live = true` is live radio. It has no length and
 ignores seeks and start positions, and nothing is opened behind it until
 it fails or the listener moves on.
 

@@ -267,8 +267,12 @@ impl Decoder {
     }
 
     /// Jumps to `secs` and returns where playing will carry on, which is
-    /// exactly there unless that is past the end.
+    /// exactly there unless that is past the end. A live stream carries on
+    /// where it is.
     pub fn seek(&mut self, secs: f64) -> Result<f64, Failure> {
+        if self.live {
+            return Ok(self.position_secs());
+        }
         let time = Time::try_from_secs_f64(secs.max(0.0))
             .ok_or_else(|| Failure::new(ErrorKind::InvalidArgument, "bad seek position"))?;
         let seeked = self
