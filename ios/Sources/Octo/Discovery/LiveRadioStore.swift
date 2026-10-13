@@ -1,0 +1,146 @@
+import Foundation
+import Observation
+import OctoKit
+
+/// Live radio near the listener: the place and radius chosen, the stations the Radio Browser
+/// catalog lists there, and the stations kept on the phone. The place, radius, order and kept
+/// stations stay on the phone (preferences suite "live_radio"); only the place's rounded
+/// coordinates, and its state and country, go to the catalog.
+@MainActor
+@Observable
+final class LiveRadioStore {
+    static let shared = LiveRadioStore()
+
+    /// What the page shows under its controls.
+    enum Found: Equatable {
+        /// No place chosen yet.
+        case noPlace
+        case loading
+        case failed(String)
+        case ready([LiveStation])
+    }
+
+    private(set) var kept: KeptStations
+    private(set) var place: LivePlace?
+    private(set) var radiusIndex: Int
+    private(set) var sort: LiveSort
+    private(set) var found: Found = .noPlace
+    /// Whether distances are in miles, by the phone's region.
+    let miles: Bool
+
+    /// HLS stations play through the app's own HLS reader.
+    static let hlsPlays = true
+
+    @ObservationIgnored private let store = UserDefaults(suiteName: "live_radio") ?? .standard
+    @ObservationIgnored private let browser = RadioBrowser(userAgent: "Octo/\(Session.appVersion) (iPhone)")
+    @ObservationIgnored private var loading: Task<Void, Never>?
+
+    private enum Keys {
+        static let kept = "kept"
+        static let place = "place"
+        static let radius = "radius"
+        static let sort = "sort"
+    }
+
+    private init() {
+        miles = Locale.current.measurementSystem != .metric
+        kept = KeptStations.decoded(store.string(forKey: Keys.kept))
+        place = store.data(forKey: Keys.place).flatMap { try? JSONDecoder().decode(LivePlace.self, from: $0) }
+        radiusIndex = store.object(forKey: Keys.radius) as? Int ?? liveRadiusDefaultIndex
+        sort = LiveSort(rawValue: store.string(forKey: Keys.sort) ?? "") ?? .distance
+    }
+
+    var radius: LiveRadius { LiveRadius.at(radiusIndex, miles: miles) }
+    var radiusChoices: [LiveRadius] { LiveRadius.choices(miles: miles) }
+
+    /// The stations found that this app plays, in the order chosen, and how many were left out.
+    var shown: (stations: [LiveStation], hidden: Int) {
+        guard case .ready(let all) = found else { return ([], 0) }
+        let playable = playableStations(all, hlsPlays: Self.hlsPlays)
+        return (sortStations(playable.stations, by: sort), playable.hidden)
+    }
+
+    // MARK: Choices
+
+    func choose(_ next: LivePlace) {
+        // Only the rounded place is ever kept.
+        let rounded = next.rounded
+        place = rounded
+        if let data = try? JSONEncoder().encode(rounded) { store.set(data, forKey: Keys.place) }
+        load()
+    }
+
+    func setRadius(_ index: Int) {
+        guard index != radiusIndex, radiusChoices.indices.contains(index) else { return }
+        radiusIndex = index
+        store.set(index, forKey: Keys.radius)
+        load()
+    }
+
+    func setSort(_ next: LiveSort) {
+        guard next != sort else { return }
+        sort = next
+        store.set(next.rawValue, forKey: Keys.sort)
+    }
+
+    // MARK: Finding
+
+    /// Asks the catalog for the stations around the place, kept answers first. Asking again
+    /// while one is on the way starts over.
+    func load() {
+        guard let place else {
+            found = .noPlace
+            return
+        }
+        loading?.cancel()
+        if case .ready = found {} else { found = .loading }
+        let radius = radius.meters
+        let browser = browser
+        loading = Task { [weak self] in
+            do {
+                let stations = try await browser.near(place, radiusMeters: radius)
+                guard !Task.isCancelled else { return }
+                self?.found = .ready(stations)
+            } catch {
+                guard !Task.isCancelled, !(error is CancellationError) else { return }
+                self?.found = .failed("Couldn't reach the radio station list. Check the connection and try again.")
+            }
+        }
+    }
+
+    /// The page is open again: the stations are asked for again, the kept answer coming at once
+    /// while it is under six hours old.
+    func shownAgain() {
+        if place != nil { load() }
+    }
+
+    // MARK: Playing
+
+    /// Plays a station, and tells the catalog it was started.
+    func play(_ station: LiveStation, on player: Player) {
+        guard let song = radioSong(radioId(streamUrl: station.streamUrl, name: station.name)) else { return }
+        player.play([song], from: 0)
+        let browser = browser
+        let uuid = station.uuid
+        Task.detached { await browser.started(uuid) }
+    }
+
+    // MARK: Keeping
+
+    func isKept(_ uuid: String) -> Bool { kept.has(uuid) }
+
+    func keep(_ station: LiveStation) { save(kept.keep(station)) }
+
+    func drop(_ uuid: String) { save(kept.drop(uuid)) }
+
+    /// Adds a backup's kept stations after the ones here.
+    func restore(_ stations: [LiveStation]) {
+        guard !stations.isEmpty else { return }
+        save(kept.adding(stations))
+    }
+
+    private func save(_ next: KeptStations) {
+        kept = next
+        store.set(next.encoded(), forKey: Keys.kept)
+    }
+}

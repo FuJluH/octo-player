@@ -47,6 +47,8 @@ enum Route: Hashable, Codable {
     case sound
     /// The order of Home's shelves, and which ones show.
     case homeSections
+    /// Live radio stations near a place, from the Radio Browser catalog.
+    case liveRadioNear
 }
 
 extension Route {
@@ -63,6 +65,7 @@ extension Route {
         case .library(let page): page.ambientPage
         case .sound: .sound
         case .homeSections: .settingsPage
+        case .liveRadioNear: .liveRadio
         case .onlineAlbum: .onlineAlbum
         case .onlineArtist: .onlineArtist
         case .charts: .charts
@@ -485,6 +488,7 @@ extension View {
                 case .liveListFrom(let query): LiveListEditView(id: nil, start: LibraryQuery.fromJSON(query))
                 case .sound: SoundPage()
                 case .homeSections: HomeSectionsPage()
+                case .liveRadioNear: LiveRadioPage()
                 }
             }
             .background { PageBackdrop(page: route.ambientPage, route: route) }

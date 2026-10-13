@@ -15,6 +15,7 @@ struct HomeView: View {
     @Environment(\.refreshLibrary) private var refreshLibrary
     @State private var model = HomeModel()
     @State private var settings = AppSettings.shared
+    @State private var liveRadio = LiveRadioStore.shared
     @State private var reading = false
 
     var body: some View {
@@ -81,7 +82,7 @@ struct HomeView: View {
             albumShelf(section.title, model.recentlyPlayed, destination: .library(.history(mostPlayed: false)))
         case .madeForYou: stationShelf(section.title, model.madeForYou, counts: true)
         case .stations: stationShelf(section.title, octoRadio(model.stations), counts: false)
-        case .internetRadio: stationShelf(section.title, internetRadio(model.stations), counts: false)
+        case .internetRadio: liveRadioShelf(section.title)
         case .yearMixes, .genreMixes, .artistMixes, .countryMixes: stationShelf(section.title, model.mixes[section] ?? [], counts: true)
         case .recentlyAdded: albumShelf(section.title, model.recentlyAdded)
         case .mostPlayed: songShelf(section.title, model.mostPlayed.map(\.asSong), destination: .library(.history(mostPlayed: true)))
@@ -159,6 +160,30 @@ struct HomeView: View {
                 }
             }
         }
+    }
+
+    /// Live radio: a way to the stations near the listener first, then the stations kept on the
+    /// phone, then the internet radio stations on the server, each stream once. Its title opens
+    /// the near-you page too.
+    @ViewBuilder
+    private func liveRadioShelf(_ title: String) -> some View {
+        let kept = liveRadio.kept.stations
+        let keptStreams = Set(kept.map(\.streamUrl))
+        let server = internetRadio(model.stations).filter { !keptStreams.contains($0.streamUrl ?? "") }
+        HomeShelfTitle(title: title, destination: .liveRadioNear)
+        SideScroller {
+            FindNearbyCard()
+            ForEach(kept) { station in
+                KeptStationCard(station: station) { liveRadio.play(station, on: player) }
+            }
+            ForEach(server) { station in
+                StationCard(name: station.name, coverArt: coverId(of: station.artwork) ?? station.id, songCount: nil,
+                            loading: model.startingStation == station.id, open: nil) {
+                    model.playStation(station)
+                }
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: kept.map(\.uuid))
     }
 
     /// The first shelf: albums, artists and playlists pinned there, in their order.

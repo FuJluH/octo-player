@@ -33,6 +33,7 @@ struct SearchView: View {
                     .padding(.leading, 20)
                     .padding(.top, 10)
             }
+            if looksLikeRadioSearch(trimmed) { liveRadioRow }
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
@@ -103,6 +104,35 @@ struct SearchView: View {
         }
         .animation(.easeOut(duration: 0.2), value: focused)
         .padding(.horizontal, 20)
+    }
+
+    /// Words about radio offer the live stations near the listener above the results.
+    private var liveRadioRow: some View {
+        NavigationLink(value: Route.liveRadioNear) {
+            HStack(spacing: 14) {
+                Image(systemName: "dot.radiowaves.left.and.right")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(OctoColor.accent)
+                    .frame(width: 40, height: 40)
+                    .glassEffect(.regular, in: .circle)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Live radio near you").font(.octoBodySmall).foregroundStyle(.white)
+                    Text("Stations on the air around you").font(.octoCaption).foregroundStyle(OctoColor.textMuted)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(OctoColor.textMuted)
+                    .accessibilityHidden(true)
+            }
+            .frame(minHeight: 56)
+            .padding(.horizontal, 20)
+            .padding(.top, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .transition(.opacity)
     }
 
     // MARK: What shows under it

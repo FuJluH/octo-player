@@ -39,9 +39,11 @@ final class NowPlayingCenter {
             return
         }
         if artworkFor != item.entryId { loadArtwork(item) }
+        // A station that names what it plays shows that, with the station's name as the artist.
+        let live = item.isRadioStation ? LiveTitleBoard.shared.titles[item.trackId] : nil
         var info: [String: Any] = [
-            MPMediaItemPropertyTitle: item.title,
-            MPMediaItemPropertyArtist: item.artist,
+            MPMediaItemPropertyTitle: live ?? item.title,
+            MPMediaItemPropertyArtist: live == nil ? item.artist : item.title,
             MPMediaItemPropertyAlbumTitle: item.album,
             MPMediaItemPropertyPlaybackDuration: player.duration,
             MPNowPlayingInfoPropertyElapsedPlaybackTime: player.elapsed,

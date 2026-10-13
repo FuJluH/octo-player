@@ -59,7 +59,22 @@ final class Player {
         case afterSongs(Int)
     }
 
-    var current: Song? { queue.indices.contains(index) ? queue[index] : nil }
+    /// The song on now. A live station that names what it plays shows that as the song, with
+    /// the station's name as the artist.
+    var current: Song? {
+        guard queue.indices.contains(index) else { return nil }
+        return liveShown(queue[index])
+    }
+
+    /// A station's song line as its stream names it now; any other song as it is.
+    func liveShown(_ song: Song) -> Song {
+        guard isRadio(song.id), let title = LiveTitleBoard.shared.titles[song.id] else { return song }
+        var shown = song
+        shown.title = title
+        shown.artist = radioTitle(song.id) ?? song.title
+        shown.displayArtist = shown.artist
+        return shown
+    }
     var currentItem: QueueItem? { items.indices.contains(index) ? items[index] : nil }
     /// How far through the song, from 0 to 1.
     var progress: Double { duration > 0 ? min(elapsed / duration, 1) : 0 }
@@ -173,6 +188,8 @@ final class Player {
         }
         engine.songSetUp = { [sound] item in sound.songSetUp(soundSong(item)) }
         wireEngine()
+        // A station's new title shows on the lock screen at once.
+        LiveTitleBoard.shared.onChange = { [weak self] in self?.nowPlaying.publish() }
         // A corrected length shows at once in the queue, the time line and the rows.
         lengths.onChange = { [weak self] corrected in
             Task { @MainActor in
@@ -760,7 +777,7 @@ final class Player {
     /// over only when a song becomes ready.
     private func failed(_ item: QueueItem, _ error: PlayError) {
         guard engine.playWhenReady else { return }
-        let why = playFailureOf(error, outside: item.isFind).words
+        let why = item.isRadioStation ? stationFailureWords(error) : playFailureOf(error, outside: item.isFind).words
         let title = item.title.trimmingCharacters(in: .whitespaces).isEmpty ? "a song" : item.title
         failuresInARow += 1
         playbackLog.info("playback failed: \(error.detail, privacy: .public)")

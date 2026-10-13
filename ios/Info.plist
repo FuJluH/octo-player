@@ -32,6 +32,8 @@
     </array>
     <key>NSCameraUsageDescription</key>
     <string>Octo uses the camera to scan a family QR code.</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Octo uses your location only to find radio stations near you.</string>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>

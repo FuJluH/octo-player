@@ -26,6 +26,7 @@ struct RadioStationsScreen: View {
                     .padding(.leading, 20)
                     .padding(.bottom, 8)
                 }
+                findNearbyRow
                 switch stations {
                 case .loading:
                     LoadingSpinner(size: 22).frame(maxWidth: .infinity).padding(.top, 24)
@@ -57,6 +58,35 @@ struct RadioStationsScreen: View {
             StationForm(draft: request.draft, saving: saving, problem: problem, save: save, delete: delete)
                 .interactiveDismissDisabled(saving)
         }
+    }
+
+    /// The way to the live stations near the listener, to play, keep or add here.
+    private var findNearbyRow: some View {
+        NavigationLink(value: Route.liveRadioNear) {
+            HStack(spacing: 14) {
+                Image(systemName: "location.magnifyingglass")
+                    .font(.system(size: 19))
+                    .foregroundStyle(OctoColor.accent)
+                    .frame(width: 22, height: 22)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Find stations near you").font(.octoBodySmall).foregroundStyle(OctoColor.textPrimary)
+                    Text(controls.isAdmin ? "Play one, keep it, or add it to this server" : "Play one, or keep it on this phone")
+                        .font(.octoCaption)
+                        .foregroundStyle(OctoColor.textMuted)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(OctoColor.textMuted)
+                    .accessibilityHidden(true)
+            }
+            .frame(minHeight: 60)
+            .padding(.horizontal, 20)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.bottom, 4)
     }
 
     private func row(_ station: ServerStationDetails, readOnly: Bool, admin: Bool) -> some View {

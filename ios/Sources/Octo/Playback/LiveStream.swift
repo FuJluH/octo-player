@@ -1,19 +1,61 @@
 import AudioToolbox
 import AVFoundation
 import Foundation
+import Observation
 import OctoKit
 
+/// A live station's bytes as they come, read in order by the live decoder.
+protocol LiveByteSource: ByteSource {
+    /// The next bytes as they come, up to `count`; none once the stream has ended.
+    func next(_ count: Int) throws -> Data
+}
+
+/// What each live station is playing now, by its queue id, as its stream says (ICY titles).
+@MainActor
+@Observable
+final class LiveTitleBoard {
+    static let shared = LiveTitleBoard()
+
+    private(set) var titles: [String: String] = [:]
+    /// Told after a title changes, for the lock screen.
+    @ObservationIgnored var onChange: (() -> Void)?
+
+    private init() {}
+
+    func set(_ trackId: String, _ title: String?) {
+        guard titles[trackId] != title else { return }
+        titles[trackId] = title
+        onChange?()
+    }
+
+    /// Sets a title from a stream's own thread.
+    nonisolated static func post(_ trackId: String, _ title: String?) {
+        Task { @MainActor in shared.set(trackId, title) }
+    }
+}
+
 /// A live station's bytes as they arrive: no length and no end. Reads wait for them; the download
-/// waits while a good stretch sits unread (a long pause), so the phone does not fill up.
-final class LiveBytes: NSObject, ByteSource, URLSessionDataDelegate, @unchecked Sendable {
+/// waits while a good stretch sits unread (a long pause), so the phone does not fill up. ICY
+/// metadata is asked for and taken out of the sound, its titles handed to `onTitle`. A stream
+/// that fails or ends is asked for again after 1, 2, 4 and 8 s; after that it has failed.
+final class LiveBytes: NSObject, LiveByteSource, URLSessionDataDelegate, @unchecked Sendable {
     private let condition = NSCondition()
+    private let request: URLRequest
+    private let onTitle: (@Sendable (String?) -> Void)?
     private var buffer = Data()
     private var failure: PlayError?
-    private var finished = false
     private var cancelled = false
     private var held = false
     private var type: String?
     private var task: URLSessionDataTask?
+    /// The ICY metadata reader for the connection in use, when the station sends metadata.
+    private var icy: IcyReader?
+    /// Tries made since the stream last played a good stretch.
+    private var retries = 0
+    /// Sound bytes the connection in use has given.
+    private var received = 0
+    /// The HLS playlist the station answered with instead of a stream, if it did.
+    private var playlist: URL?
     private lazy var session: URLSession = {
         let queue = OperationQueue()
         queue.maxConcurrentOperationCount = 1
@@ -28,15 +70,34 @@ final class LiveBytes: NSObject, ByteSource, URLSessionDataDelegate, @unchecked 
     /// Unread bytes past this hold the download; under the lower mark it carries on.
     private static let holdAbove = 1 << 20
     private static let carryOnBelow = 256 << 10
+    /// A connection that gave this much sound played a good stretch: the next failure starts the
+    /// waits over.
+    private static let goodStretch = 128 << 10
 
-    init(request: URLRequest) {
+    init(request: URLRequest, onTitle: (@Sendable (String?) -> Void)? = nil) {
+        var asked = request
+        asked.setValue("1", forHTTPHeaderField: "Icy-MetaData")
+        self.request = asked
+        self.onTitle = onTitle
         super.init()
+        onTitle?(nil)
+        condition.withLock { connect() }
+    }
+
+    /// Opens a connection. Called with the lock held.
+    private func connect() {
+        icy = nil
+        received = 0
+        held = false
         let next = session.dataTask(with: request)
         task = next
         next.resume()
     }
 
     var contentType: String? { condition.withLock { type } }
+
+    /// The HLS playlist the station answered with instead of a stream, once it has.
+    var playlistAddress: URL? { condition.withLock { playlist } }
 
     /// A live stream has no length.
     func length() throws -> Int64 { throw PlayError(.ioUnspecified, detail: "a live stream has no length") }
@@ -48,7 +109,6 @@ final class LiveBytes: NSObject, ByteSource, URLSessionDataDelegate, @unchecked 
         return data.count
     }
 
-    /// The next bytes as they come, up to `count`; none once the stream has ended.
     func next(_ count: Int) throws -> Data {
         condition.lock()
         defer { condition.unlock() }
@@ -64,7 +124,6 @@ final class LiveBytes: NSObject, ByteSource, URLSessionDataDelegate, @unchecked 
                 return taken
             }
             if let failure { throw failure }
-            if finished { return Data() }
             condition.wait(until: Date().addingTimeInterval(0.5))
         }
     }
@@ -77,6 +136,27 @@ final class LiveBytes: NSObject, ByteSource, URLSessionDataDelegate, @unchecked 
         condition.broadcast()
         condition.unlock()
         session.invalidateAndCancel()
+    }
+
+    /// The connection in use stopped: asks again after the next wait, or fails once the waits
+    /// are used up. Called with the lock held.
+    private func lost(_ why: PlayError) {
+        task = nil
+        guard !cancelled, failure == nil else { return }
+        guard retries < liveReconnectDelays.count else {
+            failure = why
+            condition.broadcast()
+            return
+        }
+        let wait = liveReconnectDelays[retries]
+        retries += 1
+        playbackLog.info("live stream lost (\(why.detail, privacy: .public)), again in \(wait, privacy: .public) s")
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + wait) { [weak self] in
+            guard let self else { return }
+            self.condition.withLock {
+                if !self.cancelled && self.failure == nil && self.task == nil { self.connect() }
+            }
+        }
     }
 
     // MARK: Session delegate
@@ -95,42 +175,82 @@ final class LiveBytes: NSObject, ByteSource, URLSessionDataDelegate, @unchecked 
                     completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
         condition.lock()
         defer { condition.unlock() }
+        guard dataTask === task else {
+            completionHandler(.cancel)
+            return
+        }
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            failure = PlayError(.badHttpStatus, httpStatus: http.statusCode, detail: "HTTP \(http.statusCode)")
+            let why = PlayError(.badHttpStatus, httpStatus: http.statusCode, detail: "HTTP \(http.statusCode)")
+            completionHandler(.cancel)
+            if liveStatusRetries(http.statusCode) {
+                lost(why)
+            } else {
+                task = nil
+                failure = why
+                condition.broadcast()
+            }
+            return
+        }
+        if let http = response as? HTTPURLResponse, let every = http.value(forHTTPHeaderField: "icy-metaint").flatMap({ Int($0) }), every > 0 {
+            icy = IcyReader(interval: every)
+        }
+        if hlsPlaylistTypes.contains(response.mimeType?.lowercased() ?? "") {
+            // An HLS playlist where a stream was expected: the opener reads it as HLS instead.
+            playlist = response.url ?? request.url
+            task = nil
+            failure = PlayError(.parsingManifestUnsupported, detail: "an HLS playlist")
             condition.broadcast()
             completionHandler(.cancel)
             return
         }
-        type = response.mimeType
+        if type == nil { type = response.mimeType }
         completionHandler(.allow)
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        var titles: [String] = []
         condition.lock()
-        defer { condition.unlock() }
-        buffer.append(data)
+        guard dataTask === task else {
+            condition.unlock()
+            return
+        }
+        if var reader = icy {
+            let split = reader.feed(data)
+            icy = reader
+            buffer.append(split.sound)
+            received += split.sound.count
+            titles = split.titles
+        } else {
+            buffer.append(data)
+            received += data.count
+        }
+        if received >= Self.goodStretch { retries = 0 }
         if !held && buffer.count > Self.holdAbove {
             held = true
             dataTask.suspend()
         }
         condition.broadcast()
+        condition.unlock()
+        if let onTitle { for title in titles { onTitle(title) } }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         condition.lock()
         defer { condition.unlock() }
+        guard task === self.task else { return }
         if let error {
             let urlError = error as? URLError
-            if urlError?.code != .cancelled, failure == nil {
-                let code: PlayErrorCode = urlError?.code == .timedOut ? .networkConnectionTimeout : .networkConnectionFailed
-                failure = PlayError(code, detail: urlError.map { "\($0.code.rawValue)" } ?? "network")
-            }
+            if urlError?.code == .cancelled { return }
+            let code: PlayErrorCode = urlError?.code == .timedOut ? .networkConnectionTimeout : .networkConnectionFailed
+            lost(PlayError(code, detail: urlError.map { "\($0.code.rawValue)" } ?? "network"))
         } else {
-            finished = true
+            lost(PlayError(.networkConnectionFailed, detail: "the stream ended"))
         }
-        condition.broadcast()
     }
 }
+
+/// The types an HLS playlist is sent as.
+let hlsPlaylistTypes: Set<String> = ["application/vnd.apple.mpegurl", "application/x-mpegurl", "audio/mpegurl", "audio/x-mpegurl"]
 
 /// Turns a live station into sound as its bytes arrive: the stream is cut into packets as it
 /// comes and decoded to the decks' rate. It has no length, and no place in it can be chosen.
@@ -142,7 +262,7 @@ final class LiveStreamDecoder: SongDecoding {
     let bitDepth: Int? = nil
     let bitrate: Int?
 
-    private let bytes: LiveBytes
+    private let bytes: any LiveByteSource
     private let parser: PacketParser
     private var converter: AudioConverterRef?
     private let list: UnsafeMutableAudioBufferListPointer
@@ -156,7 +276,7 @@ final class LiveStreamDecoder: SongDecoding {
     /// How much is read from the station at a time.
     private static let readSize = 16_384
 
-    init(bytes: LiveBytes, mimeType: String?, outputRate: Double) throws {
+    init(bytes: any LiveByteSource, mimeType: String?, outputRate: Double) throws {
         self.bytes = bytes
         list = AudioBufferList.allocate(maximumBuffers: 2)
         // The type the station says it sends, read once its answer is in.

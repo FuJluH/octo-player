@@ -96,6 +96,7 @@ final class Backups {
         let lb = settings.listenBrainz
         b.listenBrainz = ListenBrainzBackup(enabled: lb.enabled, sendPlays: lb.sendPlays, nowPlaying: lb.nowPlaying)
         b.homeSections = encodeHomeSections(settings.homeSections)
+        b.liveStations = LiveRadioStore.shared.kept.stations
         return b
     }
 
@@ -151,6 +152,7 @@ final class Backups {
             ListenBrainzSync.shared.restoreChoices(enabled: lb.enabled, sendPlays: lb.sendPlays, nowPlaying: lb.nowPlaying)
         }
         if let sections = backup.homeSections { settings.setHomeSections(homeSectionOrder(stored: sections)) }
+        LiveRadioStore.shared.restore(backup.liveStations)
         await library?.restoreSortOrders(backup.sortOrders)
         if let lyrics = backup.lyrics {
             settings.setKeepScreenOn(lyrics.keepScreenOn)

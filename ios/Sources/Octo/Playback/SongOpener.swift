@@ -159,12 +159,29 @@ enum SongOpener {
                 }
                 return OpenedSong(decoder: try AssetDecoder(url: url, outputRate: outputRate), bytes: file)
             case "http" where isRadio(trackId), "https" where isRadio(trackId):
-                // A live station: read as it comes, with no length and no end.
+                // A live station: read as it comes, with no length and no end; an HLS one by
+                // its playlist, any other with its ICY titles.
                 guard OnlineWatch.shared.online else { throw PlayError(.ioUnspecified, detail: "No connection") }
-                let live = LiveBytes(request: URLRequest(url: url))
+                if looksLikeHls(uri) {
+                    let hls = HlsBytes(url: url)
+                    token.adopt(hls)
+                    if token.isCancelled { throw PlayError(.ioUnspecified, detail: "stopped") }
+                    return OpenedSong(decoder: try LiveStreamDecoder(bytes: hls, mimeType: nil, outputRate: outputRate), bytes: hls)
+                }
+                let live = LiveBytes(request: URLRequest(url: url)) { title in LiveTitleBoard.post(trackId, title) }
                 token.adopt(live)
                 if token.isCancelled { throw PlayError(.ioUnspecified, detail: "stopped") }
-                return OpenedSong(decoder: try LiveStreamDecoder(bytes: live, mimeType: mime, outputRate: outputRate), bytes: live)
+                do {
+                    return OpenedSong(decoder: try LiveStreamDecoder(bytes: live, mimeType: mime, outputRate: outputRate), bytes: live)
+                } catch {
+                    // A station that answered with an HLS playlist is read as HLS.
+                    guard let playlist = live.playlistAddress else { throw error }
+                    live.cancel()
+                    let hls = HlsBytes(url: playlist)
+                    token.adopt(hls)
+                    if token.isCancelled { throw PlayError(.ioUnspecified, detail: "stopped") }
+                    return OpenedSong(decoder: try LiveStreamDecoder(bytes: hls, mimeType: nil, outputRate: outputRate), bytes: hls)
+                }
             case "http", "https":
                 let remote = try RemoteFile(online: { OnlineWatch.shared.online }) {
                     guard OnlineWatch.shared.online else { throw PlayError(.ioUnspecified, detail: "No connection") }
