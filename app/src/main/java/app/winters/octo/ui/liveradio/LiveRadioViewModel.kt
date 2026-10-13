@@ -14,7 +14,9 @@ import app.winters.octo.liveradio.LiveSearch
 import app.winters.octo.liveradio.LiveSort
 import app.winters.octo.liveradio.LiveStation
 import app.winters.octo.liveradio.PlaceAnswer
+import app.winters.octo.liveradio.PlaceSource
 import app.winters.octo.liveradio.Places
+import app.winters.octo.liveradio.placeProblemLine
 import app.winters.octo.liveradio.RadioBrowser
 import app.winters.octo.liveradio.StationAction
 import app.winters.octo.liveradio.livePlayable
@@ -86,6 +88,9 @@ class LiveRadioViewModel @Inject constructor(
     // Why the last place could not be found, in words.
     var placeProblem by mutableStateOf<String?>(null)
         private set
+
+    // Where a place is looked up: on the Octo server or by the phone.
+    fun placeSource(): PlaceSource = places.source()
 
     // The country a typed code or town is looked for in.
     var country by mutableStateOf(places.localeCountry().ifBlank { "US" })
@@ -176,12 +181,8 @@ class LiveRadioViewModel @Inject constructor(
     }
 
     private suspend fun found(answer: PlaceAnswer, typed: Boolean) {
-        when (answer) {
-            is PlaceAnswer.Found -> use(answer.place)
-            PlaceAnswer.NoFix -> placeProblem = "The phone could not tell where it is. Check that location is on, or type a place instead."
-            PlaceAnswer.NotFound -> placeProblem = if (typed) "No place found by that name. Try a ZIP or postal code." else "No place found here."
-            PlaceAnswer.NoLookup -> placeProblem = "This phone can't look up places by name. Use your location instead."
-        }
+        placeProblem = placeProblemLine(answer, typed)
+        if (answer is PlaceAnswer.Found) use(answer.place)
     }
 
     private suspend fun use(place: LivePlace) {

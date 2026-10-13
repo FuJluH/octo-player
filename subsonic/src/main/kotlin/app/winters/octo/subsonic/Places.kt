@@ -19,15 +19,32 @@ data class Place(
     val longitude: Double = 0.0,
 )
 
-// What getPlace asks: a postal code, or else a city's name and state, with
-// the ISO country code either way. Blank parts are left out.
-internal fun placeParams(code: String?, name: String?, state: String?, country: String): Map<String, String> = buildMap {
+// What getPlace asks: a postal code, or else a city's name and state, or
+// else a position (the nearest place the server knows, within 30 km), with
+// the ISO country code when known. Blank parts are left out, and a position
+// goes to two decimals, about a kilometer.
+internal fun placeParams(
+    code: String?,
+    name: String?,
+    state: String?,
+    country: String,
+    latitude: Double? = null,
+    longitude: Double? = null,
+): Map<String, String> = buildMap {
     val postal = code?.trim().orEmpty()
-    if (postal.isNotEmpty()) {
-        put("code", postal)
-    } else {
-        name?.trim()?.takeIf { it.isNotEmpty() }?.let { put("name", it) }
-        state?.trim()?.takeIf { it.isNotEmpty() }?.let { put("state", it) }
+    val city = name?.trim().orEmpty()
+    when {
+        postal.isNotEmpty() -> put("code", postal)
+        city.isNotEmpty() -> {
+            put("name", city)
+            state?.trim()?.takeIf { it.isNotEmpty() }?.let { put("state", it) }
+        }
+        latitude != null && longitude != null -> {
+            put("latitude", twoPlaces(latitude))
+            put("longitude", twoPlaces(longitude))
+        }
     }
-    put("country", country.trim().uppercase())
+    country.trim().uppercase().takeIf { it.isNotEmpty() }?.let { put("country", it) }
 }
+
+private fun twoPlaces(value: Double): String = (Math.round(value * 100) / 100.0).toString()

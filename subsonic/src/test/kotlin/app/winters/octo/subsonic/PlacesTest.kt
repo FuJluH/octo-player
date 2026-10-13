@@ -62,4 +62,29 @@ class PlacesTest {
         answer("""{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":70,"message":"Octo does not know that place."}}}""")
         assertNull(client().place("00000", null, null, "US"))
     }
+
+    @Test
+    fun aPositionAsksForTheNearestPlace() = runTest {
+        answer(
+            """{"subsonic-response":{"status":"ok","version":"1.16.1",
+               "place":{"code":"97205","name":"Portland","state":"Oregon","country":"US","latitude":45.52,"longitude":-122.68}}}""",
+        )
+        val place = client().place(null, null, null, "", latitude = 45.5191, longitude = -122.6804)
+        assertEquals(Place("97205", "Portland", "Oregon", "US", 45.52, -122.68), place)
+
+        val url = server.takeRequest().url
+        assertEquals("/rest/getPlace", url.encodedPath)
+        // Only the rounded position goes, and no country when none is known.
+        assertEquals("45.52", url.queryParameter("latitude"))
+        assertEquals("-122.68", url.queryParameter("longitude"))
+        assertNull(url.queryParameter("country"))
+        assertNull(url.queryParameter("code"))
+        assertNull(url.queryParameter("name"))
+    }
+
+    @Test
+    fun aCodeOrNameWinsOverAPosition() {
+        val params = placeParams("55401", null, null, "US", 1.0, 2.0)
+        assertEquals(mapOf("code" to "55401", "country" to "US"), params)
+    }
 }

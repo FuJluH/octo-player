@@ -16,6 +16,8 @@ import android.os.CancellationSignal
 import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
+import app.winters.octo.data.SessionRepository
+import app.winters.octo.data.SessionState
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -25,20 +27,6 @@ import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resume
-
-// What looking for a place gave.
-sealed interface PlaceAnswer {
-    data class Found(val place: LivePlace) : PlaceAnswer
-
-    // The phone gave no position: its location is off or it found none.
-    data object NoFix : PlaceAnswer
-
-    // Nothing by that name or code.
-    data object NotFound : PlaceAnswer
-
-    // The phone has no service for looking up places by name.
-    data object NoLookup : PlaceAnswer
-}
 
 // How long one position, or one lookup, is waited for.
 private const val FIX_WAIT_MS = 15_000L
@@ -50,13 +38,29 @@ private const val FRESH_FIX_MS = 10 * 60 * 1000L
 // Finds places for Live radio near you: the phone's rough position, and
 // places named by a ZIP or postal code or a town. A position is rounded to
 // about a kilometer as soon as it is read, before anything else sees it.
+// Towns and states are looked up on the Octo server in use when it lists
+// octoPlaces, and by the phone's place service only when it does not.
 @Singleton
-class Places @Inject constructor(@ApplicationContext private val context: Context) {
+class Places @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val sessions: SessionRepository,
+) {
     private val locations = context.getSystemService(LocationManager::class.java)
     private val connectivity = context.getSystemService(ConnectivityManager::class.java)
 
     // The catalog files states and countries under their English names.
-    private val geocoder: Geocoder? by lazy { if (Geocoder.isPresent()) Geocoder(context, Locale.ENGLISH) else null }
+    private val phonePlaces: PhonePlaces? by lazy { if (Geocoder.isPresent()) PhonePlaces(Geocoder(context, Locale.ENGLISH)) else null }
+
+    private val finder = PlaceFinder(
+        server = {
+            val session = (sessions.state.value as? SessionState.SignedIn)?.session
+            session?.takeIf { listsPlaces(it.extensions) }?.let { ServerPlaces(it.client) }
+        },
+        phone = { phonePlaces },
+    )
+
+    // Where places are looked up right now.
+    fun source(): PlaceSource = finder.source()
 
     fun allowed(): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -76,44 +80,16 @@ class Places @Inject constructor(@ApplicationContext private val context: Contex
         }.getOrDefault(emptySet())
     }
 
-    // Where the phone is, roughly, named by its town and state when the
-    // phone can look them up.
+    // Where the phone is, roughly, named by its town and state when they
+    // can be looked up.
     suspend fun here(): PlaceAnswer {
         if (!allowed()) return PlaceAnswer.NoFix
         val fix = fix() ?: return PlaceAnswer.NoFix
-        val latitude = rounded(fix.latitude)
-        val longitude = rounded(fix.longitude)
-        val address = geocoder?.let { reverse(it, latitude, longitude) }
-        return PlaceAnswer.Found(
-            LivePlace(
-                latitude = latitude,
-                longitude = longitude,
-                label = placeLabel(address?.locality ?: address?.subAdminArea, address?.adminArea, "Your location"),
-                state = address?.adminArea.orEmpty(),
-                countryCode = address?.countryCode?.uppercase().orEmpty(),
-            ),
-        )
+        return finder.around(roundedPlace(fix.latitude), roundedPlace(fix.longitude))
     }
 
     // A place by what was typed, in a country (by its code).
-    suspend fun named(text: String, countryCode: String): PlaceAnswer {
-        val words = text.trim()
-        if (words.isEmpty()) return PlaceAnswer.NotFound
-        val coder = geocoder ?: return PlaceAnswer.NoLookup
-        val country = Locale.Builder().setRegion(countryCode).build().getDisplayCountry(Locale.ENGLISH)
-        val found = lookup(coder, if (country.isBlank()) words else "$words, $country") ?: return PlaceAnswer.NotFound
-        val address = found.firstOrNull { it.countryCode.equals(countryCode, ignoreCase = true) } ?: found.firstOrNull { it.hasLatitude() } ?: return PlaceAnswer.NotFound
-        if (!address.hasLatitude() || !address.hasLongitude()) return PlaceAnswer.NotFound
-        return PlaceAnswer.Found(
-            LivePlace(
-                latitude = rounded(address.latitude),
-                longitude = rounded(address.longitude),
-                label = placeLabel(address.locality ?: address.subAdminArea ?: words, address.adminArea, words),
-                state = address.adminArea.orEmpty(),
-                countryCode = address.countryCode?.uppercase() ?: countryCode.uppercase(),
-            ),
-        )
-    }
+    suspend fun named(text: String, countryCode: String): PlaceAnswer = finder.typed(text, countryCode)
 
     // One rough position: a recent one the phone already has, or a new one.
     @SuppressLint("MissingPermission")
@@ -156,8 +132,38 @@ class Places @Inject constructor(@ApplicationContext private val context: Contex
         }
         return order.filter { it in on }
     }
+}
 
-    private suspend fun reverse(coder: Geocoder, latitude: Double, longitude: Double): Address? = withTimeoutOrNull(LOOKUP_WAIT_MS) {
+// Places looked up by the phone's own place service (Android's Geocoder),
+// with the asynchronous calls on Android 13 and newer.
+private class PhonePlaces(private val coder: Geocoder) : PlaceService {
+    override suspend fun typed(asked: TypedPlace, country: String): LivePlace? {
+        val name = Locale.Builder().setRegion(country).build().getDisplayCountry(Locale.ENGLISH)
+        val words = asked.words
+        val found = lookup(if (name.isBlank()) words else "$words, $name") ?: return null
+        val address = found.firstOrNull { it.countryCode.equals(country, ignoreCase = true) && it.hasLatitude() } ?: found.firstOrNull { it.hasLatitude() } ?: return null
+        if (!address.hasLongitude()) return null
+        return LivePlace(
+            latitude = roundedPlace(address.latitude),
+            longitude = roundedPlace(address.longitude),
+            label = placeLabel(address.locality ?: address.subAdminArea ?: words, address.adminArea, words),
+            state = address.adminArea.orEmpty(),
+            countryCode = address.countryCode?.uppercase() ?: country.uppercase(),
+        )
+    }
+
+    override suspend fun around(latitude: Double, longitude: Double): LivePlace? {
+        val address = reverse(latitude, longitude) ?: return null
+        return LivePlace(
+            latitude = latitude,
+            longitude = longitude,
+            label = placeLabel(address.locality ?: address.subAdminArea, address.adminArea, "Your location"),
+            state = address.adminArea.orEmpty(),
+            countryCode = address.countryCode?.uppercase().orEmpty(),
+        )
+    }
+
+    private suspend fun reverse(latitude: Double, longitude: Double): Address? = withTimeoutOrNull(LOOKUP_WAIT_MS) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             suspendCancellableCoroutine { done ->
                 coder.getFromLocation(
@@ -183,7 +189,7 @@ class Places @Inject constructor(@ApplicationContext private val context: Contex
         }
     }
 
-    private suspend fun lookup(coder: Geocoder, text: String): List<Address>? = withTimeoutOrNull(LOOKUP_WAIT_MS) {
+    private suspend fun lookup(text: String): List<Address>? = withTimeoutOrNull(LOOKUP_WAIT_MS) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             suspendCancellableCoroutine { done ->
                 coder.getFromLocationName(
@@ -208,9 +214,8 @@ class Places @Inject constructor(@ApplicationContext private val context: Contex
         }
     }?.takeIf { it.isNotEmpty() }
 
-    // To two decimals, about a kilometer.
-    private fun rounded(value: Double): Double = Math.round(value * 100) / 100.0
 }
+
 
 // Every country, by its code, named in the phone's language and in order.
 fun countryChoices(): List<Pair<String, String>> {

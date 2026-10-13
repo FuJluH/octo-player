@@ -49,6 +49,7 @@ import app.winters.octo.liveradio.LiveStation
 import app.winters.octo.liveradio.countryChoices
 import app.winters.octo.liveradio.hiddenLine
 import app.winters.octo.liveradio.noStationsLine
+import app.winters.octo.liveradio.placeSourceLine
 import app.winters.octo.liveradio.radiusChoices
 import app.winters.octo.liveradio.radiusLabel
 import app.winters.octo.liveradio.stationActions
@@ -214,6 +215,7 @@ private fun PlaceChooser(
             style = OctoType.bodySmall,
             color = OctoColors.TextSecondary,
         )
+        Text(placeSourceLine(vm.placeSource()), style = OctoType.caption, color = OctoColors.TextMuted)
         AccentButton("Use my location", onClick = onUseLocation, loading = vm.locating, enabled = !vm.locating)
         Text("Or type a ZIP, postal code or town", style = OctoType.caption, color = OctoColors.TextMuted, modifier = Modifier.padding(top = 4.dp))
         GlassInput(
