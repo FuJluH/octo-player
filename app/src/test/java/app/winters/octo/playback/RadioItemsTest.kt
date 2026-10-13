@@ -7,7 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 // A station as the phone's player shows and opens it: the song its stream
-// names, and how it is opened again after a drop.
+// names, which loader opens it, and how it is opened again after a drop.
 class RadioItemsTest {
     @Test
     fun theStreamsSongGoesOverTheStationsName() {
@@ -45,14 +45,39 @@ class RadioItemsTest {
     }
 
     @Test
-    fun aStationIsOpenedAgainAFewTimesAWhile() {
-        val drops = RadioDrops(max = 3, windowMs = 120_000)
-        assertTrue(drops.allow(0))
-        assertTrue(drops.allow(10_000))
-        assertTrue(drops.allow(20_000))
-        assertFalse(drops.allow(30_000))
-        // Once the first drop is two minutes old, one more is allowed.
-        assertTrue(drops.allow(121_000))
+    fun aStreamThatEndsIsOpenedAgainAFewTimesAWhile() {
+        var clock = 0L
+        val ends = RadioEnds(windowMs = 120_000, now = { clock })
+        repeat(RADIO_RETRIES) {
+            assertTrue(ends.ended("http://s/a"))
+            clock += 10_000
+        }
+        assertEquals(RADIO_RETRIES, ends.recent("http://s/a"))
+        // Once more in the same while: it is let end, and the queue moves on.
+        assertFalse(ends.ended("http://s/a"))
+        assertEquals(0, ends.recent("http://s/a"))
+        // Another station keeps its own count.
+        assertTrue(ends.ended("http://s/b"))
+        // Ends older than the window are forgotten.
+        clock += 200_000
+        assertEquals(0, ends.recent("http://s/b"))
+    }
+
+    @Test
+    fun aStationGoesToTheLoaderForItsKind() {
+        assertEquals(RadioLoader.None, radioLoader("device:12"))
+        assertEquals(RadioLoader.Stream, radioLoader(radioId("http://s/live.mp3", "One")))
+        assertEquals(RadioLoader.Hls, radioLoader(radioId("http://s/live", "Two", hls = true)))
+        assertEquals(RadioLoader.Hls, radioLoader(radioId("https://s/master.M3U8?token=1", "Three")))
+    }
+
+    @Test
+    fun newWordsForTheSameItemsLeaveABlendAlone() {
+        val items = listOf("radio:a:b" to "q:1")
+        assertTrue(wordsOnly(items, listOf("radio:a:b" to "q:1")))
+        assertFalse(wordsOnly(items, listOf("radio:c:d" to "q:1")))
+        assertFalse(wordsOnly(items, listOf("radio:a:b" to null)))
+        assertFalse(wordsOnly(emptyList(), emptyList()))
     }
 
     @Test

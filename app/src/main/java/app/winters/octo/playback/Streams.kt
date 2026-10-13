@@ -136,7 +136,8 @@ class Streams @Inject constructor(
     // and keep trying through a dropped connection. One for each deck.
     fun mediaSourceFactory(): MediaSource.Factory = RadioAwareSources(
         songs = DefaultMediaSourceFactory(dataSourceFactory(networkFactory()), extractors()).setLoadErrorHandlingPolicy(Retries()),
-        radio = DefaultMediaSourceFactory(networkFactory(), extractors()).setLoadErrorHandlingPolicy(RadioRetries()),
+        hls = DefaultMediaSourceFactory(networkFactory(), extractors()).setLoadErrorHandlingPolicy(RadioRetries()),
+        streams = DefaultMediaSourceFactory(ReconnectingDataSource.Factory(networkFactory()), extractors()).setLoadErrorHandlingPolicy(RadioRetries()),
     )
 
     // What the scout reads songs with: the same chain the decks play from
@@ -287,12 +288,18 @@ internal fun lastingRadioError(error: IOException): Boolean = when (error) {
     else -> false
 }
 
-// Radio stations go to their own loader, everything else to the songs'.
+// Radio stations go to their own loaders, everything else to the songs':
+// an HLS station to one that reads its playlist and parts as they are, any
+// other to one whose stream, should it end, is opened again
+// (ReconnectingDataSource).
 @OptIn(UnstableApi::class)
-internal class RadioAwareSources(private val songs: MediaSource.Factory, private val radio: MediaSource.Factory) : MediaSource.Factory {
+internal class RadioAwareSources(
+    private val songs: MediaSource.Factory,
+    private val hls: MediaSource.Factory,
+    private val streams: MediaSource.Factory,
+) : MediaSource.Factory {
     override fun setDrmSessionManagerProvider(drmSessionManagerProvider: DrmSessionManagerProvider): MediaSource.Factory = apply {
-        songs.setDrmSessionManagerProvider(drmSessionManagerProvider)
-        radio.setDrmSessionManagerProvider(drmSessionManagerProvider)
+        listOf(songs, hls, streams).forEach { it.setDrmSessionManagerProvider(drmSessionManagerProvider) }
     }
 
     // Songs only: stations keep their own retries.
@@ -300,10 +307,25 @@ internal class RadioAwareSources(private val songs: MediaSource.Factory, private
         songs.setLoadErrorHandlingPolicy(loadErrorHandlingPolicy)
     }
 
-    override fun getSupportedTypes(): IntArray = (songs.supportedTypes + radio.supportedTypes).distinct().toIntArray()
+    override fun getSupportedTypes(): IntArray = (songs.supportedTypes + hls.supportedTypes).distinct().toIntArray()
 
-    override fun createMediaSource(mediaItem: MediaItem): MediaSource =
-        if (isRadio(mediaItem.mediaId)) radio.createMediaSource(mediaItem) else songs.createMediaSource(mediaItem)
+    override fun createMediaSource(mediaItem: MediaItem): MediaSource = when (radioLoader(mediaItem.mediaId)) {
+        RadioLoader.None -> songs.createMediaSource(mediaItem)
+        RadioLoader.Hls -> hls.createMediaSource(mediaItem)
+        RadioLoader.Stream -> streams.createMediaSource(mediaItem)
+    }
+}
+
+// Which loader an item takes.
+internal enum class RadioLoader { None, Hls, Stream }
+
+// A station marked HLS, or whose address ends in .m3u8, is HLS; any other
+// station is one stream.
+internal fun radioLoader(id: String): RadioLoader {
+    val (stream, _) = radioOf(id) ?: return RadioLoader.None
+    if (radioIsHls(id)) return RadioLoader.Hls
+    val path = stream.substringBefore('?').substringBefore('#').lowercase()
+    return if (path.endsWith(".m3u8")) RadioLoader.Hls else RadioLoader.Stream
 }
 
 // The chain a song is read through. Server songs get their request pinned

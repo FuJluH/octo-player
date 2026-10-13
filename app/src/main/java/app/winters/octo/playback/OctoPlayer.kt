@@ -70,6 +70,11 @@ class AudioFocus(context: Context, private val onChange: (Int) -> Unit) {
 
 private const val DUCKED_VOLUME = 0.2f
 
+// Whether a replacement keeps every item (by id and queue entry) where it
+// was, so only its words change.
+internal fun wordsOnly(before: List<Pair<String, String?>>, after: List<Pair<String, String?>>): Boolean =
+    before.isNotEmpty() && before == after && after.all { it.second != null }
+
 // The one player the rest of the phone sees: the lock screen, the
 // notification, headphones and the app all talk to this. It forwards to the
 // deck that is playing, and hands over to the other deck for a crossfade
@@ -266,8 +271,11 @@ class OctoPlayer(
         return super.handleMoveMediaItems(fromIndex, toIndex, newIndex)
     }
 
+    // Items put back with new words only (a station's song title, say) are
+    // the same items in the same places: a blend under way goes on.
     override fun handleReplaceMediaItems(fromIndex: Int, toIndex: Int, mediaItems: List<MediaItem>): ListenableFuture<*> {
-        fader.interrupt()
+        val before = (fromIndex until toIndex.coerceAtMost(deck.mediaItemCount)).map { deck.getMediaItemAt(it).let { item -> item.mediaId to item.entryId } }
+        if (!wordsOnly(before, mediaItems.map { it.mediaId to it.entryId })) fader.interrupt()
         return super.handleReplaceMediaItems(fromIndex, toIndex, stamped(mediaItems))
     }
 
