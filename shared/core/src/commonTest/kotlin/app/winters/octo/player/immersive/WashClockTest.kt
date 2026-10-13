@@ -19,6 +19,44 @@ class WashClockTest {
         assertEquals(30, drawn)
     }
 
+    // Frames drawn in one second at `limit` on a screen of `hz`.
+    private fun drawnInASecond(limit: Float, hz: Double): Int {
+        val clock = WashClock(limit)
+        clock.start(0L)
+        val frames = (hz).toInt()
+        var drawn = 0
+        for (i in 1..frames) if (clock.tick((i * 1_000_000_000.0 / hz).toLong(), limit, BaseBpm, 1f, moving = true)) drawn++
+        return drawn
+    }
+
+    @Test
+    fun theLimitHoldsOnScreensThatAreNotAWholeMultipleOfIt() {
+        assertEquals(60.0, drawnInASecond(60f, 90.0).toDouble(), 1.0)
+        assertEquals(90.0, drawnInASecond(90f, 120.0).toDouble(), 1.0)
+        assertEquals(60.0, drawnInASecond(60f, 144.0).toDouble(), 1.0)
+        assertEquals(60.0, drawnInASecond(60f, 120.0).toDouble(), 1.0)
+        assertEquals(30.0, drawnInASecond(30f, 90.0).toDouble(), 1.0)
+    }
+
+    @Test
+    fun aScreenAHairOffTheLimitDrawsEveryFrame() {
+        assertEquals(60, drawnInASecond(60f, 60.1))
+        assertEquals(59, drawnInASecond(60f, 59.9))
+        assertEquals(120, drawnInASecond(120f, 120.2))
+    }
+
+    @Test
+    fun aDrawnFrameFillsItsSlotUnlessAHairEarlyOrFarBehind() {
+        // Late by a third of a frame (60 on 90 Hz): it keeps the slot.
+        assertEquals(16_666_666L, nextSlot(0L, 22_222_222L, 60f))
+        // A hair early: the drawn time.
+        assertEquals(16_600_000L, nextSlot(0L, 16_600_000L, 60f))
+        // Early by more than that: still the slot.
+        assertEquals(16_666_666L, nextSlot(0L, 13_888_889L, 60f))
+        // After a stall: half a frame behind the drawn time, no further.
+        assertEquals(100_000_000L - 8_333_333L, nextSlot(0L, 100_000_000L, 60f))
+    }
+
     @Test
     fun theDriftDoesNotDependOnTheFrameRate() {
         val slow = WashClock(30f).apply { start(0L) }
@@ -37,8 +75,9 @@ class WashClockTest {
         val clock = WashClock(30f)
         clock.start(0L)
         assertTrue(clock.tick(2 * frame60, 30f, BaseBpm, 1f, moving = true))
-        // Due 26.7 ms after the last drawn frame; it wakes 6 ms before that.
-        assertEquals(26_666_666L - RestMarginNanos, clock.restNanos(2 * frame60))
+        // Due 26.7 ms after the last drawn frame's slot (a nanosecond
+        // before the frame); it wakes 6 ms before that.
+        assertEquals(26_666_665L - RestMarginNanos, clock.restNanos(2 * frame60))
         // It sleeps through the 60 Hz screen's next frame, which would not
         // be drawn, and wakes before the one after, which is.
         val woken = 2 * frame60 + clock.restNanos(2 * frame60)
