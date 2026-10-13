@@ -285,11 +285,12 @@ final class HomeModel {
         }
     }
 
-    /// Plays what a station has lined up today, or an added station's stream. Taps while one is
-    /// on the way are ignored.
-    func playStation(id: String, name: String) {
+    /// Plays what a station or a Made for you list has lined up today, a station as a station
+    /// that keeps going, or an added station's stream. Taps while one is on the way are ignored.
+    func playStation(_ station: Station) {
         guard startingStation == nil, let discovery, let player, let router else { return }
-        if let stream = stations.first(where: { $0.id == id })?.streamUrl {
+        let id = station.id, name = station.name
+        if case .playStream(let stream) = stationTap(station) {
             if let song = radioSong(radioId(streamUrl: stream, name: name)) { player.play([song], from: 0) }
             return
         }
@@ -299,7 +300,7 @@ final class HomeModel {
             do {
                 let songs = try await discovery.stationSongs(id)
                 if songs.isEmpty { router.show("Nothing is playing on \(name) right now") }
-                player.play(songs, from: 0)
+                player.playServerList(songs, id: id, name: name)
             } catch OctoError.notFound {
                 // Made anew on the server since the list was read: off Home, and read again.
                 stations.removeAll { $0.id == id }

@@ -750,15 +750,23 @@ private struct LiveCoversKey: Hashable {
 
 // MARK: Playlist
 
-/// A playlist opened from the server's list: its page, by the library's copy of it.
+/// A playlist opened from the server's list: its page, by the library's copy of it. A list the
+/// library keeps no copy of, like a station or a Made for you list, opens as the server has it.
 struct PlaylistView: View {
     let playlist: Playlist
     @Environment(Library.self) private var library
     @State private var id: String?
+    @State private var serverOnly = false
 
     var body: some View {
         Group {
-            if let id { PlaylistPage(id: id) } else { LibrarySpinner().padding(.top, detailTopGap) }
+            if let id {
+                PlaylistPage(id: id)
+            } else if serverOnly {
+                ServerListPage(playlist: playlist)
+            } else {
+                LibrarySpinner().padding(.top, detailTopGap)
+            }
         }
         .task {
             let all = await library.playlists()
@@ -767,8 +775,74 @@ struct PlaylistView: View {
                 if summary.id == playlist.id { match = summary.id; break }
                 if await library.playlist(summary.id)?.serverId == playlist.id { match = summary.id; break }
             }
-            id = match ?? playlist.id
+            if let match { id = match } else { serverOnly = true }
         }
+    }
+}
+
+/// A list on the server the library keeps no copy of, like a station or a Made for you list: its
+/// cover and name, Play and Shuffle, then the songs it has lined up now. It cannot be changed
+/// here. A station plays as a station, from a row, Play or Shuffle alike, adding more of its
+/// songs as it runs low.
+struct ServerListPage: View {
+    let playlist: Playlist
+    @Environment(Discovery.self) private var discovery
+    @Environment(Player.self) private var player
+    @State private var page: LoadState<[Song]> = .loading
+
+    var body: some View {
+        LoadStateView(state: page, retry: { Task { await reload() } }) { songs in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    header(songs)
+                    if songs.isEmpty {
+                        MutedNote("Nothing is lined up on \(playlist.name) right now.", vertical: 20)
+                    }
+                    ForEach(Array(songs.enumerated()), id: \.element.id) { position, song in
+                        SongRow(song: song, list: songs, position: position, offersAdd: true, addSpace: true, tap: {
+                            play(songs, from: position)
+                        })
+                    }
+                    Color.clear.frame(height: 20)
+                }
+            }
+            .barClearance()
+        }
+        .inlineTitle(playlist.name)
+        .task { if page.value == nil { await reload() } }
+    }
+
+    private func header(_ songs: [Song]) -> some View {
+        let seconds = songs.reduce(0) { $0 + $1.duration }
+        let details = [songsCount(songs.count), seconds > 0 ? asLength(seconds) : nil].compactMap { $0 }.joined(separator: " · ")
+        return VStack(spacing: 0) {
+            Cover(id: playlist.coverArt, size: 240, radius: 10)
+                .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
+            Text(playlist.name).font(.octoTitle).multilineTextAlignment(.center).padding(.top, 20).bigTitle()
+            Text(details)
+                .font(.octoCaption)
+                .foregroundStyle(OctoColor.textMuted)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 14)
+            if !songs.isEmpty {
+                PlayShuffle { play(songs) } shuffle: { play(songs, shuffled: true) }
+                    .padding(.top, 10)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 20)
+        .padding(.top, detailTopGap)
+        .padding(.bottom, 16)
+    }
+
+    private func play(_ songs: [Song], from position: Int = 0, shuffled: Bool = false) {
+        player.playServerList(songs, from: position, id: playlist.id, name: playlist.name, shuffled: shuffled)
+    }
+
+    private func reload() async {
+        page = .loading
+        if let state = await loadOnline({ try await discovery.stationSongs(playlist.id) }) { page = state }
     }
 }
 

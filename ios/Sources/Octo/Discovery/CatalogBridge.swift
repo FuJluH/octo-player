@@ -66,6 +66,16 @@ extension LibraryArtist {
     func pageId(_ sourceInUse: String?) -> String { serverId(of: id, sourceId: sourceInUse ?? sourceId) ?? id }
 }
 
+extension Station {
+    /// A station or a Made for you list as its page opens it: a read-only list on the server.
+    var asPlaylist: Playlist? {
+        let data = try? JSONSerialization.data(withJSONObject: [
+            "id": id, "name": name, "songCount": songCount ?? 0, "coverArt": coverId(of: artwork) ?? id, "readonly": true,
+        ])
+        return data.flatMap { try? JSONDecoder().decode(Playlist.self, from: $0) }
+    }
+}
+
 extension PlaylistSummary {
     /// The playlist as its page opens it.
     func asPlaylist(_ sourceInUse: String?) -> Playlist? {

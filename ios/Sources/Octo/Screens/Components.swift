@@ -619,29 +619,66 @@ struct SongCard: View {
     }
 }
 
-/// A station or a Made for you list: tapping plays it.
+/// A station or a Made for you list. With `open`, tapping opens its songs and the round play
+/// button on its cover plays them at once; without, as for an internet radio station added to the
+/// server, which has no list, tapping plays it. It dims while it starts.
 struct StationCard: View {
     let name: String
     let coverArt: String?
     var songCount: Int?
     var loading = false
+    /// The page of its songs.
+    var open: Route?
     let play: () -> Void
 
+    private static let size: CGFloat = 150
+
     var body: some View {
+        if let open {
+            NavigationLink(value: open) { card }
+                .buttonStyle(PressScale(scale: 0.97))
+                .accessibilityHint("Open \(name)")
+                .overlay(alignment: .topLeading) {
+                    playButton.frame(width: Self.size, height: Self.size, alignment: .bottomTrailing)
+                }
+        } else {
+            Button(action: play) { card }
+                .buttonStyle(PressScale(scale: 0.97))
+        }
+    }
+
+    private var card: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Cover(id: coverArt, size: Self.size)
+            Text(name).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
+            if let songCount {
+                Text(songCount == 1 ? "1 song" : "\(songCount) songs")
+                    .font(.octoBodySmall)
+                    .foregroundStyle(OctoColor.textSecondary)
+            }
+        }
+        .frame(width: Self.size, alignment: .leading)
+        .opacity(loading ? 0.5 : 1)
+    }
+
+    /// Plays the list at once, a spinner in its place while it starts.
+    private var playButton: some View {
         Button(action: play) {
-            VStack(alignment: .leading, spacing: 8) {
-                Cover(id: coverArt, size: 150)
-                Text(name).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
-                if let songCount {
-                    Text(songCount == 1 ? "1 song" : "\(songCount) songs")
-                        .font(.octoBodySmall)
-                        .foregroundStyle(OctoColor.textSecondary)
+            ZStack {
+                if loading {
+                    LoadingSpinner(size: 18)
+                } else {
+                    Image(systemName: "play.fill").font(.system(size: 17, weight: .semibold))
                 }
             }
-            .frame(width: 150, alignment: .leading)
-            .opacity(loading ? 0.5 : 1)
+            .frame(width: 24, height: 24)
+            .foregroundStyle(.white)
         }
-        .buttonStyle(PressScale(scale: 0.97))
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
+        .disabled(loading)
+        .padding(8)
+        .accessibilityLabel("Play \(name)")
     }
 }
 

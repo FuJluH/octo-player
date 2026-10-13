@@ -77,10 +77,8 @@ struct HomeView: View {
         case .pinned: pinnedShelf
         case .recentlyPlayed:
             albumShelf(section.title, model.recentlyPlayed, destination: .library(.history(mostPlayed: false)))
-        case .madeForYou:
-            stationShelf(section.title, model.madeForYou.map { ($0.id, $0.name, coverId(of: $0.artwork) ?? $0.id, $0.songCount) })
-        case .stations:
-            stationShelf(section.title, model.stations.map { ($0.id, $0.name, coverId(of: $0.artwork) ?? $0.id, nil) })
+        case .madeForYou: stationShelf(section.title, model.madeForYou, counts: true)
+        case .stations: stationShelf(section.title, model.stations, counts: false)
         case .recentlyAdded: albumShelf(section.title, model.recentlyAdded)
         case .mostPlayed: songShelf(section.title, model.mostPlayed.map(\.asSong), destination: .library(.history(mostPlayed: true)))
         case .favoriteAlbums: albumShelf(section.title, model.favoriteAlbums, destination: .library(.favorites(.albums)))
@@ -138,17 +136,19 @@ struct HomeView: View {
         }
     }
 
-    /// The server's stations, or the lists it made for the listener; tapping one plays what it has
-    /// lined up. Their titles are never buttons.
+    /// The server's stations, or the lists it made for the listener (`counts` shows how many
+    /// songs each holds); tapping one opens its songs and its play button plays them, while an
+    /// added internet station plays its stream. Their titles are never buttons.
     @ViewBuilder
-    private func stationShelf(_ title: String, _ stations: [(id: String, name: String, cover: String, count: Int?)]) -> some View {
+    private func stationShelf(_ title: String, _ stations: [Station], counts: Bool) -> some View {
         if !stations.isEmpty {
             SectionTitle(title).padding(.top, 18)
             SideScroller {
-                ForEach(stations, id: \.id) { station in
-                    StationCard(name: station.name, coverArt: station.cover, songCount: station.count,
-                                loading: model.startingStation == station.id) {
-                        model.playStation(id: station.id, name: station.name)
+                ForEach(stations) { station in
+                    StationCard(name: station.name, coverArt: coverId(of: station.artwork) ?? station.id,
+                                songCount: counts ? station.songCount : nil, loading: model.startingStation == station.id,
+                                open: stationHasPlayButton(station) ? station.asPlaylist.map(Route.playlist) : nil) {
+                        model.playStation(station)
                     }
                     .animation(.easeInOut(duration: 0.2), value: model.startingStation)
                 }
