@@ -189,7 +189,7 @@ fun HomePage(app: AppState, visit: Visit) {
                             albums(app, AlbumShelf.NeverPlayed.title, it.neverPlayed, whole = it.neverPlayed.size < SHELF_SIZE, seeAll = open(AlbumShelf.NeverPlayed))
                         }
                         // Shelves only the phone draws.
-                        HomeSection.Pinned, HomeSection.Artists, HomeSection.SomethingDifferent -> Unit
+                        HomeSection.Pinned, HomeSection.Artists, HomeSection.SomethingDifferent, HomeSection.InternetRadio -> Unit
                     }
                 }
                 moving(key = "edit-home") {

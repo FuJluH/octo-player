@@ -223,7 +223,7 @@ class HomeViewModel @Inject constructor(
     // The server shelves Home draws now: a hidden one is not asked for.
     private fun wantedStationShelves(): Set<HomeSection> {
         val entries = sections.value ?: return emptySet()
-        return (setOf(HomeSection.Stations, HomeSection.MadeForYou) + MixShelves).filterTo(HashSet()) { entries.shows(it) }
+        return (setOf(HomeSection.Stations, HomeSection.InternetRadio, HomeSection.MadeForYou) + MixShelves).filterTo(HashSet()) { entries.shows(it) }
     }
 
     // The chart is wanted while its shelf shows, and while the library is
@@ -331,7 +331,7 @@ class HomeViewModel @Inject constructor(
         stationsJob = viewModelScope.launch {
             var failed = false
             var answers = 0
-            if (HomeSection.Stations in wanted) {
+            if (HomeSection.Stations in wanted || HomeSection.InternetRadio in wanted) {
                 try {
                     val got = withContext(Dispatchers.IO) { discovery.stations() }
                     stations = answered(stations, got)

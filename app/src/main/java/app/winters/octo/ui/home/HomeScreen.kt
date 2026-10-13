@@ -111,7 +111,8 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
                             HomeSection.Pinned -> pinnedShelf(pinned, onOpen)
                             HomeSection.RecentlyPlayed -> shelf(title, recentlyPlayed, onOpen, onTitle = { onOpen(HistoryRoute()) })
                             HomeSection.MadeForYou -> stationShelf(title, vm.madeForYou, vm.startingStation, onOpen, vm::playStation)
-                            HomeSection.Stations -> stationShelf(title, vm.stations, vm.startingStation, onOpen, vm::playStation)
+                            HomeSection.Stations -> stationShelf(title, vm.stations.filter { it.streamUrl == null }, vm.startingStation, onOpen, vm::playStation)
+                            HomeSection.InternetRadio -> stationShelf(title, vm.stations.filter { it.streamUrl != null }, vm.startingStation, onOpen, vm::playStation)
                             HomeSection.YearMixes, HomeSection.GenreMixes, HomeSection.ArtistMixes, HomeSection.CountryMixes ->
                                 stationShelf(title, vm.mixes[entry.section.mixGroup].orEmpty(), vm.startingStation, onOpen, vm::playStation)
                             HomeSection.RecentlyAdded -> shelf(title, recent.orEmpty(), onOpen)

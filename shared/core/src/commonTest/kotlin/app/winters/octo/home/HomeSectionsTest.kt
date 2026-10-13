@@ -6,7 +6,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HomeSectionsTest {
-    private val defaultIds = "pinned,recentlyPlayed,madeForYou,stations,yearMixes,genreMixes,artistMixes,countryMixes,recentlyAdded,mostPlayed,favoriteAlbums,charts,artists," +
+    private val defaultIds = "pinned,recentlyPlayed,madeForYou,stations,internetRadio,yearMixes,genreMixes,artistMixes,countryMixes,recentlyAdded,mostPlayed,favoriteAlbums,charts,artists," +
         "somethingDifferent,notPlayedLately,neverFinished,neverPlayed"
 
     private fun ids(entries: List<HomeSectionEntry>) = entries.map { (if (it.shown) "" else "-") + it.section.id }
@@ -27,7 +27,7 @@ class HomeSectionsTest {
 
     @Test
     fun aStoredOrderReadsBackTheSame() {
-        val stored = "charts,-pinned,neverPlayed,recentlyPlayed,madeForYou,stations,-yearMixes,genreMixes,artistMixes,countryMixes,recentlyAdded,mostPlayed,favoriteAlbums,artists," +
+        val stored = "charts,-pinned,neverPlayed,recentlyPlayed,madeForYou,stations,internetRadio,-yearMixes,genreMixes,artistMixes,countryMixes,recentlyAdded,mostPlayed,favoriteAlbums,artists," +
             "-somethingDifferent,notPlayedLately,neverFinished"
         val entries = homeSectionOrder(stored)
         assertEquals(stored, encodeHomeSections(entries))
@@ -56,7 +56,7 @@ class HomeSectionsTest {
             "madeForYou,pinned,recentlyPlayed,recentlyAdded,mostPlayed,favoriteAlbums,charts,artists," +
                 "somethingDifferent,notPlayedLately,neverFinished,neverPlayed",
         )
-        assertEquals(listOf("madeForYou", "stations", "yearMixes", "genreMixes", "artistMixes", "countryMixes", "pinned", "recentlyPlayed"), ids(entries).take(8))
+        assertEquals(listOf("madeForYou", "stations", "internetRadio", "yearMixes", "genreMixes", "artistMixes", "countryMixes", "pinned", "recentlyPlayed"), ids(entries).take(9))
         assertTrue(entries.first { it.section == HomeSection.Stations }.shown)
     }
 
@@ -65,7 +65,7 @@ class HomeSectionsTest {
         val entries = homeSectionOrder("-recentlyPlayed,neverPlayed")
         assertEquals(
             listOf(
-                "pinned", "-recentlyPlayed", "madeForYou", "stations", "yearMixes", "genreMixes", "artistMixes", "countryMixes", "recentlyAdded", "mostPlayed", "favoriteAlbums",
+                "pinned", "-recentlyPlayed", "madeForYou", "stations", "internetRadio", "yearMixes", "genreMixes", "artistMixes", "countryMixes", "recentlyAdded", "mostPlayed", "favoriteAlbums",
                 "charts", "artists", "somethingDifferent", "notPlayedLately", "neverFinished", "neverPlayed",
             ),
             ids(entries),
@@ -79,7 +79,7 @@ class HomeSectionsTest {
         assertEquals(
             listOf(
                 "pinned", "charts", "artists", "somethingDifferent", "notPlayedLately", "neverFinished", "neverPlayed",
-                "recentlyPlayed", "madeForYou", "stations", "yearMixes", "genreMixes", "artistMixes", "countryMixes", "recentlyAdded", "mostPlayed", "favoriteAlbums",
+                "recentlyPlayed", "madeForYou", "stations", "internetRadio", "yearMixes", "genreMixes", "artistMixes", "countryMixes", "recentlyAdded", "mostPlayed", "favoriteAlbums",
             ),
             ids(entries),
         )
@@ -104,8 +104,8 @@ class HomeSectionsTest {
 
     @Test
     fun movingAsAListDragReportsIt() {
-        // Drag "charts" (11) to the top.
-        var entries = moveHomeSections(DefaultHomeSections, listOf(11), 0)
+        // Drag "charts" (12) to the top.
+        var entries = moveHomeSections(DefaultHomeSections, listOf(12), 0)
         assertEquals(listOf("charts", "pinned", "recentlyPlayed"), ids(entries).take(3))
         // Drag "pinned" (now 1) down below "stations" (now 4): it lands before offset 5.
         entries = moveHomeSections(entries, listOf(1), 5)
@@ -119,7 +119,7 @@ class HomeSectionsTest {
     @Test
     fun movingToAPlaceInTheNewOrder() {
         val entries = moveHomeSection(DefaultHomeSections, HomeSection.Pinned, 3)
-        assertEquals(listOf("recentlyPlayed", "madeForYou", "stations", "pinned", "yearMixes"), ids(entries).take(5))
+        assertEquals(listOf("recentlyPlayed", "madeForYou", "stations", "pinned", "internetRadio"), ids(entries).take(5))
         assertEquals(DefaultHomeSections, moveHomeSection(entries, HomeSection.Pinned, 0))
     }
 
@@ -128,10 +128,10 @@ class HomeSectionsTest {
         val listed = DefaultHomeSections.map { it.section } - setOf(HomeSection.Pinned, HomeSection.Artists, HomeSection.SomethingDifferent)
         // Down: "recentlyPlayed" (0 of the list) onto "stations" (2) goes just after it.
         val down = moveListedHomeSection(DefaultHomeSections, listed, 0, 2)
-        assertEquals(listOf("pinned", "madeForYou", "stations", "recentlyPlayed", "yearMixes"), ids(down).take(5))
-        // Up: "notPlayedLately" (11 of the list) onto "charts" (10) goes just before it, "artists" staying after "charts".
-        val up = moveListedHomeSection(DefaultHomeSections, listed, 11, 10)
-        assertEquals(listOf("favoriteAlbums", "notPlayedLately", "charts", "artists", "somethingDifferent", "neverFinished"), ids(up).subList(10, 16))
+        assertEquals(listOf("pinned", "madeForYou", "stations", "recentlyPlayed", "internetRadio"), ids(down).take(5))
+        // Up: "notPlayedLately" (12 of the list) onto "charts" (11) goes just before it, "artists" staying after "charts".
+        val up = moveListedHomeSection(DefaultHomeSections, listed, 12, 11)
+        assertEquals(listOf("favoriteAlbums", "notPlayedLately", "charts", "artists", "somethingDifferent", "neverFinished"), ids(up).subList(11, 17))
         assertEquals(DefaultHomeSections, moveListedHomeSection(DefaultHomeSections, listed, 3, 3))
         assertEquals(DefaultHomeSections, moveListedHomeSection(DefaultHomeSections, listed, 40, 0))
     }

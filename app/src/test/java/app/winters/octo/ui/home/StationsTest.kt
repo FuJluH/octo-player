@@ -51,7 +51,7 @@ class StationsTest {
     // nothing to show and plays.
     @Test
     fun aTapOpensASongListAndPlaysAStream() {
-        assertTrue(opensOnTap(Station("or3kZ9QpLmN2xY7wV1bC0a", "Your Mix", null)))
+        assertTrue(opensOnTap(Station("or3kZ9QpLmN2xY7wV1bC0a", "Your Radio", null)))
         assertTrue(opensOnTap(Station("og1", "New Releases", null, songCount = 40)))
         assertFalse(opensOnTap(Station("rs-1", "City Radio", null, streamUrl = "https://radio.example.com/live.mp3")))
     }

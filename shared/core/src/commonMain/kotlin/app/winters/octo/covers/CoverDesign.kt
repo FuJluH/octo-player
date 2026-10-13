@@ -145,7 +145,7 @@ fun coverWords(spec: CoverSpec, side: Int, setter: CoverTypesetter, book: CoverB
 // The words a cover sets large and the light line under them. A name
 // ending in a word that says what the list is (Mix, Radio, Chart) is set
 // as two lines, "Discovery" over "Mix", "Bad Bunny" over "Station",
-// whatever kind of list it is; "Your Mix" and the like stay whole. A
+// whatever kind of list it is; "Your Radio" and the like stay whole. A
 // `coverTitle` from the server is set as it is. Otherwise the name is set
 // whole over `line`, unless the name already says what it is.
 data class CoverTitle(val title: String, val line: String?)
@@ -173,11 +173,11 @@ fun coverTitle(name: String, line: String?, coverTitle: String? = null): CoverTi
 // name, not a kind.
 private val KindSuffixes = listOf(" Radio" to STATION_COVER_LINE, " Chart" to CHART_COVER_LINE, " Mix" to MIX_COVER_LINE)
 
-// Names that keep their kind word: "Your Mix" stays "Your Mix".
+// Names that keep their kind word: "Your Radio" stays "Your Radio".
 private val Possessives = listOf("Your", "My", "Our")
 
 // Whether a name already ends with the word the second line would add ("Road
-// Trip Playlist", "Your Mix"), so the cover leaves that line out, as the
+// Trip Playlist", "Your Radio"), so the cover leaves that line out, as the
 // server's covers do. Only a whole last word counts: "Mixtape" does not.
 fun nameSaysWhatItIs(name: String): Boolean {
     val last = name.trim().split(Regex("""[^\p{L}\p{N}]+""")).lastOrNull { it.isNotEmpty() } ?: return false

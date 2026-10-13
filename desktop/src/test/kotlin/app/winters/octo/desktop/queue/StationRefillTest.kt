@@ -16,7 +16,7 @@ import kotlin.random.Random
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class StationRefillTest {
-    private val mix = QueueSource.Station("or3kZ9QpLmN2xY7wV1bC0a", "Your Mix")
+    private val mix = QueueSource.Station("or3kZ9QpLmN2xY7wV1bC0a", "Your Radio")
     private val lined = (1..30).map { Song("s$it", "Song $it", duration = 100) }
 
     private class Setup(val player: SilentPlayer, val refill: StationRefill, val asked: MutableList<List<String>>)

@@ -5,7 +5,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 class StationTopUpTest {
-    private val mix = QueueSource.Station("or3kZ9QpLmN2xY7wV1bC0a", "Your Mix")
+    private val mix = QueueSource.Station("or3kZ9QpLmN2xY7wV1bC0a", "Your Radio")
     private val you = QueueSource.You
 
     @Test
@@ -42,7 +42,7 @@ class StationTopUpTest {
 
     @Test
     fun aStationSourceIsSavedAndReadBack() {
-        assertEquals("Next from Your Mix", queueSourceTitle(mix))
+        assertEquals("Next from Your Radio", queueSourceTitle(mix))
         listOf(mix, QueueSource.Station("or1", "Radio: a:b")).forEach {
             assertEquals(it, queueSourceOf(it.encoded()))
         }

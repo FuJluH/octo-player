@@ -6,7 +6,7 @@ import app.winters.octo.subsonic.Playlist
 // they are shown, each with its heading.
 enum class OctoListGroup(val title: String) {
     ForYou("Made for you"),
-    Stations("Stations"),
+    Stations("Radio"),
     Charts("Charts"),
     Years("Years"),
     Genres("Genres"),

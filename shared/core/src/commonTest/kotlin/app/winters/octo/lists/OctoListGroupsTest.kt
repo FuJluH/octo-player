@@ -27,7 +27,7 @@ class OctoListGroupsTest {
             octo(id("og", 5), "Drake Mix", "artist"),
             octo(id("og", 6), "Top Pop", "chart"),
             octo(id("og", 7), "New Releases", "forYou", "newReleases"),
-            octo(id("or", 8), "Your Mix", "station"),
+            octo(id("or", 8), "Your Radio", "station"),
             octo(id("og", 9), "Something new", "lyrics"),
         )
         assertEquals(
@@ -48,7 +48,7 @@ class OctoListGroupsTest {
     @Test
     fun anOlderServerIsReadFromWhatItSends() {
         assertEquals(OctoListGroup.ForYou, octoListGroup(octo(id("og", 1), "Deep Cuts", list = "deepCuts"), me))
-        assertEquals(OctoListGroup.Stations, octoListGroup(octo(id("or", 2), "Your Mix"), me))
+        assertEquals(OctoListGroup.Stations, octoListGroup(octo(id("or", 2), "Your Radio"), me))
         assertEquals(OctoListGroup.Years, octoListGroup(octo(id("og", 3), "2010s Mix"), me))
         assertEquals(OctoListGroup.More, octoListGroup(octo(id("og", 4), "Spain Mix"), me))
     }

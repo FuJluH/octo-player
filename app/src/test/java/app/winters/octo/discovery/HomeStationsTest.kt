@@ -15,7 +15,7 @@ class HomeStationsTest {
     @Test
     fun anAddedStationPlaysItsStream() {
         val radio = listOf(
-            RadioStation(yourMix, "Your Mix", "https://octo/radio/stream/abc", coverArt = yourMix),
+            RadioStation(yourMix, "Your Radio", "https://octo/radio/stream/abc", coverArt = yourMix),
             RadioStation("rs-1", "City Radio", "https://radio.example.com/live.mp3", coverArt = "ra-rs-1"),
         )
         val stations = homeStations(radio, "src1")

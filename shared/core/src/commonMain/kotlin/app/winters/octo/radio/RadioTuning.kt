@@ -17,7 +17,7 @@ data class RadioTuning(
 }
 
 // The share of a radio kept for songs the library does not have, from the
-// server's suggestions. Balanced is the share Octo's Your Mix keeps.
+// server's suggestions. Balanced is the share Octo's Your Radio keeps.
 enum class RadioDiscovery(val share: Double, val label: String, val detail: String) {
     LibraryOnly(0.0, "Only my library", "Never a song from outside your library"),
     ALittle(0.15, "A little", "About 1 song in 7 from outside your library"),
