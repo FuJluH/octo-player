@@ -75,20 +75,20 @@ struct StreamContext: Sendable {
     func pinned(_ ref: StreamRef) -> StreamRef {
         if ref.pinned != nil { return ref }
         guard let source = ref.sourceId ?? sourceId else { return ref }
-        let saved = keeping
-        let request = chooseRequest(
-            source, ref, quality,
-            fullySaved: { key in saved && ((try? blocking { await StreamCache.shared.isFullySaved(key) }) ?? false) },
-            partlySaved: { key in saved && ((try? blocking { await StreamCache.shared.isPartlySaved(key) }) ?? false) })
-        var pinnedRef = ref.pin(request)
+        let quality = quality
+        var picked: StreamRequest?
+        if keeping { picked = try? blocking { await StreamCache.shared.pick(source, ref, quality).request } }
+        var pinnedRef = ref.pin(picked ?? ref.request(quality))
         pinnedRef.sourceId = source
         return pinnedRef
     }
 
-    /// The name a server song is kept under, or nil when no server is known for it.
+    /// The name a server song is kept under, or nil when no server is known for it or songs are
+    /// not kept. A saved copy of a file the server has since swapped is let go on the way.
     func savedKey(_ ref: StreamRef) -> String? {
         guard keeping, let source = ref.sourceId ?? sourceId else { return nil }
-        return streamCacheKey(source, ref, ref.request(quality))
+        let request = ref.request(quality)
+        return try? blocking { await StreamCache.shared.savedKey(source, ref, request) }
     }
 
     /// A signed request for one load of a server song. Fails at once with no connection, no
@@ -124,7 +124,8 @@ enum SongOpener {
             if let ref = parseStreamUri(uri) {
                 guard OnlineWatch.shared.online || context.keeping else { throw PlayError(.ioUnspecified, detail: "No connection") }
                 let pinned = context.pinned(ref)
-                if let key = context.savedKey(pinned),
+                let savedKey = context.savedKey(pinned)
+                if let key = savedKey,
                    let saved = try? blocking({ await StreamCache.shared.savedFile(key) }),
                    let file = try? LocalFile(url: saved.url, contentType: saved.mimeType) {
                     // A saved copy that fails part way is passed over for the server's.
@@ -134,7 +135,7 @@ enum SongOpener {
                     token.adopt(copy)
                     return OpenedSong(decoder: try SongDecoder(source: copy, mimeType: saved.mimeType ?? mime, outputRate: outputRate), bytes: copy)
                 }
-                let remote = try RemoteFile(savedKey: context.savedKey(pinned), online: { OnlineWatch.shared.online }) {
+                let remote = try RemoteFile(savedKey: savedKey, online: { OnlineWatch.shared.online }) {
                     try context.sign(pinned)
                 }
                 token.adopt(remote)

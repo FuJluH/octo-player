@@ -27,8 +27,8 @@ public struct OfflineMarks: Sendable, Hashable {
 /// A server song as the saved songs know it: "<server>|<song id there>".
 public func savedSong(_ sourceId: String, _ serverId: String) -> String { "\(sourceId)|\(serverId)" }
 
-/// The song a saved key is for: the key less its type and request.
-public func savedSongOf(_ key: String) -> String { savedBeforeLastBar(savedBeforeLastBar(key)) }
+/// The song a saved key is for: the key less its type, request and file size.
+public func savedSongOf(_ key: String) -> String { savedBeforeLastBar(savedBeforeLastBar(cacheKeyWithoutSize(key))) }
 
 /// The text before the last "|", or all of it when there is none.
 private func savedBeforeLastBar(_ text: String) -> String {

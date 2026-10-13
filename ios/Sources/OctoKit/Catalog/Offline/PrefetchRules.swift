@@ -17,10 +17,11 @@ public enum PrefetchRepeat: Sendable, Equatable {
 }
 
 /// How many songs ahead to fetch: none while songs are not saved or with no connection, else the
-/// count for Wi-Fi or for mobile data.
-public func prefetchCount(cacheEnabled: Bool, onWifi: Bool, online: Bool, prefs: OfflinePrefs) -> Int {
+/// count for Wi-Fi or for mobile data. A connection the phone is asked to use sparingly (Low Data
+/// Mode) gets the mobile data count, Wi-Fi or not.
+public func prefetchCount(cacheEnabled: Bool, onWifi: Bool, online: Bool, prefs: OfflinePrefs, lowData: Bool = false) -> Int {
     if !cacheEnabled { return 0 }
-    if onWifi { return prefs.prefetchWifi }
+    if onWifi && !lowData { return prefs.prefetchWifi }
     if online { return prefs.prefetchMobile }
     return 0
 }

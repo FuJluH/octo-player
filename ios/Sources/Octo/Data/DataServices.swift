@@ -88,6 +88,12 @@ final class DataServices {
             let before = resize
             resize = Task { await Self.applySize(to: size, after: before) }
         })
+        // The list of saved songs is written as the app leaves the screen, since the system may
+        // close it without a word once it is in the background.
+        watches.append(NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil,
+                                                              queue: .main) { _ in
+            Task { await StreamCache.shared.save() }
+        })
     }
 
     private static func applySize(to size: CacheSize, after before: Task<Void, Never>?) async {

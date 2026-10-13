@@ -118,7 +118,8 @@ struct PlayableItems {
         let fileMime = chosen?.mimeType ?? track.mimeType
         if let chosen {
             if chosen.isServerCopy {
-                let ref = StreamRef(sourceId: chosen.sourceId, serverId: chosen.nativeId, mimeType: chosen.mimeType, bitrate: bitrateOf(chosen))
+                let ref = StreamRef(sourceId: chosen.sourceId, serverId: chosen.nativeId, mimeType: chosen.mimeType, bitrate: bitrateOf(chosen),
+                                    size: chosen.sizeBytes.map(Int64.init))
                 uri = streamUri(ref)
                 mime = phoneRequest(chosen.mimeType, bitrateOf(chosen), context.quality).mimeType(chosen.mimeType)
             } else {
