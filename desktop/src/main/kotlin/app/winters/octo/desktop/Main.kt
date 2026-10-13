@@ -216,7 +216,7 @@ fun main(args: Array<String>) {
                 kept = { id -> made?.offline?.localFile(id) },
                 opened = parts.engine,
             )
-            val app = AppState(settings, parts.accounts, parts.http, scope, os, player.player, restored = parts.restored, listeningRoot = places.config, updates = parts.updates).also {
+            val app = AppState(settings, parts.accounts, parts.http, scope, os, player.player, restored = parts.restored, listeningRoot = places.config, updates = parts.updates, homeShelves = File(places.cache, "home")).also {
                 made = it
                 player.problem?.let { problem -> it.notice = problem }
             }

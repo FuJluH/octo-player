@@ -28,7 +28,6 @@ import androidx.compose.ui.Modifier
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.home.AlbumShelf
 import app.winters.octo.desktop.home.SHELF_SIZE
-import app.winters.octo.desktop.home.madeForYou
 import app.winters.octo.desktop.home.pinnedFirst
 import app.winters.octo.desktop.home.yourPlaylists
 import app.winters.octo.desktop.library.Cover
@@ -86,7 +85,9 @@ fun HomePage(app: AppState, visit: Visit) {
     LaunchedEffect(store, index) { index?.let(store::rediscover) }
     val settings by app.settings.state.collectAsState()
     val playlists = remember(app.playlists, settings.frame.pinnedPlaylists) { pinnedFirst(yourPlaylists(app.playlists), settings.frame.pinnedPlaylists) }
-    val forYou = remember(app.playlists) { madeForYou(app.playlists) }
+    // The server shelves show as the server last gave them until it answers.
+    val shelves = store.shelves
+    val forYou = shelves.madeForYou
     val home = store.data
     val failure = store.failure
     val found = store.rediscovered
@@ -99,7 +100,7 @@ fun HomePage(app: AppState, visit: Visit) {
         when {
             home == null && failure != null -> item(key = "failed") { FailedLine("Couldn't read Home from your server. $failure", store::retry) }
             home == null -> item(key = "loading") { LoadingLine() }
-            home.isEmpty && playlists.isEmpty() && forYou.isEmpty() && (found == null || found.isEmpty) -> {
+            home.isEmpty && shelves.stations.isEmpty() && playlists.isEmpty() && forYou.isEmpty() && (found == null || found.isEmpty) -> {
                 item(key = "empty") {
                     Column(verticalArrangement = Arrangement.spacedBy(Space.M)) {
                         NothingHere("No music yet", "Music on your server shows up here on its own. Once some is there, look again.")
@@ -110,16 +111,16 @@ fun HomePage(app: AppState, visit: Visit) {
                     }
                 }
                 // An empty library is where the charts help most: songs to start from.
-                app.search?.charts?.let { chartsRow(app, it) }
+                app.search?.charts?.let { chartsRow(app, it, store) }
             }
             else -> {
                 albums(app, "Recently played", home.recentlyPlayed) { app.navigator.go(Page.History) }
                 if (forYou.isNotEmpty()) {
                     item(key = "shelf:foryou") { ShelfRow("Made for you", forYou, { it.id }, null) { PlaylistCard(app, it) } }
                 }
-                if (home.stations.isNotEmpty()) {
+                if (shelves.stations.isNotEmpty()) {
                     item(key = "shelf:stations") {
-                        ShelfRow("Stations", home.stations, { it.id }, null) { station ->
+                        ShelfRow("Stations", shelves.stations, { it.id }, null) { station ->
                             StationCard(app, station, starting == station.id) {
                                 if (starting != null) return@StationCard
                                 starting = station.id
@@ -139,7 +140,7 @@ fun HomePage(app: AppState, visit: Visit) {
                         }
                     }
                 }
-                app.search?.charts?.let { chartsRow(app, it) }
+                app.search?.charts?.let { chartsRow(app, it, store) }
                 albums(app, "Recently added", home.recentlyAdded) { app.navigator.go(Page.RecentlyAdded) }
                 albums(app, "Most played", home.mostPlayed, whole = home.mostPlayed.size < SHELF_SIZE, seeAll = open(AlbumShelf.MostPlayed))
                 albums(app, "Favorite albums", home.favourites) {

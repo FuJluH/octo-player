@@ -1,6 +1,7 @@
 package app.winters.octo.ui.home
 
 import app.winters.octo.discovery.CHARTS_ROW
+import app.winters.octo.discovery.ChartAnswer
 import app.winters.octo.discovery.ChartLists
 import app.winters.octo.subsonic.CHART_OVERALL
 import android.os.SystemClock
@@ -23,6 +24,7 @@ import app.winters.octo.discovery.Station
 import app.winters.octo.favourites.PinStore
 import app.winters.octo.favourites.PinnedItem
 import app.winters.octo.home.Rediscovery
+import app.winters.octo.home.answered
 import app.winters.octo.listening.PlayHistory
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.server.ServerSync
@@ -56,6 +58,7 @@ class HomeViewModel @Inject constructor(
     pins: PinStore,
     favourites: FavouritesDao,
     private val chartLists: ChartLists,
+    keptFiles: KeptShelvesFiles,
 ) : ViewModel() {
     // What is pinned to the front of Home, in its order.
     val pinned: StateFlow<List<PinnedItem>> =
@@ -103,7 +106,9 @@ class HomeViewModel @Inject constructor(
     var refreshing by mutableStateOf(false)
         private set
 
-    // The signed-in server's stations, kept through a failed load.
+    // The signed-in server's stations, kept through a failed load. Each of
+    // these three server shelves starts as the server last gave it, read
+    // from the app's cache, and changes only when an answer differs.
     var stations by mutableStateOf<List<Station>>(emptyList())
         private set
 
@@ -112,7 +117,7 @@ class HomeViewModel @Inject constructor(
         private set
 
     // The first songs of the server's chart of the moment, for Home's Charts
-    // row; empty on a server without charts.
+    // row; empty on a server without charts, kept through a failed load.
     var charts by mutableStateOf<List<TrackEntity>>(emptyList())
         private set
 
@@ -122,6 +127,13 @@ class HomeViewModel @Inject constructor(
 
     private var offersStations = false
     private var stationsJob: Job? = null
+    private var chartsJob: Job? = null
+
+    // The server whose shelves are shown, and where each server's are kept.
+    // Writes go one at a time, in the order they were made.
+    private var shelvesFrom: String? = null
+    private val kept = keptFiles.store
+    private val keeping = Dispatchers.IO.limitedParallelism(1)
     private var stationsLoadedAt: Long? = null
     private var stationsFailed = false
 
@@ -131,19 +143,22 @@ class HomeViewModel @Inject constructor(
                 .distinctUntilChanged()
                 .collect { reroll() }
         }
-        // A new sign-in or another kept server starts over, without the
-        // last one's list; signing out, or a server without stations, drops
-        // it. The server can turn out to be Octo after start, once its
-        // extensions are read again.
+        // A new sign-in or another kept server shows the shelves it gave
+        // last time at once, or none, and asks it again; signing out, or a
+        // server without stations, drops them. The server can turn out to be
+        // Octo after start, once its extensions are read again.
         viewModelScope.launch {
             discovery.stationsFrom.collect { server ->
                 offersStations = server != null
                 stationsJob?.cancel()
+                chartsJob?.cancel()
                 stationsLoadedAt = null
                 stationsFailed = false
-                stations = emptyList()
-                madeForYou = emptyList()
-                charts = emptyList()
+                shelvesFrom = server
+                val last = server?.let { withContext(Dispatchers.IO) { kept.read(it) } } ?: KeptShelves()
+                stations = answered(stations, last.stations)
+                madeForYou = answered(madeForYou, last.madeForYou)
+                charts = answered(charts, last.charts)
                 if (server != null) {
                     loadStations()
                     loadCharts()
@@ -198,9 +213,17 @@ class HomeViewModel @Inject constructor(
     // Plays a shelf of songs as shown, starting at the one tapped.
     fun play(tracks: List<TrackEntity>, index: Int) = playback.playTracks(tracks.map { it.id }, index)
 
+    // A server without charts empties the row; one that did not answer
+    // leaves it as it is.
     private fun loadCharts() {
-        viewModelScope.launch {
-            charts = chartLists.chart(CHART_OVERALL)?.songs?.take(CHARTS_ROW)?.map { it.track }.orEmpty()
+        chartsJob = viewModelScope.launch {
+            val got = when (val answer = chartLists.answer(CHART_OVERALL)) {
+                is ChartAnswer.Got -> answer.list.songs.take(CHARTS_ROW).map { it.track }
+                ChartAnswer.None -> emptyList()
+                ChartAnswer.Failed -> return@launch
+            }
+            charts = answered(charts, got)
+            keepShelves()
         }
     }
 
@@ -216,13 +239,17 @@ class HomeViewModel @Inject constructor(
 
     // Runs in the background so no other shelf waits on the server. The
     // stations and Made for you are read apart, so one failing never hides
-    // the other; either failing asks again when Home comes back.
+    // the other; either failing asks again when Home comes back. Each
+    // answer replaces its shelf only when it differs from what is shown.
     private fun loadStations() {
         if (stationsJob?.isActive == true) return
         stationsJob = viewModelScope.launch {
             var failed = false
+            var answers = 0
             try {
-                stations = withContext(Dispatchers.IO) { discovery.stations() }
+                val got = withContext(Dispatchers.IO) { discovery.stations() }
+                stations = answered(stations, got)
+                answers++
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -230,7 +257,9 @@ class HomeViewModel @Inject constructor(
                 Log.w("Octo", "stations failed to load: ${e.javaClass.simpleName}")
             }
             try {
-                madeForYou = withContext(Dispatchers.IO) { discovery.madeForYou() }
+                val got = withContext(Dispatchers.IO) { discovery.madeForYou() }
+                madeForYou = answered(madeForYou, got)
+                answers++
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -239,7 +268,16 @@ class HomeViewModel @Inject constructor(
             }
             if (!failed) stationsLoadedAt = SystemClock.elapsedRealtime()
             stationsFailed = failed
+            if (answers > 0) keepShelves()
         }
+    }
+
+    // Keeps the server shelves as shown for the server in use, for the
+    // next start or a switch back to it.
+    private fun keepShelves() {
+        val server = shelvesFrom ?: return
+        val shelves = KeptShelves(stations, madeForYou, charts)
+        viewModelScope.launch(keeping) { kept.write(server, shelves) }
     }
 
     private suspend fun reroll() {

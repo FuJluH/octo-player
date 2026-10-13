@@ -1,6 +1,7 @@
 package app.winters.octo.desktop.home
 
 import app.winters.octo.desktop.server.Connection
+import app.winters.octo.discovery.CHARTS_ROW
 import app.winters.octo.server.serverTime
 import app.winters.octo.subsonic.Album
 import app.winters.octo.subsonic.OCTO_LIST_KINDS
@@ -8,25 +9,42 @@ import app.winters.octo.subsonic.AlbumListType
 import app.winters.octo.subsonic.Playlist
 import app.winters.octo.subsonic.RadioStation
 import app.winters.octo.subsonic.SubsonicException
+import app.winters.octo.subsonic.TopSongs
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.serialization.Serializable
 
 // How many albums each shelf on Home holds at most. A shelf shows as many
 // as fit across the window.
 const val SHELF_SIZE = 20
 
-// Home's shelves from the server's own lists, plus the stations and mixes
-// an Octo server runs. The rediscovery shelves come from the library the
-// app already holds (HomeStore).
+// Home's shelves from the server's own lists, plus the stations an Octo
+// server runs: null when it was asked for them and did not answer. The
+// rediscovery shelves come from the library the app already holds
+// (HomeStore).
 data class HomeData(
     val recentlyAdded: List<Album> = emptyList(),
     val recentlyPlayed: List<Album> = emptyList(),
     val mostPlayed: List<Album> = emptyList(),
     val favourites: List<Album> = emptyList(),
-    val stations: List<RadioStation> = emptyList(),
+    val stations: List<RadioStation>? = emptyList(),
 ) {
-    val isEmpty get() = recentlyAdded.isEmpty() && recentlyPlayed.isEmpty() && mostPlayed.isEmpty() && favourites.isEmpty() && stations.isEmpty()
+    // No album shelf has anything; the stations are counted apart (HomeStore).
+    val isEmpty get() = recentlyAdded.isEmpty() && recentlyPlayed.isEmpty() && mostPlayed.isEmpty() && favourites.isEmpty()
 }
+
+// Home's server shelves as a server last gave them: its stations, the
+// lists it made for the listener and the first songs of its chart, kept on
+// this computer so they show at once.
+@Serializable
+data class KeptShelves(
+    val stations: List<RadioStation> = emptyList(),
+    val madeForYou: List<Playlist> = emptyList(),
+    val chart: TopSongs? = null,
+)
+
+// The part of a chart Home's row shows: its first songs.
+fun homeChart(top: TopSongs): TopSongs = top.copy(entry = top.entry.filter { it.song != null }.take(CHARTS_ROW))
 
 // Reads Home's shelves at once. A shelf the server cannot give is empty
 // rather than failing the page; only when every one fails does it throw.
@@ -41,7 +59,7 @@ suspend fun loadHome(connection: Connection): HomeData = coroutineScope {
     val most = async { shelf { client.albumList(AlbumListType.FREQUENT, SHELF_SIZE) } }
     val starred = async { shelf { newestFavourites(client.starred().album) } }
     val stations = async {
-        if (connection.isOcto) runCatching { client.radioStations() }.getOrDefault(emptyList()) else emptyList()
+        if (connection.isOcto) runCatching { client.radioStations() }.getOrNull() else emptyList()
     }
     val shelves = listOf(added.await(), played.await(), most.await(), starred.await())
     shelves.firstOrNull { it.isFailure }?.takeIf { shelves.all { s -> s.isFailure } }?.exceptionOrNull()?.let { throw it }

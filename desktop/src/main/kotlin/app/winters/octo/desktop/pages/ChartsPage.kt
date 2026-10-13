@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import app.winters.octo.design.ChipRow
 import app.winters.octo.design.GlazeCapsule
@@ -18,6 +19,7 @@ import app.winters.octo.design.Space
 import app.winters.octo.design.Txt
 import app.winters.octo.design.scrollbar
 import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.home.HomeStore
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.search.Charts
@@ -95,15 +97,22 @@ private fun LazyListScope.chartSongs(app: AppState, top: TopSongs, shown: Int?) 
 
 // Home's Charts row: the most played songs right now, the first ten, with
 // "See all" opening the Charts page. Only from a server that has charts.
-internal fun LazyListScope.chartsRow(app: AppState, charts: Charts) {
+// The row shows the chart as the server last gave it (HomeStore) until the
+// server answers again; a server without charts empties it.
+internal fun LazyListScope.chartsRow(app: AppState, charts: Charts, home: HomeStore) {
     item(key = "charts-ask") {
-        LaunchedEffect(charts) {
+        LaunchedEffect(charts, home) {
             charts.check()
             charts.load(CHART_OVERALL)
+            snapshotFlow { charts.offered to charts.lists[CHART_OVERALL] }.collect { (offered, top) ->
+                when {
+                    offered == false -> home.chartAnswered(null)
+                    top != null -> home.chartAnswered(top)
+                }
+            }
         }
     }
-    if (charts.offered != true) return
-    val top = charts.lists[CHART_OVERALL] ?: return
+    val top = home.shelves.chart ?: return
     if (top.entry.none { it.song != null }) return
     item(key = "charts-title") {
         Column(verticalArrangement = Arrangement.spacedBy(Space.Xs)) {

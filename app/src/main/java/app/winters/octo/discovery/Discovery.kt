@@ -25,6 +25,7 @@ import app.winters.octo.subsonic.SubsonicException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.Serializable
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -52,6 +53,7 @@ data class OnlineArtist(val id: String, val name: String, val albumCount: Int, v
 
 // A station the server runs, played as the list of songs it has lined up.
 // A Made for you list is shown and played the same way, with its song count.
+@Serializable
 data class Station(val id: String, val name: String, val artwork: String?, val songCount: Int? = null)
 
 // The lists Octo made for the listener (New Releases, Rediscover, Deep Cuts),
