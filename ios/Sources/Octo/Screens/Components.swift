@@ -129,7 +129,12 @@ struct TrackRow: View {
     private var song: Song { track.asSong }
     private var selecting: Bool { selection?.active == true }
     private var picked: Bool { selection?.isPicked(key) == true }
-    private var isNow: Bool { player.current.map { $0.id == song.id && $0.isExternal == song.isExternal } ?? false }
+    /// Whether this row's song is the one playing: the queue holds a library song by its library
+    /// id, the row by the same id.
+    private var isNow: Bool {
+        if let item = player.currentItem, item.trackId == track.id { return true }
+        return player.current.map { $0.id == song.id && $0.isExternal == song.isExternal } ?? false
+    }
 
     var body: some View {
         if turns && track.isFound {
@@ -476,7 +481,13 @@ struct SongRow: View {
         rowAddSign(isFind: shown.isExternal, adopted: downloads.phase(shown.id) == .done, offersAdd: offersAdd)
     }
 
-    private func isCurrent(_ shown: Song) -> Bool { player.current?.id == shown.id || player.current?.id == song.id }
+    /// Whether the shown song is the one playing. A song from the server carries the server's id
+    /// while the queue holds a library song by its library id, so both are compared.
+    private func isCurrent(_ shown: Song) -> Bool {
+        if player.current?.id == shown.id || player.current?.id == song.id { return true }
+        guard let playing = player.currentItem?.trackId else { return false }
+        return [shown, song].contains { playing == $0.id || playing == actions.state.libraryId($0) }
+    }
 
     @ViewBuilder
     private func lead(_ shown: Song) -> some View {
