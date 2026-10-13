@@ -67,10 +67,19 @@ final class ServerDiscovery {
         return homeStations(try await client.stations(), sourceId: sourceId)
     }
 
-    /// The lists Octo made for the listener, from its playlists.
-    func madeForYou() async throws -> [Station] {
-        guard offersStations, let (client, sourceId) = server() else { return [] }
-        return madeForYouLists(try await client.playlists(), sourceId: sourceId)
+    /// The lists Octo made for the listener and its mixes by Home's shelves, from one read of its
+    /// playlists.
+    func octoLists() async throws -> (madeForYou: [Station], mixes: [HomeSection: [Station]]) {
+        guard offersStations, let (client, sourceId) = server() else { return ([], [:]) }
+        let playlists = try await client.playlists()
+        return (madeForYouLists(playlists, sourceId: sourceId),
+                homeMixes(playlists, listener: client.credentials.username, sourceId: sourceId))
+    }
+
+    /// Octo's lists for the listener in their groups, from its playlists.
+    func octoListGroups() async throws -> [(group: OctoListGroup, lists: [Playlist])] {
+        guard offersStations, let (client, _) = server() else { return [] }
+        return OctoKit.octoListGroups(try await client.playlists(), listener: client.credentials.username)
     }
 
     /// The songs a station, or a Made for you list, has lined up now.

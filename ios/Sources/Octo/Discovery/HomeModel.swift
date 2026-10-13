@@ -90,9 +90,12 @@ final class HomeModel {
     private(set) var stations: [Station] = []
     /// The lists Octo made for the listener, kept through a failed load.
     private(set) var madeForYou: [Station] = []
+    /// Octo's mixes by year, genre, artist and country, by the shelf that shows them, kept
+    /// through a failed load.
+    private(set) var mixes: [HomeSection: [Station]] = [:]
     /// The first songs of the server's chart of the moment; empty on a server without charts.
     private(set) var charts: [Song] = []
-    /// The station, or Made for you list, whose songs are on the way.
+    /// The station, Made for you list or mix whose songs are on the way.
     private(set) var startingStation: String?
     private(set) var access: PhoneAccess = HomeModel.phoneAccess()
     /// Whether "Not now" put the access card away; nil until read.
@@ -189,6 +192,7 @@ final class HomeModel {
         let kept = server.flatMap(HomeShelfStore.read)
         stations = kept?.stations ?? []
         madeForYou = kept?.madeForYou ?? []
+        mixes = kept?.mixShelves ?? [:]
         charts = kept?.charts ?? []
         guard server != nil else { return }
         loadStations()
@@ -196,10 +200,13 @@ final class HomeModel {
     }
 
     /// The server shelves Home draws now: a hidden one is not asked for. Radio and Internet radio
-    /// both come from the server's stations.
+    /// both come from the server's stations, Made for you and the mixes from its playlists.
     private var wantedStationShelves: Set<HomeSection> {
-        Set([HomeSection.stations, .internetRadio, .madeForYou].filter { AppSettings.shared.homeSectionShown($0) })
+        Set(([HomeSection.stations, .internetRadio, .madeForYou] + Self.mixSections).filter { AppSettings.shared.homeSectionShown($0) })
     }
+
+    /// The shelves of Octo's mixes.
+    static let mixSections: [HomeSection] = [.yearMixes, .genreMixes, .artistMixes, .countryMixes]
 
     /// The chart is wanted while its shelf shows, and while the library is empty, where it sits
     /// under the empty card whether its shelf is hidden or not.
@@ -229,10 +236,10 @@ final class HomeModel {
         }
     }
 
-    /// Keeps the stations, Made for you and the chart for the next start.
+    /// Keeps the stations, Made for you, the mixes and the chart for the next start.
     private func keepShelves() {
         guard let from = stationsFrom, let server = from else { return }
-        HomeShelfStore.write(HomeShelves(stations: stations, madeForYou: madeForYou, charts: charts), for: server)
+        HomeShelfStore.write(HomeShelves(stations: stations, madeForYou: madeForYou, charts: charts, mixShelves: mixes), for: server)
     }
 
     /// Home is on screen again: ask for the stations if the last try failed or the list is old.
@@ -246,8 +253,9 @@ final class HomeModel {
         }
     }
 
-    /// Runs in the background so no other shelf waits on the server. The stations and Made for you
-    /// are read apart, so one failing never hides the other, and a hidden one is not read at all.
+    /// Runs in the background so no other shelf waits on the server. The stations and the
+    /// playlists (Made for you and the mixes) are read apart, so one failing never hides the
+    /// other, and what no shown shelf needs is not read at all.
     private func loadStations() {
         let wanted = wantedStationShelves
         guard stationsTask == nil, !wanted.isEmpty, let discovery else { return }
@@ -262,11 +270,12 @@ final class HomeModel {
                     failed = true
                 }
             }
-            if wanted.contains(.madeForYou) {
+            if wanted.contains(.madeForYou) || !wanted.isDisjoint(with: Self.mixSections) {
                 do {
-                    let got = try await discovery.madeForYou()
+                    let got = try await discovery.octoLists()
                     if Task.isCancelled { return }
-                    if self?.madeForYou != got { self?.madeForYou = got }
+                    if self?.madeForYou != got.madeForYou { self?.madeForYou = got.madeForYou }
+                    if self?.mixes != got.mixes { self?.mixes = got.mixes }
                 } catch {
                     failed = true
                 }
@@ -287,8 +296,9 @@ final class HomeModel {
         }
     }
 
-    /// Plays what a station or a Made for you list has lined up today, a station as a station
-    /// that keeps going, or an added station's stream. Taps while one is on the way are ignored.
+    /// Plays what a station, a Made for you list or a mix has lined up today, a station as a
+    /// station that keeps going, or an added station's stream. Taps while one is on the way are
+    /// ignored.
     func playStation(_ station: Station) {
         guard startingStation == nil, let discovery, let player, let router else { return }
         let id = station.id, name = station.name
@@ -302,11 +312,12 @@ final class HomeModel {
             do {
                 let songs = try await discovery.stationSongs(id)
                 if songs.isEmpty { router.show("Nothing is playing on \(name) right now") }
-                player.playServerList(songs, id: id, name: name)
+                player.playServerList(songs, id: id, name: name, octoGroup: station.octoGroup)
             } catch OctoError.notFound {
                 // Made anew on the server since the list was read: off Home, and read again.
                 stations.removeAll { $0.id == id }
                 madeForYou.removeAll { $0.id == id }
+                for section in Self.mixSections { mixes[section]?.removeAll { $0.id == id } }
                 stationsLoadedAt = nil
                 loadStations()
                 router.show(stationGoneLine(name))
@@ -357,11 +368,26 @@ final class HomeModel {
     func dismissWhatsNew() { WhatsNewStore.shared.markSeen() }
 }
 
-/// The stations, Made for you lists and chart one server gave last.
+/// The stations, Made for you lists, mixes and chart one server gave last. The mixes are kept
+/// by their shelf's id, and are missing from what an older version kept.
 struct HomeShelves: Codable {
     var stations: [Station] = []
     var madeForYou: [Station] = []
     var charts: [Song] = []
+    var mixes: [String: [Station]]?
+
+    init(stations: [Station], madeForYou: [Station], charts: [Song], mixShelves: [HomeSection: [Station]]) {
+        self.stations = stations
+        self.madeForYou = madeForYou
+        self.charts = charts
+        mixes = Dictionary(uniqueKeysWithValues: mixShelves.map { ($0.key.rawValue, $0.value) })
+    }
+
+    var mixShelves: [HomeSection: [Station]] {
+        var shelves: [HomeSection: [Station]] = [:]
+        for (id, lists) in mixes ?? [:] { if let section = HomeSection(rawValue: id) { shelves[section] = lists } }
+        return shelves
+    }
 }
 
 /// Home's server shelves kept on the phone between runs, one file a server, in Caches.

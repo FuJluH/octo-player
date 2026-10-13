@@ -67,11 +67,12 @@ extension LibraryArtist {
 }
 
 extension Station {
-    /// A station or a Made for you list as its page opens it: a read-only list on the server.
+    /// A station, a Made for you list or a mix as its page opens it: a read-only list on the
+    /// server.
     var asPlaylist: Playlist? {
-        let data = try? JSONSerialization.data(withJSONObject: [
-            "id": id, "name": name, "songCount": songCount ?? 0, "coverArt": coverId(of: artwork) ?? id, "readonly": true,
-        ])
+        var fields: [String: Any] = ["id": id, "name": name, "songCount": songCount ?? 0, "coverArt": coverId(of: artwork) ?? id, "readonly": true]
+        if let octoGroup { fields["octoGroup"] = octoGroup }
+        let data = try? JSONSerialization.data(withJSONObject: fields)
         return data.flatMap { try? JSONDecoder().decode(Playlist.self, from: $0) }
     }
 }

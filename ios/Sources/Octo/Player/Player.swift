@@ -262,10 +262,12 @@ final class Player {
     }
 
     /// Plays one of the server's lists from `start`: a station as a station, which adds more of
-    /// its songs as it runs low, any other list under its name. A station shuffled has its songs
-    /// put in a new order and played in it, so the songs it adds later come after them.
-    func playServerList(_ songs: [Song], from start: Int = 0, id: String, name: String, shuffled: Bool = false) {
-        let source = serverListSource(id: id, name: name)
+    /// its songs as it runs low, any other list under its name (`octoGroup` is the kind Octo says
+    /// it is). A station shuffled has its songs put in a new order and played in it, so the songs
+    /// it adds later come after them.
+    func playServerList(_ songs: [Song], from start: Int = 0, id: String, name: String, octoGroup: String? = nil,
+                        shuffled: Bool = false) {
+        let source = serverListSource(id: id, name: name, octoGroup: octoGroup)
         if shuffled && source.isStation {
             play(songs.shuffled(), from: 0, source: source)
         } else {

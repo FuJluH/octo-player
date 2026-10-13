@@ -179,8 +179,11 @@ final class Discovery {
     /// The stations the server runs: only Octo's.
     func stations() async throws -> [Station] { try await online.stations() }
 
-    /// The lists Octo made for the listener, from its playlists.
-    func madeForYou() async throws -> [Station] { try await online.madeForYou() }
+    /// The lists Octo made for the listener and its mixes by Home's shelves, from its playlists.
+    func octoLists() async throws -> (madeForYou: [Station], mixes: [HomeSection: [Station]]) { try await online.octoLists() }
+
+    /// Octo's lists for the listener in their groups; nothing on a server that does not run Octo.
+    func octoListGroups() async throws -> [(group: OctoListGroup, lists: [Playlist])] { try await online.octoListGroups() }
 
     /// The songs a station, or a Made for you list, has lined up now.
     func stationSongs(_ id: String) async throws -> [Song] { try await online.stationSongs(id).map(\.asSong) }

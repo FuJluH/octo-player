@@ -571,7 +571,8 @@ struct ArtistView: View {
 // MARK: Playlists
 
 /// Every playlist: ways to make or import one, then the live lists in the order they were made,
-/// then the listener's own playlists and the server's in the chosen order.
+/// then the listener's own playlists and the server's in the chosen order, then, on a server that
+/// runs Octo, the lists Octo made under "From Octo", by kind. A list Octo made is only there.
 struct PlaylistsView: View {
     @Environment(Library.self) private var library
     @Environment(LibraryState.self) private var state
@@ -580,7 +581,12 @@ struct PlaylistsView: View {
     @Environment(Router.self) private var router
     @Environment(LiveListStore.self) private var liveLists
     @Environment(LiveLibrary.self) private var liveLibrary
+    @Environment(Discovery.self) private var discovery
     @State private var playlists: [PlaylistSummary]?
+    /// Octo's lists in their groups, kept through a failed read.
+    @State private var octoGroups: [(group: OctoListGroup, lists: [Playlist])] = []
+    /// The server's id for each of the listener's playlists kept in step with one.
+    @State private var serverIds: [String: String] = [:]
     @State private var importing = false
     @State private var importNote: ImportNote?
 
@@ -594,7 +600,8 @@ struct PlaylistsView: View {
 
     var body: some View {
         let order = state.order(.playlists)
-        let shown = sortPlaylists(playlists ?? [], order)
+        let claimed = Set(octoGroups.flatMap { $0.lists.map(\.id) })
+        let shown = sortPlaylists(playlists ?? [], order).filter { !claimed.contains(serverIds[$0.id] ?? $0.id) }
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -644,6 +651,7 @@ struct PlaylistsView: View {
                         .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: OctoRadius.row))
                         .contextMenu { CollectionMenuItems(subject: .playlist(playlist)) }
                     }
+                    fromOcto
                 }
                 .padding(.bottom, 20)
                 .animation(.easeOut(duration: 0.25), value: shown.map(\.id))
@@ -654,13 +662,50 @@ struct PlaylistsView: View {
         .barClearance()
         .libraryRefreshable {}
         .task { sync.syncAgain() }
-        .task(id: library.stamp(.playlists, .library)) { playlists = await library.playlists() }
+        .task(id: library.stamp(.playlists, .library)) {
+            let all = await library.playlists()
+            var ids: [String: String] = [:]
+            for summary in all where summary.onServer {
+                if let serverId = await library.playlist(summary.id)?.serverId { ids[summary.id] = serverId }
+            }
+            serverIds = ids
+            playlists = all
+        }
+        .task(id: "\(discovery.server ?? "")|\(library.stamp(.playlists))") {
+            if let groups = try? await discovery.octoListGroups() { octoGroups = groups }
+        }
         .task(id: library.stamp(.library, .likes, .plays)) { await liveLibrary.read() }
         .task(id: LiveCoversKey(version: liveLibrary.version, queries: liveLists.lists.map(\.query))) {
             for list in liveLists.lists { await liveLibrary.pick(list.query) }
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.m3uPlaylist, .plainText, .data]) { result in
             if case .success(let url) = result { Task { await importFile(url) } }
+        }
+    }
+
+    /// The lists Octo made for the listener, under a heading for each kind. Each opens as the
+    /// server has it; a station there plays as a station.
+    @ViewBuilder
+    private var fromOcto: some View {
+        if !octoGroups.isEmpty {
+            SectionTitle("From Octo").padding(.top, 24).padding(.bottom, 4)
+            ForEach(octoGroups, id: \.group) { entry in
+                Text(entry.group.title)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(OctoColor.textMuted)
+                    .padding(.leading, 20)
+                    .padding(.top, 16)
+                    .padding(.bottom, 4)
+                    .accessibilityAddTraits(.isHeader)
+                ForEach(entry.lists) { list in
+                    NavigationLink(value: Route.playlist(list)) {
+                        PlaylistLine(name: list.name, subtitle: songsCount(list.songCount)) {
+                            Cover(id: list.coverArt ?? list.id, size: 56)
+                        }
+                    }
+                    .buttonStyle(SqueezeStyle())
+                }
+            }
         }
     }
 
@@ -750,8 +795,8 @@ private struct LiveCoversKey: Hashable {
 
 // MARK: Playlist
 
-/// A playlist opened from the server's list: its page, by the library's copy of it. A list the
-/// library keeps no copy of, like a station or a Made for you list, opens as the server has it.
+/// A playlist opened from the server's list: its page, by the library's copy of it. One of Octo's
+/// lists, and any list the library keeps no copy of, opens as the server has it.
 struct PlaylistView: View {
     let playlist: Playlist
     @Environment(Library.self) private var library
@@ -769,6 +814,10 @@ struct PlaylistView: View {
             }
         }
         .task {
+            if opensAsServerList(playlist) {
+                serverOnly = true
+                return
+            }
             let all = await library.playlists()
             var match: String?
             for summary in all {
@@ -837,7 +886,8 @@ struct ServerListPage: View {
     }
 
     private func play(_ songs: [Song], from position: Int = 0, shuffled: Bool = false) {
-        player.playServerList(songs, from: position, id: playlist.id, name: playlist.name, shuffled: shuffled)
+        player.playServerList(songs, from: position, id: playlist.id, name: playlist.name, octoGroup: playlist.octoGroup,
+                              shuffled: shuffled)
     }
 
     private func reload() async {
