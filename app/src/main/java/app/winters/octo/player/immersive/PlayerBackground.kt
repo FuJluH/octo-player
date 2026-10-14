@@ -33,6 +33,8 @@ import app.winters.octo.catalog.SourceDao
 import app.winters.octo.catalog.songDetails
 import app.winters.octo.playback.NowPlaying
 import app.winters.octo.playback.PlaybackConnection
+import app.winters.octo.playback.isWebPicture
+import app.winters.octo.playback.stationArtOf
 import app.winters.octo.player.ArtworkPalette
 import app.winters.octo.player.LiveBackgroundSupported
 import app.winters.octo.player.MeshBackground
@@ -177,14 +179,22 @@ private fun ColourFill(colors: PlayerColors, background: BackgroundPrefs) {
 }
 
 // The song's own artwork, blurred into a wash of its colours: the classic
-// background when it is not moving or the phone cannot draw the mesh.
+// background when it is not moving or the phone cannot draw the mesh. A
+// live station washes in its song's artwork, else its logo.
 @Composable
 private fun ClassicArtwork(ref: String?) {
-    val picture = remember(ref) { ArtworkRef.decode(ref) }
-    if (picture != null) {
-        val context = LocalPlatformContext.current
+    val context = LocalPlatformContext.current
+    val model = remember(ref) {
+        ArtworkRef.decode(ref)?.let { artworkRequest(context, it) }
+            ?: stationArtOf(ref)?.let { art ->
+                (listOf(art.artwork) + art.logos).firstOrNull(String::isNotBlank)?.let { picture ->
+                    ArtworkRef.decode(picture)?.let { artworkRequest(context, it) } ?: picture.takeIf(::isWebPicture)
+                }
+            }
+    }
+    if (model != null) {
         AsyncImage(
-            model = remember(picture) { artworkRequest(context, picture) },
+            model = model,
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize().blur(80.dp).alpha(0.6f),

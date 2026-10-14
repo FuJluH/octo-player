@@ -25,6 +25,7 @@ import app.winters.octo.design.ArtworkShape
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoShapes
 import app.winters.octo.design.artworkRim
+import app.winters.octo.playback.stationArtOf
 import app.winters.octo.server.serverCoverKey
 import coil3.PlatformContext
 import coil3.compose.AsyncImage
@@ -56,6 +57,11 @@ fun Artwork(
     outside: Boolean = false,
     keptFirst: Boolean = false,
 ) {
+    // A live station draws its own layered cover.
+    stationArtOf(ref)?.let {
+        StationCover(it, size, modifier, shape)
+        return
+    }
     val description = artworkDescription(null, outside)
     Box(
         modifier
