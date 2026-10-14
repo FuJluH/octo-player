@@ -23,11 +23,12 @@ data class IcyRead(val streamTitle: String?, val streamUrl: String?)
 data class LiveLines(val title: String, val subtitle: String, val artwork: String, val shown: LiveShown)
 
 // The lines a station's item shows for what its stream named last; `art`
-// is the cover it shows now, whose station pictures are kept.
-fun liveLines(id: String, read: IcyRead?, art: StationArt? = null): LiveLines? {
+// is the cover it shows now, whose station pictures are kept, and
+// `octoCover` the cover Octo has for the song on air, when it has one.
+fun liveLines(id: String, read: IcyRead?, art: StationArt? = null, octoCover: String? = null): LiveLines? {
     val shown = liveShown(id, read?.streamTitle, read?.streamUrl) ?: return null
     val base = art ?: stationArt(id) ?: return null
-    val cover = base.copy(artwork = shown.onAir.artwork.trim())
+    val cover = base.copy(artwork = shown.onAir.artwork.trim(), cover = octoCover?.takeIf { shown.onAir.named }.orEmpty())
     return LiveLines(shown.title.take(RADIO_TITLE_MAX), shown.subtitle.take(RADIO_TITLE_MAX), cover.encode(), shown)
 }
 
@@ -75,10 +76,11 @@ fun MediaMetadata.icyRead(): IcyRead? {
 }
 
 // A station in the queue with its lines and cover as the stream names them
-// now, or null when they are already shown.
-internal fun MediaItem.withOnAir(read: IcyRead): MediaItem? {
+// now (and Octo's cover for the song, `octoCover`), or null when they are
+// already shown.
+internal fun MediaItem.withOnAir(read: IcyRead, octoCover: String? = null): MediaItem? {
     val meta = mediaMetadata
-    val lines = liveLines(mediaId, read, stationArtOf(meta.artworkRef())) ?: return null
+    val lines = liveLines(mediaId, read, stationArtOf(meta.artworkRef()), octoCover) ?: return null
     if (meta.title?.toString() == lines.title && meta.artist?.toString() == lines.subtitle && meta.artworkRef() == lines.artwork) return null
     return buildUpon().setMediaMetadata(meta.buildUpon().withLines(lines, read, meta.extras).build()).build()
 }

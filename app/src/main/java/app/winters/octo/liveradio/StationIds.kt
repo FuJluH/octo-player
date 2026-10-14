@@ -20,11 +20,12 @@ val LiveShelfEntry.streamUrl: String get() = when (this) {
 }
 
 // A station added to the server, by its stream: its cover on the server,
-// and what the same stream kept on this phone knows (its logo, codec and
-// place, and whether it streams as HLS).
+// its home page, and what the same stream kept on this phone knows (its
+// logo, codec and place, and whether it streams as HLS).
 fun Station.radioId(kept: LiveStation? = null): String {
     val cover = (ArtworkRef.decode(artwork) as? ArtworkRef.Server)?.coverId.orEmpty()
-    val details = (kept?.radioDetails() ?: RadioDetails()).copy(coverArt = cover)
+    val known = kept?.radioDetails() ?: RadioDetails()
+    val details = known.copy(coverArt = cover, homepage = homepage ?: known.homepage)
     return radioId(streamUrl.orEmpty(), name, kept?.hls == true, details)
 }
 

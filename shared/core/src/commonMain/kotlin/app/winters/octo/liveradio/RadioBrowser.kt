@@ -36,6 +36,8 @@ data class LiveStation(
     val countryCode: String = "",
     val state: String = "",
     val tags: List<String> = emptyList(),
+    // The station's own website, empty when the catalog has none.
+    val homepage: String = "",
     // How far from the place asked about, in meters; null when the catalog
     // does not know where the station is.
     val distanceMeters: Double? = null,
@@ -84,6 +86,7 @@ internal data class CatalogStation(
     @SerialName("countrycode") val countryCode: String = "",
     val state: String = "",
     val tags: String = "",
+    val homepage: String = "",
     @SerialName("geo_distance") val geoDistance: Double? = null,
     @SerialName("geo_lat") val geoLat: Double? = null,
     @SerialName("geo_long") val geoLong: Double? = null,
@@ -109,6 +112,7 @@ internal fun CatalogStation.toLive(): LiveStation? {
         countryCode = countryCode.trim().uppercase(),
         state = state.trim(),
         tags = tags.split(',').map { it.trim() }.filter { it.isNotEmpty() }.distinct().take(6),
+        homepage = homepage.trim().takeIf { it.startsWith("http://", ignoreCase = true) || it.startsWith("https://", ignoreCase = true) }.orEmpty(),
         distanceMeters = geoDistance,
         clicks = clickCount,
     )

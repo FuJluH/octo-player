@@ -1,6 +1,8 @@
 package app.winters.octo.discovery
 
 import app.winters.octo.catalog.ArtworkRef
+import app.winters.octo.liveradio.radioId
+import app.winters.octo.playback.radioDetailsOf
 import app.winters.octo.subsonic.RadioStation
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -16,12 +18,14 @@ class HomeStationsTest {
     fun anAddedStationPlaysItsStream() {
         val radio = listOf(
             RadioStation(yourMix, "Your Radio", "https://octo/radio/stream/abc", coverArt = yourMix),
-            RadioStation("rs-1", "City Radio", "https://radio.example.com/live.mp3", coverArt = "ra-rs-1"),
+            RadioStation("rs-1", "City Radio", "https://radio.example.com/live.mp3", coverArt = "ra-rs-1", homePageUrl = "https://city.example"),
         )
         val stations = homeStations(radio, "src1")
         assertNull("Octo's own station plays its songs", stations[0].streamUrl)
         assertEquals("https://radio.example.com/live.mp3", stations[1].streamUrl)
         assertEquals(ArtworkRef.Server("src1", "ra-rs-1").encode(), stations[1].artwork)
+        assertEquals("https://city.example", stations[1].homepage)
+        assertEquals("https://city.example", radioDetailsOf(stations[1].radioId()).homepage)
     }
 
     @Test

@@ -104,7 +104,6 @@ fun onAir(streamTitle: String?, streamUrl: String? = null, station: String = "")
 fun icyArtworkField(fields: Map<String, String>): String? =
     listOfNotNull(fields["StreamArtwork"], fields["StreamUrl"]).map(String::trim).firstOrNull { it.isNotEmpty() }
 
-// "Artist - Title" at its first " - ", or a title alone.
 // iHeart's artwork asked for at the size the player draws: its catalog
 // addresses say `ops=fit(200,200)`, which is blurry on a phone, and it
 // serves any fit up to the original. Other addresses stay as they are.
@@ -122,6 +121,7 @@ private val IHeartFit = Regex("""fit\((\d+),\s*\d+\)""")
 // The longest side asked of a station's artwork, in pixels.
 const val ARTWORK_SIZE = 600
 
+// "Artist - Title" at its first " - ", or a title alone.
 private fun splitArtist(text: String): Pair<String, String> {
     val bare = text.trim()
     if (bare.startsWith("-")) return "" to bare.trimStart('-', ' ')

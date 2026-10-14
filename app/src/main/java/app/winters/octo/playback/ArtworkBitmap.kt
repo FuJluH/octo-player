@@ -35,10 +35,10 @@ fun artworkBitmap(context: Context, ref: String?, px: Int): Bitmap? {
     }
 }
 
-// The first of a station's pictures that can be had, at most `px` across,
-// else its drawn cover.
+// The first of a station's pictures that can be had (see StationArt), at
+// most `px` across, else its drawn cover.
 private fun stationBitmap(context: Context, art: StationArt, px: Int): Bitmap? {
-    for (picture in listOf(art.artwork).filter(String::isNotBlank) + art.logos) {
+    for (picture in art.pictures) {
         val bitmap = if (isWebPicture(picture)) loaded(context, picture, px) else artworkBitmap(context, picture, px)
         if (bitmap != null) return bitmap
     }

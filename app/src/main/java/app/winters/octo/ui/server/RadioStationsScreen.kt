@@ -51,6 +51,7 @@ import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.discovery.Discovery
 import app.winters.octo.playback.PlaybackConnection
+import app.winters.octo.liveradio.lineupOf
 import app.winters.octo.liveradio.radioId
 import app.winters.octo.server.ServerControls
 import app.winters.octo.subsonic.RadioStationDetails
@@ -180,10 +181,15 @@ class RadioStationsViewModel @Inject constructor(
 
     // A station the server made plays the songs it has lined up, like the
     // Home shelf; any other plays its stream.
+    // A stream plays with the list's other streams in its order, for Back
+    // and Next.
     fun play(station: RadioStationDetails) {
         if (starting != null) return
         if (station.id !in readOnly.value) {
-            if (station.streamUrl.isNotBlank()) playback.playTracks(listOf(station.radioId()))
+            if (station.streamUrl.isBlank()) return
+            val streams = (stations as? LoadState.Ready)?.data.orEmpty().filter { it.id !in readOnly.value && it.streamUrl.isNotBlank() }
+            val (ids, start) = lineupOf(streams, streams.indexOfFirst { it.id == station.id }.coerceAtLeast(0), { it.streamUrl }, { it.radioId() })
+            playback.playLineup(ids.ifEmpty { listOf(station.radioId()) }, start, source = "Radio stations")
             return
         }
         starting = station.id

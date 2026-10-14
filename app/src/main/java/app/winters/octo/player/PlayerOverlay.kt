@@ -56,6 +56,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -75,6 +76,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -94,6 +96,7 @@ import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -139,6 +142,7 @@ import app.winters.octo.ui.common.SwipeSkip
 import app.winters.octo.ui.common.detectAxisDrags
 import app.winters.octo.ui.common.swipeSkip
 import app.winters.octo.ui.common.AddToLibraryButton
+import app.winters.octo.ui.common.LocalChoiceSheet
 import app.winters.octo.ui.common.LocalHaze
 import app.winters.octo.ui.common.LocalPressSpot
 import app.winters.octo.ui.common.pressSpot
@@ -327,7 +331,9 @@ private fun AnimatedVisibilityScope.PlayerContent(
     onOpenSpeed: () -> Unit,
     onChooseLyrics: () -> Unit,
 ) {
-    val lyricsOpen by model.lyricsOpen.collectAsStateWithLifecycle()
+    val lyricsWanted by model.lyricsOpen.collectAsStateWithLifecycle()
+    // A live station has no lyrics to show.
+    val lyricsOpen = lyricsWanted && now.live == null
     val prefs by model.prefs.collectAsStateWithLifecycle()
     val calm = prefs.reduceMotion || rememberSystemReduceMotion()
     // The player's own scope, so the controls still rise in as the player
@@ -530,6 +536,7 @@ private fun AnimatedVisibilityScope.ArtStage(
     val haptics = LocalHapticFeedback.current
     // How far the artwork has been swiped, in pixels.
     var swipe by remember { mutableFloatStateOf(0f) }
+    val liveLineupNow by rememberUpdatedState(now.live?.lineup)
     BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
         val side = min(maxSide, min(maxWidth, maxHeight))
         val width = constraints.maxWidth.toFloat()
@@ -555,7 +562,17 @@ private fun AnimatedVisibilityScope.ArtStage(
                                 }
                             },
                             onEnd = { offset, velocity ->
-                                val skip = swipeSkip(offset, velocity, distance, fling)
+                                // A station at an end of its lineup has no
+                                // station that way to swipe to.
+                                val lineup = liveLineupNow
+                                val skip = swipeSkip(offset, velocity, distance, fling).let {
+                                    when {
+                                        lineup == null -> it
+                                        it == SwipeSkip.Next && !lineup.hasNext -> SwipeSkip.Stay
+                                        it == SwipeSkip.Previous && !lineup.hasPrevious -> SwipeSkip.Stay
+                                        else -> it
+                                    }
+                                }
                                 if (skip != SwipeSkip.Stay && !armed) haptics.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
                                 armed = false
                                 settling = scope.launch { settleSwipe(skip, width, { swipe }, { swipe = it }, model::next, model::previous) }
@@ -623,15 +640,33 @@ private fun AnimatedVisibilityScope.Controls(
             exit = ExitTransition.None,
         ),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        val live = now.live
+        val liveModel: LivePlayerViewModel? = if (live != null) hiltViewModel() else null
+        // A station's heart and menu sit on the title's own line, centered
+        // on it, their touch room reaching past it.
+        val measurer = rememberTextMeasurer()
+        val titleLine = with(LocalDensity.current) { remember(measurer, this) { measurer.measure("Ag", TitleStyle).size.height.toDp() } }
+        Row(verticalAlignment = if (live != null) Alignment.Top else Alignment.CenterVertically) {
             Box(Modifier.weight(1f)) { TitleBlock(now, onOpenArtist, onClose) }
-            SongButtons(now, model)
+            if (live != null && liveModel != null) {
+                Row(Modifier.height(titleLine).wrapContentHeight(unbounded = true), verticalAlignment = Alignment.CenterVertically) {
+                    LiveSongButtons(live, liveModel)
+                }
+            } else {
+                SongButtons(now, model)
+            }
         }
-        // The song's rating, only once it has one.
-        val rating by model.rating.collectAsStateWithLifecycle()
-        RatingStars(rating, Modifier.padding(top = 2.dp), size = 12.dp)
-        Spacer(Modifier.height(12.dp))
-        Progress(now, model, onOpenSpeed)
+        if (live == null) {
+            // The song's rating, only once it has one.
+            val rating by model.rating.collectAsStateWithLifecycle()
+            RatingStars(rating, Modifier.padding(top = 2.dp), size = 12.dp)
+            Spacer(Modifier.height(12.dp))
+            Progress(now, model, onOpenSpeed)
+        } else {
+            Spacer(Modifier.height(12.dp))
+            val prefs by model.prefs.collectAsStateWithLifecycle()
+            LiveBar(live, calm = prefs.reduceMotion || rememberSystemReduceMotion())
+        }
         Spacer(Modifier.height(gap))
         Transport(now, model)
         if (roomy) {
@@ -639,7 +674,25 @@ private fun AnimatedVisibilityScope.Controls(
             Volume(model)
         }
         Spacer(Modifier.height(gap))
-        Row(
+        if (live != null) {
+            // A station has no lyrics, shuffle or repeat. The queue button
+            // lists the stations being surfed; the sleep timer stays.
+            val sheet = LocalChoiceSheet.current
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterHorizontally),
+            ) {
+                if (live.lineup.shows) {
+                    ActionButton(
+                        icon = OctoIcons.Queue,
+                        description = "Stations",
+                        on = false,
+                        onClick = { sheet.show(stationList(live.lineup, model::playAt)) },
+                    )
+                }
+                SleepCircle(model, onClick = onOpenSleep)
+            }
+        } else Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterHorizontally),
         ) {
@@ -725,7 +778,7 @@ private fun TitleBlock(now: NowPlaying, onOpenArtist: (String) -> Unit, onClose:
             SongTitle(
                 song.title.orEmpty(),
                 explicit = song.explicit,
-                style = OctoType.title.copy(fontWeight = FontWeight.Bold),
+                style = TitleStyle,
                 color = LocalContentColor.current,
                 markColor = accentInk,
                 titleModifier = Modifier.basicMarquee().closesPlayer(onClose),
@@ -914,14 +967,33 @@ private fun Transport(now: NowPlaying, model: PlayerViewModel) {
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        TransportButton(OctoIcons.Previous, "Previous", 44.dp, model::previous, nudge = (-8).dp)
-        TransportButton(
-            if (now.isPlaying) OctoIcons.Pause else OctoIcons.Play,
-            if (now.isPlaying) "Pause" else "Play",
-            56.dp,
-            model::togglePlayPause,
-        )
-        TransportButton(OctoIcons.Next, "Next", 44.dp, model::next, nudge = 8.dp)
+        val live = now.live
+        if (live != null) {
+            // A station stops and plays again live; Back and Next change
+            // station, while there are others in its list, up to its ends.
+            val lineup = live.lineup
+            if (lineup.shows) {
+                TransportButton(OctoIcons.Previous, "Previous station", 44.dp, model::previous, nudge = (-8).dp, enabled = lineup.hasPrevious)
+            }
+            TransportButton(
+                if (now.playWhenReady) LiveStopIcon else OctoIcons.Play,
+                if (now.playWhenReady) "Stop" else "Play",
+                56.dp,
+                model::togglePlayPause,
+            )
+            if (lineup.shows) {
+                TransportButton(OctoIcons.Next, "Next station", 44.dp, model::next, nudge = 8.dp, enabled = lineup.hasNext)
+            }
+        } else {
+            TransportButton(OctoIcons.Previous, "Previous", 44.dp, model::previous, nudge = (-8).dp)
+            TransportButton(
+                if (now.isPlaying) OctoIcons.Pause else OctoIcons.Play,
+                if (now.isPlaying) "Pause" else "Play",
+                56.dp,
+                model::togglePlayPause,
+            )
+            TransportButton(OctoIcons.Next, "Next", 44.dp, model::next, nudge = 8.dp)
+        }
     }
 }
 
@@ -957,6 +1029,7 @@ private fun TransportButton(
     iconSize: Dp,
     onClick: () -> Unit,
     nudge: Dp = 0.dp,
+    enabled: Boolean = true,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
@@ -966,7 +1039,8 @@ private fun TransportButton(
     Box(
         Modifier
             .size(72.dp)
-            .clickable(interactionSource = interaction, indication = null, role = Role.Button) {
+            .alpha(if (enabled) 1f else 0.3f)
+            .clickable(interactionSource = interaction, indication = null, enabled = enabled, role = Role.Button) {
                 onClick()
                 if (nudge != 0.dp) {
                     scope.launch {
@@ -1112,3 +1186,6 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
     is ContextWrapper -> baseContext.findActivity()
     else -> null
 }
+
+// The song's name in the player.
+private val TitleStyle = OctoType.title.copy(fontWeight = FontWeight.Bold)

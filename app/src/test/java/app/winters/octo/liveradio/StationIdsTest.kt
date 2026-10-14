@@ -64,6 +64,26 @@ class StationIdsTest {
     }
 
     @Test
+    fun theShelfPlaysAsALineupInItsOrderFromTheStationTapped() {
+        val server = Station("ra-1", "KIIS", ArtworkRef.Server("src", "ra-1").encode(), streamUrl = "https://stream.revma.ihrhls.com/zc185")
+        val other = kiis.copy(uuid = "u-2", name = "KROQ", streamUrl = "https://kroq.example/live")
+        val shelf = liveShelf(listOf(server), listOf(kiis, other))
+        // The kept copy of the server's stream joins the server's card.
+        assertEquals(2, shelf.size)
+        val (ids, start) = lineupOf(shelf, 1, { it.streamUrl }, { it.radioId() })
+        assertEquals(listOf(shelf[0].radioId(), other.radioId()), ids)
+        assertEquals(1, start)
+        val lineup = liveLineup(ids, start)!!
+        assertTrue(lineup.shows)
+        assertTrue(lineup.hasPrevious)
+        assertFalse(lineup.hasNext)
+        // A list with the same stream twice plays it once.
+        val (twice, at) = lineupOf(listOf(kiis, other, kiis.copy(uuid = "u-3")), 2, { it.streamUrl }, { it.radioId() })
+        assertEquals(listOf(kiis.radioId(), other.radioId()), twice)
+        assertEquals(0, at)
+    }
+
+    @Test
     fun aStationOnTheRadioStationsScreenCarriesItsHomePageAndCover() {
         val id = RadioStationDetails("ra-2", "KEXP", "https://kexp.example/live", homePageUrl = "https://kexp.org", coverArt = "ra-2").radioId()
         assertEquals("https://kexp.example/live" to "KEXP", radioOf(id))

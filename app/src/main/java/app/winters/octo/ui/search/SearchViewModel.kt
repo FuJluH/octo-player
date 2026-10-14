@@ -118,9 +118,23 @@ class SearchViewModel @Inject constructor(
     private val downloads: Downloads,
     private val hint: AddHint,
     private val tops: SearchTopSongs,
+    asks: SearchAsks,
 ) : ViewModel() {
     var text by mutableStateOf("")
     var filter by mutableStateOf(SearchFilter.All)
+
+    init {
+        // Words asked for from elsewhere in the app become the search.
+        viewModelScope.launch {
+            asks.query.collect { words ->
+                if (words != null) {
+                    text = words
+                    filter = SearchFilter.All
+                    asks.took(words)
+                }
+            }
+        }
+    }
 
     // Whether the artist's top songs, and the chart, show every song or
     // only the first few.

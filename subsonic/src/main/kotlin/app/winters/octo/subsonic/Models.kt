@@ -360,6 +360,7 @@ data class RadioStation(
     val name: String = "",
     val streamUrl: String = "",
     val coverArt: String? = null,
+    val homePageUrl: String? = null,
 )
 
 @Serializable

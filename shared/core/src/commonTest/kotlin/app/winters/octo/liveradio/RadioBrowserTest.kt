@@ -24,7 +24,7 @@ class RadioBrowserTest {
 
     private fun station(uuid: String, name: String, distance: Double? = null, clicks: Int = 0, state: String = "California", codec: String = "MP3", ok: Int = 1) =
         """{"stationuuid":"$uuid","name":"$name","url":"http://x/$uuid","url_resolved":"http://s/$uuid","favicon":"http://f/$uuid.png","codec":"$codec","bitrate":128,"hls":0,""" +
-            """"country":"The United States Of America","countrycode":"US","state":"$state","tags":"jazz,news, jazz","clickcount":$clicks,"lastcheckok":$ok""" +
+            """"country":"The United States Of America","countrycode":"US","state":"$state","tags":"jazz,news, jazz","homepage":"https://$uuid.example/ ","clickcount":$clicks,"lastcheckok":$ok""" +
             (distance?.let { ""","geo_distance":$it""" } ?: "") + "}"
 
     private var nearBody = "[]"
@@ -63,6 +63,7 @@ class RadioBrowserTest {
         val found = catalog().near(sf, 40_000.0, LiveSort.Distance)
         assertEquals(listOf("b", "a", "d", "c"), found.map { it.uuid })
         assertEquals(listOf("jazz", "news"), found[0].tags)
+        assertEquals("https://${found[0].uuid}.example/", found[0].homepage)
         assertEquals("http://s/b", found[0].streamUrl)
     }
 

@@ -20,6 +20,7 @@ import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.PauseGlyph
 import app.winters.octo.playback.NowPlaying
+import app.winters.octo.player.LiveStopIcon
 import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.output.CastingMark
 
@@ -34,7 +35,15 @@ fun NowPlayingFace(now: NowPlaying, progress: () -> Float, size: Dp = BarHeight)
             // Darkens the picture so the sign on top stays readable.
             Box(Modifier.size(size - 12.dp).background(Color.Black.copy(alpha = 0.35f), CircleShape))
         }
-        if (now.isPlaying) {
+        if (now.live != null) {
+            // A station stops rather than pauses.
+            Icon(
+                painterResource(if (now.playWhenReady) LiveStopIcon else OctoIcons.Play),
+                contentDescription = null,
+                tint = OctoColors.TextPrimary,
+                modifier = Modifier.size(22.dp),
+            )
+        } else if (now.isPlaying) {
             PauseGlyph(OctoColors.TextPrimary, size = 22.dp)
         } else {
             Icon(painterResource(OctoIcons.Play), contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(22.dp))

@@ -65,6 +65,7 @@ import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.playback.NowPlaying
+import app.winters.octo.player.LiveStopIcon
 import app.winters.octo.player.fractionAt
 import app.winters.octo.player.rememberPositionMs
 import app.winters.octo.ui.common.Artwork
@@ -380,28 +381,44 @@ private fun PlayerCapsule(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            CapsuleButton(OctoIcons.Previous, "Previous", actions.onPrevious)
-            CapsuleButton(if (now.isPlaying) OctoIcons.Pause else OctoIcons.Play, if (now.isPlaying) "Pause" else "Play", actions.onPlayPause)
-            CapsuleButton(OctoIcons.Next, "Next", actions.onNext)
+            val live = now.live
+            if (live == null) {
+                CapsuleButton(OctoIcons.Previous, "Previous", actions.onPrevious)
+                CapsuleButton(if (now.isPlaying) OctoIcons.Pause else OctoIcons.Play, if (now.isPlaying) "Pause" else "Play", actions.onPlayPause)
+                CapsuleButton(OctoIcons.Next, "Next", actions.onNext)
+            } else {
+                // A station stops rather than pauses; Back and Next change
+                // station, while there is more than one to change to.
+                val lineup = live.lineup
+                if (lineup.shows) CapsuleButton(OctoIcons.Previous, "Previous station", actions.onPrevious, enabled = lineup.hasPrevious)
+                CapsuleButton(if (now.playWhenReady) LiveStopIcon else OctoIcons.Play, if (now.playWhenReady) "Stop" else "Play", actions.onPlayPause)
+                if (lineup.shows) CapsuleButton(OctoIcons.Next, "Next station", actions.onNext, enabled = lineup.hasNext)
+            }
         }
     }
 }
 
 @Composable
-private fun CapsuleButton(@DrawableRes icon: Int, description: String, onClick: () -> Unit) {
+private fun CapsuleButton(@DrawableRes icon: Int, description: String, onClick: () -> Unit, enabled: Boolean = true) {
     Box(
         Modifier
             .size(36.dp)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
+                enabled = enabled,
                 role = Role.Button,
                 onClick = onClick,
             )
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(painterResource(icon), contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(28.dp))
+        Icon(
+            painterResource(icon),
+            contentDescription = null,
+            tint = if (enabled) OctoColors.TextPrimary else OctoColors.TextPrimary.copy(alpha = 0.3f),
+            modifier = Modifier.size(28.dp),
+        )
     }
 }
 
