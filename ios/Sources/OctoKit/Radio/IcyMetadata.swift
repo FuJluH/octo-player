@@ -15,11 +15,12 @@ public struct IcyReader: Sendable {
         soundLeft = max(1, interval)
     }
 
-    /// The sound in `data`, and each title a metadata block in it finished, in order. A block
-    /// with no title or an empty one gives none.
-    public mutating func feed(_ data: Data) -> (sound: Data, titles: [String]) {
+    /// The sound in `data`, and what each metadata block it finished names, in order. A block
+    /// with an empty title is kept, since it says the station names nothing now; a block with no
+    /// StreamTitle at all gives none.
+    public mutating func feed(_ data: Data) -> (sound: Data, titles: [IcyMeta]) {
         var sound = Data()
-        var titles: [String] = []
+        var titles: [IcyMeta] = []
         var at = data.startIndex
         while at < data.endIndex {
             if let left = metaLeft {
@@ -27,7 +28,7 @@ public struct IcyReader: Sendable {
                 meta.append(data[at..<(at + take)])
                 at += take
                 if take == left {
-                    if let title = icyStreamTitle(meta) { titles.append(title) }
+                    if let named = icyMeta(meta) { titles.append(named) }
                     meta.removeAll(keepingCapacity: true)
                     metaLeft = nil
                     soundLeft = interval
@@ -53,16 +54,129 @@ public struct IcyReader: Sendable {
     }
 }
 
-/// The StreamTitle in an ICY metadata block (`StreamTitle='Artist - Song';StreamUrl='';`), read
-/// as UTF-8 or else Latin-1; nil when it has none or it is blank.
-public func icyStreamTitle(_ block: Data) -> String? {
-    let bytes = Array(block.prefix { $0 != 0 })
-    let text = String(bytes: bytes, encoding: .utf8) ?? String(bytes: bytes, encoding: .isoLatin1) ?? ""
-    guard let start = text.range(of: "StreamTitle='") else { return nil }
-    let rest = text[start.upperBound...]
-    let end = rest.range(of: "';")?.lowerBound ?? rest.lastIndex(of: "'") ?? rest.endIndex
-    let title = rest[..<end].trimmingCharacters(in: .whitespacesAndNewlines)
-    return title.isEmpty || title == "-" ? nil : title
+/// What one ICY metadata block names: its StreamTitle, trimmed, and the address sent with it
+/// (StreamArtwork, else StreamUrl), empty when there is none.
+public struct IcyMeta: Sendable, Equatable, Hashable {
+    public var title: String
+    public var url: String
+
+    public init(title: String, url: String = "") {
+        self.title = title
+        self.url = url
+    }
+}
+
+/// The StreamTitle of an ICY metadata block (`StreamTitle='Artist - Song';StreamUrl='';`) with
+/// its address, read as UTF-8 or else Latin-1, or nil when the block has no StreamTitle. The
+/// NULs padding the block are dropped.
+public func icyMeta(_ block: Data) -> IcyMeta? {
+    let fields = icyFields(icyText(block))
+    guard let title = fields["StreamTitle"] else { return nil }
+    return IcyMeta(title: title.trimmingCharacters(in: .whitespacesAndNewlines), url: icyArtworkField(fields) ?? "")
+}
+
+/// A metadata block as text: UTF-8, else Latin-1, without the NULs that pad it.
+func icyText(_ block: Data) -> String {
+    var bytes = Array(block)
+    while bytes.last == 0 { bytes.removeLast() }
+    return String(bytes: bytes, encoding: .utf8) ?? String(bytes: bytes, encoding: .isoLatin1) ?? ""
+}
+
+/// The fields of one ICY metadata block, `StreamTitle='...';StreamUrl='...';`, by name, each name
+/// once (the first wins). A value ends at a `';` that the next `Key='` or the end of the block
+/// follows, so a quote inside a name stays in it ("LA's #1", "I DON'T WANNA MISS A THING"); else
+/// at a quote that ends the block, else at the end.
+public func icyFields(_ block: String) -> [String: String] {
+    var scalars = Array(block.unicodeScalars)
+    while scalars.last == "\u{0}" { scalars.removeLast() }
+    let text = IcyText(scalars)
+    var fields: [String: String] = [:]
+    var at = 0
+    while at < text.count {
+        guard let eq = text.find("='", from: at) else { break }
+        var key = text.string(at, eq).trimmingCharacters(in: .whitespacesAndNewlines)
+        while key.hasPrefix(";") { key.removeFirst() }
+        key = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        let start = eq + 2
+        let end = text.valueEnd(from: start)
+        if !key.isEmpty, key.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" }), fields[key] == nil {
+            fields[key] = text.string(start, end)
+        }
+        at = min(end + 1, text.count)
+        if at < text.count, text[at] == ";" { at += 1 }
+    }
+    return fields
+}
+
+/// The artwork address in a block's StreamArtwork or StreamUrl: the first one not empty.
+public func icyArtworkField(_ fields: [String: String]) -> String? {
+    [fields["StreamArtwork"], fields["StreamUrl"]]
+        .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .first { !$0.isEmpty }
+}
+
+/// A block's text as scalars, read by position.
+private struct IcyText {
+    let scalars: [Unicode.Scalar]
+
+    init(_ scalars: [Unicode.Scalar]) { self.scalars = scalars }
+
+    var count: Int { scalars.count }
+
+    subscript(_ index: Int) -> Unicode.Scalar { scalars[index] }
+
+    func string(_ from: Int, _ to: Int) -> String {
+        guard from < to else { return "" }
+        var view = String.UnicodeScalarView()
+        view.append(contentsOf: scalars[from..<to])
+        return String(view)
+    }
+
+    func find(_ pattern: String, from: Int) -> Int? {
+        let wanted = Array(pattern.unicodeScalars)
+        guard let first = wanted.first else { return nil }
+        var at = max(0, from)
+        while at + wanted.count <= count {
+            if scalars[at] == first, scalars[at..<(at + wanted.count)].elementsEqual(wanted) { return at }
+            at += 1
+        }
+        return nil
+    }
+
+    /// Whether only white space follows `from`.
+    func isBlank(from: Int) -> Bool {
+        scalars[min(from, count)...].allSatisfy(\.properties.isWhitespace)
+    }
+
+    /// Whether `Key='` starts at `start`, after any white space.
+    func keyStarts(at start: Int) -> Bool {
+        var at = start
+        while at < count, scalars[at].properties.isWhitespace { at += 1 }
+        guard at < count, Self.isAsciiLetter(scalars[at]) else { return false }
+        at += 1
+        while at < count, Self.isAsciiLetter(scalars[at]) || ("0"..."9").contains(scalars[at]) || scalars[at] == "_" || scalars[at] == "-" {
+            at += 1
+        }
+        return at + 1 < count && scalars[at] == "=" && scalars[at + 1] == "'"
+    }
+
+    /// Where a value that starts at `start` ends: at a `';` that the next key or the end of the
+    /// block follows, else at a quote that ends the block, else at the end.
+    func valueEnd(from start: Int) -> Int {
+        var search = start
+        while let close = find("';", from: search) {
+            let after = close + 2
+            if after >= count || keyStarts(at: after) || isBlank(from: after) { return close }
+            search = close + 1
+        }
+        var end = count
+        while end > 0, scalars[end - 1].properties.isWhitespace { end -= 1 }
+        return end - 1 >= start && scalars[end - 1] == "'" ? end - 1 : count
+    }
+
+    private static func isAsciiLetter(_ scalar: Unicode.Scalar) -> Bool {
+        ("a"..."z").contains(scalar) || ("A"..."Z").contains(scalar)
+    }
 }
 
 /// The waits, in seconds, before each try to reach a live station again once it stopped sending.

@@ -3,18 +3,113 @@ import Foundation
 // An internet radio station in the queue. Its id carries everything needed to play it, so
 // nothing about it is stored anywhere else:
 //
-//   radio:<url-encoded stream address>:<url-encoded station name>
+//   radio:<url-encoded stream address>:<url-encoded station name>[:hls][:<details>]
 //
-// Encoding turns every ':' into %3A, so the two parts split cleanly. The name may be empty. The
-// player opens the address as it is; a live stream has no length, so it never crossfades and
-// never counts as a play.
+// Encoding turns every ':' into %3A, so the parts split cleanly. The name may be empty; ":hls"
+// marks a stream sent as HLS whose address does not say so (the part is empty when it is not,
+// and details follow). Details are what the player shows about the station (logo, codec, place,
+// website), url-encoded as `key=value&...`; an id without them still plays. The player opens the
+// address as it is; a live stream has no length, so it never crossfades and never counts as a
+// play.
 public let radioPrefix = "radio:"
+private let radioHlsMark = "hls"
 
 public func isRadio(_ id: String) -> Bool { id.hasPrefix(radioPrefix) }
 
-public func radioId(_ streamUrl: String, _ name: String = "") -> String {
-    radioPrefix + javaEncode(streamUrl.trimmingCharacters(in: .whitespacesAndNewlines)) + ":"
+public func radioId(_ streamUrl: String, _ name: String = "", hls: Bool = false, details: RadioDetails = RadioDetails()) -> String {
+    let base = radioPrefix + javaEncode(streamUrl.trimmingCharacters(in: .whitespacesAndNewlines)) + ":"
         + javaEncode(name.trimmingCharacters(in: .whitespacesAndNewlines))
+    let shown = details.encoded()
+    if !shown.isEmpty { return base + ":" + (hls ? radioHlsMark : "") + ":" + javaEncode(shown) }
+    return hls ? base + ":" + radioHlsMark : base
+}
+
+/// What the player shows about a station besides its name: its logo (an address, or a server
+/// cover art id in `coverArt`), how it streams, where it is, its website, its genres and its
+/// Radio Browser id.
+public struct RadioDetails: Sendable, Equatable, Hashable {
+    public var logo: String
+    public var coverArt: String
+    public var codec: String
+    public var bitrate: Int
+    public var country: String
+    public var countryCode: String
+    public var state: String
+    public var homepage: String
+    public var tags: [String]
+    public var uuid: String
+
+    public init(logo: String = "", coverArt: String = "", codec: String = "", bitrate: Int = 0, country: String = "",
+                countryCode: String = "", state: String = "", homepage: String = "", tags: [String] = [], uuid: String = "") {
+        self.logo = logo
+        self.coverArt = coverArt
+        self.codec = codec
+        self.bitrate = bitrate
+        self.country = country
+        self.countryCode = countryCode
+        self.state = state
+        self.homepage = homepage
+        self.tags = tags
+        self.uuid = uuid
+    }
+
+    func encoded() -> String {
+        let pairs: [(String, String)] = [
+            ("logo", logo),
+            ("cover", coverArt),
+            ("codec", codec),
+            ("kbps", bitrate > 0 ? String(bitrate) : ""),
+            ("country", country),
+            ("cc", countryCode),
+            ("state", state),
+            ("home", homepage),
+            ("tags", tags.joined(separator: ",")),
+            ("uuid", uuid),
+        ]
+        return pairs.filter { !$0.1.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .map { $0.0 + "=" + javaEncode($0.1.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            .joined(separator: "&")
+    }
+
+    static func decoded(_ text: String) -> RadioDetails {
+        var values: [String: String] = [:]
+        for pair in text.split(separator: "&", omittingEmptySubsequences: false) {
+            guard let eq = pair.firstIndex(of: "="), eq != pair.startIndex else { continue }
+            values[String(pair[..<eq])] = javaDecode(String(pair[pair.index(after: eq)...]))
+        }
+        return RadioDetails(
+            logo: values["logo"] ?? "",
+            coverArt: values["cover"] ?? "",
+            codec: values["codec"] ?? "",
+            bitrate: values["kbps"].flatMap { Int($0) } ?? 0,
+            country: values["country"] ?? "",
+            countryCode: values["cc"] ?? "",
+            state: values["state"] ?? "",
+            homepage: values["home"] ?? "",
+            tags: (values["tags"] ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty },
+            uuid: values["uuid"] ?? "")
+    }
+}
+
+/// The parts of a station's id after its prefix.
+private func radioParts(_ id: String) -> [String] {
+    String(id.dropFirst(radioPrefix.count)).split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+}
+
+/// What a station's id says about it beyond its address and name; empty details when it says
+/// nothing more.
+public func radioDetailsOf(_ id: String) -> RadioDetails {
+    guard isRadio(id) else { return RadioDetails() }
+    let parts = radioParts(id)
+    guard parts.count > 3 else { return RadioDetails() }
+    return RadioDetails.decoded(javaDecode(parts[3]))
+}
+
+/// Whether a station's id says it streams as HLS.
+public func radioIsHls(_ id: String) -> Bool {
+    guard isRadio(id) else { return false }
+    let parts = radioParts(id)
+    return parts.count > 2 && parts[2] == radioHlsMark
 }
 
 /// The station's stream address and name, or nil when the id is not one.

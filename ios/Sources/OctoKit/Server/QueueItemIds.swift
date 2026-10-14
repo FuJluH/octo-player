@@ -3,18 +3,25 @@ import Foundation
 // Things in the queue that are not songs of the library, whose ids carry everything needed to
 // play them, so nothing about them is stored anywhere else:
 //
-//   radio:<encoded stream address>:<encoded station name>
+//   radio:<encoded stream address>:<encoded station name>[:hls][:<encoded details>]
 //   file:<encoded address>:<encoded title>:<encoded artist>
 //
 // Encoding turns every ':' into %3A, so the parts split cleanly.
 
-/// A station's id from its stream address and name.
-public func radioId(streamUrl: String, name: String = "") -> String { radioId(streamUrl, name) }
+/// A station's id from its stream address and name, with what the player shows about it.
+public func radioId(streamUrl: String, name: String = "", hls: Bool = false, details: RadioDetails = RadioDetails()) -> String {
+    radioId(streamUrl, name, hls: hls, details: details)
+}
 
-/// A station as a song for the queue: titled by its name (its address when it has none), by "Radio".
+/// A station as a song for the queue: titled by its name (its address when it has none), by
+/// "Radio", with the server cover its details name, and typed as HLS when its id says so.
 public func radioSong(_ id: String) -> Song? {
     guard let (stream, name) = radioOf(id) else { return nil }
-    return Song(id: id, title: name.isEmpty ? stream : name, artist: "Radio")
+    var song = Song(id: id, title: name.isEmpty ? stream : name, artist: "Radio")
+    let cover = radioDetailsOf(id).coverArt
+    if !cover.isEmpty { song.coverArt = cover }
+    if radioIsHls(id) { song.contentType = hlsPlaylistTypes[0] }
+    return song
 }
 
 /// An opened file's id from its address, title and artist.

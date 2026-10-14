@@ -18,7 +18,7 @@ import Testing
         let stream = sound(8, 1) + block("StreamTitle='Artist - Song';StreamUrl='';") + sound(8, 2) + Data([0]) + sound(3, 3)
         let (out, titles) = reader.feed(stream)
         #expect(out == sound(8, 1) + sound(8, 2) + sound(3, 3))
-        #expect(titles == ["Artist - Song"])
+        #expect(titles == [IcyMeta(title: "Artist - Song")])
     }
 
     @Test func aBlockCutAcrossReadsStillGivesItsTitle() {
@@ -27,7 +27,7 @@ import Testing
         for size in [1, 2, 3, 7, 16, 100] {
             var reader = IcyReader(interval: 5)
             var out = Data()
-            var titles: [String] = []
+            var titles: [IcyMeta] = []
             var at = 0
             while at < stream.count {
                 let piece = stream.subdata(in: at..<min(stream.count, at + size))
@@ -37,23 +37,43 @@ import Testing
                 at += size
             }
             #expect(out == sound(5, 1) + sound(5, 2) + sound(2, 3), "pieces of \(size)")
-            #expect(titles == ["Don't Stop", "Next"], "pieces of \(size)")
+            #expect(titles.map(\.title) == ["Don't Stop", "Next"], "pieces of \(size)")
         }
     }
 
-    @Test func anEmptyTitleIsIgnored() {
+    @Test func anEmptyTitleIsKeptSoTheOldSongClears() {
         var reader = IcyReader(interval: 4)
         let (out, titles) = reader.feed(sound(4, 1) + block("StreamTitle='';") + sound(4, 2) + block("StreamTitle='  ';StreamUrl='x';")
                                         + sound(4, 3) + block("StreamUrl='x';"))
         #expect(out == sound(4, 1) + sound(4, 2) + sound(4, 3))
-        #expect(titles.isEmpty)
+        // A block with no StreamTitle at all says nothing.
+        #expect(titles == [IcyMeta(title: ""), IcyMeta(title: "", url: "x")])
+        #expect(!onAir(titles[0]).named)
+    }
+
+    @Test func theReaderCarriesTheArtworkAddress() {
+        var reader = IcyReader(interval: 4)
+        let soma = "StreamTitle='Reef Project - True Clown';StreamUrl='https://somafm.com/logos/512/groovesalad512.jpg';"
+        let (_, titles) = reader.feed(sound(4, 1) + block(soma) + sound(4, 2) + block("StreamTitle='GWMR0446000';StreamUrl='';StreamArtwork='';"))
+        #expect(titles == [IcyMeta(title: "Reef Project - True Clown", url: "https://somafm.com/logos/512/groovesalad512.jpg"),
+                           IcyMeta(title: "GWMR0446000")])
+        #expect(onAir(titles[0], station: "Groove Salad") == OnAir("True Clown", "Reef Project", "https://somafm.com/logos/512/groovesalad512.jpg"))
+        #expect(!onAir(titles[1], station: "181.FM").named)
+    }
+
+    @Test func theReaderKeepsQuotesInsideNames() {
+        var reader = IcyReader(interval: 2)
+        let (_, titles) = reader.feed(sound(2, 1) + block("StreamTitle='AEROSMITH - I DON'T WANNA MISS A THING';") + sound(2, 2))
+        #expect(titles == [IcyMeta(title: "AEROSMITH - I DON'T WANNA MISS A THING")])
     }
 
     @Test func titlesReadAsUtf8OrElseLatin1() {
-        #expect(icyStreamTitle(Data("StreamTitle='Beyoncé - Halo';".utf8)) == "Beyoncé - Halo")
-        #expect(icyStreamTitle(Data([0x53, 0x74, 0x72, 0x65, 0x61, 0x6D, 0x54, 0x69, 0x74, 0x6C, 0x65, 0x3D, 0x27, 0x43, 0x61, 0x66, 0xE9, 0x27, 0x3B]))
+        #expect(icyMeta(Data("StreamTitle='Beyoncé - Halo';".utf8))?.title == "Beyoncé - Halo")
+        #expect(icyMeta(Data([0x53, 0x74, 0x72, 0x65, 0x61, 0x6D, 0x54, 0x69, 0x74, 0x6C, 0x65, 0x3D, 0x27, 0x43, 0x61, 0x66, 0xE9, 0x27, 0x3B]))?.title
                 == "Café")
-        #expect(icyStreamTitle(Data("StreamTitle='No end".utf8)) == "No end")
+        #expect(icyMeta(Data("StreamTitle='No end".utf8))?.title == "No end")
+        #expect(icyMeta(Data("StreamTitle='Padded';".utf8) + Data(repeating: 0, count: 9))?.title == "Padded")
+        #expect(icyMeta(Data("StreamUrl='x';".utf8)) == nil)
     }
 
     @Test func reconnectsWaitLongerEachTime() {
