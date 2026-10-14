@@ -61,6 +61,10 @@ object SettingsIndex {
         "crossfade_length", SettingsPage.Playback, "Longest blend", "The most seconds two songs blend for",
         listOf("fade", "seconds", "duration", "crossfade length"),
     )
+    val CrossfadeCurve = add(
+        "crossfade_curve", SettingsPage.Playback, "Crossfade curve", "How one song fades into the next",
+        listOf("fade", "curve", "shape", "linear", "equal power", "s-curve", "logarithmic", "mix", "dj", "transition"),
+    )
     val SmartTransitions = add(
         "smart_transitions", SettingsPage.Playback, "Smart transitions", "Each blend starts where the songs meet best",
         listOf("automix", "dj", "mix", "transition", "beat", "outro"),
@@ -139,6 +143,10 @@ object SettingsIndex {
     val Balance = add(
         "sound_balance", SettingsPage.Sound, "Balance", "Left and right",
         listOf("left", "right", "channel", "mono"),
+    )
+    val Crossfeed = add(
+        "sound_crossfeed", SettingsPage.Sound, "Crossfeed", "Each ear hears a little of the other side, for headphones",
+        listOf("headphones", "stereo", "speakers", "fatigue", "bs2b", "chu moy", "meier", "blend"),
     )
     val HeadphoneCorrection = add(
         "sound_correction", SettingsPage.Sound, "Headphone correction", "A correction for the headphones in use",

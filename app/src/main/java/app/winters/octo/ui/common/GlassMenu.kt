@@ -141,6 +141,7 @@ private fun MenuOption(option: Choice, selected: Boolean, pickable: Boolean, onC
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            option.leading?.invoke()
             Column(Modifier.weight(1f)) {
                 Text(option.label, style = OctoType.bodySmall, color = if (option.enabled) OctoColors.TextPrimary else OctoColors.TextMuted)
                 option.detail?.let { Text(it, style = OctoType.caption, color = OctoColors.TextMuted) }

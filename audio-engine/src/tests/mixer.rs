@@ -255,6 +255,20 @@ fn the_curve_follows_k() {
 }
 
 #[test]
+fn a_fixed_crossfade_follows_its_curve() {
+    use crate::automix::{FadeCurve, fade_out_gain};
+    let fade = 24_000u64;
+    let fade_start = 48_000 + LATENCY;
+    for curve in [FadeCurve::Linear, FadeCurve::SCurve, FadeCurve::EvenLoudness, FadeCurve::MixOnly] {
+        let (out, _) = blend(FadeShape { curve, ..Default::default() }, fade, 0.0, 96_000);
+        for i in (0..fade as usize).step_by(997) {
+            let want = 0.25 * fade_out_gain(curve, i as f64 / fade as f64, 500.0);
+            assert!((out[(fade_start + i) * 2] as f64 - want).abs() < 1e-6, "{curve:?} at {i}");
+        }
+    }
+}
+
+#[test]
 fn filter_sweeps_touch_only_the_blend() {
     let fade = 24_000u64;
     let plain = FadeShape { k: 0.4, ..Default::default() };

@@ -2960,6 +2960,11 @@ data class AutomixSettings (
      * crossfade length.
      */
     val `maxOverlapMs`: kotlin.UInt
+    , 
+    /**
+     * The shape of the fixed crossfade, with smart transitions off.
+     */
+    val `fadeCurve`: FadeCurve
     
 ){
     
@@ -2980,6 +2985,7 @@ public object FfiConverterTypeAutomixSettings: FfiConverterRustBuffer<AutomixSet
             FfiConverterBoolean.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterUInt.read(buf),
+            FfiConverterTypeFadeCurve.read(buf),
         )
     }
 
@@ -2987,7 +2993,8 @@ public object FfiConverterTypeAutomixSettings: FfiConverterRustBuffer<AutomixSet
             FfiConverterBoolean.allocationSize(value.`smartTransitions`) +
             FfiConverterBoolean.allocationSize(value.`filterSweeps`) +
             FfiConverterBoolean.allocationSize(value.`matchTempo`) +
-            FfiConverterUInt.allocationSize(value.`maxOverlapMs`)
+            FfiConverterUInt.allocationSize(value.`maxOverlapMs`) +
+            FfiConverterTypeFadeCurve.allocationSize(value.`fadeCurve`)
     )
 
     override fun write(value: AutomixSettings, buf: ByteBuffer) {
@@ -2995,13 +3002,68 @@ public object FfiConverterTypeAutomixSettings: FfiConverterRustBuffer<AutomixSet
             FfiConverterBoolean.write(value.`filterSweeps`, buf)
             FfiConverterBoolean.write(value.`matchTempo`, buf)
             FfiConverterUInt.write(value.`maxOverlapMs`, buf)
+            FfiConverterTypeFadeCurve.write(value.`fadeCurve`, buf)
     }
 }
 
 
 
 /**
- * The rest of the shaping: the limiter, balance and mono.
+ * Headphone crossfeed: each ear hears a little of the other side.
+ */
+data class CrossfeedSettings (
+    val `on`: kotlin.Boolean
+    , 
+    /**
+     * Where the sound fed to the other ear has fallen by 3 dB, 300 to
+     * 2000 Hz.
+     */
+    val `cutHz`: kotlin.Float
+    , 
+    /**
+     * How much quieter than the ear's own sound the other side is in the
+     * bass, 1 to 15 dB.
+     */
+    val `feedDb`: kotlin.Float
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeCrossfeedSettings: FfiConverterRustBuffer<CrossfeedSettings> {
+    override fun read(buf: ByteBuffer): CrossfeedSettings {
+        return CrossfeedSettings(
+            FfiConverterBoolean.read(buf),
+            FfiConverterFloat.read(buf),
+            FfiConverterFloat.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: CrossfeedSettings) = (
+            FfiConverterBoolean.allocationSize(value.`on`) +
+            FfiConverterFloat.allocationSize(value.`cutHz`) +
+            FfiConverterFloat.allocationSize(value.`feedDb`)
+    )
+
+    override fun write(value: CrossfeedSettings, buf: ByteBuffer) {
+            FfiConverterBoolean.write(value.`on`, buf)
+            FfiConverterFloat.write(value.`cutHz`, buf)
+            FfiConverterFloat.write(value.`feedDb`, buf)
+    }
+}
+
+
+
+/**
+ * The rest of the shaping: crossfeed, the limiter, balance and mono.
  */
 data class DspSettings (
     /**
@@ -3015,6 +3077,8 @@ data class DspSettings (
     val `balance`: kotlin.Float
     , 
     val `mono`: kotlin.Boolean
+    , 
+    val `crossfeed`: CrossfeedSettings
     
 ){
     
@@ -3034,19 +3098,22 @@ public object FfiConverterTypeDspSettings: FfiConverterRustBuffer<DspSettings> {
             FfiConverterBoolean.read(buf),
             FfiConverterFloat.read(buf),
             FfiConverterBoolean.read(buf),
+            FfiConverterTypeCrossfeedSettings.read(buf),
         )
     }
 
     override fun allocationSize(value: DspSettings) = (
             FfiConverterBoolean.allocationSize(value.`limiter`) +
             FfiConverterFloat.allocationSize(value.`balance`) +
-            FfiConverterBoolean.allocationSize(value.`mono`)
+            FfiConverterBoolean.allocationSize(value.`mono`) +
+            FfiConverterTypeCrossfeedSettings.allocationSize(value.`crossfeed`)
     )
 
     override fun write(value: DspSettings, buf: ByteBuffer) {
             FfiConverterBoolean.write(value.`limiter`, buf)
             FfiConverterFloat.write(value.`balance`, buf)
             FfiConverterBoolean.write(value.`mono`, buf)
+            FfiConverterTypeCrossfeedSettings.write(value.`crossfeed`, buf)
     }
 }
 
@@ -4733,6 +4800,62 @@ public object FfiConverterTypeErrorKind: FfiConverterRustBuffer<ErrorKind> {
     override fun allocationSize(value: ErrorKind) = 4UL
 
     override fun write(value: ErrorKind, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+/**
+ * The shape of the fixed crossfade: how the outgoing song's volume falls
+ * and the incoming song's rises as the blend goes from 0 to 1.
+ */
+
+enum class FadeCurve {
+    
+    /**
+     * cos and sin: the two songs together keep a steady loudness.
+     */
+    EQUAL_POWER,
+    /**
+     * Straight lines, with a slight dip in the middle.
+     */
+    LINEAR,
+    /**
+     * Holds each song longer, then swaps them quickly around the middle.
+     */
+    S_CURVE,
+    /**
+     * The same step down in decibels every moment, to -60 dB, then silence.
+     */
+    EVEN_LOUDNESS,
+    /**
+     * Both songs play at full volume; only the edges fade.
+     */
+    MIX_ONLY;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFadeCurve: FfiConverterRustBuffer<FadeCurve> {
+    override fun read(buf: ByteBuffer) = try {
+        FadeCurve.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: FadeCurve) = 4UL
+
+    override fun write(value: FadeCurve, buf: ByteBuffer) {
         buf.putInt(value.ordinal + 1)
     }
 }

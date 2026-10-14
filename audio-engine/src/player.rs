@@ -1262,7 +1262,11 @@ impl Player {
     ) -> (TransitionPlan, Option<LiveAnalysis>) {
         let a_len_ms = current_song.duration_ms as i64;
         if !self.automix.smart_transitions {
-            return (TransitionPlan::fixed_crossfade(a_len_ms, blend_ms, "smart transitions off"), None);
+            return (
+                TransitionPlan::fixed_crossfade(a_len_ms, blend_ms, "smart transitions off")
+                    .with_curve(self.automix.fade_curve),
+                None,
+            );
         }
         let (a, b) = (self.queue[current].key, self.queue[next].key);
         let (a_item, b_item) = (&self.queue[current].item, &self.queue[next].item);
@@ -1299,6 +1303,7 @@ impl Player {
                 smart: true,
                 filter_sweeps: self.automix.filter_sweeps,
                 beat_match: self.automix.match_tempo,
+                fade_curve: self.automix.fade_curve,
             },
             context: TransitionContext {
                 now_ms,
@@ -1340,6 +1345,7 @@ impl Player {
         let equal_power = plan.k == 0.0;
         FadeShape {
             k: plan.k,
+            curve: plan.curve,
             filter_strength: plan.filter_strength,
             steps: plan.low_pass_glide().map(|glide| LowPassSteps { beats: plan.beat_progress(), glide }),
             rate: plan.beat_match_rate.filter(|_| room),

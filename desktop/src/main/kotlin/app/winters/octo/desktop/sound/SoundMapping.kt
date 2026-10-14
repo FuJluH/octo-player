@@ -1,13 +1,16 @@
 package app.winters.octo.desktop.sound
 
+import app.winters.octo.audio.CrossfeedSettings
 import app.winters.octo.audio.DspSettings
 import app.winters.octo.audio.EqSettings
 import app.winters.octo.audio.ReplayGainSettings
+import app.winters.octo.playback.FadeCurve
 import app.winters.octo.sound.EqMode
 import app.winters.octo.sound.FilterType
 import app.winters.octo.sound.ReplayGainMode
 import app.winters.octo.sound.SoundSettings
 import app.winters.octo.audio.EqFilter as EngineFilter
+import app.winters.octo.audio.FadeCurve as EngineFadeCurve
 import app.winters.octo.audio.EqMode as EngineEqMode
 import app.winters.octo.audio.FilterType as EngineFilterType
 import app.winters.octo.audio.HeadphoneCorrection as EngineCorrection
@@ -43,7 +46,20 @@ fun SoundSettings.engineReplayGain(): ReplayGainSettings = ReplayGainSettings(
     preventClipping = preventClipping,
 )
 
-fun SoundSettings.engineDsp(): DspSettings = DspSettings(limiter = limiter, balance = balance.coerceIn(-1f, 1f), mono = mono)
+fun SoundSettings.engineDsp(): DspSettings = DspSettings(
+    limiter = limiter,
+    balance = balance.coerceIn(-1f, 1f),
+    mono = mono,
+    crossfeed = CrossfeedSettings(on = crossfeed.on, cutHz = crossfeed.activeCutHz.toFloat(), feedDb = crossfeed.activeFeedDb),
+)
+
+fun FadeCurve.engine(): EngineFadeCurve = when (this) {
+    FadeCurve.EqualPower -> EngineFadeCurve.EQUAL_POWER
+    FadeCurve.Linear -> EngineFadeCurve.LINEAR
+    FadeCurve.SCurve -> EngineFadeCurve.S_CURVE
+    FadeCurve.EvenLoudness -> EngineFadeCurve.EVEN_LOUDNESS
+    FadeCurve.MixOnly -> EngineFadeCurve.MIX_ONLY
+}
 
 private fun SharedFilter.engine() = EngineFilter(
     filterType = when (type) {

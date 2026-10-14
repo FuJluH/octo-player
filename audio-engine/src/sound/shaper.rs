@@ -1,9 +1,13 @@
 //! The shaping chain after the mix, as in the Android app's `SoundShaper`:
-//! the equalizer's preamp, its filters, mono and balance, then the limiter.
+//! the equalizer's preamp, its filters, crossfeed, mono and balance, then
+//! the limiter.
 //! ReplayGain is applied per song before the mix (see `lane.rs`), so each
 //! song keeps its own level through a crossfade.
 
 use super::biquad::FilterBank;
+use super::crossfeed::{
+    CrossfeedCoefficients, CrossfeedFilter, MAX_CUT_HZ, MAX_FEED_DB, MIN_CUT_HZ, MIN_FEED_DB,
+};
 use super::limiter::Limiter;
 use super::model::{SoundSettings, band_coefficients};
 
@@ -68,6 +72,7 @@ pub struct SoundShaper {
     fading_from: Option<FilterBank>,
     fade_left: usize,
     fade_scratch: Vec<f32>,
+    crossfeed: CrossfeedFilter,
     limiter: Limiter,
     // Whether the settings turn the limiter on, and whether the sound would
     // pass through untouched without it.
@@ -93,6 +98,7 @@ impl SoundShaper {
             fading_from: None,
             fade_left: 0,
             fade_scratch: Vec::new(),
+            crossfeed: CrossfeedFilter::new(),
             limiter: Limiter::new(channels, sample_rate),
             limiter_on: true,
             untouched: true,
@@ -138,9 +144,20 @@ impl SoundShaper {
         let to_mono = stereo && settings.dsp.mono;
         self.mono.to(if to_mono { 1.0 } else { 0.0 }, frames);
 
+        // Crossfeed blends the two sides, so it has nothing to do in mono.
+        let feed = &settings.dsp.crossfeed;
+        let crossfeed_on = stereo && feed.on && !to_mono;
+        let coefficients = CrossfeedCoefficients::new(
+            feed.cut_hz.clamp(MIN_CUT_HZ, MAX_CUT_HZ) as f64,
+            feed.feed_db.clamp(MIN_FEED_DB, MAX_FEED_DB) as f64,
+            self.sample_rate,
+        );
+        self.crossfeed.set(coefficients, crossfeed_on, frames);
+
         // Sound that is left as it is passes through untouched; the limiter
         // only catches peaks the shaping could push over.
-        self.untouched = bands.is_empty() && preamp * song_gain == 1.0 && balance == 0.0 && !to_mono;
+        self.untouched =
+            bands.is_empty() && preamp * song_gain == 1.0 && balance == 0.0 && !to_mono && !crossfeed_on;
         self.limiter_on = settings.dsp.limiter;
         self.follow_limiter();
     }
@@ -167,6 +184,7 @@ impl SoundShaper {
         let count = frames * self.channels;
         self.apply_gain(samples, frames);
         self.apply_filters(samples, frames);
+        self.crossfeed.process(samples, frames, self.channels);
         self.apply_mix(samples, frames);
         if self.output.len() < count {
             self.output.resize(count, 0.0);

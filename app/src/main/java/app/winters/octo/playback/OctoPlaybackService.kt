@@ -168,7 +168,7 @@ class OctoPlaybackService : MediaLibraryService() {
         // Each deck's buffering, told how long a stream waits before it starts.
         val loads = ArrayList<OctoLoadControl>()
         fun deck(): ExoPlayer {
-            val renderers = OctoRenderersFactory(this, { sound.current.value }, albums, crossfadeOn::get)
+            val renderers = OctoRenderersFactory(this, { sound.playing.value }, albums, crossfadeOn::get)
             val control = OctoLoadControl().also(loads::add)
             return buildDeck(this, streams.mediaSourceFactory(), renderers, audioSession.id, control)
                 .also { deck -> renderers.sound?.let { sounds[deck] = it } }

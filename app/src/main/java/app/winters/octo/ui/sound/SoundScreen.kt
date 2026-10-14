@@ -41,6 +41,21 @@ import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoSwitch
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.raisedPanel
+import app.winters.octo.sound.CROSSFEED_ABOUT
+import app.winters.octo.sound.CROSSFEED_CUT_HELP
+import app.winters.octo.sound.CROSSFEED_CUT_TITLE
+import app.winters.octo.sound.CROSSFEED_FEED_HELP
+import app.winters.octo.sound.CROSSFEED_FEED_TITLE
+import app.winters.octo.sound.CROSSFEED_HEADPHONES_ONLY
+import app.winters.octo.sound.CROSSFEED_MAX_CUT_HZ
+import app.winters.octo.sound.CROSSFEED_MAX_FEED_DB
+import app.winters.octo.sound.CROSSFEED_MIN_CUT_HZ
+import app.winters.octo.sound.CROSSFEED_MIN_FEED_DB
+import app.winters.octo.sound.CROSSFEED_MONO
+import app.winters.octo.sound.Crossfeed
+import app.winters.octo.sound.CrossfeedPreset
+import app.winters.octo.sound.detail
+import app.winters.octo.sound.label
 import app.winters.octo.sound.EqFilter
 import app.winters.octo.sound.EqMode
 import app.winters.octo.sound.EqPresets
@@ -63,6 +78,7 @@ import app.winters.octo.ui.settings.SwitchLine
 import java.util.Locale
 import kotlin.math.ln
 import kotlin.math.pow
+import kotlin.math.roundToInt
 
 private val CardShape = RoundedCornerShape(20.dp)
 
@@ -92,12 +108,13 @@ private sealed interface SoundSheet {
 }
 
 // Everything that shapes the sound: the equalizer and its presets,
-// loudness, balance, and a correction for the headphones in use.
+// loudness, balance, crossfeed, and a correction for the headphones in use.
 @Composable
 fun SoundScreen(onBack: () -> Unit, vm: SoundViewModel = hiltViewModel()) {
     val saved by vm.saved.collectAsStateWithLifecycle()
     val output by vm.output.collectAsStateWithLifecycle()
     val perOutput by vm.perOutput.collectAsStateWithLifecycle()
+    val headphones by vm.forHeadphones.collectAsStateWithLifecycle()
     val settings = vm.draft ?: saved
     var sheet by remember { mutableStateOf<SoundSheet?>(null) }
     var lastSheet by remember { mutableStateOf<SoundSheet?>(null) }
@@ -119,6 +136,7 @@ fun SoundScreen(onBack: () -> Unit, vm: SoundViewModel = hiltViewModel()) {
                 EqualizerCard(settings, vm, onSave = { show(SoundSheet.SavePreset) }, onDelete = { show(SoundSheet.DeletePreset(it)) })
                 LoudnessCard(settings, vm)
                 BalanceCard(settings, vm)
+                CrossfeedCard(settings, headphones, vm)
                 CorrectionCard(settings, vm)
             }
         }
@@ -147,6 +165,7 @@ private fun SwitchCard(
     title: String,
     checked: Boolean,
     onChange: (Boolean) -> Unit,
+    enabled: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(
@@ -164,7 +183,7 @@ private fun SwitchCard(
                 color = OctoColors.TextPrimary,
                 modifier = Modifier.weight(1f).semantics { heading() },
             )
-            OctoSwitch(checked = checked, onCheckedChange = onChange, modifier = Modifier.semantics { contentDescription = title })
+            OctoSwitch(checked = checked, onCheckedChange = onChange, enabled = enabled, modifier = Modifier.semantics { contentDescription = title })
         }
         content()
     }
@@ -386,6 +405,65 @@ private fun BalanceCard(settings: SoundSettings, vm: SoundViewModel) {
             checked = settings.mono,
             onChange = { on -> vm.change { it.copy(mono = on) } },
         )
+    }
+}
+
+// Crossfeed: its preset, and the reach and level of a custom one. It only
+// plays on headphones, and mono leaves it nothing to blend.
+@Composable
+private fun CrossfeedCard(settings: SoundSettings, headphones: Boolean, vm: SoundViewModel) {
+    val feed = settings.crossfeed
+    SwitchCard(
+        "Crossfeed",
+        checked = feed.on && headphones,
+        enabled = headphones,
+        onChange = { on -> vm.change { it.copy(crossfeed = it.crossfeed.copy(on = on)) } },
+    ) {
+        val note = when {
+            !headphones -> CROSSFEED_HEADPHONES_ONLY
+            settings.mono && feed.on -> CROSSFEED_MONO
+            else -> CROSSFEED_ABOUT
+        }
+        Text(note, style = OctoType.caption, color = OctoColors.TextMuted, modifier = Modifier.padding(horizontal = 4.dp))
+        if (headphones) CrossfeedChoices(feed, vm)
+    }
+}
+
+// The crossfeed presets, and the sliders of a custom one.
+@Composable
+private fun CrossfeedChoices(feed: Crossfeed, vm: SoundViewModel) {
+    val presets = CrossfeedPreset.entries
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Segmented(
+            options = presets.map { it.label },
+            selected = presets.indexOf(feed.preset),
+            onSelect = { index -> vm.change { it.copy(crossfeed = it.crossfeed.copy(on = true, preset = presets[index])) } },
+        )
+        Text(feed.preset.detail, style = OctoType.caption, color = OctoColors.TextMuted, modifier = Modifier.padding(horizontal = 4.dp))
+        if (feed.preset == CrossfeedPreset.Custom) {
+            val minHz = CROSSFEED_MIN_CUT_HZ.toFloat()
+            val maxHz = CROSSFEED_MAX_CUT_HZ.toFloat()
+            val logHz = ln(maxHz / minHz)
+            ValueSlider(
+                label = CROSSFEED_CUT_TITLE,
+                value = feed.activeCutHz.toFloat(),
+                range = minHz..maxHz,
+                reading = readHz(feed.activeCutHz.toFloat()),
+                onChange = { hz -> vm.preview { it.copy(crossfeed = it.crossfeed.copy(on = true, cutHz = hz.roundToInt())) } },
+                step = 10f,
+                toFraction = { ln(it / minHz) / logHz },
+                fromFraction = { minHz * (maxHz / minHz).pow(it) },
+            )
+            Text(CROSSFEED_CUT_HELP, style = OctoType.caption, color = OctoColors.TextMuted, modifier = Modifier.padding(horizontal = 4.dp))
+            ValueSlider(
+                label = CROSSFEED_FEED_TITLE,
+                value = feed.activeFeedDb,
+                range = CROSSFEED_MIN_FEED_DB..CROSSFEED_MAX_FEED_DB,
+                reading = readDb(-feed.activeFeedDb),
+                onChange = { db -> vm.preview { it.copy(crossfeed = it.crossfeed.copy(on = true, feedDb = db)) } },
+            )
+            Text(CROSSFEED_FEED_HELP, style = OctoType.caption, color = OctoColors.TextMuted, modifier = Modifier.padding(horizontal = 4.dp))
+        }
     }
 }
 

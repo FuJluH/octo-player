@@ -275,3 +275,107 @@ fn stored_loudness_fills_in_for_a_stream_without_tags() {
     assert_eq!(choose_replay_gain(None, None), None);
     assert_eq!(stored_replay_gain(&ReplayGainInfo { track_gain: Some(100.0), ..Default::default() }), None);
 }
+
+// Runs `left` and `right` through a crossfeed that is fully on.
+fn crossfed(
+    c: crate::sound::crossfeed::CrossfeedCoefficients,
+    left: &[f32],
+    right: &[f32],
+) -> (Vec<f32>, Vec<f32>) {
+    let mut filter = crate::sound::crossfeed::CrossfeedFilter::new();
+    filter.set(c, true, 0);
+    let mut samples: Vec<f32> = left.iter().zip(right).flat_map(|(l, r)| [*l, *r]).collect();
+    filter.process(&mut samples, left.len(), 2);
+    (samples.iter().step_by(2).copied().collect(), samples.iter().skip(1).step_by(2).copied().collect())
+}
+
+#[test]
+fn every_crossfeed_vector_matches() {
+    use crate::sound::crossfeed::CrossfeedCoefficients;
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../shared/core/src/commonTest/resources/crossfeed-vectors.json");
+    let vectors: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let tolerance = |name: &str| vectors["tolerances"][name].as_f64().unwrap();
+    let mut failures = Vec::new();
+    let mut near = |what: String, got: f64, want: f64, within: f64| {
+        if (got - want).abs() > within {
+            failures.push(format!("{what}: {got}, want {want}"));
+        }
+    };
+    for case in vectors["cases"].as_array().unwrap() {
+        let rate = case["rate"].as_u64().unwrap() as u32;
+        let name = format!("{} at {rate}", case["preset"].as_str().unwrap());
+        let c = CrossfeedCoefficients::new(
+            case["cutHz"].as_f64().unwrap(),
+            case["feedDb"].as_f64().unwrap(),
+            rate,
+        );
+        near(format!("{name} gain"), c.gain, case["gain"].as_f64().unwrap(), tolerance("coefficient"));
+        near(format!("{name} pole"), c.pole, case["pole"].as_f64().unwrap(), tolerance("coefficient"));
+        let own: Vec<f64> =
+            case["impulse"]["own"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+        let other: Vec<f64> =
+            case["impulse"]["other"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+        let mut left = vec![0f32; own.len()];
+        left[0] = 1.0;
+        let (got_own, got_other) = crossfed(c, &left, &vec![0f32; own.len()]);
+        for n in 0..own.len() {
+            near(format!("{name} own[{n}]"), got_own[n] as f64, own[n], tolerance("floatSample"));
+            near(format!("{name} other[{n}]"), got_other[n] as f64, other[n], tolerance("floatSample"));
+        }
+        for point in case["response"].as_array().unwrap() {
+            let hz = point["hz"].as_f64().unwrap();
+            let (own_db, other_db) = c.response_db(hz, rate);
+            near(format!("{name} own dB at {hz}"), own_db, point["ownDb"].as_f64().unwrap(), tolerance("db"));
+            near(
+                format!("{name} other dB at {hz}"),
+                other_db,
+                point["otherDb"].as_f64().unwrap(),
+                tolerance("db"),
+            );
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn crossfeed_leaves_sound_in_the_middle_exactly_as_it_was() {
+    let c = crate::sound::crossfeed::CrossfeedCoefficients::new(650.0, 9.5, 44_100);
+    let tone: Vec<f32> = (0..2_000).map(|n| if n % 7 < 3 { 1.0 } else { -1.0 }).collect();
+    let (left, right) = crossfed(c, &tone, &tone);
+    assert_eq!(left, tone);
+    assert_eq!(right, tone);
+}
+
+#[test]
+fn crossfeed_sends_the_bass_to_the_other_ear_at_the_feed_level() {
+    for (cut, feed) in [(700.0, 4.5), (700.0, 6.0), (650.0, 9.5), (1_200.0, 3.0)] {
+        let c = crate::sound::crossfeed::CrossfeedCoefficients::new(cut, feed, 48_000);
+        let (own, other) = c.response_db(5.0, 48_000);
+        assert!((own - other - feed).abs() < 0.05, "{cut} Hz {feed} dB: {own} {other}");
+        let (_, at_cut) = c.response_db(cut, 48_000);
+        assert!((other - 3.0 - at_cut).abs() < 0.2, "{cut} Hz {feed} dB at the cut");
+    }
+}
+
+#[test]
+fn the_shaper_runs_crossfeed_after_the_filters_and_skips_it_in_mono() {
+    let hard_left = |shaper: &mut SoundShaper| {
+        let mut samples: Vec<f32> = (0..4_800).flat_map(|_| [0.5f32, 0.0]).collect();
+        shaper.process(&mut samples, 4_800);
+        samples[4_000 * 2 + 1]
+    };
+    let mut settings = SoundSettings::default();
+    settings.dsp.limiter = false;
+    settings.dsp.crossfeed.on = true;
+    let mut shaper = SoundShaper::new(48_000, 2);
+    shaper.apply(&settings, 1.0, true);
+    // The right ear hears the left side's bass at the feed level.
+    let right = hard_left(&mut shaper);
+    let expected = 0.5 * crate::sound::crossfeed::CrossfeedCoefficients::new(700.0, 4.5, 48_000).low_share();
+    assert!((right as f64 - expected).abs() < 1e-4, "{right} vs {expected}");
+    settings.dsp.mono = true;
+    let mut mono = SoundShaper::new(48_000, 2);
+    mono.apply(&settings, 1.0, true);
+    assert_eq!(hard_left(&mut mono), 0.25);
+}

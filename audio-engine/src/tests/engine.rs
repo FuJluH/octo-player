@@ -888,6 +888,7 @@ fn a_smart_plan_starts_early_enters_late_and_cuts_the_outgoing_song() {
             filter_sweeps: true,
             match_tempo: false,
             max_overlap_ms: 8_000,
+            fade_curve: crate::automix::FadeCurve::EqualPower,
         })
         .unwrap();
     engine.load(vec![item("a", &a), item("b", &b)], 0, 0, true).unwrap();
@@ -943,6 +944,7 @@ fn a_late_plan_into_a_song_entered_part_way_still_blends() {
             filter_sweeps: false,
             match_tempo: false,
             max_overlap_ms: 8_000,
+            fade_curve: crate::automix::FadeCurve::EqualPower,
         })
         .unwrap();
     engine.load(vec![item("a", &a), item("b", &b)], 0, 9_500, true).unwrap();
@@ -1085,6 +1087,7 @@ fn a_song_with_a_profile_is_planned_from_it_without_the_live_level() {
             filter_sweeps: true,
             match_tempo: false,
             max_overlap_ms: 8_000,
+            fade_curve: crate::automix::FadeCurve::EqualPower,
         })
         .unwrap();
     engine.set_song_profile("a".into(), Some(profile_of(12_000, 0))).unwrap();

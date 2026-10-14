@@ -1,10 +1,12 @@
 package app.winters.octo.desktop.pages
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -14,6 +16,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.IntRect
 import app.winters.octo.design.ControlHeight
@@ -42,6 +47,12 @@ import app.winters.octo.desktop.sound.LONGEST_BLEND_SECONDS
 import app.winters.octo.desktop.sound.SHORTEST_BLEND_SECONDS
 import app.winters.octo.desktop.sound.SoundController
 import app.winters.octo.desktop.ui.windowRect
+import app.winters.octo.playback.FadeCurve
+import app.winters.octo.playback.SMART_PICKS_THE_CURVE
+import app.winters.octo.playback.detail
+import app.winters.octo.playback.fadeInGain
+import app.winters.octo.playback.fadeOutGain
+import app.winters.octo.playback.label
 import app.winters.octo.playback.FASTEST_SPEED
 import app.winters.octo.playback.PITCH_RANGE_SEMITONES
 import app.winters.octo.playback.SLOWEST_SPEED
@@ -51,6 +62,20 @@ import app.winters.octo.playback.semitonesLabel
 import app.winters.octo.playback.speedAt
 import app.winters.octo.playback.speedFraction
 import app.winters.octo.playback.speedLabel
+import app.winters.octo.sound.CROSSFEED_ABOUT
+import app.winters.octo.sound.CROSSFEED_CUT_HELP
+import app.winters.octo.sound.CROSSFEED_CUT_TITLE
+import app.winters.octo.sound.CROSSFEED_FEED_HELP
+import app.winters.octo.sound.CROSSFEED_FEED_TITLE
+import app.winters.octo.sound.CROSSFEED_MAX_CUT_HZ
+import app.winters.octo.sound.CROSSFEED_MAX_FEED_DB
+import app.winters.octo.sound.CROSSFEED_MIN_CUT_HZ
+import app.winters.octo.sound.CROSSFEED_MIN_FEED_DB
+import app.winters.octo.sound.CROSSFEED_MONO
+import app.winters.octo.sound.Crossfeed
+import app.winters.octo.sound.CrossfeedPreset
+import app.winters.octo.sound.detail
+import app.winters.octo.sound.label
 import app.winters.octo.sound.EqFilter
 import app.winters.octo.sound.EqMode
 import app.winters.octo.sound.FilterType
@@ -139,6 +164,9 @@ fun SoundPage(app: AppState, visit: Visit) {
             },
             PageSection("loudness", "Loudness", OctoIcons.Loudness) { LoudnessRows(controller) },
             PageSection("balance", "Balance", OctoIcons.Balance) { BalanceRows(controller) },
+            PageSection("crossfeed", "Crossfeed", OctoIcons.Headphones, detail = CROSSFEED_ABOUT, trailing = {
+                OctoSwitch(eq.crossfeed.on, { on -> controller.update { it.copy(crossfeed = it.crossfeed.copy(on = on)) } })
+            }) { CrossfeedRows(controller) },
             PageSection("playback", "Crossfade and speed", OctoIcons.Crossfade) { PlaybackRows(app, all.playback) },
             PageSection("correction", "Headphone correction", OctoIcons.Headphones) { CorrectionRows(controller) },
         ),
@@ -413,6 +441,7 @@ private fun PlaybackRows(app: AppState, playback: PlaybackPrefs) {
                 live = false,
                 wheelStep = 1f / span,
             )
+            CurveRow(app, playback.crossfadeCurve, playback.smartTransitions) { curve -> change { it.copy(crossfadeCurve = curve) } }
             SwitchRow(
                 "Smart transitions",
                 "Each blend starts where the music allows, on the beat or as the song winds down. Off, songs fade at the very end.",
@@ -500,4 +529,99 @@ private fun chooseFile(title: String, save: Boolean, suggested: String? = null):
     dialog.isVisible = true
     val name = dialog.file ?: return null
     return File(dialog.directory, name)
+}
+
+// The shape of the crossfade, picked from a menu that draws each one. With
+// smart transitions on, Automix picks the curve and the row only says so.
+@Composable
+private fun CurveRow(app: AppState, curve: FadeCurve, smart: Boolean, onPick: (FadeCurve) -> Unit) {
+    if (smart) {
+        SettingRow("Crossfade curve", SMART_PICKS_THE_CURVE, dim = true)
+        return
+    }
+    var anchor by remember { mutableStateOf(IntRect.Zero) }
+    SettingRow("Crossfade curve", curve.detail) {
+        Box(Modifier.onGloballyPositioned { anchor = it.windowRect() }) {
+            GlazeCapsule(null, curve.label, {
+                app.popups.showUnder(anchor, width = FrameSize.Menu) { close ->
+                    MenuTitle("Crossfade curve")
+                    FadeCurve.entries.forEach { option ->
+                        MenuRow(
+                            option.label,
+                            {
+                                onPick(option)
+                                close()
+                            },
+                            leading = { CurvePreview(option) },
+                            checked = option == curve,
+                        )
+                    }
+                }
+            }, height = ControlHeight.M)
+        }
+    }
+}
+
+// A small drawing of a curve: the outgoing song falling, the incoming one
+// rising.
+@Composable
+private fun CurvePreview(curve: FadeCurve) {
+    Canvas(Modifier.size(width = SettingsSize.CurvePreviewWidth, height = SettingsSize.CurvePreviewHeight)) {
+        val steps = 24
+        val stroke = SettingsSize.CurveLine.toPx()
+        fun line(gain: (Double) -> Double, color: Color) {
+            val path = Path()
+            for (i in 0..steps) {
+                val t = i.toDouble() / steps
+                val x = size.width * t.toFloat()
+                val y = size.height * (1f - gain(t).toFloat())
+                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            }
+            drawPath(path, color, style = Stroke(stroke))
+        }
+        // An 8 second blend, so mix only shows its short edges.
+        line({ fadeOutGain(curve, it, 8_000.0) }, OctoColors.TextMuted)
+        line({ fadeInGain(curve, it, 8_000.0) }, OctoColors.TextPrimary)
+    }
+}
+
+// Crossfeed's preset, and the cut and feed of a custom one. Mono leaves
+// nothing to blend, so it says so.
+@Composable
+private fun CrossfeedRows(sound: SoundController) {
+    val settings by sound.current.collectAsState()
+    val feed = settings.crossfeed
+    fun change(edit: (Crossfeed) -> Crossfeed) = sound.update { it.copy(crossfeed = edit(it.crossfeed)) }
+    fun preview(edit: (Crossfeed) -> Crossfeed) = sound.preview { it.copy(crossfeed = edit(it.crossfeed)) }
+    Rows {
+        if (settings.mono && feed.on) SettingRow(CROSSFEED_MONO, null, dim = true)
+        ChoiceRow("Preset", feed.preset.detail, CrossfeedPreset.entries, feed.preset, { it.label }) { preset ->
+            change { it.copy(on = true, preset = preset) }
+        }
+        if (feed.preset == CrossfeedPreset.Custom) {
+            val logCut = ln(CROSSFEED_MAX_CUT_HZ.toFloat() / CROSSFEED_MIN_CUT_HZ)
+            SliderRow(
+                CROSSFEED_CUT_TITLE,
+                CROSSFEED_CUT_HELP,
+                readHz(feed.activeCutHz.toFloat()),
+                ln(feed.activeCutHz.toFloat() / CROSSFEED_MIN_CUT_HZ) / logCut,
+                { x ->
+                    val hz = (CROSSFEED_MIN_CUT_HZ * (CROSSFEED_MAX_CUT_HZ.toFloat() / CROSSFEED_MIN_CUT_HZ).pow(x) / 10f).roundToInt() * 10
+                    preview { it.copy(on = true, cutHz = hz) }
+                },
+                onRelease = sound::settle,
+                wheelStep = 0.02f,
+            )
+            val span = CROSSFEED_MAX_FEED_DB - CROSSFEED_MIN_FEED_DB
+            SliderRow(
+                CROSSFEED_FEED_TITLE,
+                CROSSFEED_FEED_HELP,
+                readDb(-feed.activeFeedDb),
+                (feed.activeFeedDb - CROSSFEED_MIN_FEED_DB) / span,
+                { x -> preview { it.copy(on = true, feedDb = tenths(CROSSFEED_MIN_FEED_DB + x * span)) } },
+                onRelease = sound::settle,
+                wheelStep = 0.5f / span,
+            )
+        }
+    }
 }

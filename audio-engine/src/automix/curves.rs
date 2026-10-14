@@ -120,3 +120,114 @@ pub fn beat_match_rate_at(rate: f64, since_entry_ms: f64, overlap_ms: f64) -> f6
     }
     rate + (1.0 - rate) * (1.0 - (PI * u).cos()) / 2.0
 }
+
+/// The shape of the fixed crossfade: how the outgoing song's volume falls
+/// and the incoming song's rises as the blend goes from 0 to 1.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, uniffi::Enum)]
+pub enum FadeCurve {
+    /// cos and sin: the two songs together keep a steady loudness.
+    #[default]
+    EqualPower,
+    /// Straight lines, with a slight dip in the middle.
+    Linear,
+    /// Holds each song longer, then swaps them quickly around the middle.
+    SCurve,
+    /// The same step down in decibels every moment, to -60 dB, then silence.
+    EvenLoudness,
+    /// Both songs play at full volume; only the edges fade.
+    MixOnly,
+}
+
+/// Even in loudness falls in a straight line in decibels to this level...
+pub const EVEN_LOUDNESS_FLOOR_DB: f64 = -60.0;
+
+/// ...reached at this point of the blend, then goes straight to silence.
+pub const EVEN_LOUDNESS_FLOOR_AT: f64 = 0.95;
+
+/// Mix only fades the incoming song in over this long at the start and the
+/// outgoing one out over this long at the end, each at most half the blend.
+pub const MIX_ONLY_EDGE_MS: f64 = 300.0;
+
+/// Both songs play this much quieter through a mix only blend, so their
+/// sum keeps clear of clipping.
+pub const MIX_ONLY_HEADROOM_DB: f64 = 3.0;
+
+/// The headroom a fixed crossfade with `curve` plays with.
+pub fn fade_headroom_db(curve: FadeCurve) -> f64 {
+    if curve == FadeCurve::MixOnly { MIX_ONLY_HEADROOM_DB } else { 0.0 }
+}
+
+// The share of a mix only blend `overlap_ms` long that each edge takes.
+fn mix_only_edge(overlap_ms: f64) -> f64 {
+    if overlap_ms <= 0.0 { 0.5 } else { (MIX_ONLY_EDGE_MS / overlap_ms).min(0.5) }
+}
+
+// The even in loudness volume at `p`, falling from 1 to 0.
+fn even_loudness_fall(p: f64) -> f64 {
+    let floor = 10f64.powf(EVEN_LOUDNESS_FLOOR_DB / 20.0);
+    if p <= EVEN_LOUDNESS_FLOOR_AT {
+        10f64.powf(EVEN_LOUDNESS_FLOOR_DB * p / EVEN_LOUDNESS_FLOOR_AT / 20.0)
+    } else {
+        floor * (1.0 - p) / (1.0 - EVEN_LOUDNESS_FLOOR_AT)
+    }
+}
+
+/// The outgoing song's volume at `t` (0 to 1) through a blend
+/// `overlap_ms` long. Equal power is exactly [`automix_out_gain`] with no
+/// curve weight.
+pub fn fade_out_gain(curve: FadeCurve, t: f64, overlap_ms: f64) -> f64 {
+    let p = t.clamp(0.0, 1.0);
+    let gain = match curve {
+        FadeCurve::EqualPower => automix_out_gain(p, 0.0),
+        FadeCurve::Linear => 1.0 - p,
+        FadeCurve::SCurve => 1.0 - s_curve(p),
+        FadeCurve::EvenLoudness => even_loudness_fall(p),
+        FadeCurve::MixOnly => {
+            let edge = mix_only_edge(overlap_ms);
+            let from = 1.0 - edge;
+            if p <= from {
+                1.0
+            } else if p >= 1.0 {
+                0.0
+            } else {
+                ((p - from) / edge * PI / 2.0).cos()
+            }
+        }
+    };
+    gain.clamp(0.0, 1.0)
+}
+
+/// The incoming song's volume at `t` through a blend `overlap_ms` long.
+pub fn fade_in_gain(curve: FadeCurve, t: f64, overlap_ms: f64) -> f64 {
+    let p = t.clamp(0.0, 1.0);
+    let gain = match curve {
+        FadeCurve::EqualPower => automix_in_gain(p, 0.0),
+        FadeCurve::Linear => p,
+        // Whatever keeps the two volumes' squares at one.
+        FadeCurve::SCurve => {
+            let out = 1.0 - s_curve(p);
+            (1.0 - out * out).max(0.0).sqrt()
+        }
+        FadeCurve::EvenLoudness => even_loudness_fall(1.0 - p),
+        FadeCurve::MixOnly => {
+            let edge = mix_only_edge(overlap_ms);
+            if p >= edge { 1.0 } else { (p / edge * PI / 2.0).sin() }
+        }
+    };
+    gain.clamp(0.0, 1.0)
+}
+
+/// Both volumes at once: outgoing, then incoming.
+pub fn fade_gains(curve: FadeCurve, t: f64, overlap_ms: f64) -> (f64, f64) {
+    (fade_out_gain(curve, t, overlap_ms), fade_in_gain(curve, t, overlap_ms))
+}
+
+/// The gains of a blend at `t`: the automix curve with weight `k` for
+/// equal power (`k = 0` being the plain equal-power crossfade), otherwise
+/// the fixed crossfade's `curve`.
+pub fn blend_gains(curve: FadeCurve, k: f64, t: f64, overlap_ms: f64) -> (f64, f64) {
+    match curve {
+        FadeCurve::EqualPower => (automix_out_gain(t, k), automix_in_gain(t, k)),
+        other => fade_gains(other, t, overlap_ms),
+    }
+}

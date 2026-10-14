@@ -67,6 +67,7 @@ fun engineSound(settings: AppSettings, device: String?): EngineSound {
             filterSweeps = playback.filterSweeps,
             matchTempo = playback.matchTempo,
             maxOverlapMs = (playback.crossfadeSeconds.coerceIn(0, LONGEST_BLEND_SECONDS) * 1_000).toUInt(),
+            fadeCurve = playback.crossfadeCurve.engine(),
         ),
         pace = paceOf(playback.speed, playback.keepPitch, playback.pitchSemitones),
     )

@@ -194,6 +194,10 @@ object SettingsSize {
     val Slider = 200.dp
     val Reading = 60.dp
     val EqPlot = 160.dp
+    // The small drawing of a crossfade curve in its menu, and its lines.
+    val CurvePreviewWidth = 28.dp
+    val CurvePreviewHeight = 16.dp
+    val CurveLine = 1.5.dp
     // The tile behind a section's icon at the top of its page.
     val SectionIcon = 36.dp
 

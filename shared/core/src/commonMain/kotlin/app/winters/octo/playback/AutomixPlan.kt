@@ -46,7 +46,7 @@ enum class TransitionKind {
     // One song straight after the other, no overlap.
     GAPLESS,
 
-    // The fixed equal-power crossfade at the end of the song.
+    // The fixed crossfade at the end of the song.
     CROSSFADE,
 
     // A short planned swap.
@@ -68,6 +68,9 @@ data class AutomixSettings(
     val filterSweeps: Boolean = true,
     // Nudges the incoming song's speed to the outgoing song's tempo.
     val beatMatch: Boolean = false,
+    // The shape of the fixed crossfade, with smart transitions off. Planned
+    // blends keep their own curves.
+    val fadeCurve: FadeCurve = FadeCurve.EqualPower,
 )
 
 // Where the player is when it plans, and what it knows besides the scouted
@@ -91,7 +94,8 @@ data class TransitionContext(
 
 // How to move from one song to the next. At startMs into the outgoing song
 // the incoming song starts playing from entryMs, and over overlapMs the
-// volumes follow automixOutGain / automixInGain with curve weight k, both
+// volumes follow automixOutGain / automixInGain with curve weight k (or,
+// for a curve other than equal power, fadeOutGain / fadeInGain), both
 // lowered by headroomDb. With a filterStrength above 0 the filter sweeps
 // run through the overlap and are bypassed once it ends. beatMatchRate,
 // when set, is the incoming song's playback rate through the blend.
@@ -113,15 +117,18 @@ data class TransitionPlan(
     val late: Boolean,
     val headroomDb: Double,
     val reason: String,
+    val curve: FadeCurve = FadeCurve.EqualPower,
 ) {
     val barLocked: Boolean get() = beatMs != null
 
     fun progressAt(outgoingMs: Double): Double =
         if (overlapMs <= 0) 1.0 else ((outgoingMs - startMs) / overlapMs).coerceIn(0.0, 1.0)
 
-    fun outGain(t: Double): Double = automixOutGain(t, k)
+    fun outGain(t: Double): Double =
+        if (curve == FadeCurve.EqualPower) automixOutGain(t, k) else fadeOutGain(curve, t, overlapMs.toDouble())
 
-    fun inGain(t: Double): Double = automixInGain(t, k)
+    fun inGain(t: Double): Double =
+        if (curve == FadeCurve.EqualPower) automixInGain(t, k) else fadeInGain(curve, t, overlapMs.toDouble())
 
     // The outgoing song's beats inside the blend as places through it (0 to
     // 1). A beat within a twentieth of a beat of either end counts as the
@@ -161,7 +168,8 @@ data class TransitionPlan(
 // songs play gaplessly. With smart transitions off the plan is the
 // equal-power crossfade (fixedCrossfadePlan); for a song under 35 s or in a
 // genre that should not be mixed, the fixed crossfade with the plain curve.
-// Without the tail, or when no start is left at least PRE_ROLL_MS ahead,
+// Only the crossfade with smart transitions off takes the settings'
+// fadeCurve. Without the tail, or when no start is left at least PRE_ROLL_MS ahead,
 // the plan is a late one: the blend at the end, with the curve and the
 // filters but no bar lock.
 fun planTransition(
@@ -178,7 +186,7 @@ fun planTransition(
     }
     val lenA = current.durationMs
     val lenB = next.durationMs
-    if (!settings.smart) return fixedCrossfadePlan(lenA, plain, "smart transitions off")
+    if (!settings.smart) return fixedCrossfadePlan(lenA, plain, "smart transitions off", settings.fadeCurve)
     listOfNotNull(context.currentGenre, context.nextGenre).firstOrNull { PLAIN_CROSSFADE_GENRES.containsMatchIn(it) }?.let {
         return crossfadePlan(lenA, plain, "genre $it")
     }
@@ -408,9 +416,10 @@ private fun gaplessPlan(current: FadeSong, reason: String) = TransitionPlan(
     reason = "gapless: $reason",
 )
 
-// The equal-power crossfade at the end of the song, as it was before
-// planned transitions: no curve weight, no filters and no headroom.
-fun fixedCrossfadePlan(lenA: Long, length: Long, why: String): TransitionPlan {
+// The crossfade at the end of the song, as it was before planned
+// transitions: no curve weight and no filters. Equal power with no headroom
+// unless `curve` picks another shape; mix only brings its own headroom.
+fun fixedCrossfadePlan(lenA: Long, length: Long, why: String, curve: FadeCurve = FadeCurve.EqualPower): TransitionPlan {
     val start = max(0L, lenA - length)
     return TransitionPlan(
         startMs = start,
@@ -423,8 +432,9 @@ fun fixedCrossfadePlan(lenA: Long, length: Long, why: String): TransitionPlan {
         beatMs = null,
         beatAnchorMs = null,
         late = false,
-        headroomDb = 0.0,
+        headroomDb = fadeHeadroomDb(curve),
         reason = "crossfade at ${seconds(start)} over ${seconds(length)}: $why",
+        curve = curve,
     )
 }
 

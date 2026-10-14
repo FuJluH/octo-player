@@ -1,8 +1,8 @@
 //! Chooses where and how one song hands over to the next.
 
 use super::curves::{
-    BLEND_CURVE, CROSSFADE_CURVE, CUT_CURVE, FILTER_STRENGTH, LIFT_CURVE, automix_in_gain, automix_out_gain,
-    beat_match_rate_at, incoming_high_pass_hz, outgoing_high_pass_hz, outgoing_low_pass_hz,
+    BLEND_CURVE, CROSSFADE_CURVE, CUT_CURVE, FILTER_STRENGTH, FadeCurve, LIFT_CURVE, beat_match_rate_at,
+    blend_gains, incoming_high_pass_hz, outgoing_high_pass_hz, outgoing_low_pass_hz,
     stepped_outgoing_low_pass_hz,
 };
 use super::features::{
@@ -84,11 +84,20 @@ pub struct PlanSettings {
     pub filter_sweeps: bool,
     /// Nudges the incoming song's speed to the outgoing song's tempo.
     pub beat_match: bool,
+    /// The shape of the fixed crossfade, with smart transitions off.
+    /// Planned blends keep their own curves.
+    pub fade_curve: FadeCurve,
 }
 
 impl PlanSettings {
     pub fn new(max_overlap_ms: i64) -> Self {
-        PlanSettings { max_overlap_ms, smart: true, filter_sweeps: true, beat_match: false }
+        PlanSettings {
+            max_overlap_ms,
+            smart: true,
+            filter_sweeps: true,
+            beat_match: false,
+            fade_curve: FadeCurve::EqualPower,
+        }
     }
 }
 
@@ -131,8 +140,8 @@ impl Default for TransitionContext {
 
 /// How to move from one song to the next. At `start_ms` into the outgoing
 /// song the incoming song starts playing from `entry_ms`, and over
-/// `overlap_ms` the volumes follow [`automix_out_gain`] /
-/// [`automix_in_gain`] with curve weight `k`, both lowered by
+/// `overlap_ms` the volumes follow [`blend_gains`]: the automix curve with
+/// weight `k`, or a fixed crossfade's own `curve`, both lowered by
 /// `headroom_db`. With a `filter_strength` above 0 the filter sweeps run
 /// through the overlap and are bypassed once it ends. `beat_match_rate`,
 /// when set, is the incoming song's playback rate through the blend.
@@ -155,6 +164,8 @@ pub struct TransitionPlan {
     pub late: bool,
     pub headroom_db: f64,
     pub reason: String,
+    /// The shape of a fixed crossfade; equal power follows `k`.
+    pub curve: FadeCurve,
 }
 
 impl TransitionPlan {
@@ -171,11 +182,11 @@ impl TransitionPlan {
     }
 
     pub fn out_gain(&self, t: f64) -> f64 {
-        automix_out_gain(t, self.k)
+        blend_gains(self.curve, self.k, t, self.overlap_ms as f64).0
     }
 
     pub fn in_gain(&self, t: f64) -> f64 {
-        automix_in_gain(t, self.k)
+        blend_gains(self.curve, self.k, t, self.overlap_ms as f64).1
     }
 
     /// The outgoing song's beats inside the blend as places through it (0
@@ -268,7 +279,8 @@ pub fn plan_transition(
     };
     let len_b = next.duration_ms as i64;
     if !settings.smart {
-        return TransitionPlan::fixed_crossfade(len_a, plain, "smart transitions off");
+        return TransitionPlan::fixed_crossfade(len_a, plain, "smart transitions off")
+            .with_curve(settings.fade_curve);
     }
     let genres = [context.current_genre.as_deref(), context.next_genre.as_deref()];
     if let Some(genre) = genres.into_iter().flatten().find(|g| is_plain_genre(g)) {
@@ -471,6 +483,7 @@ pub fn plan_transition(
         late: false,
         headroom_db: OVERLAP_HEADROOM_DB,
         reason,
+        curve: FadeCurve::EqualPower,
     }
 }
 
@@ -552,6 +565,7 @@ fn late_plan(
             seconds(length as i64),
             seconds(entry_ms)
         ),
+        curve: FadeCurve::EqualPower,
     }
 }
 
@@ -569,6 +583,7 @@ fn gapless_plan(len_a: i64, reason: &str) -> TransitionPlan {
         late: false,
         headroom_db: 0.0,
         reason: format!("gapless: {reason}"),
+        curve: FadeCurve::EqualPower,
     }
 }
 
@@ -586,6 +601,7 @@ fn crossfade_plan(len_a: i64, length: i64, why: &str) -> TransitionPlan {
         late: false,
         headroom_db: OVERLAP_HEADROOM_DB,
         reason: format!("crossfade at {} over {}: {why}", seconds(len_a - length), seconds(length)),
+        curve: FadeCurve::EqualPower,
     }
 }
 

@@ -9,8 +9,9 @@
 use std::collections::VecDeque;
 
 use crate::automix::{
-    BEAT_MATCH_SETTLE_MS, Biquad, LiveAnalysis, LiveAnalyzer, RATE_RANGE, beat_match_rate_at, gains,
-    incoming_high_pass_hz, outgoing_high_pass_hz, outgoing_low_pass_hz, stepped_outgoing_low_pass_hz,
+    BEAT_MATCH_SETTLE_MS, Biquad, FadeCurve, LiveAnalysis, LiveAnalyzer, RATE_RANGE, beat_match_rate_at,
+    blend_gains, incoming_high_pass_hz, outgoing_high_pass_hz, outgoing_low_pass_hz,
+    stepped_outgoing_low_pass_hz,
 };
 use crate::deck::Deck;
 use crate::error::Failure;
@@ -101,6 +102,9 @@ pub struct LowPassSteps {
 pub struct FadeShape {
     /// Gain curve weight: 0 is equal power (see `automix::gains`).
     pub k: f64,
+    /// The fixed crossfade's shape; equal power follows `k` (see
+    /// `automix::blend_gains`).
+    pub curve: FadeCurve,
     /// How deep the filter sweeps go, 0 for none.
     pub filter_strength: f64,
     /// Steps for the outgoing low-pass; `None` sweeps it smoothly.
@@ -142,6 +146,10 @@ struct Fade {
     done: u64,
     clock: FadeClock,
     k: f64,
+    curve: FadeCurve,
+    // The blend's length in milliseconds of output, for curves with edges
+    // of a fixed length.
+    overlap_ms: f64,
     sweeps: Option<Sweeps>,
     // Mean square under which the outgoing song counts as silent.
     gate: Option<f32>,
@@ -861,7 +869,7 @@ impl Mixer {
         if let Some(fade) = &mut self.fade {
             for i in 0..frames {
                 let p = fade.clock.progress(fade.done + i as u64);
-                let (mut gout, mut gin) = gains(p, fade.k);
+                let (mut gout, mut gin) = blend_gains(fade.curve, fade.k, p, fade.overlap_ms);
                 if fade.headroom_db > 0.0 {
                     let h = headroom(fade.headroom_db, p);
                     gout *= h;
@@ -939,6 +947,8 @@ impl Mixer {
             done: 0,
             clock: FadeClock { frames: plan.frames, rush: None },
             k: shape.k,
+            curve: shape.curve,
+            overlap_ms: plan.frames as f64 * 1_000.0 / self.rate as f64,
             sweeps,
             gate,
             quiet: 0,

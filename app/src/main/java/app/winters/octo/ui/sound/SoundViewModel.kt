@@ -40,6 +40,9 @@ class SoundViewModel @Inject constructor(
 ) : ViewModel() {
     val saved: StateFlow<SoundSettings> = engine.current
     val output: StateFlow<AudioOutput> = engine.output
+
+    // Whether the output playing now is worn, so crossfeed can play on it.
+    val forHeadphones: StateFlow<Boolean> = engine.forHeadphones
     val perOutput: StateFlow<Boolean> = engine.perOutput
     val presets: StateFlow<List<EqPreset>> = userPresets.presets
 
