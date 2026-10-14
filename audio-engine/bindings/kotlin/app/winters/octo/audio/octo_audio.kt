@@ -4401,12 +4401,15 @@ sealed class EngineEvent {
     
     /**
      * A live stream's title changed, as it is heard: usually "Artist -
-     * Song" for what the station plays now. An empty title says the
-     * stream no longer names what it plays.
+     * Song" for what the station plays now, as the station sent it. An
+     * empty title says the stream no longer names what it plays. `url` is
+     * the address sent with it (`StreamArtwork`, else `StreamUrl`), empty
+     * when there is none.
      */
     data class StreamTitle(
         val `itemId`: kotlin.String, 
-        val `title`: kotlin.String) : EngineEvent()
+        val `title`: kotlin.String, 
+        val `url`: kotlin.String) : EngineEvent()
         
     {
         
@@ -4493,6 +4496,7 @@ public object FfiConverterTypeEngineEvent : FfiConverterRustBuffer<EngineEvent>{
                 FfiConverterDouble.read(buf),
                 )
             12 -> EngineEvent.StreamTitle(
+                FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
@@ -4601,6 +4605,7 @@ public object FfiConverterTypeEngineEvent : FfiConverterRustBuffer<EngineEvent>{
                 4UL
                 + FfiConverterString.allocationSize(value.`itemId`)
                 + FfiConverterString.allocationSize(value.`title`)
+                + FfiConverterString.allocationSize(value.`url`)
             )
         }
         is EngineEvent.TransitionPlanned -> {
@@ -4687,6 +4692,7 @@ public object FfiConverterTypeEngineEvent : FfiConverterRustBuffer<EngineEvent>{
                 buf.putInt(12)
                 FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterString.write(value.`title`, buf)
+                FfiConverterString.write(value.`url`, buf)
                 Unit
             }
             is EngineEvent.TransitionPlanned -> {

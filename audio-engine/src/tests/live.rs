@@ -356,7 +356,8 @@ pub(super) fn icy_radio(stopped: &AtomicBool, conn: &mut TcpStream) {
             continue;
         }
         let block_index = i / METAINT;
-        let text = format!("StreamTitle='Test FM - Song {}';", block_index / 3);
+        let song = block_index / 3;
+        let text = format!("StreamTitle='Test FM - Song {song}';StreamUrl='https://img.test/{song}.jpg';");
         let mut block = text.into_bytes();
         block.resize(block.len().div_ceil(16) * 16, 0);
         let mut out = std::mem::take(&mut audio);
@@ -385,7 +386,7 @@ fn an_icy_radio_stream_decodes_and_hands_on_titles_as_heard() {
         let r = deck.read(&mut buf);
         assert!(r.failure.is_none() && !r.finished, "{r:?}");
         sound.extend_from_slice(&buf[..r.frames * 2]);
-        titles.extend(deck.take_title(r.start_secs + r.frames as f64 / 44_100.0));
+        titles.extend(deck.take_title(r.start_secs + r.frames as f64 / 44_100.0).map(|meta| meta.title));
         if r.frames == 0 {
             assert!(Instant::now() < until);
             thread::sleep(Duration::from_millis(1));
@@ -593,7 +594,7 @@ fn a_plain_m3u_opens_its_first_station_and_a_looping_one_fails() {
         let r = deck.read(&mut buf);
         assert!(r.failure.is_none() && !r.finished, "{r:?}");
         heard = r.start_secs + r.frames as f64 / 44_100.0;
-        titles.extend(deck.take_title(heard));
+        titles.extend(deck.take_title(heard).map(|meta| meta.title));
         if r.frames == 0 {
             assert!(Instant::now() < until);
             thread::sleep(Duration::from_millis(1));

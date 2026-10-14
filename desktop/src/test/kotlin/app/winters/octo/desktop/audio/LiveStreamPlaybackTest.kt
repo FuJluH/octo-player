@@ -60,14 +60,14 @@ class LiveStreamPlaybackTest {
         engine.emit(EngineEvent.TrackStarted(radio, 0u, null))
         // Until the stream names what it plays, the station's name.
         assertEquals("Jazz FM" to "Live radio", player.state.value.current!!.song.let { it.title to it.artist })
-        engine.emit(EngineEvent.StreamTitle(radio, "Miles Davis - So What"))
+        engine.emit(EngineEvent.StreamTitle(radio, "Miles Davis - So What", ""))
         val shown = player.state.value.current!!.song
         assertEquals("Miles Davis - So What" to "Jazz FM", shown.title to shown.artist)
         assertEquals(station.id, shown.id)
         // The queue keeps the station as it is, so a saved queue does too.
         assertEquals("Jazz FM", player.state.value.queue.first().song.title)
         // A title for an entry no longer queued changes nothing.
-        engine.emit(EngineEvent.StreamTitle("q:999", "Other - Thing"))
+        engine.emit(EngineEvent.StreamTitle("q:999", "Other - Thing", ""))
         assertEquals("Miles Davis - So What", player.state.value.current!!.song.title)
         // A live stream takes no seek, and starts where its station is.
         player.seekTo(60_000)
@@ -128,8 +128,8 @@ class LiveStreamPlaybackTest {
         player.play(listOf(station), 0)
         val radio = engine.queue[0].id
         engine.emit(EngineEvent.TrackStarted(radio, 0u, null))
-        engine.emit(EngineEvent.StreamTitle(radio, "Miles Davis - So What"))
-        engine.emit(EngineEvent.StreamTitle(radio, ""))
+        engine.emit(EngineEvent.StreamTitle(radio, "Miles Davis - So What", ""))
+        engine.emit(EngineEvent.StreamTitle(radio, "", ""))
         assertEquals("Jazz FM" to "Live radio", player.state.value.current!!.song.let { it.title to it.artist })
         player.close()
     }

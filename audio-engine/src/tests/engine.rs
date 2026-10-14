@@ -1219,16 +1219,22 @@ fn a_live_radio_stream_plays_on_with_its_titles_and_takes_no_seek() {
     // Block 3 is a second into the stream: the title comes as that is heard.
     let heard = engine.position().position_ms;
     assert!((900.0..2_000.0).contains(&heard), "{heard}");
-    let titles: Vec<(String, String)> = events
+    let titles: Vec<(String, String, String)> = events
         .all()
         .into_iter()
         .filter_map(|e| match e {
-            EngineEvent::StreamTitle { item_id, title } => Some((item_id, title)),
+            EngineEvent::StreamTitle { item_id, title, url } => Some((item_id, title, url)),
             _ => None,
         })
         .collect();
-    let named = |t: &str| ("radio".to_string(), t.to_string());
-    assert_eq!(titles, [named("Test FM - Song 0"), named("Test FM - Song 1")]);
+    let named = |t: &str, url: &str| ("radio".to_string(), t.to_string(), url.to_string());
+    assert_eq!(
+        titles,
+        [
+            named("Test FM - Song 0", "https://img.test/0.jpg"),
+            named("Test FM - Song 1", "https://img.test/1.jpg")
+        ]
+    );
     // A seek is ignored: it plays on from where it was, over the same connection.
     engine.seek(60_000).unwrap();
     for _ in 0..50 {

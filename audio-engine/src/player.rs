@@ -1447,9 +1447,13 @@ impl Player {
             let position = self.shared.position();
             let item_id = &self.queue[i].item.id;
             if position.item_id.as_ref() == Some(item_id)
-                && let Some(title) = lane.current().take_title(position.position_ms / 1_000.0)
+                && let Some(meta) = lane.current().take_title(position.position_ms / 1_000.0)
             {
-                self.emit(EngineEvent::StreamTitle { item_id: item_id.clone(), title });
+                self.emit(EngineEvent::StreamTitle {
+                    item_id: item_id.clone(),
+                    title: meta.title,
+                    url: meta.url,
+                });
             }
         }
 

@@ -181,11 +181,14 @@ pub enum EngineEvent {
         position_ms: f64,
     },
     /// A live stream's title changed, as it is heard: usually "Artist -
-    /// Song" for what the station plays now. An empty title says the
-    /// stream no longer names what it plays.
+    /// Song" for what the station plays now, as the station sent it. An
+    /// empty title says the stream no longer names what it plays. `url` is
+    /// the address sent with it (`StreamArtwork`, else `StreamUrl`), empty
+    /// when there is none.
     StreamTitle {
         item_id: String,
         title: String,
+        url: String,
     },
     /// How the next song will follow the playing one, decided ahead of
     /// time. `start_ms` is when in `from_id` the blend starts (its length

@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 use symphonia::core::io::MediaSource;
 
 use crate::error::{ErrorKind, Failure};
-use crate::source::icy::{IcySplitter, IcyStatus};
+use crate::source::icy::{IcySplitter, IcyStatus, StreamMeta};
 use crate::source::trust::{PinnedTls, Trust};
 
 /// How a stream is fetched.
@@ -76,14 +76,14 @@ impl Default for HttpOptions {
 
 /// The newest title a live stream reached, until it is picked up.
 #[derive(Debug, Default)]
-pub struct TitleSlot(Mutex<Option<String>>);
+pub struct TitleSlot(Mutex<Option<StreamMeta>>);
 
 impl TitleSlot {
-    pub fn put(&self, title: String) {
+    pub fn put(&self, title: StreamMeta) {
         *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(title);
     }
 
-    pub fn take(&self) -> Option<String> {
+    pub fn take(&self) -> Option<StreamMeta> {
         self.0.lock().unwrap_or_else(|e| e.into_inner()).take()
     }
 }
@@ -166,8 +166,8 @@ struct State {
     last_progress: Instant,
     stalls: u32,
     // A live stream's titles the reader has not reached, by where they start.
-    titles: VecDeque<(u64, String)>,
-    last_title: Option<String>,
+    titles: VecDeque<(u64, StreamMeta)>,
+    last_title: Option<StreamMeta>,
 }
 
 impl State {
@@ -427,14 +427,14 @@ impl Shared {
     // Adds fetched bytes, and the titles found among them by where in
     // `bytes` each starts. A title the same as the one before is dropped;
     // an empty one, once there was another, says there is none now.
-    fn append(&self, generation: u64, bytes: &[u8], titles: &mut Vec<(usize, String)>) -> bool {
+    fn append(&self, generation: u64, bytes: &[u8], titles: &mut Vec<(usize, StreamMeta)>) -> bool {
         let mut state = self.lock();
         if state.generation != generation || state.closed {
             return false;
         }
         let end = state.buf_end();
         for (at, title) in titles.drain(..) {
-            let unchanged = state.last_title.as_deref().unwrap_or("") == title;
+            let unchanged = state.last_title.as_ref().map_or(title.is_empty(), |last| *last == title);
             if !unchanged {
                 state.last_title = Some(title.clone());
                 state.titles.push_back((end + at as u64, title));

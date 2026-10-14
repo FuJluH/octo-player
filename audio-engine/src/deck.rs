@@ -14,6 +14,7 @@ use crate::fifo::Fifo;
 use crate::source::{
     self,
     http::{HttpOptions, TitleSlot},
+    icy::StreamMeta,
 };
 
 /// How much decoded sound a deck keeps ready, in seconds.
@@ -53,7 +54,7 @@ struct State {
     stop: bool,
     capacity: usize,
     // A live stream's titles, by the time in it where they start.
-    titles: VecDeque<(f64, String)>,
+    titles: VecDeque<(f64, StreamMeta)>,
 }
 
 struct Shared {
@@ -149,7 +150,7 @@ impl Deck {
 
     /// The newest title of a live stream that starts by `heard_secs` into
     /// it, when there is one not taken before.
-    pub fn take_title(&self, heard_secs: f64) -> Option<String> {
+    pub fn take_title(&self, heard_secs: f64) -> Option<StreamMeta> {
         let mut state = self.shared.lock();
         let mut latest = None;
         while state.titles.front().is_some_and(|(at, _)| *at <= heard_secs) {

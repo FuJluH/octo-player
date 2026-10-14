@@ -247,7 +247,7 @@ fn read_live(source: &mut HttpSource, slot: &TitleSlot, len: usize) -> (Vec<u8>,
         let n = source.read(&mut buf).unwrap();
         assert!(n > 0, "a live stream never ends");
         out.extend_from_slice(&buf[..n]);
-        titles.extend(slot.take());
+        titles.extend(slot.take().map(|meta| meta.title));
     }
     out.truncate(len);
     (out, titles)
