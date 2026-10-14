@@ -200,8 +200,8 @@ class SubsonicClient(
     suspend fun upgrades(): List<Upgrade> =
         get("getUpgrades", key = "upgrades", serializer = ListSerializer(Upgrade.serializer()), default = emptyList())
 
-    // The signed-in user's Spotify import: sign-in, lists and trickle. Only for
-    // servers that list octoImports.
+    // The signed-in user's imports: lists and trickle. Only for servers that
+    // list octoImports.
     suspend fun imports(): ImportOverview =
         get("getImports", key = "imports", serializer = ImportOverview.serializer(), default = ImportOverview())
 

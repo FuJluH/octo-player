@@ -73,10 +73,9 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 // The screen's state is the shared ImportModel, kept for as long as the
-// screen is, so a sign-in waiting for the browser, or a wait for a file
-// TuneMyMusic saves, outlives the screen going to the background. Another
-// server in use starts it over, as the desktop's does: nothing of the last
-// server's lists stays.
+// screen is, so a wait for a file TuneMyMusic saves outlives the screen
+// going to the background. Another server in use starts it over, as the
+// desktop's does: nothing of the last server's lists stays.
 @HiltViewModel
 class ImportViewModel @Inject constructor(
     @ApplicationContext context: Context,
@@ -123,7 +122,7 @@ internal fun openInBrowser(context: Context, url: String) {
 }
 
 // Import on an Octo server: get music from another service through a file
-// TuneMyMusic saves, a shared file or a pasted list; connect Spotify; see
+// TuneMyMusic saves, a shared file, a pasted list or a public link; see
 // what the library has of each list, keep one as a playlist, fetch what it
 // is missing, and follow the trickle. The server does the work; this shows
 // what it says.
@@ -163,10 +162,9 @@ fun ImportScreen(onBack: () -> Unit, owner: ImportViewModel = hiltViewModel()) {
                 if (services != null) {
                     getMyMusic(vm, services, pickFile = pickFile, paste = { pasting = true })
                     vm.said?.let { item(key = "said") { Line(it, OctoColors.TextSecondary) } }
-                    item(key = "spotify:title") { SectionTitle("Spotify", Modifier.padding(top = 12.dp)) }
-                    spotify(vm, overview) { openInBrowser(context, it) }
+                    link(vm)
                 } else {
-                    spotify(vm, overview) { openInBrowser(context, it) }
+                    link(vm)
                     vm.said?.let { item(key = "said") { Line(it, OctoColors.TextSecondary) } }
                 }
                 val opened = overview.lists.firstOrNull { it.id == vm.openId }
@@ -187,36 +185,12 @@ internal fun Line(text: String, color: androidx.compose.ui.graphics.Color = Octo
     Text(text, style = OctoType.bodySmall, color = color, modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
 }
 
-private fun LazyListScope.spotify(vm: ImportModel, overview: ImportOverview, open: (String) -> Unit) {
-    val spotify = overview.spotify
-    item(key = "spotify") {
-        Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(spotify.title(), style = OctoType.body, color = OctoColors.TextPrimary)
-            Text(spotify.line(), style = OctoType.caption, color = OctoColors.TextMuted)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (vm.signingIn) {
-                    GlazeButton("Cancel", vm::cancelSignIn, size = ButtonSize.Medium)
-                } else {
-                    GlazeButton(
-                        if (spotify.connected) "Connect again" else "Connect Spotify",
-                        { vm.connect(open) },
-                        size = ButtonSize.Medium,
-                        enabled = spotify.configured && spotify.redirectProblem == null,
-                    )
-                }
-                if (spotify.connected) {
-                    GlazeButton("Read again", { vm.readAgain() }, size = ButtonSize.Medium, enabled = !overview.reading.busy && !vm.working, loading = overview.reading.busy)
-                    GlazeButton("Disconnect", { vm.disconnect() }, size = ButtonSize.Medium, enabled = !vm.working)
-                }
-            }
-            val reading = overview.reading
-            (reading.step?.let { "$it…" } ?: reading.error)?.let { Text(it, style = OctoType.caption, color = OctoColors.TextSecondary) }
-        }
-    }
+// A public Spotify playlist or album by its link, which the server reads.
+private fun LazyListScope.link(vm: ImportModel) {
+    item(key = "link:title") { SectionTitle("Public link", Modifier.padding(top = 12.dp)) }
     item(key = "link") {
         var link by rememberSaveable { mutableStateOf("") }
         Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Public link", style = OctoType.body, color = OctoColors.TextPrimary)
             Text("Share, then Copy link, on a Spotify playlist or album. A link shows Octo the first 100 songs.", style = OctoType.caption, color = OctoColors.TextMuted)
             val add = {
                 if (link.isNotBlank()) {
@@ -244,11 +218,8 @@ private fun LazyListScope.lists(vm: ImportModel, overview: ImportOverview) {
     if (overview.lists.isEmpty()) {
         item(key = "lists:none") {
             Line(
-                when {
-                    overview.spotify.connected -> "No lists yet. Read again to look at your Spotify once more."
-                    vm.services != null -> "No lists yet. Pick your service under $GET_MY_MUSIC, or add a link."
-                    else -> "No lists yet. Connect Spotify, or add a link."
-                },
+                if (vm.services != null) "No lists yet. Pick your service under $GET_MY_MUSIC, or add a link."
+                else "No lists yet. Add a public link above.",
             )
         }
     }
@@ -284,7 +255,7 @@ private fun ListRow(vm: ImportModel, list: ImportListSummary) {
         } else {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 GlazeButton("Open", { vm.open(list.id) }, size = ButtonSize.Small)
-                if (list.canRefresh) GlazeButton("Read again", { vm.readList(list.id) }, size = ButtonSize.Small, enabled = !vm.working)
+                if (list.readsAgain) GlazeButton("Read again", { vm.readList(list.id) }, size = ButtonSize.Small, enabled = !vm.working)
                 GlazeButton("Remove", { confirming = true }, size = ButtonSize.Small, enabled = !vm.working)
             }
         }

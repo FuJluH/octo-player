@@ -65,10 +65,10 @@ import app.winters.octo.ui.imports.title
 
 // Import on an Octo server: get music from another service through a file
 // TuneMyMusic saves (a tile for each service, then the file by a dialog or
-// dropped on the page, or a pasted list), connect a Spotify account, see
-// what the library has of each list, keep one as a playlist, fetch the
-// songs it is missing, and follow the trickle that fetches them. The
-// server reads, matches and fetches; this page shows what it says.
+// dropped on the page, or a pasted list) or a public link, see what the
+// library has of each list, keep one as a playlist, fetch the songs it is
+// missing, and follow the trickle that fetches them. The server reads,
+// matches and fetches; this page shows what it says.
 @Composable
 fun ImportPage(app: AppState, visit: Visit) {
     val model = app.imports
@@ -98,7 +98,7 @@ fun ImportPage(app: AppState, visit: Visit) {
         if (services != null) {
             add(PageSection("get", GET_MY_MUSIC, OctoIcons.Download, detail = getDetail(model)) { GetMyMusicSection(model, services) })
         }
-        add(PageSection("spotify", "Spotify", OctoIcons.Cloud, detail = overview.spotify.title()) { SpotifySection(model, overview, files = services != null) })
+        add(PageSection("link", "Public link", OctoIcons.Link, detail = "A Spotify playlist or album") { LinkSection(model, files = services != null) })
         add(PageSection("lists", "Your lists", OctoIcons.Playlists, detail = listsDetail(overview)) { ListsSection(model, overview) })
         add(
             PageSection(
@@ -132,51 +132,23 @@ internal fun Said(model: ImportModel) {
     Txt(said, DesktopType.meta, OctoColors.TextSecondary, Modifier.padding(horizontal = RowInset), maxLines = 4)
 }
 
-// The Spotify account. On a server that takes files, a file from any
-// service is under Get my music; an older one only says where to send one.
+// A public Spotify playlist or album by its link, which the server reads.
+// On a server that takes files, a file from any service is under Get my
+// music; an older one only says where to send one.
 @Composable
-private fun SpotifySection(model: ImportModel, overview: ImportOverview, files: Boolean) {
-    val spotify = overview.spotify
-    overview.libraryProblem?.let { Txt(it, DesktopType.body, OctoColors.SignalOrange, Modifier.padding(horizontal = RowInset), maxLines = 4) }
+private fun LinkSection(model: ImportModel, files: Boolean) {
     Rows {
-        SettingRow(spotify.title(), spotify.line()) {
-            if (model.signingIn) {
-                RowAction("Cancel", model::cancelSignIn)
-            } else {
-                GlazeCapsule(
-                    OctoIcons.Cloud,
-                    if (spotify.connected) "Connect again" else "Connect Spotify",
-                    model::connect,
-                    lit = !spotify.connected,
-                    enabled = spotify.configured && spotify.redirectProblem == null,
-                )
-            }
-        }
-        val reading = overview.reading
-        if (spotify.connected || reading.busy || reading.error != null) {
-            SettingRow(
-                if (reading.busy) "Reading your lists" else "Read your lists again",
-                reading.step?.let { "$it…" } ?: reading.error ?: "Octo reads them again on its own every few hours while a list is kept or fetching.",
-            ) {
-                if (reading.busy) ProgressRing(null, size = IconSize.Transport) else RowAction("Read again", model::readAgain, enabled = spotify.connected && !model.working)
-            }
-        }
-        if (spotify.connected || spotify.problem != null) {
-            ActionRow("Disconnect", "Your lists, playlists and fetched songs stay.", "Disconnect", model::disconnect, enabled = !model.working)
-        }
-    }
-    Said(model)
-    Group("Without signing in") {
         LinkRow(model)
         if (!files) SettingRow("A file", "A CSV from Exportify or TuneMyMusic, or Spotify's own data export, imports on the Octo dashboard, on its import page.")
     }
+    Said(model)
 }
 
 @Composable
 private fun LinkRow(model: ImportModel) {
     var link by remember { mutableStateOf("") }
     Column(Modifier.fillMaxWidth().padding(horizontal = RowInset, vertical = Space.L), verticalArrangement = Arrangement.spacedBy(Space.S)) {
-        Txt("Public link", DesktopType.body)
+        Txt("Paste a link", DesktopType.body)
         Txt("Share, then Copy link, on a Spotify playlist or album. A link shows Octo the first 100 songs.", DesktopType.meta, OctoColors.TextMuted, maxLines = 2)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M)) {
             val add = {
@@ -193,6 +165,7 @@ private fun LinkRow(model: ImportModel) {
 
 @Composable
 private fun ListsSection(model: ImportModel, overview: ImportOverview) {
+    overview.libraryProblem?.let { Txt(it, DesktopType.body, OctoColors.SignalOrange, Modifier.padding(horizontal = RowInset), maxLines = 4) }
     Said(model)
     val openId = model.openId
     val opened = overview.lists.firstOrNull { it.id == openId }
@@ -204,11 +177,8 @@ private fun ListsSection(model: ImportModel, overview: ImportOverview) {
         Rows {
             SettingRow(
                 "No lists yet",
-                when {
-                    overview.spotify.connected -> "Read again under Spotify to look at your Spotify once more."
-                    model.services != null -> "Pick your service under $GET_MY_MUSIC, or add a public link under Spotify."
-                    else -> "Connect Spotify, or add a public link, under Spotify."
-                },
+                if (model.services != null) "Pick your service under $GET_MY_MUSIC, or add a link under Public link."
+                else "Add a link under Public link.",
             )
         }
         return
@@ -243,7 +213,7 @@ private fun ListRow(model: ImportModel, list: ImportListSummary) {
             LabelledSwitch(KEEP_AS_PLAYLIST, list.keepPlaylist, enabled = !model.working) { model.keepPlaylist(list.id, it) }
             LabelledSwitch(GET_MISSING_SONGS, list.getMissing, enabled = !model.working) { model.getMissing(list.id, it) }
             Box(Modifier.weight(1f))
-            if (list.canRefresh) RowAction("Read again", { model.readList(list.id) }, enabled = !model.working)
+            if (list.readsAgain) RowAction("Read again", { model.readList(list.id) }, enabled = !model.working)
             val popups = LocalPopups.current
             RowAction("Remove", { askToRemove(popups, model, list) }, enabled = !model.working)
         }

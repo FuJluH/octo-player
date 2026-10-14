@@ -2,7 +2,6 @@ package app.winters.octo.ui.imports
 
 import app.winters.octo.subsonic.ImportOverview
 import app.winters.octo.subsonic.ImportServiceLink
-import app.winters.octo.subsonic.SPOTIFY_SERVICE
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 // "Get my music" as the phone and the desktop both show it: a tile for each
@@ -15,7 +14,6 @@ const val GET_MY_MUSIC = "Get my music"
 const val USE_DOWNLOADED_FILE = "Use the file I just downloaded"
 const val USE_A_FILE = "Use a file"
 const val PASTE_A_LIST = "Paste a list"
-const val CONNECT_SPOTIFY_KEEPS_UPDATING = "Connect Spotify (keeps updating)"
 const val PASTED_LIST_NAME = "Pasted list"
 
 // Every service Octo imports from, for finding Import by a service's name
@@ -40,10 +38,6 @@ sealed interface ImportStep {
     // The grid of services.
     data object Choose : ImportStep
 
-    // Spotify on a server that can sign in to it: keep it updating through
-    // a sign-in, or use a file like the other services.
-    data class SpotifyWays(val service: ImportServiceLink) : ImportStep
-
     // The export page is open in the browser; the file comes back here.
     // `service` is null when a file is used without a service picked.
     data class Waiting(val service: ImportServiceLink?) : ImportStep
@@ -59,7 +53,6 @@ sealed interface ImportStep {
 // The tile a step lights up, if any.
 val ImportStep.service: ImportServiceLink?
     get() = when (this) {
-        is ImportStep.SpotifyWays -> service
         is ImportStep.Waiting -> service
         is ImportStep.Sending -> service
         else -> null
@@ -94,9 +87,6 @@ const val NOT_TUNEMYMUSIC = "That export link does not go to TuneMyMusic, so Oct
 const val FILE_TOO_BIG = "That file is over 64 MB, more than Octo takes."
 const val FILE_EMPTY = "That file is empty."
 const val NOT_A_LIST_FILE = "Octo reads lists from CSV, TXT, JSON or ZIP files."
-
-// Whether a Spotify tile also offers the sign-in that keeps lists updating.
-fun ImportServiceLink.offersSpotifySignIn(spotifyConnect: Boolean): Boolean = spotifyConnect && id == SPOTIFY_SERVICE
 
 // What a member reads once their lists are in and wait for approval.
 fun approvalLine(owner: String?): String =

@@ -96,16 +96,6 @@ internal fun LazyListScope.getMyMusic(vm: ImportModel, services: ImportServices,
                 }
             }
         }
-        is ImportStep.SpotifyWays -> {
-            item(key = "get:spotify") {
-                StepCard(step.service.name, "Connecting keeps your Spotify lists updating in Octo. A file is a copy of them as they are today.") {
-                    AccentButton(CONNECT_SPOTIFY_KEEPS_UPDATING, { vm.connectSpotify() }, Modifier.fillMaxWidth(), enabled = !vm.signingIn, size = ButtonSize.Medium)
-                    GlazeButton(USE_A_FILE, { vm.openExport(step.service) }, Modifier.fillMaxWidth(), size = ButtonSize.Medium)
-                    GlazeButton("Back", vm::backToServices, Modifier.fillMaxWidth(), size = ButtonSize.Small)
-                }
-            }
-            grid()
-        }
         is ImportStep.Waiting -> {
             item(key = "get:waiting") {
                 val service = step.service

@@ -15,9 +15,9 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-// The Spotify import page's state against a pretend Octo server: reading the
+// The Import page's state against a pretend Octo server: reading the
 // overview and a list, passing on what was switched, and what an older Octo
-// without the feature says.
+// without the feature says. The list is one an older Spotify sign-in read.
 class ImportModelTest {
     private val server = FakeServer()
     private val scope = CoroutineScope(Dispatchers.Default + Job())
@@ -34,8 +34,7 @@ class ImportModelTest {
 
     private fun overview(getMissing: Boolean = false) = server.answer(
         "getImports",
-        """"imports":{"spotify":{"configured":true,"connected":true,"account":"Brandon","redirectUri":"http://127.0.0.1/callback"},
-        "lists":[{"id":"spotify-liked","name":"Liked Songs","source":"spotifyLiked","total":3,"have":1,"missing":2,"getMissing":$getMissing,"canRefresh":true}],
+        """"imports":{"lists":[{"id":"spotify-liked","name":"Liked Songs","source":"spotifyLiked","total":3,"have":1,"missing":2,"getMissing":$getMissing,"canRefresh":true}],
         "trickle":{"state":"idle","perHour":20}}""",
         type = "octo",
     )
