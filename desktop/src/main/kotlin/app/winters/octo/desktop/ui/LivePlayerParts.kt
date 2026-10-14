@@ -159,7 +159,8 @@ fun LiveLine(app: AppState, color: Color, muted: Color, modifier: Modifier = Mod
     val time = @Composable { if (times) Txt(listened, LiveTimeStyle, muted, Modifier.semantics { contentDescription = "Listening for $listened" }) }
     if (stacked) {
         Column(modifier, verticalArrangement = Arrangement.spacedBy(Space.S)) {
-            line(Modifier.fillMaxWidth().padding(top = Space.S))
+            // Level with a seek line's track.
+            line(Modifier.fillMaxWidth().padding(top = 11.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 time()
                 Spacer(Modifier.weight(1f))
