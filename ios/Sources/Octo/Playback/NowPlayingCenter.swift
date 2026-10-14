@@ -93,36 +93,54 @@ final class NowPlayingCenter {
         MPNowPlayingInfoCenter.default().playbackState = .stopped
     }
 
-    /// What the picture on the lock screen is for: the entry, and for a live station the
-    /// artwork or logo it shows.
+    /// The covers a live station's lock screen picture can come from, best first.
+    private func liveSources(_ item: QueueItem, _ live: LiveShown) -> [LiveCoverSource] {
+        liveCoverSources(octo: LiveLookup.shared.cover(live.onAir), shown: live, serverCover: item.artwork)
+    }
+
+    /// What the picture on the lock screen is for: the entry, and for a live station the covers
+    /// it can show.
     private func artworkKey(_ item: QueueItem, _ live: LiveShown?) -> String {
-        "\(item.entryId ?? item.trackId)|\(live?.cover ?? "")"
+        let covers = live.map { liveSources(item, $0).map { "\($0)" }.joined(separator: ",") } ?? ""
+        return "\(item.entryId ?? item.trackId)|\(covers)"
     }
 
     /// The lock screen and car pictures are drawn about 512 px wide. A live station shows the
-    /// song's artwork, else its logo, else its server cover, else the tile Octo draws for it.
+    /// song on air's cover in Octo, else the artwork it sent, else its logo, else its server
+    /// cover; the tile Octo draws for it shows at once until one of them loads.
     private func loadArtwork(_ item: QueueItem, _ live: LiveShown?, key: String) {
-        // A station's song changing keeps its picture until the new one is ready.
         let entry = item.entryId ?? item.trackId
+        let session = player.session
+        if let live {
+            let sources = liveSources(item, live)
+            // A new station shows its drawn tile at once; a new song keeps the picture it has
+            // until a better one is ready.
+            if artworkEntry != entry || artwork == nil { artwork = Self.artwork(drawnStationTile(live.station, pixels: 512)) }
+            artworkEntry = entry
+            artworkFor = key
+            if let best = sources.first, let quick = cachedLiveCover(best, pixels: 512) {
+                artwork = Self.artwork(quick)
+                return
+            }
+            Task {
+                let found = await loadFirstLiveCover(sources, pixels: 512, client: session.client)
+                guard artworkFor == key else { return }
+                artwork = Self.artwork(found?.1 ?? drawnStationTile(live.station, pixels: 512))
+                publish()
+            }
+            return
+        }
         if artworkEntry != entry { artwork = nil }
         artworkEntry = entry
         artworkFor = key
-        let session = player.session
-        let stationCover = radioDetailsOf(item.trackId).coverArt
-        let reference = live == nil ? item.artwork : (stationCover.isEmpty ? nil : stationCover)
-        let addresses = live.map { [$0.onAir.artwork, $0.details.logo].filter { !$0.isEmpty } } ?? []
-        let name = live?.station ?? item.title
+        let reference = item.artwork
         Task {
             var image: UIImage?
-            for address in addresses where image == nil {
-                image = await StationLogos.shared.image(address, pixels: 512)
-            }
-            if image == nil, ArtworkRef.decode(reference) != nil {
+            if ArtworkRef.decode(reference) != nil {
                 image = await ArtworkCache.shared.image(reference, px: 512, client: session.client, signedInSource: session.inUse?.sourceId)
-            } else if image == nil, let coverId = reference, let client = session.client {
+            } else if let coverId = reference, let client = session.client {
                 image = await Covers.shared.image(coverId, size: 512, client: client)
             }
-            if image == nil, live != nil { image = drawnStationTile(name, pixels: 512) }
             guard let image, artworkFor == key else { return }
             artwork = Self.artwork(image)
             publish()

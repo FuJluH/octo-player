@@ -360,7 +360,7 @@ struct NowPlayingView: View {
             LiveHeartButton(onAir: live.onAir, ink: ink, heart: liveHeart, openSearch: openSearch)
             liveMoreButton(live)
         }
-        LiveBar(ink: ink, muted: muted, details: live.details)
+        LiveBar(ink: ink, muted: muted)
             .padding(.top, 12)
         LiveTransport(ink: ink, lineup: lineup)
             .padding(.top, gap)
@@ -484,7 +484,7 @@ struct NowPlayingView: View {
     // MARK: Opening and closing
 
     private func arrive() {
-        flight.playerOpening(player.current?.coverArt)
+        flight.playerOpening(flightKey(player.current))
         showLyrics(lyrics.open, animated: false)
         withAnimation(PlayerDolly.open) { entrance.dolly = 1 }
         withAnimation(.octoSpring(1, 1500)) { entrance.corner = 3 }
@@ -497,7 +497,7 @@ struct NowPlayingView: View {
     private func close(then go: (() -> Void)? = nil) {
         guard !entrance.closing else { return }
         entrance.closing = true
-        flight.playerClosing(player.current?.coverArt)
+        flight.playerClosing(flightKey(player.current))
         withAnimation(PlayerDolly.close) { entrance.dolly = 0 }
         withAnimation(.octoSpring(1, 1500)) { entrance.corner = 50 }
         DispatchQueue.main.async {

@@ -407,7 +407,7 @@ struct QueueSongRow<Trailing: View>: View {
         HStack(spacing: 12) {
             if isRadio(song.id) {
                 // A station shows its logo, or the tile Octo draws for it.
-                LiveCover(artwork: "", logo: radioDetailsOf(song.id).logo, coverArt: song.coverArt, name: song.title, size: 44, radius: 6)
+                LiveCover(logo: radioDetailsOf(song.id).logo, coverArt: song.coverArt, name: song.title, size: 44, radius: 6)
             } else {
                 BadgedCover(id: song.coverArt, size: 44, radius: 6, external: song.isExternal)
             }

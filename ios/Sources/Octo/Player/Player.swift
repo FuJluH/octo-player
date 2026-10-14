@@ -206,8 +206,13 @@ final class Player {
         }
         engine.songSetUp = { [sound] item in sound.songSetUp(soundSong(item)) }
         wireEngine()
-        // A station's new title shows on the lock screen at once.
-        LiveTitleBoard.shared.onChange = { [weak self] in self?.nowPlaying.publish() }
+        // A station's new title shows on the lock screen at once, and its song is looked up in
+        // Octo for its cover and the heart; the cover follows when Octo answers.
+        LiveTitleBoard.shared.onChange = { [weak self] in
+            self?.lookUpLiveSong()
+            self?.nowPlaying.publish()
+        }
+        LiveLookup.shared.onAnswer = { [weak self] in self?.nowPlaying.publish() }
         // A corrected length shows at once in the queue, the time line and the rows.
         lengths.onChange = { [weak self] corrected in
             Task { @MainActor in
@@ -781,9 +786,16 @@ final class Player {
         serverQueue.changed(queueSnapshot(), items: engine.queue.items)
         stationRefill?.check()
         autoplay?.check()
+        lookUpLiveSong()
         nowPlaying.publish()
         updatePrefetch()
         ensureTicking()
+    }
+
+    /// Asks Octo once for the song the live station on now has on air.
+    private func lookUpLiveSong() {
+        guard let live, live.onAir.named else { return }
+        LiveLookup.shared.start(live.onAir, session: session)
     }
 
     private func isPlayingChanged(_ playing: Bool) {

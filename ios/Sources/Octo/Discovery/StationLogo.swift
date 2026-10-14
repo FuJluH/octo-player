@@ -117,7 +117,10 @@ struct StationLogo: View {
                 image = quick
                 return
             }
+            // Another station's logo never stays while this one loads: the drawn tile shows.
+            image = nil
             let loaded = await StationLogos.shared.image(address, pixels: pixels)
+            guard !Task.isCancelled else { return }
             withAnimation(.easeOut(duration: 0.2)) { image = loaded }
         }
     }
@@ -158,69 +161,101 @@ func drawnStationTile(_ name: String, pixels: Int) -> UIImage {
     }
 }
 
-/// A live station's cover: the song on air's artwork, else the station's logo, else its cover on
-/// the server, else the tile Octo draws for it. Each picture is cut down to the size drawn, and
-/// one that fails to load falls back to the next, so a station never shows an empty square.
+/// A live station's picture from one place it can come from, at `pixels`: at once when it is
+/// kept in memory, nil otherwise.
+func cachedLiveCover(_ source: LiveCoverSource, pixels: Int) -> UIImage? {
+    switch source {
+    case .octo(let coverArt, let online): Covers.shared.cached(coverArt, size: pixels, online: online)?.image
+    case .artwork(let address), .logo(let address): StationLogos.shared.cached(address, pixels: pixels)
+    case .server(let coverArt): Covers.shared.cached(coverArt, size: pixels, online: false)?.image
+    }
+}
+
+/// A live station's picture from one place it can come from, at `pixels`, or nil when it does
+/// not load.
+func loadLiveCover(_ source: LiveCoverSource, pixels: Int, client: SubsonicClient?) async -> UIImage? {
+    switch source {
+    case .octo(let coverArt, let online): await Covers.shared.image(coverArt, size: pixels, client: client, online: online)
+    case .artwork(let address), .logo(let address): await StationLogos.shared.image(address, pixels: pixels)
+    case .server(let coverArt): await Covers.shared.image(coverArt, size: pixels, client: client)
+    }
+}
+
+/// The first of `sources` that loads, best first, with where it came from; nil when none does.
+func loadFirstLiveCover(_ sources: [LiveCoverSource], pixels: Int, client: SubsonicClient?) async -> (LiveCoverSource, UIImage)? {
+    for source in sources {
+        if Task.isCancelled { return nil }
+        if let image = await loadLiveCover(source, pixels: pixels, client: client) { return (source, image) }
+    }
+    return nil
+}
+
+/// A live station's cover: the song on air's cover in Octo, else the artwork the station sent,
+/// else its logo, else its cover on the server. The tile Octo draws for the station shows at
+/// once, drawn on the phone, and stays until one of those loads; a picture that stops being one
+/// of them (another station, another song) gives way to the tile, never to an empty square.
 struct LiveCover: View {
-    /// The song's artwork address, empty when the station sends none.
-    let artwork: String
-    /// The station's logo address, empty when it has none.
-    let logo: String
-    /// The station's cover id on the server, for the server's own stations.
-    let coverArt: String?
+    let sources: [LiveCoverSource]
     let name: String
     var size: CGFloat
     var radius: CGFloat = OctoRadius.artS
     @Environment(Session.self) private var session
     @Environment(\.displayScale) private var scale
-    @State private var picture: UIImage?
-    @State private var serverCover: UIImage?
+    @State private var picture: (source: LiveCoverSource, image: UIImage)?
 
     var body: some View {
         ZStack {
-            if let serverCover, logo.isEmpty {
-                Image(uiImage: serverCover).resizable().scaledToFill()
-            } else {
-                StationLogo(address: logo, name: name, size: size, radius: radius)
-            }
-            if let picture, !artwork.isEmpty {
-                Image(uiImage: picture)
-                    .resizable()
-                    .scaledToFill()
-                    .transition(.opacity)
+            StationLogo(address: "", name: name, size: size, radius: radius)
+            if let picture, sources.contains(picture.source) {
+                Group {
+                    if case .logo = picture.source {
+                        ZStack {
+                            Color.white
+                            Image(uiImage: picture.image).resizable().scaledToFit().padding(size * 0.06)
+                        }
+                    } else {
+                        Image(uiImage: picture.image).resizable().scaledToFill()
+                    }
+                }
+                .frame(width: size, height: size)
+                .transition(.opacity)
             }
         }
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
-        .task(id: artwork) {
-            guard !artwork.isEmpty else {
-                picture = nil
-                return
-            }
+        .task(id: sources) {
             let pixels = Int(size * scale)
-            if let quick = StationLogos.shared.cached(artwork, pixels: pixels) {
-                picture = quick
-                return
+            // The best picture kept in memory shows at once.
+            if let best = sources.first(where: { cachedLiveCover($0, pixels: pixels) != nil }),
+               let image = cachedLiveCover(best, pixels: pixels) {
+                picture = (best, image)
+                if best == sources.first { return }
             }
-            let loaded = await StationLogos.shared.image(artwork, pixels: pixels)
-            guard !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: 0.25)) { picture = loaded }
-        }
-        .task(id: "\(coverArt ?? "")|\(logo.isEmpty)") {
-            guard logo.isEmpty, let coverArt, !coverArt.isEmpty, let client = session.client else {
-                serverCover = nil
-                return
-            }
-            serverCover = await Covers.shared.image(coverArt, size: Int(size * scale), client: client)
+            let shown = picture.flatMap { current in sources.firstIndex(of: current.source) } ?? sources.count
+            guard shown > 0 else { return }
+            // Only pictures better than the one showing are worth the wait.
+            guard let found = await loadFirstLiveCover(Array(sources.prefix(shown)), pixels: pixels, client: session.client),
+                  !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.25)) { picture = found }
         }
         .accessibilityHidden(true)
     }
 }
 
 extension LiveCover {
-    /// The cover for what a station shows now.
+    /// The cover for what a station shows now, with the song on air's cover in Octo once it is
+    /// known.
+    @MainActor
     init(_ shown: LiveShown, coverArt: String?, size: CGFloat, radius: CGFloat = OctoRadius.artS) {
-        self.init(artwork: shown.onAir.artwork, logo: shown.details.logo, coverArt: coverArt ?? (shown.details.coverArt.isEmpty ? nil : shown.details.coverArt),
+        self.init(sources: liveCoverSources(octo: LiveLookup.shared.cover(shown.onAir), shown: shown, serverCover: coverArt),
                   name: shown.station, size: size, radius: radius)
+    }
+
+    /// A station's own cover, with no song: its logo, else its server cover.
+    init(logo: String, coverArt: String?, name: String, size: CGFloat, radius: CGFloat = OctoRadius.artS) {
+        var sources: [LiveCoverSource] = []
+        if !logo.isEmpty { sources.append(.logo(logo)) }
+        if let coverArt, !coverArt.isEmpty { sources.append(.server(coverArt)) }
+        self.init(sources: sources, name: name, size: size, radius: radius)
     }
 }

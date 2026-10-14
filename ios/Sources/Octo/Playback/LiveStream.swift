@@ -41,8 +41,9 @@ final class LiveTitleBoard {
 
 /// A live station's bytes as they arrive: no length and no end. Reads wait for them; the download
 /// waits while a good stretch sits unread (a long pause), so the phone does not fill up. ICY
-/// metadata is asked for and taken out of the sound, its titles handed to `onTitle`. A stream
-/// that fails or ends is asked for again as `LiveReconnect` says; then it has failed. A station
+/// metadata is asked for and taken out of the sound, each title handed to `onTitle` once the
+/// sound sent before it has been read. A stream that fails or ends is asked for again as
+/// `LiveReconnect` says; then it has failed. A station
 /// that answers with a playlist (by its type, or `#EXTM3U` at its start) stops at once and names
 /// it in `playlistAddress`, for the opener to read as HLS.
 final class LiveBytes: NSObject, LiveByteSource, URLSessionDataDelegate, @unchecked Sendable {
@@ -50,6 +51,11 @@ final class LiveBytes: NSObject, LiveByteSource, URLSessionDataDelegate, @unchec
     private let request: URLRequest
     private let onTitle: (@Sendable (IcyMeta?) -> Void)?
     private var buffer = Data()
+    /// Sound bytes the stream has given, and those read out to play, across reconnects.
+    private var soundIn: Int64 = 0
+    private var soundRead: Int64 = 0
+    /// Titles waiting for the sound sent before them to be read.
+    private var titleQueue = IcyTitleQueue()
     private var failure: PlayError?
     private var cancelled = false
     private var held = false
@@ -122,6 +128,10 @@ final class LiveBytes: NSObject, LiveByteSource, URLSessionDataDelegate, @unchec
             if !buffer.isEmpty {
                 let taken = Data(buffer.prefix(count))
                 buffer.removeFirst(taken.count)
+                soundRead += Int64(taken.count)
+                if let onTitle, !titleQueue.isEmpty {
+                    for meta in titleQueue.due(read: soundRead) { onTitle(meta) }
+                }
                 if held && buffer.count < Self.carryOnBelow {
                     held = false
                     task?.resume()
@@ -229,13 +239,18 @@ final class LiveBytes: NSObject, LiveByteSource, URLSessionDataDelegate, @unchec
             return
         }
         if var reader = icy {
-            let split = reader.feed(data)
+            let split = reader.feedMarked(data)
             icy = reader
+            // Each title waits for the sound before it to be read, so it changes as its song
+            // starts rather than as its bytes arrive.
+            for mark in split.titles { titleQueue.hold(mark.meta, at: soundIn + Int64(mark.at)) }
             buffer.append(split.sound)
+            soundIn += Int64(split.sound.count)
             reconnect.heard(split.sound.count)
-            titles = split.titles
+            titles = titleQueue.due(read: soundRead)
         } else {
             buffer.append(data)
+            soundIn += Int64(data.count)
             reconnect.heard(data.count)
         }
         heardAny = true

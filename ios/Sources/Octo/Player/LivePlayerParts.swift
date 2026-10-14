@@ -9,54 +9,43 @@ import UIKit
 
 // MARK: The live bar
 
-/// A live station's place: a thin line that cannot be dragged, the LIVE mark (a red dot that
-/// beats gently unless motion is reduced), how long the listener has been on, and the codec pill.
+/// A live station's place: a calm thin line that cannot be dragged, how long the listener has
+/// been on where a song shows its time gone, and the LIVE pill where a song shows its quality.
+/// The codec and bitrate are in Station info.
 struct LiveBar: View {
     let ink: Color
     let muted: Color
-    let details: RadioDetails
     @Environment(Player.self) private var player
 
     var body: some View {
         VStack(spacing: 0) {
             Capsule()
-                .fill(ink.opacity(0.24))
-                .frame(height: 4)
+                .fill(ink.opacity(0.16))
+                .frame(height: 3)
                 .frame(height: 24)
                 .accessibilityHidden(true)
             ZStack {
                 HStack {
-                    LiveMark(ink: ink, beating: player.isPlaying)
-                    Spacer()
                     Text(player.listened)
                         .font(.octoCaption.monospacedDigit())
                         .foregroundStyle(muted)
                         .accessibilityLabel("Listening for \(player.listened)")
+                    Spacer()
                 }
-                let codec = liveCodecLine(details)
-                if !codec.isEmpty {
-                    Text(codec)
-                        .font(.octo(10.5, .semibold, .caption2))
-                        .tracking(1)
-                        .foregroundStyle(ink)
-                        .lineLimit(1)
-                        .padding(.horizontal, 10)
-                        .frame(height: 24)
-                        .octoGlass(Capsule(), film: .clear)
-                        .accessibilityLabel(codec)
-                }
+                LivePill(beating: player.isPlaying)
             }
             .padding(.top, -8)
         }
     }
 }
 
-/// "LIVE" after a red dot. The dot beats while the station plays, and holds still when motion is
-/// reduced.
-struct LiveMark: View {
-    let ink: Color
+/// The LIVE pill: a red dot that beats gently while the station plays (still when motion is
+/// reduced) and "LIVE", on a red tint.
+struct LivePill: View {
     let beating: Bool
     @Environment(\.octoReduceMotion) private var calm
+
+    private static let red = Color(red: 1, green: 0.27, blue: 0.23)
 
     var body: some View {
         HStack(spacing: 6) {
@@ -65,16 +54,20 @@ struct LiveMark: View {
                 // Fades to a third and back every 1.8 s.
                 let phase = context.date.timeIntervalSinceReferenceDate * .pi / 0.9
                 Circle()
-                    .fill(Color.red)
-                    .frame(width: 8, height: 8)
+                    .fill(Self.red)
+                    .frame(width: 7, height: 7)
                     .opacity(moving ? 0.675 + 0.325 * cos(phase) : 1)
             }
-            .frame(width: 8, height: 8)
+            .frame(width: 7, height: 7)
             Text("LIVE")
                 .font(.octo(10.5, .bold, .caption2))
                 .tracking(1)
-                .foregroundStyle(ink)
+                .foregroundStyle(Self.red)
         }
+        .padding(.horizontal, 10)
+        .frame(height: 24)
+        .background(Capsule().fill(Self.red.opacity(0.16)))
+        .overlay(Capsule().strokeBorder(Self.red.opacity(0.35), lineWidth: 1))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Live")
     }
@@ -135,10 +128,10 @@ private struct DimmedIcon: View {
 
 // MARK: The heart
 
-/// The heart for the song a live station has on air. A tap searches Octo for it and stars the one
-/// result whose title and artist both agree: a library song is liked, a song from outside the
-/// library is asked for, the way any outside song is. It starts over when the song on air
-/// changes.
+/// The heart for the song a live station has on air. A tap stars the song `LiveLookup` found in
+/// Octo for it, the one result whose title and artist both agree: a library song is liked, a
+/// song from outside the library is asked for, the way any outside song is. It starts over when
+/// the song on air changes.
 @MainActor
 @Observable
 final class LiveHeart {
@@ -198,24 +191,24 @@ final class LiveHeart {
         }
         let onAir = song
         let query = heartQuery(onAir)
-        guard onAir.named, let client = services.session.client else {
+        guard onAir.named, services.session.client != nil else {
             missing(onAir, query, services)
             return
         }
         state = .looking
+        // The same lookup the cover uses: the answer is usually there already.
         looking = Task { [weak self] in
-            let found = (try? await client.search(query, artists: 0, albums: 0, songs: 20))?.song ?? []
+            let found = await LiveLookup.shared.find(onAir, session: services.session)
             guard !Task.isCancelled, let self, self.song == onAir else { return }
-            let candidates = found.map { HeartCandidate(id: $0.id, title: $0.title, artist: $0.artist ?? $0.displayArtist ?? "", inLibrary: !$0.isExternal) }
-            guard let match = heartMatch(onAir, candidates), let song = found.first(where: { $0.id == match.id }) else {
+            guard let found else {
                 self.state = .idle
                 self.missing(onAir, query, services)
                 return
             }
-            if match.inLibrary {
-                await self.like(song, for: onAir, services)
+            if found.inLibrary {
+                await self.like(found.song, for: onAir, services)
             } else {
-                await self.ask(song, for: onAir, services)
+                await self.ask(found.song, for: onAir, services)
             }
         }
     }
@@ -368,7 +361,7 @@ struct StationInfoSheet: View {
             SheetScrollArea {
                 VStack(alignment: .leading, spacing: 16) {
                     HStack(spacing: 14) {
-                        LiveCover(artwork: "", logo: shown.details.logo, coverArt: coverArt, name: shown.station, size: 64)
+                        LiveCover(logo: shown.details.logo, coverArt: coverArt, name: shown.station, size: 64)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(shown.station)
                                 .font(.octoHeadline)
@@ -473,7 +466,7 @@ struct StationListSheet: View {
             if !on { player.jump(to: place) }
         } label: {
             HStack(spacing: 12) {
-                LiveCover(artwork: "", logo: details.logo, coverArt: details.coverArt.isEmpty ? nil : details.coverArt, name: name, size: 44, radius: 6)
+                LiveCover(logo: details.logo, coverArt: details.coverArt.isEmpty ? nil : details.coverArt, name: name, size: 44, radius: 6)
                 VStack(alignment: .leading, spacing: 0) {
                     Text(name).font(.octo(15, .semibold)).foregroundStyle(on ? Color.black : .white).lineLimit(2)
                     Text(on ? "Playing now" : line)
