@@ -105,6 +105,7 @@ import app.winters.octo.ui.livelists.LiveListEditScreen
 import app.winters.octo.ui.livelists.LiveListScreen
 import app.winters.octo.ui.playlist.PlaylistsScreen
 import app.winters.octo.ui.search.SearchScreen
+import app.winters.octo.ui.search.SearchShellViewModel
 import app.winters.octo.ui.server.LocalShareSheet
 import app.winters.octo.ui.server.RadioStationsScreen
 import app.winters.octo.ui.server.ShareSheetHost
@@ -195,6 +196,21 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
     // The bar's small player, and the full one over everything.
     var barPlayer by rememberSaveable { mutableStateOf(false) }
     var playerOpen by rememberSaveable { mutableStateOf(false) }
+    // A search asked for elsewhere (the live player's "Find this song in
+    // Octo"): the Search tab, at its top, with the player closed.
+    val searchAsks = hiltViewModel<SearchShellViewModel>().asks
+    val searchAsked by searchAsks.asked.collectAsStateWithLifecycle()
+    val searchSeen = rememberSaveable { intArrayOf(searchAsked) }
+    LaunchedEffect(searchAsked) {
+        if (searchAsked == searchSeen[0]) return@LaunchedEffect
+        searchSeen[0] = searchAsked
+        playerOpen = false
+        barPlayer = false
+        val searchTab = 1
+        selected = searchTab
+        val tab = stacks[searchTab]
+        while (tab.size > 1) tab.removeAt(tab.lastIndex)
+    }
     // When the queue empties, both fold away.
     LaunchedEffect(hasTrack) {
         if (!hasTrack) {
