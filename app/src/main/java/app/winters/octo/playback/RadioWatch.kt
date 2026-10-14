@@ -5,32 +5,55 @@ import androidx.media3.common.Metadata
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.extractor.metadata.icy.IcyInfo
+import app.winters.octo.liveradio.icyArtworkField
+import app.winters.octo.liveradio.icyFields
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
-
-// The song a stream names in its ICY metadata; its title is null when the
-// stream names none.
-internal data class IcyTitle(val title: String?)
+import java.nio.ByteBuffer
+import java.nio.charset.CharacterCodingException
+import java.nio.charset.CodingErrorAction
 
 // The ICY part of some metadata, or null when it has none.
 @OptIn(UnstableApi::class)
-internal fun icyTitleOf(metadata: Metadata): IcyTitle? =
-    (0 until metadata.length()).map(metadata::get).filterIsInstance<IcyInfo>().lastOrNull()?.let { IcyTitle(it.title) }
+internal fun icyReadOf(metadata: Metadata): IcyRead? =
+    (0 until metadata.length()).map(metadata::get).filterIsInstance<IcyInfo>().lastOrNull()?.let { icyReadOf(it.rawMetadata, it.title, it.url) }
+
+// What one ICY block names, read from the block as the stream sent it, so a
+// quote inside a value stays in it and every field is there. A block with
+// no StreamTitle in it keeps the title and address the player read.
+internal fun icyReadOf(raw: ByteArray?, title: String?, url: String?): IcyRead {
+    val fields = raw?.takeIf { it.isNotEmpty() }?.let { icyFields(icyText(it)) }.orEmpty()
+    if ("StreamTitle" !in fields) return IcyRead(title, url ?: icyArtworkField(fields))
+    return IcyRead(fields["StreamTitle"], icyArtworkField(fields) ?: url)
+}
+
+// A block's words: UTF-8 when it reads as such, else Latin-1, as older
+// stations send them.
+private fun icyText(bytes: ByteArray): String = try {
+    Charsets.UTF_8.newDecoder()
+        .onMalformedInput(CodingErrorAction.REPORT)
+        .onUnmappableCharacter(CodingErrorAction.REPORT)
+        .decode(ByteBuffer.wrap(bytes))
+        .toString()
+} catch (e: CharacterCodingException) {
+    String(bytes, Charsets.ISO_8859_1)
+}
 
 // Watches the station that plays: the song its stream names becomes the
-// item's title, with the station's name under it, so the player, the
-// notification and the lock screen all show it. (A stream that drops is
-// opened again by its loader: see ReconnectingRadio.)
+// item's title, with "Artist · Station" under it and the song's artwork as
+// its cover, so the player, the notification and the lock screen all show
+// it. (A stream that drops is opened again by its loader: see
+// ReconnectingRadio.)
 @OptIn(UnstableApi::class)
 internal class RadioWatch(
     private val player: Player,
     private val scope: CoroutineScope,
 ) : Player.Listener {
     override fun onMetadata(metadata: Metadata) {
-        val icy = icyTitleOf(metadata) ?: return
+        val icy = icyReadOf(metadata) ?: return
         val item = player.currentMediaItem ?: return
         if (!isRadio(item.mediaId)) return
-        val updated = item.withRadioLines(icy.title) ?: return
+        val updated = item.withOnAir(icy) ?: return
         val index = player.currentMediaItemIndex
         scope.launch {
             // Still the same station in the same place.

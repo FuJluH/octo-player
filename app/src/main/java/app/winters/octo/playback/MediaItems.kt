@@ -43,7 +43,7 @@ private const val EXTRA_ALBUM_PEAK = "app.winters.octo.albumPeak"
 
 // Artwork for the lock screen and notification, in a form the playback
 // service can turn back into a picture.
-private fun artworkUri(ref: String?): Uri? = ref?.let { Uri.fromParts(ART_SCHEME, it, null) }
+internal fun artworkUri(ref: String?): Uri? = ref?.let { Uri.fromParts(ART_SCHEME, it, null) }
 
 // A song from the catalog, ready to play.
 fun TrackEntity.toMediaItem(): MediaItem = toMediaItem(uri, mimeType)
