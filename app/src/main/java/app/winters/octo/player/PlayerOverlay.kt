@@ -650,7 +650,7 @@ private fun AnimatedVisibilityScope.Controls(
             Box(Modifier.weight(1f)) { TitleBlock(now, onOpenArtist, onClose) }
             if (live != null && liveModel != null) {
                 Row(Modifier.height(titleLine).wrapContentHeight(unbounded = true), verticalAlignment = Alignment.CenterVertically) {
-                    LiveSongButtons(live, liveModel)
+                    LiveSongButtons(live, liveModel, calm = model.prefs.collectAsStateWithLifecycle().value.reduceMotion || rememberSystemReduceMotion())
                 }
             } else {
                 SongButtons(now, model)

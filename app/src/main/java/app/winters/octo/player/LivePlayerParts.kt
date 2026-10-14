@@ -33,7 +33,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
@@ -42,7 +41,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -54,7 +52,10 @@ import app.winters.octo.design.IconAccent
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.rememberIconAccent
+import app.winters.octo.discovery.DownloadPhase
 import app.winters.octo.liveradio.LiveLineup
+import app.winters.octo.liveradio.LiveSongButton
+import app.winters.octo.liveradio.liveSongButtonLabel
 import app.winters.octo.liveradio.liveCodecLine
 import app.winters.octo.liveradio.liveShown
 import app.winters.octo.liveradio.listenedFor
@@ -62,6 +63,7 @@ import app.winters.octo.player.immersive.mutedInk
 import app.winters.octo.playback.LiveNow
 import app.winters.octo.playback.stationArt
 import app.winters.octo.ui.common.Artwork
+import app.winters.octo.ui.common.DownloadRing
 import app.winters.octo.ui.common.Choice
 import app.winters.octo.ui.common.ChoiceRequest
 import app.winters.octo.ui.common.LocalChoiceSheet
@@ -146,37 +148,57 @@ private val LiveLabel = OctoType.caption.copy(fontSize = 10.5.sp, fontWeight = F
 // Beside the song on air: the heart, which hearts that song (hidden while
 // the station names none), and the station's menu.
 @Composable
-internal fun LiveSongButtons(live: LiveNow, vm: LivePlayerViewModel) {
-    val heart by vm.heartState.collectAsStateWithLifecycle()
+internal fun LiveSongButtons(live: LiveNow, vm: LivePlayerViewModel, calm: Boolean) {
+    val button by vm.songButton.collectAsStateWithLifecycle()
+    val phase by vm.songPhase.collectAsStateWithLifecycle()
     val air = live.shown.onAir
-    if (air.named && heart.onAir.title == air.title) {
+    if (air.named && button != LiveSongButton.None) {
         val pulse = rememberIconAccent(IconAccent.Pulse)
-        val on = heart.starred != null
+        val label = liveSongButtonLabel(button, air)
         Box(
             Modifier
                 .size(44.dp)
                 .clickable(interactionSource = null, indication = null, role = Role.Button) {
-                    if (!on) pulse.play()
-                    vm.tapHeart()
+                    if (button == LiveSongButton.Heart(starred = false)) pulse.play()
+                    vm.tapSong()
                 }
-                .semantics {
-                    contentDescription = liveHeartLabel(air)
-                    stateDescription = if (on) "Hearted" else "Not hearted"
-                },
+                .semantics { contentDescription = label },
             contentAlignment = Alignment.Center,
         ) {
-            GlowIcon(
-                painterResource(if (on) OctoIcons.Liked else OctoIcons.Like),
-                tint = if (on) LocalContentColor.current else LocalContentColor.current.copy(alpha = 0.6f),
-                lit = on,
-                modifier = Modifier.size(24.dp).alpha(if (heart.working) 0.5f else 1f),
-                accent = pulse,
-            )
+            when (val shown = button) {
+                is LiveSongButton.Heart -> GlowIcon(
+                    painterResource(if (shown.starred) OctoIcons.Liked else OctoIcons.Like),
+                    tint = if (shown.starred) LocalContentColor.current else LocalContentColor.current.copy(alpha = 0.6f),
+                    lit = shown.starred,
+                    modifier = Modifier.size(24.dp),
+                    accent = pulse,
+                )
+                // On its way into the library: the ring the app's other add
+                // buttons show.
+                is LiveSongButton.Add -> if (shown.adding) {
+                    DownloadRing(if (phase == DownloadPhase.None) DownloadPhase.Queued else phase, calm, Modifier.size(24.dp))
+                } else {
+                    PlusIcon()
+                }
+                LiveSongButton.Search -> PlusIcon()
+                LiveSongButton.None -> Unit
+            }
         }
     } else {
         Spacer(Modifier.size(44.dp))
     }
     LiveMoreButton(live, vm)
+}
+
+// The plus the app's outside songs show where a heart would be.
+@Composable
+private fun PlusIcon() {
+    GlowIcon(
+        painterResource(OctoIcons.AddToLibrary),
+        tint = LocalContentColor.current.copy(alpha = 0.6f),
+        lit = false,
+        modifier = Modifier.size(24.dp),
+    )
 }
 
 // What the station's menu offers, in order.

@@ -1,95 +1,148 @@
 package app.winters.octo.player
 
-import app.winters.octo.liveradio.HeartCandidate
+import app.winters.octo.catalog.TrackEntity
+import app.winters.octo.discovery.DownloadPhase
 import app.winters.octo.liveradio.LiveLineup
+import app.winters.octo.liveradio.LiveSongButton
 import app.winters.octo.liveradio.OnAir
+import app.winters.octo.liveradio.SongLookup
 import app.winters.octo.liveradio.liveShown
+import app.winters.octo.liveradio.liveSongButtonLabel
+import app.winters.octo.liveradio.songLookupOf
 import app.winters.octo.playback.LiveNow
 import app.winters.octo.playback.RadioDetails
 import app.winters.octo.playback.radioId
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-// The live heart hearts the song on air and nothing else, and the station's
-// menu and info say what can be done and what is known.
+// The live player's song button: a heart for a song in the library, a plus
+// that adds one from outside it or searches for one Octo is not sure of,
+// and the station's menu and info.
 class LiveHeartTest {
     private val petal = OnAir("Petal", "Ariana Grande", "https://art")
-    private val library = HeartCandidate("t-1", "Petal", "Ariana Grande", inLibrary = true)
-    private val outsideCopy = HeartCandidate("find:9", "Petal", "Ariana Grande", inLibrary = false)
-    private val remix = HeartCandidate("find:2", "Petal (Remix)", "Ariana Grande", inLibrary = false)
-    private val other = HeartCandidate("t-3", "Petal", "Someone Else", inLibrary = true)
 
-    private class Fake(var found: List<HeartCandidate>) {
-        val asked = mutableListOf<String>()
-        val starred = mutableListOf<HeartCandidate>()
-        val unstarred = mutableListOf<HeartCandidate>()
-        val heart = LiveHeart(
-            find = { query, _ -> asked += query; found },
-            star = { starred += it; true },
-            unstar = { unstarred += it; true },
+    private fun track(id: String, title: String = "Petal", artist: String = "Ariana Grande") = TrackEntity(
+        id = id, sourceId = "src", nativeId = id, title = title, searchKey = title.lowercase(), sortKey = title.lowercase(),
+        artist = artist, artistId = "", album = "", albumId = "", trackNo = null, discNo = null, year = null,
+        durationMs = 0, addedAt = 0, mimeType = null, sizeBytes = null, artwork = null, uri = null,
+    )
+
+    private val inLibrary = songLookupOf(petal, listOf(track("t-1")), emptyList())
+    private val outside = songLookupOf(petal, emptyList(), listOf(track("find:9"), track("find:2", title = "Petal (Remix)")))
+    private val unsure = songLookupOf(petal, listOf(track("t-3", artist = "Someone Else")), listOf(track("find:2", title = "Petal (Remix)")))
+
+    private class Fake(val answer: suspend () -> SongLookup) {
+        val liked = mutableSetOf<String>()
+        val added = mutableListOf<String>()
+        val searched = mutableListOf<String>()
+        var looks = 0
+        var library = LibraryNow()
+        val song = LiveSong(
+            look = { _, _ -> looks++; answer() },
+            like = { id, on -> if (on) liked += id else liked -= id; library = library.copy(liked = liked.toSet()) },
+            add = { added += it.id; true },
+            search = { searched += it },
         )
+
+        fun button() = song.button(song.state.value, library)
+
+        suspend fun tap() = song.tap { library }
     }
 
     @Test
-    fun aSureMatchIsStarredTheLibrarysFirst() = runTest {
-        val fake = Fake(listOf(other, remix, outsideCopy, library))
-        fake.heart.onAir(petal)
-        assertTrue(fake.heart.state.value.shown)
-        assertEquals(HeartOutcome.Starred(library), fake.heart.tap())
-        assertEquals(listOf("Ariana Grande Petal"), fake.asked)
-        assertEquals(listOf(library), fake.starred)
-        assertEquals(library, fake.heart.state.value.starred)
-        assertFalse(fake.heart.state.value.working)
-        // Outside the library, the outside copy is starred, which Octo downloads.
-        val outside = Fake(listOf(remix, outsideCopy))
-        outside.heart.onAir(petal)
-        assertEquals(HeartOutcome.Starred(outsideCopy), outside.heart.tap())
+    fun aLibrarySongShowsTheHeartWhichFillsOnceStarred() = runTest {
+        val fake = Fake { inLibrary }
+        fake.song.onAir(petal)
+        fake.song.lookUp()
+        assertEquals(LiveSongButton.Heart(starred = false), fake.button())
+        assertEquals("Heart Petal by Ariana Grande", liveSongButtonLabel(fake.button(), petal))
+        assertEquals(SongTap.Hearted("t-1"), fake.tap())
+        assertEquals(LiveSongButton.Heart(starred = true), fake.button())
+        assertEquals(SongTap.Unhearted("t-1"), fake.tap())
+        assertEquals(LiveSongButton.Heart(starred = false), fake.button())
+        assertTrue(fake.added.isEmpty())
     }
 
     @Test
-    fun noSureMatchStarsNothingAndOffersTheSearch() = runTest {
-        val fake = Fake(listOf(remix, other))
-        fake.heart.onAir(petal)
-        assertEquals(HeartOutcome.NoMatch("Ariana Grande Petal"), fake.heart.tap())
-        assertTrue(fake.starred.isEmpty())
-        assertNull(fake.heart.state.value.starred)
+    fun anOutsideSongShowsThePlusThatAddsItThenTheHeartOnceInTheLibrary() = runTest {
+        val fake = Fake { outside }
+        fake.song.onAir(petal)
+        fake.song.lookUp()
+        assertEquals(LiveSongButton.Add(adding = false), fake.button())
+        assertEquals("Add Petal by Ariana Grande to your library", liveSongButtonLabel(fake.button(), petal))
+        assertEquals("find:9", (fake.tap() as SongTap.Adding).song.id)
+        assertEquals(listOf("find:9"), fake.added)
+        // On its way: the ring, and a second tap asks for nothing more.
+        assertEquals(LiveSongButton.Add(adding = true), fake.button())
+        fake.library = fake.library.copy(phases = mapOf("find:9" to DownloadPhase.Downloading(0.4f)))
+        assertEquals(LiveSongButton.Add(adding = true), fake.button())
+        assertEquals(SongTap.Ignored, fake.tap())
+        assertEquals(1, fake.added.size)
+        // In the library now: the filled heart.
+        fake.library = fake.library.copy(phases = mapOf("find:9" to DownloadPhase.Done), adoptions = mapOf("find:9" to "t-9"))
+        assertEquals(LiveSongButton.Heart(starred = true), fake.button())
+        // Taking the heart off unlikes the library's copy.
+        fake.liked += "t-9"
+        fake.library = fake.library.copy(liked = setOf("t-9"))
+        assertEquals(SongTap.Unhearted("t-9"), fake.tap())
+        assertEquals(LiveSongButton.Heart(starred = false), fake.button())
     }
 
     @Test
-    fun aNewSongOnAirResetsTheHeartAndNothingNamedHidesIt() = runTest {
-        val fake = Fake(listOf(library))
-        fake.heart.onAir(petal)
-        fake.heart.tap()
-        assertEquals(library, fake.heart.state.value.starred)
-        // The same song heard again keeps it.
-        fake.heart.onAir(petal.copy(artwork = "https://other"))
-        assertEquals(library, fake.heart.state.value.starred)
-        fake.heart.onAir(OnAir("Lush Life", "Zara Larsson"))
-        assertNull(fake.heart.state.value.starred)
-        fake.heart.onAir(OnAir(tagline = "LA's #1 Hit Music Station"))
-        assertFalse(fake.heart.state.value.shown)
-        assertEquals(HeartOutcome.Ignored, fake.heart.tap())
+    fun noSureMatchShowsThePlusThatSearchesAndStarsNothing() = runTest {
+        val fake = Fake { unsure }
+        fake.song.onAir(petal)
+        fake.song.lookUp()
+        assertEquals(LiveSongButton.Search, fake.button())
+        assertEquals(SongTap.Searched("Ariana Grande Petal"), fake.tap())
+        assertEquals(listOf("Ariana Grande Petal"), fake.searched)
+        assertTrue(fake.added.isEmpty())
+        assertTrue(fake.liked.isEmpty())
     }
 
     @Test
-    fun aSecondTapTakesTheLibrarysStarOff() = runTest {
-        val fake = Fake(listOf(library))
-        fake.heart.onAir(petal)
-        fake.heart.tap()
-        assertEquals(HeartOutcome.Unstarred, fake.heart.tap())
-        assertEquals(listOf(library), fake.unstarred)
-        assertNull(fake.heart.state.value.starred)
+    fun aTapWhileStillLookingWaitsForTheAnswer() = runTest {
+        val gate = CompletableDeferred<SongLookup>()
+        val fake = Fake { gate.await() }
+        fake.song.onAir(petal)
+        // Still looking: the plus, which does nothing on its own.
+        assertEquals(LiveSongButton.Add(adding = false), fake.button())
+        val tap = async { fake.tap() }
+        testScheduler.runCurrent()
+        gate.complete(inLibrary)
+        assertEquals(SongTap.Hearted("t-1"), tap.await())
+        assertEquals(1, fake.looks)
     }
 
     @Test
-    fun theHeartIsNamedForTheSong() {
-        assertEquals("Heart Petal by Ariana Grande", liveHeartLabel(petal))
-        assertEquals("Heart Interlude", liveHeartLabel(OnAir("Interlude")))
+    fun noSongNamedHasNoButtonAndANewSongStartsAfresh() = runTest {
+        val fake = Fake { outside }
+        fake.song.onAir(OnAir(tagline = "LA's #1 Hit Music Station"))
+        assertNull(fake.song.lookUp())
+        assertEquals(LiveSongButton.None, fake.button())
+        assertEquals(SongTap.Ignored, fake.tap())
+        assertEquals(0, fake.looks)
+        fake.song.onAir(petal)
+        fake.song.lookUp()
+        fake.tap()
+        assertEquals(LiveSongButton.Add(adding = true), fake.button())
+        // The same song heard again keeps its state; a new song does not.
+        fake.song.onAir(petal.copy(artwork = "https://other"))
+        assertEquals(LiveSongButton.Add(adding = true), fake.button())
+        fake.song.onAir(OnAir("Lush Life", "Zara Larsson"))
+        assertEquals(LiveSongButton.Add(adding = false), fake.button())
+        assertNull(fake.song.state.value.lookup)
+    }
+
+    @Test
+    fun theSongsNameIsCopiedArtistFirst() {
         assertEquals("Ariana Grande - Petal", copiedSongName(petal))
+        assertEquals("Interlude", copiedSongName(OnAir("Interlude")))
     }
 
     @Test

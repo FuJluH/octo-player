@@ -3,14 +3,16 @@ package app.winters.octo.player
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.data.userMessage
+import app.winters.octo.discovery.DownloadPhase
 import app.winters.octo.discovery.Downloads
 import app.winters.octo.liveradio.AddResult
 import app.winters.octo.liveradio.KeptStations
 import app.winters.octo.liveradio.LiveLookup
+import app.winters.octo.liveradio.LiveSongButton
 import app.winters.octo.liveradio.LiveRadioStore
 import app.winters.octo.liveradio.LiveStation
 import app.winters.octo.liveradio.OnAir
@@ -27,7 +29,10 @@ import app.winters.octo.ui.common.Feedback
 import app.winters.octo.ui.search.SearchAsks
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -50,48 +55,61 @@ class LivePlayerViewModel @Inject constructor(
     private val feedback: Feedback,
     private val searches: SearchAsks,
 ) : ViewModel() {
-    // The songs found for the last heart, by id, so one from outside the
-    // library can be downloaded.
-    private var found: Map<String, TrackEntity> = emptyMap()
-
-    // The heart weighs the same look the cover came from: kept per song, so
-    // it asks Octo again only when that look could not reach it.
-    private val heart = LiveHeart(
-        find = { _, air ->
-            val look = lookup.look(air, again = true)
-            found = look.songs
-            look.candidates
-        },
-        star = { song ->
-            if (song.inLibrary) {
-                if (!likes.isLiked(song.id)) likes.toggle(song.id)
-                true
-            } else {
-                found[song.id]?.let { downloads.request(it) } == true
-            }
-        },
-        unstar = { song ->
-            if (song.inLibrary && likes.isLiked(song.id)) likes.toggle(song.id)
-            song.inLibrary
-        },
+    // The song button weighs the same look the cover came from: kept per
+    // song, so Octo is asked again only when that look could not reach it.
+    private val song = LiveSong(
+        look = { air, again -> lookup.look(air, again) },
+        like = { id, on -> if (likes.isLiked(id) != on) likes.toggle(id) },
+        add = { track -> downloads.request(track) },
+        search = searches::ask,
     )
 
-    val heartState: StateFlow<LiveHeartState> = heart.state
+    private val library: StateFlow<LibraryNow> = combine(likes.liked, downloads.phases, downloads.adoptions) { liked, phases, adoptions ->
+        LibraryNow(liked, phases, adoptions.orEmpty())
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, LibraryNow())
+
+    // The button for the song on air: the heart, the plus that adds it or
+    // searches for it, or none.
+    val songButton: StateFlow<LiveSongButton> = combine(song.state, library, song::button)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LiveSongButton.None)
+
+    // How the outside song asked for from the plus is coming along, for its
+    // ring: Queued until the server's own word on it comes.
+    val songPhase: StateFlow<DownloadPhase> = combine(song.state, library) { state, now ->
+        val id = state.lookup?.match?.id ?: return@combine DownloadPhase.None
+        now.phases[id] ?: if (id in state.requested) DownloadPhase.Queued else DownloadPhase.None
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DownloadPhase.None)
 
     init {
+        // Each new song is looked up as it comes on, before any tap.
         viewModelScope.launch {
-            playback.now.map { it.live?.shown?.onAir ?: OnAir.Nothing }.distinctUntilChanged().collect(heart::onAir)
+            playback.now.map { it.live?.shown?.onAir ?: OnAir.Nothing }.distinctUntilChanged().collectLatest { air ->
+                song.onAir(air)
+                try {
+                    song.lookUp()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.w("Octo", "song on air not looked up: ${e.javaClass.simpleName}")
+                }
+            }
         }
     }
 
-
-    fun tapHeart() {
+    fun tapSong() {
         viewModelScope.launch {
-            when (val outcome = heart.tap()) {
-                is HeartOutcome.Starred -> feedback.done(if (outcome.song.inLibrary) "Added to Liked songs" else "Adding ${outcome.song.title} to your library")
-                is HeartOutcome.NoMatch -> feedback.show(noMatchLine(heart.state.value.onAir), "Search", onAction = { searches.ask(outcome.query) })
-                HeartOutcome.Failed -> feedback.show("Could not heart this song")
-                HeartOutcome.Unstarred, HeartOutcome.Ignored -> Unit
+            val outcome = try {
+                song.tap { library.value }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                SongTap.Failed
+            }
+            when (outcome) {
+                is SongTap.Hearted -> feedback.done("Added to Liked songs")
+                is SongTap.Adding -> feedback.done("Adding ${outcome.song.title} to your library")
+                SongTap.Failed -> feedback.show("Could not add this song")
+                is SongTap.Unhearted, is SongTap.Searched, SongTap.Ignored -> Unit
             }
         }
     }
