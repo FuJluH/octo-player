@@ -38,7 +38,7 @@ class RadioItemsTest {
         assertEquals("Ariana Grande · 102.7 KIIS FM", lines.subtitle)
         assertEquals("Ariana Grande", lines.shown.onAir.artist)
         val art = stationArtOf(lines.artwork)!!
-        assertEquals("https://i.iheart.com/v3/catalog/track/421089822?ops=fit(200,200),format(%22jpeg%22)", art.artwork)
+        assertEquals("https://i.iheart.com/v3/catalog/track/421089822?ops=fit(600,600),format(%22jpeg%22)", art.artwork)
         // The station's logo stays under it.
         assertEquals(listOf("https://cdn.example/kiis.png"), art.logos)
         assertEquals("102.7 KIIS FM", art.name)
