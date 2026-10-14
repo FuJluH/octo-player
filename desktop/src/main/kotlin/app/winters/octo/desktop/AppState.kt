@@ -56,6 +56,10 @@ import app.winters.octo.desktop.downloads.DownloadsModel
 import kotlinx.coroutines.delay
 import app.winters.octo.desktop.search.OmniboxState
 import app.winters.octo.desktop.search.SearchModel
+import app.winters.octo.desktop.search.SearchFilter
+import app.winters.octo.desktop.liveradio.FoundSong
+import app.winters.octo.desktop.liveradio.LiveHeart
+import app.winters.octo.desktop.liveradio.heartMissedLine
 import app.winters.octo.desktop.server.Accounts
 import app.winters.octo.desktop.server.Connection
 import app.winters.octo.desktop.server.ServerFactsModel
@@ -213,6 +217,17 @@ class AppState(
     // Live radio near the listener, from the Radio Browser catalog, and the
     // stations kept on this computer.
     val liveRadio = LiveRadioModel(settings, radioCatalog, { connection }, scope)
+
+    // The live player's heart, for the song a station has on air.
+    val liveHeart = LiveHeart(
+        scope,
+        find = { query -> search?.search(query, SearchFilter.Songs)?.let { found -> found.library.songs.map { FoundSong(it, true) } + found.outside.songs.map { FoundSong(it, false) } } },
+        star = { song, on -> setStarred(listOf(song), on) },
+        missed = { onAir, query ->
+            val line = heartMissedLine(onAir)
+            passingNotice(line, NoticeAction(line, "Search") { searchFor(query) })
+        },
+    )
 
     // Family, on an Octo server with it on: the account's abilities, which song actions and
     // the Family page follow.
@@ -429,6 +444,7 @@ class AppState(
         }
         queueSync.start()
         watchProblems()
+        followLive()
         restored?.let(::signedIn)
     }
 
@@ -978,8 +994,9 @@ class AppState(
     fun perform(shortcut: Shortcut): Boolean {
         when (shortcut) {
             Shortcut.PlayPause -> player.togglePlay()
-            Shortcut.SeekBack -> player.seekTo(player.positionMs() - SEEK_STEP_MS)
-            Shortcut.SeekForward -> player.seekTo(player.positionMs() + SEEK_STEP_MS)
+            // A live station has no place to move to.
+            Shortcut.SeekBack -> if (player.state.value.live == null) player.seekTo(player.positionMs() - SEEK_STEP_MS) else return false
+            Shortcut.SeekForward -> if (player.state.value.live == null) player.seekTo(player.positionMs() + SEEK_STEP_MS) else return false
             Shortcut.VolumeUp -> setVolume(player.state.value.volume + VOLUME_STEP)
             Shortcut.VolumeDown -> setVolume(player.state.value.volume - VOLUME_STEP)
             Shortcut.Search -> if (connection != null) openSearch() else return false

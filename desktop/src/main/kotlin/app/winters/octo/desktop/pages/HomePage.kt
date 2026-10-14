@@ -76,7 +76,7 @@ import app.winters.octo.desktop.liveradio.FIND_STATIONS_NEAR
 import app.winters.octo.desktop.liveradio.LIVE_RADIO
 import app.winters.octo.desktop.liveradio.ShelfStation
 import app.winters.octo.desktop.liveradio.liveShelf
-import app.winters.octo.desktop.playLive
+import app.winters.octo.desktop.playShelf
 import app.winters.octo.desktop.ui.FindStationsArt
 import app.winters.octo.desktop.ui.StationArt
 import app.winters.octo.desktop.ui.liveStationMenu
@@ -202,7 +202,7 @@ fun HomePage(app: AppState, visit: Visit) {
                         // Always shown, since it opens with the way to find stations.
                         HomeSection.InternetRadio -> moving(key = "shelf:live") {
                             ShelfRow(entry.section.title, listOf<ShelfStation?>(null) + live, { it?.streamUrl ?: "find" }, { app.navigator.go(Page.LiveRadio) }) { station ->
-                                if (station == null) FindStationsCard(app) else LiveShelfCard(app, station)
+                                if (station == null) FindStationsCard(app) else LiveShelfCard(app, station, live)
                             }
                         }
                         // Shelves only the phone draws.
@@ -297,18 +297,19 @@ private fun FindStationsCard(app: AppState) {
     )
 }
 
-// A live station on the shelf: a click or its play button plays it. One
-// kept here has its menu on a right click.
+// A live station on the shelf: a click or its play button plays it, with
+// the shelf's other stations around it for Back and Next. One kept here has
+// its menu on a right click.
 @Composable
-private fun LiveShelfCard(app: AppState, station: ShelfStation) {
+private fun LiveShelfCard(app: AppState, station: ShelfStation, shelf: List<ShelfStation>) {
     val kept = station.kept
-    val play = { app.playLive(station.name, station.streamUrl, kept?.uuid.orEmpty()) }
+    val play = { app.playShelf(station, shelf) }
     MediaCard(
         station.name,
         if (station.serverId != null) "On your server" else "Kept here",
         null,
         onOpen = play,
-        onMenu = kept?.let { liveStationMenu(app, it, kept = true) },
+        onMenu = kept?.let { liveStationMenu(app, it, kept = true, play = play) },
         badge = { PlayButton(playing = false, enabled = true, size = ControlHeight.L, label = "Play ${station.name}", onClick = play) },
         picture = { modifier, shape -> StationArt(app, station.logo, station.name, station.streamUrl, modifier, shape, station.coverArt) },
     )

@@ -38,7 +38,7 @@ import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.liveradio.FIND_STATIONS_NEAR
 import app.winters.octo.desktop.liveradio.isOctoStation
 import app.winters.octo.desktop.nav.Page
-import app.winters.octo.desktop.playLive
+import app.winters.octo.desktop.playServerStation
 import app.winters.octo.desktop.server.userMessage
 import app.winters.octo.desktop.ui.StationLogo
 import app.winters.octo.subsonic.RadioStationDetails
@@ -76,7 +76,10 @@ internal fun RadioStationRows(app: AppState) {
             stations == null && failed -> SettingRow("Couldn't read the stations", "Your server didn't answer just now.") { RowAction("Try again", { round++ }) }
             stations == null -> SettingRow("Reading the stations", null) { Spinner(size = IconSize.Table) }
             stations.isEmpty() -> SettingRow("No stations yet", if (admin) "Add one by its stream address, or find stations near you." else "An admin of your server can add some.")
-            else -> stations.forEach { station -> StationRow(app, station, own = isOctoStation(station.basic(), connection.isOcto), admin = admin) { round++ } }
+            else -> {
+                val streams = stations.filter { !isOctoStation(it.basic(), connection.isOcto) && it.streamUrl.isNotBlank() }
+                stations.forEach { station -> StationRow(app, station, own = isOctoStation(station.basic(), connection.isOcto), admin = admin, play = { app.playServerStation(station, streams) }) { round++ } }
+            }
         }
         if (admin) {
             ActionRow("Add a station", "By its stream address, for everyone on your server.", "Add", { stationSheet(app, StationDraft(null, "", "", "")) { round++ } })
@@ -94,7 +97,7 @@ private fun RadioStationDetails.basic() = app.winters.octo.subsonic.RadioStation
 // One station: its logo, name and where it streams from, with Play, and
 // Edit for an admin. One Octo makes itself is the server's to keep.
 @Composable
-private fun StationRow(app: AppState, station: RadioStationDetails, own: Boolean, admin: Boolean, changed: () -> Unit) {
+private fun StationRow(app: AppState, station: RadioStationDetails, own: Boolean, admin: Boolean, play: () -> Unit, changed: () -> Unit) {
     val detail = if (own) "Made by the server" else station.streamUrl.toHttpUrlOrNull()?.host ?: station.streamUrl
     Row(
         Modifier.fillMaxWidth().padding(start = RowInset, top = Space.M, bottom = Space.M),
@@ -106,7 +109,7 @@ private fun StationRow(app: AppState, station: RadioStationDetails, own: Boolean
             Txt(station.name.ifBlank { station.streamUrl }, DesktopType.body)
             Txt(detail, DesktopType.meta, OctoColors.TextMuted, Modifier.padding(top = Space.Xxs))
         }
-        if (!own && station.streamUrl.isNotBlank()) RowAction("Play", { app.playLive(station.name, station.streamUrl) })
+        if (!own && station.streamUrl.isNotBlank()) RowAction("Play", play)
         if (own) RowAction("Open", { app.navigator.go(Page.Playlist(station.id)) })
         if (admin && !own) RowAction("Edit", { stationSheet(app, StationDraft(station.id, station.name, station.streamUrl, station.homePageUrl.orEmpty()), changed) })
         Spacer(Modifier.size(Space.M))
