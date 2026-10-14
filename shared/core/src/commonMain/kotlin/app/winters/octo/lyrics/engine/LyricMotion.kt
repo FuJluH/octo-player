@@ -245,18 +245,47 @@ fun easeInOutBack(x: Double): Double = if (x < 0.5) {
 const val LIFT_EM = 0.05
 const val BACKGROUND_LIFT_EM = 0.10
 
+// How far sung words rise when fast singing blooms too.
+const val FAST_LIFT_EM = 0.08
+const val FAST_BACKGROUND_LIFT_EM = 0.16
+
+// How far a word rises by the end, `fast` when fast singing blooms too.
+fun liftOf(background: Boolean, fast: Boolean): Double = when {
+    fast -> if (background) FAST_BACKGROUND_LIFT_EM else FAST_LIFT_EM
+    else -> if (background) BACKGROUND_LIFT_EM else LIFT_EM
+}
+
 // How far a sung word has risen, in em (up is negative): it eases up over
 // at least a second from its start and stays up.
-fun liftEm(t: Double, start: Double, end: Double, background: Boolean, lift: Double): Double {
+fun liftEm(t: Double, start: Double, end: Double, background: Boolean, lift: Double, fast: Boolean = false): Double {
     val over = max(1.0, end - start)
     val done = ((t - start) / over).coerceIn(0.0, 1.0)
-    return -(if (background) BACKGROUND_LIFT_EM else LIFT_EM) * lift * EaseOut.at(done)
+    return -liftOf(background, fast) * lift * EaseOut.at(done)
 }
 
 // ---- Long-word emphasis ----
 
 // Words held at least this long bloom letter by letter.
 const val EMPHASIS_MIN_S = 1.0
+
+// When fast singing blooms too, a word also blooms when it is held at least
+// this long and at least this many times as long as its line's middle word,
+// and blooms as strongly as a word held FAST_EMPHASIS_STRENGTH_S.
+const val FAST_EMPHASIS_MIN_S = 0.6
+const val FAST_EMPHASIS_RATIO = 2.5
+const val FAST_EMPHASIS_STRENGTH_S = 1.6
+
+// Which of a line's words bloom: those held EMPHASIS_MIN_S or more, and,
+// with `fast`, those held long for their line.
+fun heldWords(words: List<SyncWord>, fast: Boolean): BooleanArray {
+    val durations = words.map { it.end - it.start }
+    val sorted = durations.filter { it > 0 }.sorted()
+    val middle = if (sorted.isEmpty()) 0.0 else sorted[sorted.size / 2]
+    return BooleanArray(durations.size) { i ->
+        val d = durations[i]
+        d >= EMPHASIS_MIN_S || (fast && d >= FAST_EMPHASIS_MIN_S && d >= FAST_EMPHASIS_RATIO * middle)
+    }
+}
 
 // How strongly a held word blooms, and over how long.
 data class Emphasis(
@@ -273,15 +302,25 @@ data class Emphasis(
 )
 
 // The bloom for a word held `duration` seconds with `glyphs` letters (not
-// counting spaces), or null when it is too short. The line's last word
-// blooms harder and longer.
-fun emphasisFor(duration: Double, glyphs: Int, last: Boolean, emphasis: Double, glow: Double): Emphasis? {
-    if (duration < EMPHASIS_MIN_S || glyphs <= 0) return null
-    val d = duration * 1000
+// counting spaces), or null when it does not bloom (`held`, by default held
+// EMPHASIS_MIN_S or more). The line's last word blooms harder and longer.
+// With `fast`, a word held long for its line blooms as strongly as one
+// held FAST_EMPHASIS_STRENGTH_S, and words held 1 to 3 s glow more.
+fun emphasisFor(
+    duration: Double,
+    glyphs: Int,
+    last: Boolean,
+    emphasis: Double,
+    glow: Double,
+    fast: Boolean = false,
+    held: Boolean = duration >= EMPHASIS_MIN_S,
+): Emphasis? {
+    if (!held || glyphs <= 0) return null
+    val d = (if (fast) max(duration, FAST_EMPHASIS_STRENGTH_S) else duration) * 1000
     var a = d / 2000
     a = (if (a > 1) sqrt(a) else a * a * a) * 0.6
     var g = d / 3000
-    g = (if (g > 1) sqrt(g) else g * g * g) * 0.5
+    g = (if (g > 1) sqrt(g) else if (fast) g * sqrt(g) else g * g * g) * 0.5
     var run = duration
     if (last) {
         a *= 1.6

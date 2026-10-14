@@ -91,6 +91,10 @@ class LyricsSettingsViewModel @Inject constructor(
         viewModelScope.launch { looks.setKeepCompleted(on) }
     }
 
+    fun setBloomFast(on: Boolean) {
+        viewModelScope.launch { looks.setBloomFast(on) }
+    }
+
     fun setArc(on: Boolean) {
         viewModelScope.launch { looks.setArc(on) }
     }
@@ -174,6 +178,12 @@ fun LyricsPage(onBack: () -> Unit, highlight: String?, vm: LyricsSettingsViewMod
                 checked = look.keepCompleted,
                 onChange = vm::setKeepCompleted,
                 helper = "Sung lines stay faintly above.",
+            )
+            SwitchRow(
+                SettingsIndex.LyricsBloomFast,
+                checked = look.bloomFast,
+                onChange = vm::setBloomFast,
+                helper = "Off, only notes held a second or more bloom.",
             )
             SwitchRow(
                 SettingsIndex.LyricsArc,

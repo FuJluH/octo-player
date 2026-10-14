@@ -10,7 +10,7 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import app.winters.octo.lyrics.engine.EMPHASIS_MIN_S
+import app.winters.octo.lyrics.engine.heldWords
 import app.winters.octo.lyrics.engine.SyncLine
 import java.text.BreakIterator
 import kotlin.math.max
@@ -65,8 +65,10 @@ internal class LineBox(
     // Where it grows from: the edge its text starts at.
     val pivotX: Float,
 ) {
-    // Each held word's letters, while the line is near the focus.
+    // Each held word's letters, while the line is near the focus, and which
+    // of its words are held (see heldWords).
     var glyphs: Array<List<GlyphBox>?>? = null
+    var held: BooleanArray? = null
 }
 
 // The sizes every line shares, worked out from the view's width.
@@ -107,18 +109,21 @@ internal class LyricsLayout(val spec: LyricsSpec, val lines: List<LineBox>) {
     // Heights for the engine; an interlude counts closed.
     fun baseHeights(): DoubleArray = DoubleArray(lines.size) { lines[it].height.toDouble() }
 
-    // Splits a line's held words into letters, so they can swell one by one.
-    fun prepare(index: Int, line: SyncLine, measurer: TextMeasurer) {
+    // Splits a line's held words into letters, so they can swell one by one;
+    // `fast` when fast singing blooms too.
+    fun prepare(index: Int, line: SyncLine, measurer: TextMeasurer, fast: Boolean) {
         val box = lines[index]
         if (box.words.isEmpty()) return
+        val held = heldWords(line.words, fast)
+        box.held = held
         box.glyphs = Array(line.words.size) { j ->
-            val word = line.words[j]
-            if (word.end - word.start >= EMPHASIS_MIN_S) letters(box.words[j], word.text, box.style, line.rtl, measurer) else null
+            if (held[j]) letters(box.words[j], line.words[j].text, box.style, line.rtl, measurer) else null
         }
     }
 
     fun release(index: Int) {
         lines[index].glyphs = null
+        lines[index].held = null
     }
 }
 

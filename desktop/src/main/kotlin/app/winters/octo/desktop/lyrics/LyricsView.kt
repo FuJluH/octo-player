@@ -90,7 +90,7 @@ fun LyricsView(app: AppState, modifier: Modifier = Modifier, textColor: Color = 
                         speed = { app.player.state.value.speed },
                         offsetMs = offset,
                         outputOffsetMs = outputOffset,
-                        look = LyricsLook(),
+                        look = LyricsLook(bloomFast = settings.lyrics.bloomFast),
                         calm = LocalReduceMotion.current,
                         onSeek = app.player::seekTo,
                         textColor = textColor,

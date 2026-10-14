@@ -44,6 +44,9 @@ data class LyricsLook(
     val keepCompleted: Boolean = true,
     // The lines bend around a drum.
     val arc: Boolean = false,
+    // Fast singing blooms too: a word held long for its line swells and
+    // glows, held words glow more and every sung word rises a little more.
+    val bloomFast: Boolean = true,
 ) {
     fun percent(dial: LookDial): Int = when (dial) {
         LookDial.Emphasis -> emphasis
