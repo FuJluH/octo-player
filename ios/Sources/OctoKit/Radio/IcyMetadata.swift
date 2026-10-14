@@ -19,8 +19,15 @@ public struct IcyReader: Sendable {
     /// with an empty title is kept, since it says the station names nothing now; a block with no
     /// StreamTitle at all gives none.
     public mutating func feed(_ data: Data) -> (sound: Data, titles: [IcyMeta]) {
+        let read = feedMarked(data)
+        return (read.sound, read.titles.map(\.meta))
+    }
+
+    /// The same, with where each block sat in the sound given back: `at` sound bytes of this read
+    /// came before it, so its title belongs to what plays once they have.
+    public mutating func feedMarked(_ data: Data) -> (sound: Data, titles: [IcyMark]) {
         var sound = Data()
-        var titles: [IcyMeta] = []
+        var titles: [IcyMark] = []
         var at = data.startIndex
         while at < data.endIndex {
             if let left = metaLeft {
@@ -28,7 +35,7 @@ public struct IcyReader: Sendable {
                 meta.append(data[at..<(at + take)])
                 at += take
                 if take == left {
-                    if let named = icyMeta(meta) { titles.append(named) }
+                    if let named = icyMeta(meta) { titles.append(IcyMark(at: sound.count, meta: named)) }
                     meta.removeAll(keepingCapacity: true)
                     metaLeft = nil
                     soundLeft = interval
@@ -52,6 +59,42 @@ public struct IcyReader: Sendable {
         }
         return (sound, titles)
     }
+}
+
+/// A metadata block and where it sat: after `at` bytes of the sound given back with it.
+public struct IcyMark: Sendable, Equatable {
+    public var at: Int
+    public var meta: IcyMeta
+
+    public init(at: Int, meta: IcyMeta) {
+        self.at = at
+        self.meta = meta
+    }
+}
+
+/// Titles held until the sound sent before them has been read, so a title changes when the
+/// song it names starts to play instead of when its bytes arrive. Positions count every sound
+/// byte the stream has given, across reconnects.
+public struct IcyTitleQueue: Sendable {
+    private var waiting: [(at: Int64, meta: IcyMeta)] = []
+
+    public init() {}
+
+    /// Holds a title that comes after `at` sound bytes of the stream.
+    public mutating func hold(_ meta: IcyMeta, at: Int64) {
+        waiting.append((at, meta))
+    }
+
+    /// The titles whose sound before them has all been read once `read` bytes have, in order.
+    public mutating func due(read: Int64) -> [IcyMeta] {
+        guard let first = waiting.first, first.at <= read else { return [] }
+        let count = waiting.prefix { $0.at <= read }.count
+        let ready = waiting.prefix(count).map(\.meta)
+        waiting.removeFirst(count)
+        return ready
+    }
+
+    public var isEmpty: Bool { waiting.isEmpty }
 }
 
 /// What one ICY metadata block names: its StreamTitle, trimmed, and the address sent with it

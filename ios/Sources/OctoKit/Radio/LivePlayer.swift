@@ -173,6 +173,70 @@ public func heartMatch(_ onAir: OnAir, _ candidates: [HeartCandidate]) -> HeartC
     }?.0
 }
 
+/// The key a song on air is looked up in Octo under: its artist and title, case and spacing
+/// aside. Empty for no song, which is never looked up.
+public func liveLookupKey(_ onAir: OnAir) -> String {
+    guard onAir.named else { return "" }
+    func plain(_ text: String) -> String {
+        text.lowercased().split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+    }
+    return plain(onAir.artist) + "\n" + plain(onAir.title)
+}
+
+/// What Octo found for songs on air, by `liveLookupKey`: the song the heart stars and whose
+/// cover shows, or none, so a song heard again is never searched for twice. The oldest answers
+/// go once it holds `capacity`.
+public struct LiveLookupCache<Value: Sendable>: Sendable {
+    public enum Answer: Sendable {
+        case found(Value)
+        /// Searched for, and Octo has no song that is surely it.
+        case notFound
+    }
+
+    public let capacity: Int
+    private var answers: [String: Answer] = [:]
+    private var order: [String] = []
+
+    public init(capacity: Int = 200) {
+        self.capacity = max(1, capacity)
+    }
+
+    public subscript(_ key: String) -> Answer? { answers[key] }
+
+    public mutating func keep(_ answer: Answer, for key: String) {
+        guard !key.isEmpty else { return }
+        if answers.updateValue(answer, forKey: key) == nil { order.append(key) }
+        while order.count > capacity { answers[order.removeFirst()] = nil }
+    }
+
+    public var count: Int { answers.count }
+}
+
+/// Where a live station's cover comes from, best first.
+public enum LiveCoverSource: Sendable, Equatable {
+    /// The cover of the song on air as Octo has it, by its cover art id.
+    case octo(coverArt: String, online: Bool)
+    /// The artwork the station sent for the song.
+    case artwork(String)
+    /// The station's logo.
+    case logo(String)
+    /// The station's cover on the server, for the server's own stations.
+    case server(String)
+}
+
+/// The covers to try for a live station, best first: the song on air's cover in Octo, the
+/// artwork the station sent, its logo, its server cover. The drawn tile comes after them all and
+/// shows until one of them loads.
+public func liveCoverSources(octo: (coverArt: String, online: Bool)?, shown: LiveShown, serverCover: String?) -> [LiveCoverSource] {
+    var sources: [LiveCoverSource] = []
+    if let octo, !octo.coverArt.isEmpty { sources.append(.octo(coverArt: octo.coverArt, online: octo.online)) }
+    if !shown.onAir.artwork.isEmpty { sources.append(.artwork(shown.onAir.artwork)) }
+    if !shown.details.logo.isEmpty { sources.append(.logo(shown.details.logo)) }
+    let server = serverCover ?? shown.details.coverArt
+    if !server.isEmpty { sources.append(.server(server)) }
+    return sources
+}
+
 /// What the live player shows for a station: its title and the line under it, the station's
 /// name and stream, what is on air, and the station's details.
 public struct LiveShown: Sendable, Equatable {

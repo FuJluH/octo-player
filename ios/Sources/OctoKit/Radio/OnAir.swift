@@ -50,7 +50,7 @@ public func onAir(_ streamTitle: String?, streamUrl: String? = nil, station: Str
         let artist = nonEmpty(keys["artist"]) ?? lead
         let spot = (keys["song_spot"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let music = spot.isEmpty || spot.lowercased() == "m"
-        let artwork = keys["amgartworkurl"].flatMap { isWebAddress($0) ? $0 : nil }
+        let artwork = keys["amgartworkurl"].flatMap { isWebAddress($0) ? sharperArtwork($0) : nil }
             ?? keys["artworkurl"].flatMap { isWebAddress($0) ? $0 : nil }
             ?? imageAddress(streamUrl)
         if !music || namesNothing(title, artist, stationKey) {
@@ -71,6 +71,35 @@ public func onAir(_ meta: IcyMeta?, station: String = "") -> OnAir {
 
 /// The longest title read; the rest is cut.
 let onAirTitleMax = 1_000
+
+/// The longest side asked of a station's artwork, in pixels.
+public let liveArtworkSize = 600
+
+/// iHeart's artwork asked for at the size the player draws: its catalog addresses say
+/// `ops=fit(200,200)`, which is blurry on a phone, and it serves any fit up to the original.
+/// Other addresses stay as they are.
+public func sharperArtwork(_ url: String) -> String {
+    guard let mark = url.range(of: "://") else { return url }
+    let host = String(url[mark.upperBound...].prefix { $0 != "/" }.prefix { $0 != ":" }).lowercased()
+    guard host == "iheart.com" || host.hasSuffix(".iheart.com") else { return url }
+    let text = url as NSString
+    var out = ""
+    var at = 0
+    for match in iHeartFit.matches(in: url, range: NSRange(location: 0, length: text.length)) {
+        out += text.substring(with: NSRange(location: at, length: match.range.location - at))
+        let whole = text.substring(with: match.range)
+        if let size = Int(text.substring(with: match.range(at: 1))), size < liveArtworkSize {
+            out += "fit(\(liveArtworkSize),\(liveArtworkSize))"
+        } else {
+            out += whole
+        }
+        at = match.range.location + match.range.length
+    }
+    out += text.substring(from: at)
+    return out
+}
+
+private let iHeartFit = try! NSRegularExpression(pattern: #"fit\((\d+),\s*\d+\)"#)
 
 /// "Artist - Title" at its first " - ", or a title alone.
 private func splitArtist(_ text: String) -> (artist: String, title: String) {

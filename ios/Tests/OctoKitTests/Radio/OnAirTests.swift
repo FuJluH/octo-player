@@ -25,7 +25,7 @@ import Testing
         let air = read(kiisSong, "102.7 KIIS FM")
         #expect(air.title == "Petal")
         #expect(air.artist == "Ariana Grande")
-        #expect(air.artwork == "https://i.iheart.com/v3/catalog/track/421089822?ops=fit(200,200),format(%22jpeg%22)")
+        #expect(air.artwork == "https://i.iheart.com/v3/catalog/track/421089822?ops=fit(600,600),format(%22jpeg%22)")
         #expect(read(kiisLushLife, "102.7 KIIS FM") == OnAir("Lush Life", "Zara Larsson",
                                                              "http://image.iheart.com/ihr-ingestion-pipeline-production-sbmg/A10301A00036327915_20190402040656160/45785635.20126.jpg"))
     }
@@ -93,6 +93,14 @@ import Testing
         #expect(onAir("title=\"Blinding Lights\" artist=\"The Weeknd\" url=\"x\"", station: "Some FM") == OnAir("Blinding Lights", "The Weeknd"))
         // A text that is only the station's name is no song.
         #expect(!onAir("text=\"102.7 KIIS FM\" song_spot=\"M\"", station: "102.7 KIIS FM").named)
+    }
+
+    @Test func iHeartArtworkIsAskedForAtThePlayersSize() {
+        #expect(sharperArtwork("https://i.iheart.com/v3/catalog/track/1?ops=fit(200,200),format(%22jpeg%22)")
+                == "https://i.iheart.com/v3/catalog/track/1?ops=fit(600,600),format(%22jpeg%22)")
+        #expect(sharperArtwork("https://i.iheart.com/x?ops=fit(1000,1000)") == "https://i.iheart.com/x?ops=fit(1000,1000)")
+        #expect(sharperArtwork("https://cdn.example/fit(200,200).jpg") == "https://cdn.example/fit(200,200).jpg")
+        #expect(sharperArtwork("http://image.iheart.com/a/b.jpg") == "http://image.iheart.com/a/b.jpg")
     }
 
     @Test func fieldsReadEveryKeyOnce() {
@@ -303,6 +311,36 @@ import Testing
         #expect(heartMatch(petal, []) == nil)
         // The near miss is passed over for the song itself.
         #expect(heartMatch(petal, [lib("r", "Petal (Remix)", "Ariana Grande"), outside("o", "Petal", "Ariana Grande")])?.id == "o")
+    }
+
+    @Test func aSongOnAirIsLookedUpUnderItsArtistAndTitle() {
+        #expect(liveLookupKey(OnAir("Petal", "Ariana Grande")) == liveLookupKey(OnAir("petal ", "ARIANA  GRANDE")))
+        #expect(liveLookupKey(OnAir("Petal", "Ariana Grande")) != liveLookupKey(OnAir("Petal", "Ariana Greenblatt")))
+        #expect(liveLookupKey(.nothing) == "")
+        #expect(liveLookupKey(OnAir(tagline: "LA's #1 Hit Music Station")) == "")
+    }
+
+    @Test func theLookupCacheAnswersARepeatAndForgetsTheOldest() {
+        var cache = LiveLookupCache<String>(capacity: 2)
+        cache.keep(.found("1"), for: "a")
+        cache.keep(.notFound, for: "b")
+        if case .found(let id) = cache["a"] { #expect(id == "1") } else { Issue.record("a was not kept") }
+        if case .notFound = cache["b"] {} else { Issue.record("b's empty answer was not kept") }
+        cache.keep(.found("3"), for: "c")
+        #expect(cache["a"] == nil)
+        #expect(cache.count == 2)
+        cache.keep(.found("x"), for: "")
+        #expect(cache.count == 2)
+    }
+
+    @Test func theCoverOrderIsOctoThenArtworkThenLogoThenServer() throws {
+        let shown = try #require(liveShown(kiis.radioId(),
+                                           streamTitle: "Ariana Grande - text=\"Petal\" song_spot=\"M\" amgArtworkURL=\"https://i.iheart.com/a.jpg\""))
+        #expect(liveCoverSources(octo: ("al-1", false), shown: shown, serverCover: nil)
+                == [.octo(coverArt: "al-1", online: false), .artwork("https://i.iheart.com/a.jpg"), .logo(kiis.favicon)])
+        #expect(liveCoverSources(octo: nil, shown: shown, serverCover: "ra-1") == [.artwork("https://i.iheart.com/a.jpg"), .logo(kiis.favicon), .server("ra-1")])
+        let plain = try #require(liveShown(radioId("http://h/s", "Plain"), streamTitle: nil))
+        #expect(liveCoverSources(octo: nil, shown: plain, serverCover: nil).isEmpty)
     }
 
     @Test func aLiveStationsLockScreenHasNoSeekingAndStepsThroughItsList() {

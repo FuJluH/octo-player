@@ -61,6 +61,25 @@ import Testing
         #expect(!onAir(titles[1], station: "181.FM").named)
     }
 
+    @Test func eachTitleSaysWhereItSatInTheSound() {
+        var reader = IcyReader(interval: 4)
+        let (out, marks) = reader.feedMarked(sound(4, 1) + block("StreamTitle='A - B';") + sound(4, 2) + block("StreamTitle='C - D';") + sound(2, 3))
+        #expect(out.count == 10)
+        #expect(marks == [IcyMark(at: 4, meta: IcyMeta(title: "A - B")), IcyMark(at: 8, meta: IcyMeta(title: "C - D"))])
+    }
+
+    @Test func titlesWaitForTheSoundBeforeThemToBeRead() {
+        var queue = IcyTitleQueue()
+        queue.hold(IcyMeta(title: "A - B"), at: 1_000)
+        queue.hold(IcyMeta(title: "C - D"), at: 5_000)
+        #expect(queue.due(read: 999).isEmpty)
+        #expect(queue.due(read: 1_000) == [IcyMeta(title: "A - B")])
+        #expect(queue.due(read: 4_000).isEmpty)
+        queue.hold(IcyMeta(title: ""), at: 6_000)
+        #expect(queue.due(read: 9_000) == [IcyMeta(title: "C - D"), IcyMeta(title: "")])
+        #expect(queue.isEmpty)
+    }
+
     @Test func theReaderKeepsQuotesInsideNames() {
         var reader = IcyReader(interval: 2)
         let (_, titles) = reader.feed(sound(2, 1) + block("StreamTitle='AEROSMITH - I DON'T WANNA MISS A THING';") + sound(2, 2))
