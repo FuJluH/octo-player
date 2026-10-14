@@ -120,14 +120,17 @@ fun discordActivityFor(
     val played = positionMs.coerceIn(0, length ?: Long.MAX_VALUE)
     val start = clockMs - (played / speed).toLong()
     val timed = now.playing && prefs.time != DiscordTime.Off
-    val cover = art.cover?.takeIf { prefs.picture == DiscordPicture.Cover && it.length <= URL_MAX }
+    // A live station shows its song's artwork or its logo from the web.
+    val cover = (now.artUrl?.takeIf { now.live } ?: art.cover)?.takeIf { prefs.picture == DiscordPicture.Cover && it.length <= URL_MAX }
     val (small, smallText) = when {
         !now.playing -> DISCORD_PAUSE to "Paused"
         prefs.badge == DiscordBadge.Artist -> art.artist?.takeIf { it.length <= URL_MAX } to discordText(now.artist)
         prefs.badge == DiscordBadge.Icon && cover != null -> DISCORD_ICON to "Octo"
         else -> null to null
     }
-    val track = if (prefs.lastFmLinks) lastFmTrackUrl(now.artist, now.title) else null
+    // A station naming no song links nowhere.
+    val linked = prefs.lastFmLinks && (!now.live || now.liveNamed)
+    val track = if (linked) lastFmTrackUrl(now.artist, now.title) else null
     return DiscordActivity(
         details = discordText(fill(prefs.firstLine)) ?: discordText(now.title) ?: "Unknown song",
         state = discordText(fill(prefs.secondLine)),
@@ -139,7 +142,7 @@ fun discordActivityFor(
         smallImage = small,
         smallText = smallText.takeIf { small != null },
         detailsUrl = track?.takeIf { it.length <= URL_MAX },
-        stateUrl = if (prefs.lastFmLinks) lastFmArtistUrl(now.artist)?.takeIf { it.length <= URL_MAX } else null,
+        stateUrl = if (linked) lastFmArtistUrl(now.artist)?.takeIf { it.length <= URL_MAX } else null,
         button = track?.takeIf { it.length <= BUTTON_URL_MAX }?.let { DiscordButton("Open on Last.fm", it) },
     )
 }

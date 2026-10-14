@@ -16,6 +16,7 @@ import androidx.compose.ui.window.ApplicationScope
 import androidx.compose.ui.window.TrayState
 import androidx.compose.ui.window.isTraySupported
 import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.drawnStationPicture
 import app.winters.octo.desktop.audio.CHECK_PLAY
 import app.winters.octo.desktop.settings.AppPlaces
 import app.winters.octo.desktop.settings.DesktopOs
@@ -79,7 +80,13 @@ class SystemIntegration(
     private val session = MediaSession(
         player = app.player,
         controls = controls,
-        covers = ServerCovers(app.http, { app.connection?.client }, File(places.cache, "now-playing"), images = { app.coverImages?.invoke() }),
+        covers = ServerCovers(
+            app.http,
+            { app.connection?.client },
+            File(places.cache, "now-playing"),
+            images = { app.coverImages?.invoke() },
+            drawn = { name, stream -> app.drawnStationPicture(name, stream) },
+        ),
         scope = app.scope,
         others = ::otherEvent,
     )
@@ -270,7 +277,8 @@ class SystemIntegration(
             val state = app.player.state.value
             val now = nowPlayingOf(state)
             val clock = System.currentTimeMillis()
-            val query = now?.let { artQueryOf(it) }
+            // A station naming no song has no pictures to look up.
+            val query = now?.takeUnless { it.live && !it.liveNamed }?.let { artQueryOf(it) }
             val pictures = query?.let { art.known(it) } ?: DiscordArtwork()
             val shown = discordActivityFor(now, app.player.positionMs(), clock, prefs, pictures)
             if (now?.entryKey != song) {

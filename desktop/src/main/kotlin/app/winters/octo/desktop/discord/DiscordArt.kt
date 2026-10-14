@@ -26,7 +26,8 @@ data class DiscordArtwork(val cover: String? = null, val artist: String? = null)
 // What a song's pictures are looked up by: only the names Discord shows anyway.
 data class ArtQuery(val title: String, val artist: String, val album: String, val albumArtist: String)
 
-fun artQueryOf(now: NowPlaying) = ArtQuery(now.title, now.artist, now.album, now.albumArtist)
+// A live station's album is the station, which no catalog has.
+fun artQueryOf(now: NowPlaying) = if (now.live) ArtQuery(now.title, now.artist, "", "") else ArtQuery(now.title, now.artist, now.album, now.albumArtist)
 
 // The same names nowPlayingOf takes from a song, for a song still to come.
 fun artQueryOf(song: Song) = ArtQuery(

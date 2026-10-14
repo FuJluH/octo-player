@@ -78,6 +78,7 @@ import okio.Path.Companion.toOkioPath
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.Canvas
 import org.jetbrains.skia.CubicResampler
+import org.jetbrains.skia.EncodedImageFormat
 import org.jetbrains.skia.FilterMipmap
 import org.jetbrains.skia.FilterMode
 import org.jetbrains.skia.Image
@@ -241,6 +242,20 @@ suspend fun coverPicture(loader: ImageLoader, client: SubsonicClient, coverId: S
     val result = loader.execute(coverRequest(PlatformContext.INSTANCE, client, coverId, bucket).size(bucket).build())
     val bitmap = (result as? SuccessResult)?.image?.toBitmap() ?: return null
     return Image.makeFromBitmap(bitmap)
+}
+
+// A picture from a web address (a station's logo, the artwork of a song
+// on the air) at `px` at most, as a PNG, through the loader and its caches;
+// null when it does not load.
+suspend fun webPicture(loader: ImageLoader, url: String, px: Int): ByteArray? {
+    val result = loader.execute(ImageRequest.Builder(PlatformContext.INSTANCE).data(url).size(px).build())
+    val bitmap = (result as? SuccessResult)?.image?.toBitmap() ?: return null
+    val image = Image.makeFromBitmap(bitmap)
+    return try {
+        image.encodeToData(EncodedImageFormat.PNG)?.bytes
+    } finally {
+        image.close()
+    }
 }
 
 // How many bytes of decoded covers are kept in memory: a few screens of
