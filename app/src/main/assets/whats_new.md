@@ -15,8 +15,10 @@
 ## Playback
 
 - **Live radio near you**: find radio stations around a ZIP code, postal code, town or your location, choose how far to look, and keep the ones you like. Open it from Home, Search or your server's stations.
-- Live radio shows the song the station is playing, plays more kinds of station streams and reconnects when the connection drops.
-- After a long pause, live radio picks up with what is on now.
+- **A player made for live radio**: a LIVE pill instead of the scrub bar, Stop and Play that always rejoin what is on air, and Back and Next to change station.
+- Live radio shows the song the station is playing with its cover. Tap **+** to add that song to your library, or the heart if you already have it.
+- Live radio plays more kinds of station streams and reconnects when the connection drops.
+- The player's cover sits higher and fills more of the screen.
 - **Stations keep going**: a tap on a station or a Made for you list shows its songs, with a play button on the cover. A station adds more songs as you near the end, even after the app restarts.
 - Internet radio stations added to your server play from Home.
 
