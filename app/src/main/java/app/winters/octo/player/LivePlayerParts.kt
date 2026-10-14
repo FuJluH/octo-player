@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -83,15 +84,18 @@ private val LiveRed = Color(0xFFFF3B30)
 // label would be. The station's codec is in Station info.
 @Composable
 internal fun LiveBar(live: LiveNow, calm: Boolean) {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .padding(vertical = 10.dp)
-            .height(3.dp)
-            .background(LocalContentColor.current.copy(alpha = 0.24f), CircleShape)
-            .clearAndSetSemantics { },
-    )
-    Box(Modifier.fillMaxWidth().offset(y = (-2).dp)) {
+    // In the room the scrub bar takes, with the times' line under it, so
+    // a song and a station keep the same rhythm.
+    Box(Modifier.fillMaxWidth().height(BarRoom), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(3.dp)
+                .background(LocalContentColor.current.copy(alpha = 0.24f), CircleShape)
+                .clearAndSetSemantics { },
+        )
+    }
+    Box(Modifier.fillMaxWidth().heightIn(min = TimesRoom).offset(y = (-8).dp)) {
         ListenedTime(live.since, Modifier.align(Alignment.CenterStart))
         LivePill(calm, Modifier.align(Alignment.Center))
     }
@@ -305,3 +309,8 @@ internal fun stationList(lineup: LiveLineup, onPick: (Int) -> Unit): ChoiceReque
     selected = lineup.index,
     onPick = onPick,
 )
+
+// The room the scrub bar takes, and the line of times under it: the live
+// bar takes the same.
+internal val BarRoom = 48.dp
+internal val TimesRoom = 24.dp
