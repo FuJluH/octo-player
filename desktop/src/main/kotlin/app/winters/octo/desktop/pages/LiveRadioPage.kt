@@ -131,7 +131,7 @@ fun LiveRadioPage(app: AppState, visit: Visit) {
         item(key = "order") { OrderControls(app, prefs.sort, prefs.radius, located = (prefs.place?.located ?: false)) }
         if (kept.isNotEmpty()) {
             item(key = "kept-title") { SectionTitle("Kept here") }
-            items(kept, key = { "kept:${it.uuid}" }) { station -> StationRow(app, station, kept = true, miles = model.miles, near = false) }
+            items(kept, key = { "kept:${it.uuid}" }) { station -> StationRow(app, station, kept = true, miles = model.miles, near = false, lineup = kept, source = "Kept here") }
         }
         stations(app, find, keptIds, prefs.radius, model.miles)
     }
@@ -155,7 +155,7 @@ private fun LazyListScope.stations(app: AppState, find: LiveFind, keptIds: Set<S
                 val value = radiusChoices(miles).let { it[radius.coerceIn(it.indices)] }
                 item(key = "none") { NothingHere(nothingFound(find.place, value, miles)) }
             }
-            items(find.stations, key = { "near:${it.uuid}" }) { station -> StationRow(app, station, kept = station.uuid in keptIds, miles = miles, near = true) }
+            items(find.stations, key = { "near:${it.uuid}" }) { station -> StationRow(app, station, kept = station.uuid in keptIds, miles = miles, near = true, lineup = find.stations, source = LIVE_RADIO_NEAR) }
         }
     }
 }
@@ -215,15 +215,17 @@ private fun ColumnScope.CountryMenu(chosen: String, pick: (String) -> Unit, clos
 }
 
 // A station: its logo, its name, where it is and its tags, how it sounds,
-// and its menu button. A click (or Enter) plays it (the second click of a
-// double click does not start it over); a right click, the menu key or
-// Shift+F10 opens its menu where the button is.
+// and its menu button. A click (or Enter) plays it with the rest of its
+// `lineup` around it for Back and Next (the second click of a double click
+// does not start it over); a right click, the menu key or Shift+F10 opens
+// its menu where the button is.
 @Composable
-private fun StationRow(app: AppState, station: LiveStation, kept: Boolean, miles: Boolean, near: Boolean) {
+private fun StationRow(app: AppState, station: LiveStation, kept: Boolean, miles: Boolean, near: Boolean, lineup: List<LiveStation>, source: String) {
     val clicks = remember { longArrayOf(0L) }
-    val menu = liveStationMenu(app, station, kept)
+    val play = { app.playLive(station, lineup, source) }
+    val menu = liveStationMenu(app, station, kept, play)
     var anchor by remember { mutableStateOf(IntRect.Zero) }
-    val menuHere = { app.popups.showUnder(anchor) { close -> LiveStationMenu(app, station, kept, close) } }
+    val menuHere = { app.popups.showUnder(anchor) { close -> LiveStationMenu(app, station, kept, close, play) } }
     Row(
         Modifier
             .fillMaxWidth()
@@ -237,7 +239,7 @@ private fun StationRow(app: AppState, station: LiveStation, kept: Boolean, miles
             }
             .clickable(role = Role.Button) {
                 val now = System.currentTimeMillis()
-                if (now - clicks[0] >= DOUBLE_CLICK_MS) app.playLive(station)
+                if (now - clicks[0] >= DOUBLE_CLICK_MS) play()
                 clicks[0] = now
             }
             .padding(horizontal = Space.M, vertical = Space.S),

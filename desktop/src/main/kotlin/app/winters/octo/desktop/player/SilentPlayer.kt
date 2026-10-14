@@ -1,6 +1,7 @@
 package app.winters.octo.desktop.player
 
 import app.winters.octo.playback.QueueSource
+import app.winters.octo.playback.isRadio
 import app.winters.octo.playback.RealLengths
 import app.winters.octo.subsonic.Song
 import kotlinx.coroutines.CoroutineScope
@@ -59,7 +60,12 @@ class SilentPlayer(
         }
     }
 
-    override fun positionMs(): Long = synchronized(lock) { rawPosition().coerceAtMost(durationMs().coerceAtLeast(0)) }
+    // A live station's place is how long it has been listened to.
+    override fun positionMs(): Long = synchronized(lock) {
+        if (liveNow()) rawPosition() else rawPosition().coerceAtMost(durationMs().coerceAtLeast(0))
+    }
+
+    private fun liveNow(): Boolean = isRadio(queue.currentEntry?.song?.id.orEmpty())
 
     private fun rawPosition(): Long = if (running) anchorMs + (clock() - since) else anchorMs
 
@@ -118,8 +124,10 @@ class SilentPlayer(
 
     override fun play(songs: List<Song>, start: Int, shuffle: Boolean, source: QueueSource) {
         synchronized(lock) {
-            this.shuffle = shuffle
-            queue.replace(songs, start, shuffle, source)
+            // A lineup of stations plays in its own order.
+            val lineup = isLineup(songs)
+            if (!lineup) this.shuffle = shuffle
+            queue.replace(songs, start, shuffle && !lineup, source)
             restartAt(0, play = queue.currentEntry != null)
         }
     }
@@ -127,6 +135,8 @@ class SilentPlayer(
     override fun resume() {
         synchronized(lock) {
             if (queue.currentEntry == null || running) return
+            // A station starts afresh.
+            if (liveNow()) return restartAt(0, play = true)
             // At the very end of the last song, Play starts it over.
             if (anchorMs >= durationMs() && durationMs() > 0) anchorMs = 0
             since = clock()
@@ -150,6 +160,7 @@ class SilentPlayer(
 
     override fun next() {
         synchronized(lock) {
+            if (queue.isLineup()) return step(forward = true)
             val next = queue.nextPosition(if (repeat == RepeatMode.One) RepeatMode.All else repeat) ?: return
             queue.moveTo(next)
             restartAt(0, play = running)
@@ -159,8 +170,15 @@ class SilentPlayer(
     override fun previous() {
         synchronized(lock) {
             if (queue.currentEntry == null) return
+            if (queue.isLineup()) return step(forward = false)
             val back = queue.previousPosition(if (repeat == RepeatMode.One) RepeatMode.All else repeat)
-            if (rawPosition() > RESTART_AFTER_MS || back == null) {
+            // A live stream cannot start over: back goes to the song before.
+            if (liveNow()) {
+                if (back != null) {
+                    queue.moveTo(back)
+                    restartAt(0, play = running)
+                }
+            } else if (rawPosition() > RESTART_AFTER_MS || back == null) {
                 restartAt(0, play = running)
             } else {
                 queue.moveTo(back)
@@ -169,9 +187,16 @@ class SilentPlayer(
         }
     }
 
+    // Back or Next in a lineup, never round from an end.
+    private fun step(forward: Boolean) {
+        val to = queue.lineupStep(forward) ?: return
+        queue.moveTo(to)
+        restartAt(0, play = running)
+    }
+
     override fun seekTo(positionMs: Long) {
         synchronized(lock) {
-            if (queue.currentEntry == null) return
+            if (queue.currentEntry == null || liveNow()) return
             restartAt(positionMs.coerceIn(0, durationMs().coerceAtLeast(0)), play = running)
         }
     }
@@ -241,7 +266,7 @@ class SilentPlayer(
     override fun setShuffle(on: Boolean) {
         synchronized(lock) {
             shuffle = on
-            queue.setShuffle(on)
+            if (!queue.isLineup()) queue.setShuffle(on)
             publish()
         }
     }
@@ -306,9 +331,10 @@ class SilentPlayer(
             roundsOf = key
             rounds = 0
         }
+        val live = queue.liveNow(null, null)
         _state.value = PlayerState(
             queue = queue.songs,
-            current = queue.currentEntry,
+            current = queue.currentEntry?.let { if (live != null) it.copy(song = shownLive(it.song, live.shown)) else it },
             upcoming = queue.upcoming,
             played = queue.played,
             rounds = rounds,
@@ -326,6 +352,7 @@ class SilentPlayer(
             ended = ended,
             canUndo = queue.canUndo,
             moves = moves,
+            live = live,
         )
     }
 

@@ -8,7 +8,10 @@ import app.winters.octo.liveradio.MILE_METERS
 import app.winters.octo.liveradio.liveStreamKey
 import app.winters.octo.liveradio.located
 import app.winters.octo.liveradio.parseWhere
+import app.winters.octo.desktop.library.CoverOrder
+import app.winters.octo.playback.radioDetailsOf
 import app.winters.octo.playback.radioId
+import app.winters.octo.playback.radioOf
 import app.winters.octo.subsonic.Place
 import app.winters.octo.subsonic.RadioStation
 import app.winters.octo.subsonic.Song
@@ -117,10 +120,19 @@ fun nothingFound(place: LivePlace, radius: Int, miles: Boolean): String =
         "No stations listed in ${place.state.ifBlank { place.label }}. Try a nearby city with its state."
     }
 
-// A live station as a song for the player: its id carries the stream and
-// the name, as on the phone.
-fun liveSong(name: String, streamUrl: String): Song =
-    Song(id = radioId(streamUrl, name), title = name.ifBlank { streamUrl }, artist = LIVE_RADIO)
+// A live station as a song for the player: its id carries the stream, the
+// name and what the player shows about it, as on the phone.
+fun liveSong(id: String): Song {
+    val (stream, name) = radioOf(id) ?: return Song(id = id, artist = LIVE_RADIO)
+    return Song(id = id, title = name.ifBlank { stream }, artist = LIVE_RADIO, coverArt = radioDetailsOf(id).coverArt.ifBlank { null })
+}
+
+fun liveSong(name: String, streamUrl: String): Song = liveSong(radioId(streamUrl, name))
+
+// What a station's drawn cover is made from, the same on every card and in
+// the player: its name, "Live radio", and its colors from its stream.
+fun liveCoverOrder(name: String, streamUrl: String): CoverOrder =
+    CoverOrder("live:${streamKey(streamUrl)}", name.ifBlank { streamUrl }, LIVE_RADIO, null, emptyList())
 
 const val LIVE_RADIO = "Live radio"
 const val LIVE_RADIO_NEAR = "Live radio near you"
@@ -138,6 +150,7 @@ data class ShelfStation(
     val coverArt: String? = null,
     val serverId: String? = null,
     val kept: LiveStation? = null,
+    val homepage: String = "",
 )
 
 // Whether a station from the server is one of Octo's own (songs it lines
@@ -155,7 +168,7 @@ fun liveShelf(server: List<RadioStation>, kept: List<LiveStation>): List<ShelfSt
     val seen = HashSet<String>()
     val fromServer = server.filter { it.streamUrl.isNotBlank() && seen.add(streamKey(it.streamUrl)) }.map { station ->
         val mine = byStream[streamKey(station.streamUrl)]
-        ShelfStation(station.name.ifBlank { station.streamUrl }, station.streamUrl, mine?.favicon.orEmpty(), station.coverArt, station.id, mine)
+        ShelfStation(station.name.ifBlank { station.streamUrl }, station.streamUrl, mine?.favicon.orEmpty(), station.coverArt, station.id, mine, station.homePageUrl.orEmpty())
     }
     val fromHere = kept.filter { seen.add(streamKey(it.streamUrl)) }.map { ShelfStation(it.name, it.streamUrl, it.favicon, kept = it) }
     return fromServer + fromHere

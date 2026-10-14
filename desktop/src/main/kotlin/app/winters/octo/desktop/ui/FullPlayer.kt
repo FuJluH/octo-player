@@ -48,17 +48,21 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.SidePanel
+import app.winters.octo.desktop.liveSongCover
 import app.winters.octo.desktop.library.Cover
 import app.winters.octo.desktop.library.lengthText
 import app.winters.octo.desktop.lyrics.LyricsMenuButton
 import app.winters.octo.desktop.lyrics.LyricsView
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.player.DesktopPlayer
+import app.winters.octo.desktop.player.LiveNow
+import androidx.compose.ui.layout.onGloballyPositioned
 import app.winters.octo.desktop.player.PlayerState
 import app.winters.octo.desktop.player.RepeatMode
 import app.winters.octo.desktop.player.wash.ImmersiveWash
 import app.winters.octo.desktop.player.wash.WashCover
 import app.winters.octo.design.IconAction
+import app.winters.octo.design.FrameSize
 import app.winters.octo.design.LineSlider
 import app.winters.octo.design.LocalReduceMotion
 import app.winters.octo.design.OctoColors
@@ -129,8 +133,10 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
     val tuning = WashTuning(wash.contrast, wash.saturation / 100f, wash.brightnessCap / 100f)
     // The cover made ready, keeping the last one while the next is made.
     var cover by remember { mutableStateOf<WashCover?>(null) }
-    LaunchedEffect(song.coverArt, tuning, app.connection) {
-        app.washCovers.follow(app.connection?.client, song.coverArt, tuning).collect { cover = it }
+    // A station's song on air colors it once Octo has found the song.
+    val washId = state.live?.let { app.liveSongCover(song.title, it.shown.onAir.artist) } ?: song.coverArt
+    LaunchedEffect(washId, tuning, app.connection) {
+        app.washCovers.follow(app.connection?.client, washId, tuning).collect { cover = it }
     }
     val ink = remember(cover) { cover?.playerInk() }.color()
     val dolly = remember { Animatable(0f) }
@@ -150,8 +156,16 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
             moving = wash.moving && !LocalReduceMotion.current && LocalWindowShown.current,
             dolly = { dolly.value },
         )
+        val live = state.live
         BoxWithConstraints(Modifier.fillMaxSize().padding(start = 56.dp, end = 40.dp, top = top + 48.dp, bottom = 32.dp)) {
-            val panel = app.playerPanel
+            // A station has no lyrics or song details: their place shows the
+            // stations being surfed (none for a station alone), so the cover
+            // stays where it was.
+            val panel = when {
+                live == null -> app.playerPanel
+                app.playerPanel == null || state.queue.size <= 1 -> null
+                else -> SidePanel.Queue
+            }
             val artSide = minOf(440.dp, maxHeight - 290.dp, if (panel != null) maxWidth * 0.36f else maxWidth * 0.6f).coerceAtLeast(120.dp)
             Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(48.dp, Alignment.CenterHorizontally)) {
                 PlayerColumn(app, song, state, ink, artSide)
@@ -175,10 +189,15 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
         }
         // The panel toggles and the way out.
         Row(Modifier.align(Alignment.TopEnd).padding(top = top + 4.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            if (app.playerPanel == SidePanel.Lyrics) LyricsMenuButton(app, tint = ink)
-            IconAction(OctoIcons.Lyrics, "Lyrics", { app.togglePlayerPanel(SidePanel.Lyrics) }, size = 36.dp, iconSize = 20.dp, active = app.playerPanel == SidePanel.Lyrics, tint = ink)
-            IconAction(OctoIcons.Queue, "Queue", { app.togglePlayerPanel(SidePanel.Queue) }, size = 36.dp, iconSize = 20.dp, active = app.playerPanel == SidePanel.Queue, tint = ink)
-            IconAction(OctoIcons.Info, "Song details", { app.togglePlayerPanel(SidePanel.Info) }, size = 36.dp, iconSize = 20.dp, active = app.playerPanel == SidePanel.Info, tint = ink)
+            if (live != null) {
+                if (state.queue.size > 1) IconAction(OctoIcons.Queue, "Stations", { app.togglePlayerPanel(SidePanel.Queue) }, size = 36.dp, iconSize = 20.dp, active = app.playerPanel == SidePanel.Queue, tint = ink)
+                LiveMoreButton(app, live, state.current?.song?.id.orEmpty(), ink)
+            } else {
+                if (app.playerPanel == SidePanel.Lyrics) LyricsMenuButton(app, tint = ink)
+                IconAction(OctoIcons.Lyrics, "Lyrics", { app.togglePlayerPanel(SidePanel.Lyrics) }, size = 36.dp, iconSize = 20.dp, active = app.playerPanel == SidePanel.Lyrics, tint = ink)
+                IconAction(OctoIcons.Queue, "Queue", { app.togglePlayerPanel(SidePanel.Queue) }, size = 36.dp, iconSize = 20.dp, active = app.playerPanel == SidePanel.Queue, tint = ink)
+                IconAction(OctoIcons.Info, "Song details", { app.togglePlayerPanel(SidePanel.Info) }, size = 36.dp, iconSize = 20.dp, active = app.playerPanel == SidePanel.Info, tint = ink)
+            }
             IconAction(OctoIcons.Collapse, "Close the player", { app.fullPlayer = false }, size = 36.dp, iconSize = 20.dp, tint = ink)
         }
     }
@@ -186,6 +205,10 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
 
 // The transport's width, with a little room either side.
 private val ColumnLeast = 340.dp
+
+// The room the seek line and its times take, the live line and its LIVE
+// pill too, so the cover stays put when a song gives way to a station.
+private val SeekArea = 48.dp
 
 // The cover large, then the song and its heart, the seek line, the
 // transport and the volume.
@@ -204,17 +227,18 @@ private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Col
             val target = if (state.playing || still) 1f else 0.94f
             if (still) scale.snapTo(target) else scale.animateTo(target, tween(420))
         }
-        Cover(
-            song.coverArt,
-            Modifier.size(side).graphicsLayer {
-                scaleX = scale.value
-                scaleY = scale.value
-            },
-            shape = RoundedCornerShape(14.dp),
-            placeholder = OctoIcons.Songs,
-            retry = true,
-        )
+        val coverModifier = Modifier.size(side).graphicsLayer {
+            scaleX = scale.value
+            scaleY = scale.value
+        }
+        val live = state.live
+        if (live != null) {
+            LiveCover(app, live, coverModifier, RoundedCornerShape(14.dp))
+        } else {
+            Cover(song.coverArt, coverModifier, shape = RoundedCornerShape(14.dp), placeholder = OctoIcons.Songs, retry = true)
+        }
         Spacer(Modifier.height(28.dp))
+        if (live != null) return@Column LivePlayerLines(app, song, state, live, ink, muted)
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 MarkedTitle(song, OctoType.headline, markColor = muted) { Txt(song.title, OctoType.headline, ink, it, maxLines = 2) }
@@ -246,18 +270,20 @@ private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Col
         Spacer(Modifier.height(14.dp))
         val position = rememberFramePosition(app.player)
         val duration = state.durationMs
-        LineSlider(
-            fraction = { if (duration > 0) position.value.toFloat() / duration else 0f },
-            onSeek = { app.player.seekTo((it * duration).toLong()) },
-            modifier = Modifier.fillMaxWidth(),
-            color = ink,
-            trackColor = ink.copy(alpha = 0.22f),
-            hoverLabel = { lengthText(((it * duration) / 1000).toInt()).ifEmpty { "0:00" } },
-            label = "Song position",
-            keyStep = if (duration > 0) (SEEK_STEP_MS.toFloat() / duration).coerceAtMost(1f) else 0.05f,
-            reading = { "${lengthText((it * duration / 1000).toInt()).ifEmpty { "0:00" }} of ${lengthText((duration / 1000).toInt()).ifEmpty { "0:00" }}" },
-        )
-        PlayTimes(position, duration, muted)
+        Column(Modifier.fillMaxWidth().heightIn(min = SeekArea)) {
+            LineSlider(
+                fraction = { if (duration > 0) position.value.toFloat() / duration else 0f },
+                onSeek = { app.player.seekTo((it * duration).toLong()) },
+                modifier = Modifier.fillMaxWidth(),
+                color = ink,
+                trackColor = ink.copy(alpha = 0.22f),
+                hoverLabel = { lengthText(((it * duration) / 1000).toInt()).ifEmpty { "0:00" } },
+                label = "Song position",
+                keyStep = if (duration > 0) (SEEK_STEP_MS.toFloat() / duration).coerceAtMost(1f) else 0.05f,
+                reading = { "${lengthText((it * duration / 1000).toInt()).ifEmpty { "0:00" }} of ${lengthText((duration / 1000).toInt()).ifEmpty { "0:00" }}" },
+            )
+            PlayTimes(position, duration, muted)
+        }
         Spacer(Modifier.height(10.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             IconAction(OctoIcons.Shuffle, "Shuffle", { app.player.setShuffle(!state.shuffle) }, size = 40.dp, iconSize = 22.dp, active = state.shuffle, tint = ink, toggled = state.shuffle)
@@ -295,6 +321,52 @@ private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Col
             LineSlider(fraction = { volume }, onSeek = app::setVolume, modifier = Modifier.weight(1f), live = true, color = ink, trackColor = ink.copy(alpha = 0.22f), label = "Volume")
             IconAction(OctoIcons.VolumeUp, "Louder", { app.setVolume(volume + 0.1f) }, size = 30.dp, iconSize = 18.dp, tint = muted)
         }
+    }
+}
+
+// A station's lines under its cover: the song on air (or the station),
+// "Artist · Station" (or its tagline or place) and the heart, the live
+// line, Back, Play or Stop and Next, and the volume.
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun LivePlayerLines(app: AppState, song: Song, state: PlayerState, live: LiveNow, ink: Color, muted: Color) {
+    // The button sits on the title's line.
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        Column(Modifier.weight(1f)) {
+            Txt(song.title, OctoType.headline, ink, maxLines = 2)
+            Txt(live.shown.subtitle, OctoType.body, muted, Modifier.heightIn(min = Focus.MinTarget), maxLines = 2)
+        }
+        OnTitleLine(OctoType.headline) { OnAirButton(app, live, 40.dp, 22.dp, ink) }
+    }
+    Spacer(Modifier.height(14.dp))
+    LiveLine(app, ink, muted, Modifier.fillMaxWidth().heightIn(min = SeekArea), stacked = true)
+    Spacer(Modifier.height(10.dp))
+    LiveTransport(app, state, live, playSize = 68.dp, stepSize = 48.dp, stepIcon = 30.dp, tint = ink, gap = 14.dp)
+    Spacer(Modifier.height(10.dp))
+    val volume = state.volume
+    Row(
+        Modifier.fillMaxWidth().onPointerEvent(PointerEventType.Scroll) { event ->
+            val dy = event.changes.firstOrNull()?.scrollDelta?.y ?: 0f
+            if (dy != 0f) app.setVolume(volume - dy * 0.05f)
+        },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        IconAction(OctoIcons.VolumeDown, "Quieter", { app.setVolume(volume - 0.1f) }, size = 30.dp, iconSize = 18.dp, tint = muted)
+        LineSlider(fraction = { volume }, onSeek = app::setVolume, modifier = Modifier.weight(1f), live = true, color = ink, trackColor = ink.copy(alpha = 0.22f), label = "Volume")
+        IconAction(OctoIcons.VolumeUp, "Louder", { app.setVolume(volume + 0.1f) }, size = 30.dp, iconSize = 18.dp, tint = muted)
+    }
+}
+
+// The More button over the full player while a station plays: its menu of
+// station rows, and the sleep timer.
+@Composable
+private fun LiveMoreButton(app: AppState, live: LiveNow, stationId: String, ink: Color) {
+    var anchor by remember { mutableStateOf(androidx.compose.ui.unit.IntRect.Zero) }
+    Box(Modifier.onGloballyPositioned { anchor = it.windowRect() }) {
+        IconAction(OctoIcons.More, "More", {
+            app.popups.showUnder(anchor, width = FrameSize.Menu) { close -> LiveMenuRows(app, live, stationId, close) }
+        }, size = 36.dp, iconSize = 20.dp, tint = ink)
     }
 }
 

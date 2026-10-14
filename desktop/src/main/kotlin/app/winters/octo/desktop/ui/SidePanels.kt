@@ -99,6 +99,7 @@ import app.winters.octo.design.TextAction
 import app.winters.octo.design.Txt
 import app.winters.octo.design.chromeFilm
 import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.player.isLineup
 import app.winters.octo.desktop.SidePanel
 import app.winters.octo.desktop.clearUpcoming
 import app.winters.octo.desktop.dropIntoQueue
@@ -200,6 +201,8 @@ private fun itemsOf(sections: List<QueueSection>): List<QueueItem> = buildList {
 @Composable
 fun QueueList(app: AppState, modifier: Modifier = Modifier.fillMaxSize()) {
     val state by app.player.state.collectAsState()
+    // A lineup of stations shows its stations, to switch between.
+    if (state.live != null && isLineup(state.queue.map { it.song })) return LiveLineupList(app, state, modifier)
     var playedOpen by remember { mutableStateOf(false) }
     val sections = remember(state.played, state.current, state.upcoming, playedOpen) { queueSections(state, playedOpen) }
     val shown = remember(sections) { itemsOf(sections) }

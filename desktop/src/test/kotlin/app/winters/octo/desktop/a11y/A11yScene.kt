@@ -20,6 +20,7 @@ import app.winters.octo.design.ProvideWindowLook
 import app.winters.octo.design.TypingState
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.FakeServer
+import app.winters.octo.desktop.player.DesktopPlayer
 import app.winters.octo.desktop.player.SilentPlayer
 import app.winters.octo.desktop.secrets.SessionOnlySecrets
 import app.winters.octo.desktop.server.Accounts
@@ -57,10 +58,12 @@ class A11yScene(
     textScale: Float = 1f,
     // The extensions the pretend server lists, like "songLyrics:2".
     extensions: List<String> = listOf(),
+    // What plays: the silent player unless a test brings its own.
+    player: DesktopPlayer = SilentPlayer(),
 ) : AutoCloseable {
     val server = FakeServer()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    val player = SilentPlayer()
+    val player = player
     val keyboard = FocusVisibility(keyboard = true)
     val arrows = ArrowKeys()
     lateinit var app: AppState

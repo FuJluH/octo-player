@@ -21,7 +21,11 @@ import app.winters.octo.desktop.player.RESTART_AFTER_MS
 import app.winters.octo.desktop.player.RepeatMode
 import app.winters.octo.desktop.player.SavedQueue
 import app.winters.octo.desktop.player.SongFormat
+import app.winters.octo.desktop.player.isLineup
 import app.winters.octo.desktop.player.libraryFormat
+import app.winters.octo.desktop.player.lineupStep
+import app.winters.octo.desktop.player.liveNow
+import app.winters.octo.desktop.player.shownLive
 import app.winters.octo.discovery.knownLengthMs
 import app.winters.octo.playback.PlayFailure
 import app.winters.octo.playback.QueueSource
@@ -94,8 +98,13 @@ class EnginePlayer(
     // The decoder's length of the entry that started last, by its key.
     private var measured: Pair<Long, Long>? = null
 
-    // What a live stream says it plays now, by the entry's key.
-    private var streamTitle: Pair<Long, String>? = null
+    // What a live stream says it plays now (its StreamTitle, and the
+    // address sent with it), by the entry's key.
+    private var streamTitle: Triple<Long, String, String>? = null
+
+    // The repeat the engine was last told, which is off while a station
+    // plays, so a stream that stops is never started over by itself.
+    private var engineRepeat: EngineRepeat = EngineRepeat.OFF
 
     // What the listener asked for: playing or not. The engine's own state
     // changes only override it when the engine stops by itself.
@@ -216,7 +225,7 @@ class EnginePlayer(
         val ms = lengths.learn(entry.song.id, knownLengthMs(entry.song), engineMs) ?: return false
         if (!queue.updateSong(entry.song.id) { it.withLengthMs(ms) }) return false
         val current = queue.currentEntry
-        if (current != null && current.key in mirror) engine.replaceQueue(inPlayOrder().map { queueItem(it, sources) }, mirror.indexOf(current.key))
+        if (current != null && current.key in mirror) engine.replaceQueue(engineOrder().map { queueItem(it, sources) }, mirror.indexOf(current.key))
         return true
     }
 
@@ -224,8 +233,11 @@ class EnginePlayer(
 
     override fun play(songs: List<Song>, start: Int, shuffle: Boolean, source: QueueSource) {
         synchronized(lock) {
-            this.shuffle = shuffle
-            queue.replace(songs.map(lengths::applyTo), start, shuffle, source)
+            // A lineup of stations plays in its own order; the listener's
+            // shuffle stays as it was for the songs played after it.
+            val lineup = isLineup(songs)
+            if (!lineup) this.shuffle = shuffle
+            queue.replace(songs.map(lengths::applyTo), start, shuffle && !lineup, source)
             playing = queue.currentEntry != null
             problem = null
             load(startMs = 0, play = playing)
@@ -238,7 +250,12 @@ class EnginePlayer(
             val current = queue.currentEntry ?: return
             if (playing) return
             playing = true
-            if (problem?.song?.id == current.song.id) {
+            if (isRadio(current.song.id)) {
+                // A station joins what is on air now, from a fresh
+                // connection, never from sound held since it stopped.
+                problem = null
+                load(startMs = 0, play = true)
+            } else if (problem?.song?.id == current.song.id) {
                 // The song that could not play is tried again from its
                 // start, in an engine queue made afresh: the engine gave up
                 // on it and would not try it again by itself.
@@ -259,7 +276,15 @@ class EnginePlayer(
             if (!playing) return
             playing = false
             buffering = false
-            engine.pause()
+            if (isRadio(queue.currentEntry?.song?.id.orEmpty())) {
+                // A station stops: its stream is let go, and what it named
+                // is no longer on air.
+                engine.stop()
+                mirror = emptyList()
+                streamTitle = null
+            } else {
+                engine.pause()
+            }
             publish()
         }
     }
@@ -270,6 +295,7 @@ class EnginePlayer(
 
     override fun next() {
         synchronized(lock) {
+            if (queue.isLineup()) return step(forward = true)
             val next = queue.nextPosition(if (repeat == RepeatMode.One) RepeatMode.All else repeat) ?: return
             queue.moveTo(next)
             jump(play = playing)
@@ -281,6 +307,7 @@ class EnginePlayer(
         val at = positionMs()
         synchronized(lock) {
             val current = queue.currentEntry ?: return
+            if (queue.isLineup()) return step(forward = false)
             val back = queue.previousPosition(if (repeat == RepeatMode.One) RepeatMode.All else repeat)
             if (isRadio(current.song.id)) {
                 // A live stream cannot start over: back goes to the song before.
@@ -296,6 +323,15 @@ class EnginePlayer(
             }
             publish()
         }
+    }
+
+    // Back or Next in a lineup: the station before or after, never round
+    // from an end.
+    private fun step(forward: Boolean) {
+        val to = queue.lineupStep(forward) ?: return
+        queue.moveTo(to)
+        jump(play = playing)
+        publish()
     }
 
     override fun seekTo(positionMs: Long) {
@@ -390,8 +426,11 @@ class EnginePlayer(
     override fun setShuffle(on: Boolean) {
         synchronized(lock) {
             shuffle = on
-            queue.setShuffle(on)
-            syncQueue()
+            // A lineup keeps its order; the setting waits for songs.
+            if (!queue.isLineup()) {
+                queue.setShuffle(on)
+                syncQueue()
+            }
             publish()
         }
     }
@@ -399,13 +438,9 @@ class EnginePlayer(
     override fun setRepeat(mode: RepeatMode) {
         synchronized(lock) {
             repeat = mode
-            engine.setRepeat(
-                when (mode) {
-                    RepeatMode.Off -> EngineRepeat.OFF
-                    RepeatMode.All -> EngineRepeat.ALL
-                    RepeatMode.One -> EngineRepeat.ONE
-                },
-            )
+            val want = repeatForEngine()
+            engineRepeat = want
+            engine.setRepeat(want)
             publish()
         }
     }
@@ -482,6 +517,22 @@ class EnginePlayer(
         setRepeat(saved.repeat)
     }
 
+    // The repeat the engine plays by: the listener's, and off while a
+    // station plays.
+    private fun repeatForEngine(): EngineRepeat = when {
+        isRadio(queue.currentEntry?.song?.id.orEmpty()) -> EngineRepeat.OFF
+        repeat == RepeatMode.All -> EngineRepeat.ALL
+        repeat == RepeatMode.One -> EngineRepeat.ONE
+        else -> EngineRepeat.OFF
+    }
+
+    private fun syncRepeat() {
+        val want = repeatForEngine()
+        if (want == engineRepeat) return
+        engineRepeat = want
+        engine.setRepeat(want)
+    }
+
     override fun close() {
         background.shutdownNow()
         engine.close()
@@ -501,10 +552,24 @@ class EnginePlayer(
             engine.load(emptyList(), 0, 0, false)
             return
         }
-        val ordered = inPlayOrder()
+        syncRepeat()
+        val live = isRadio(current.song.id)
+        // A station opened again names what is on air from scratch.
+        if (live) streamTitle = null
+        if (live && !play) {
+            // A station waiting to be played holds no connection open: Play
+            // opens it then.
+            mirror = emptyList()
+            pending = null
+            expecting = null
+            lastShown = 0
+            engine.load(emptyList(), 0, 0, false)
+            return
+        }
+        val ordered = engineOrder()
         mirror = ordered.map { it.key }
         // A live stream starts where its station is.
-        val start = if (isRadio(current.song.id)) 0 else startMs
+        val start = if (live) 0 else startMs
         engine.load(ordered.map { queueItem(it, sources) }, mirror.indexOf(current.key), start, play)
         expect(current.key)
         setPending(current.key, start)
@@ -519,6 +584,7 @@ class EnginePlayer(
         val index = mirror.indexOf(current.key)
         if (index < 0) return load(startMs = 0, play = play)
         lastStarted = null
+        syncRepeat()
         engine.skipTo(index)
         if (play) engine.play()
         expect(current.key)
@@ -536,7 +602,7 @@ class EnginePlayer(
     private fun syncQueue() {
         val current = queue.currentEntry ?: return
         if (current.key !in mirror) return load(startMs = positionMsLocked(), play = playing)
-        val ordered = inPlayOrder()
+        val ordered = engineOrder()
         val keys = ordered.map { it.key }
         if (keys == mirror) return
         engine.replaceQueue(ordered.map { queueItem(it, sources) }, keys.indexOf(current.key))
@@ -549,7 +615,7 @@ class EnginePlayer(
     private fun askProfiles() {
         val profiles = profiles ?: return
         val current = queue.currentEntry ?: return
-        val ordered = inPlayOrder()
+        val ordered = engineOrder()
         val at = ordered.indexOfFirst { it.key == current.key }
         profiles.follow(listOfNotNull(current, ordered.getOrNull(at + 1)))
     }
@@ -558,6 +624,15 @@ class EnginePlayer(
     private fun inPlayOrder(): List<QueueEntry> {
         val songs = queue.songs
         return queue.playOrder.map { songs[it] }
+    }
+
+    // What the engine holds: every entry in play order, or a station alone
+    // while one plays, so a stream that fails stops there rather than
+    // moving on by itself; Back and Next load the next one.
+    private fun engineOrder(): List<QueueEntry> {
+        val current = queue.currentEntry
+        if (current != null && isRadio(current.song.id)) return listOf(current)
+        return inPlayOrder()
     }
 
     private fun positionMsLocked(): Long = pending?.ms ?: lastShown
@@ -615,7 +690,7 @@ class EnginePlayer(
                 is EngineEvent.StreamTitle -> {
                     val key = keyOfItem(event.itemId) ?: return
                     if (queue.songs.none { it.key == key }) return
-                    streamTitle = key to event.title
+                    streamTitle = Triple(key, event.title, event.url)
                 }
                 is EngineEvent.Position -> {
                     val key = keyOfItem(event.itemId)
@@ -721,9 +796,13 @@ class EnginePlayer(
             rounds = 0
         }
         val outputs = listOf(defaultOutput()) + devices
+        val said = streamTitle?.takeIf { it.first == key }
+        val live = queue.liveNow(said?.second, said?.third)
         _state.value = PlayerState(
             queue = queue.songs,
-            current = queue.currentEntry?.let(::shown),
+            // A station shows what it has on air; only the current entry
+            // carries it, so a saved queue keeps the station.
+            current = queue.currentEntry?.let { if (live != null) it.copy(song = shownLive(it.song, live.shown)) else it },
             upcoming = queue.upcoming,
             played = queue.played,
             rounds = rounds,
@@ -744,15 +823,8 @@ class EnginePlayer(
             ended = ended,
             canUndo = queue.canUndo,
             moves = moves,
+            live = live,
         )
-    }
-
-    // The current entry as the screen shows it: a station with what its
-    // stream says it plays now as the song and its name as the artist.
-    // Only the current entry carries it, so a saved queue keeps the station.
-    private fun shown(entry: QueueEntry): QueueEntry {
-        val title = streamTitle?.takeIf { it.first == entry.key }?.second ?: return entry
-        return entry.copy(song = onAir(entry.song, title))
     }
 
     // The current song's format, the decoder's once it started and the

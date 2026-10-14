@@ -1,6 +1,7 @@
 package app.winters.octo.desktop.system
 
 import app.winters.octo.desktop.library.coverBytes
+import app.winters.octo.desktop.library.webPicture
 import app.winters.octo.desktop.player.DesktopPlayer
 import app.winters.octo.desktop.player.RepeatMode
 import app.winters.octo.subsonic.SubsonicClient
@@ -22,6 +23,11 @@ import kotlin.math.abs
 // Finds the cover of a song for the system's player.
 fun interface CoverSource {
     suspend fun load(coverId: String): CoverArt?
+
+    // A live station's picture: the song's artwork or the station's logo
+    // from the web (`now.artUrl`), else its server picture, else its
+    // drawn cover.
+    suspend fun live(now: NowPlaying): CoverArt? = now.coverId?.let { load(it) }
 }
 
 // Covers from the signed-in server, fetched with the app's HTTP client and
@@ -29,14 +35,48 @@ fun interface CoverSource {
 // picture or that file, never the server's signed address, which would
 // hand the listener's sign-in to every program that asks what is playing.
 // With an image loader from `images`, the picture comes through its caches
-// and downloads, shared with every other place that shows the cover.
+// and downloads, shared with every other place that shows the cover. A live
+// station's picture comes from the web (the station's own address, which
+// carries no sign-in), drawn at `size` at most, or is its drawn cover
+// (`drawn`, from its name and stream).
 class ServerCovers(
     private val http: OkHttpClient,
     private val client: () -> SubsonicClient?,
     private val folder: File,
     private val size: Int = 600,
     private val images: () -> ImageLoader? = { null },
+    private val drawn: (suspend (String, String) -> ByteArray?)? = null,
 ) : CoverSource {
+    override suspend fun live(now: NowPlaying): CoverArt? {
+        now.artUrl?.let { url -> fromWeb(url)?.let { return it } }
+        now.coverId?.let { id -> load(id)?.let { return it } }
+        val draw = drawn ?: return null
+        val name = sha("drawn/" + now.station + "/" + now.stream).take(24) + ".img"
+        File(folder, name).takeIf { it.isFile && it.length() > 0 }?.let { return CoverArt(it.readBytes(), it) }
+        val bytes = draw(now.station, now.stream)?.takeIf { it.isNotEmpty() } ?: return null
+        return withContext(Dispatchers.IO) { kept(name, bytes) }
+    }
+
+    // A picture from the web, as a PNG at `size` at most through the image
+    // loader, or as sent (when it is a picture, and not too big) without one.
+    private suspend fun fromWeb(url: String): CoverArt? = withContext(Dispatchers.IO) {
+        val name = sha("web/" + url).take(24) + ".img"
+        val file = File(folder, name)
+        if (file.isFile && file.length() > 0) return@withContext CoverArt(file.readBytes(), file)
+        val loader = images()
+        val bytes = runCatching {
+            if (loader != null) {
+                webPicture(loader, url, size)
+            } else {
+                http.newCall(Request.Builder().url(url).build()).execute().use { response ->
+                    val body = response.body
+                    if (!response.isSuccessful || body.contentLength() > WEB_PICTURE_MAX) null else body.bytes().takeIf { it.isNotEmpty() && it.size <= WEB_PICTURE_MAX && looksLikeImage(it) }
+                }
+            }
+        }.getOrNull() ?: return@withContext null
+        kept(name, bytes)
+    }
+
     override suspend fun load(coverId: String): CoverArt? = withContext(Dispatchers.IO) {
         val server = client() ?: return@withContext null
         val name = sha(server.primaryUrl.host + "/" + coverId).take(24) + ".img"
@@ -52,6 +92,12 @@ class ServerCovers(
                 }
             }
         }.getOrNull() ?: return@withContext null
+        kept(name, bytes)
+    }
+
+    // Keeps a cover in the folder under `name`, and hands it over.
+    private fun kept(name: String, bytes: ByteArray): CoverArt {
+        val file = File(folder, name)
         runCatching {
             folder.mkdirs()
             // Only the last few covers are kept; the rest are for songs gone by.
@@ -60,11 +106,14 @@ class ServerCovers(
             temp.writeBytes(bytes)
             if (!temp.renameTo(file)) temp.delete()
         }
-        CoverArt(bytes, file)
+        return CoverArt(bytes, file)
     }
 
     private companion object {
         const val KEPT_COVERS = 8
+
+        // The most a picture from the web may weigh, taken as sent.
+        const val WEB_PICTURE_MAX = 4L * 1024 * 1024
     }
 }
 
@@ -173,21 +222,36 @@ class MediaSession(
 
     private fun showTrack(now: NowPlaying) {
         coverJob?.cancel()
-        val cover = now.coverId
         controls.showTrack(now, null)
-        if (cover == null || covers == null) return
+        loadCover(now)
+    }
+
+    private fun loadCover(now: NowPlaying) {
+        val cover = now.coverId
+        if ((cover == null && !now.live) || covers == null) return
         coverJob = scope.launch {
-            val art = covers.load(cover) ?: return@launch
+            val art = (if (now.live) covers.live(now) else cover?.let { covers.load(it) }) ?: return@launch
             // Still the same song: show it again with its cover.
             val current = shown ?: return@launch
-            if (current.entryKey != now.entryKey) return@launch
+            if (current.entryKey != now.entryKey || current.title != now.title || current.artUrl != now.artUrl) return@launch
             controls.showTrack(current, art)
             tell(current, jumped = false)
         }
     }
 
+    // Asks for a station's cover again, keeping the one shown meanwhile:
+    // once the song on air is found in Octo, its cover takes the place.
+    fun refreshCover() {
+        val now = shown?.takeIf { it.live } ?: return
+        coverJob?.cancel()
+        loadCover(now)
+    }
+
+    // A live station has no place in it to show.
+    private fun positionOf(now: NowPlaying): Long = if (now.live) 0 else player.positionMs()
+
     private fun tell(now: NowPlaying, jumped: Boolean) {
-        val position = player.positionMs()
+        val position = positionOf(now)
         toldPosition = position
         toldAt = clock()
         controls.showPlayback(now, position, jumped)
@@ -199,7 +263,7 @@ class MediaSession(
     // moves on at the song's speed, and not at all while waiting for sound.
     fun check() {
         val now = shown ?: return
-        val position = player.positionMs()
+        val position = positionOf(now)
         val expected = toldPosition + ((clock() - toldAt) * now.rate).toLong()
         when {
             abs(position - expected) > JUMP_MS -> tell(now, jumped = true)
@@ -208,6 +272,8 @@ class MediaSession(
     }
 
     fun handle(event: SystemEvent) {
+        // A live station plays on from wherever it is: nothing to seek.
+        if ((event is SystemEvent.SeekTo || event is SystemEvent.SeekBy) && shown?.live == true) return
         when (event) {
             SystemEvent.Play -> player.resume()
             SystemEvent.Pause -> player.pause()

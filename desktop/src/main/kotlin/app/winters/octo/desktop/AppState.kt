@@ -56,6 +56,13 @@ import app.winters.octo.desktop.downloads.DownloadsModel
 import kotlinx.coroutines.delay
 import app.winters.octo.desktop.search.OmniboxState
 import app.winters.octo.desktop.search.SearchModel
+import app.winters.octo.desktop.search.SearchFilter
+import app.winters.octo.desktop.liveradio.FoundSong
+import app.winters.octo.desktop.liveradio.LiveHeart
+import app.winters.octo.desktop.search.FetchPhase
+import app.winters.octo.ui.family.outsideActions
+import app.winters.octo.playback.stoppedLine
+import app.winters.octo.playback.isRadio
 import app.winters.octo.desktop.server.Accounts
 import app.winters.octo.desktop.server.Connection
 import app.winters.octo.desktop.server.ServerFactsModel
@@ -213,6 +220,21 @@ class AppState(
     // Live radio near the listener, from the Radio Browser catalog, and the
     // stations kept on this computer.
     val liveRadio = LiveRadioModel(settings, radioCatalog, { connection }, scope)
+
+    // The live player's heart, for the song a station has on air.
+    val liveHeart = LiveHeart(
+        scope,
+        find = { query -> search?.search(query, SearchFilter.Songs)?.let { found -> found.library.songs.map { FoundSong(it, true) } + found.outside.songs.map { FoundSong(it, false) } } },
+        star = { song, on -> setStarred(listOf(fetches?.landedId(song.id)?.let { id -> song.copy(id = id) } ?: song), on) },
+        missed = { _, query -> searchFor(query) },
+        // Octo downloads a song found online once asked; a family member
+        // who saves songs saves it instead.
+        add = { song ->
+            val fetching = fetches
+            if (fetching != null && outsideActions(family.me).addLabel == null) fetching.request(song.id) else setStarred(listOf(song), true)
+        },
+        landed = { song -> fetches?.phase(song.id) == FetchPhase.Done },
+    )
 
     // Family, on an Octo server with it on: the account's abilities, which song actions and
     // the Family page follow.
@@ -429,6 +451,7 @@ class AppState(
         }
         queueSync.start()
         watchProblems()
+        followLive()
         restored?.let(::signedIn)
     }
 
@@ -440,7 +463,12 @@ class AppState(
                 if (problem == null) return@collect
                 val song = problem.song
                 if (song != null) failedSongs[song.id] = problem.words
-                notice = if (song != null) skippedLine(song.title, problem.words) else problem.words
+                // A station that fails stops there; a song is skipped.
+                notice = when {
+                    song == null -> problem.words
+                    isRadio(song.id) -> stoppedLine(song.title, problem.words)
+                    else -> skippedLine(song.title, problem.words)
+                }
                 noticeDetail = problem.detail
             }
         }
@@ -978,8 +1006,9 @@ class AppState(
     fun perform(shortcut: Shortcut): Boolean {
         when (shortcut) {
             Shortcut.PlayPause -> player.togglePlay()
-            Shortcut.SeekBack -> player.seekTo(player.positionMs() - SEEK_STEP_MS)
-            Shortcut.SeekForward -> player.seekTo(player.positionMs() + SEEK_STEP_MS)
+            // A live station has no place to move to.
+            Shortcut.SeekBack -> if (player.state.value.live == null) player.seekTo(player.positionMs() - SEEK_STEP_MS) else return false
+            Shortcut.SeekForward -> if (player.state.value.live == null) player.seekTo(player.positionMs() + SEEK_STEP_MS) else return false
             Shortcut.VolumeUp -> setVolume(player.state.value.volume + VOLUME_STEP)
             Shortcut.VolumeDown -> setVolume(player.state.value.volume - VOLUME_STEP)
             Shortcut.Search -> if (connection != null) openSearch() else return false
