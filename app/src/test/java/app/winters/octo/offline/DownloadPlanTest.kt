@@ -5,6 +5,27 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DownloadPlanTest {
+    private fun done(format: String?, sizeBytes: Long, fileSize: Long?, serverSize: Long?, serverType: String? = "audio/flac") =
+        DownloadedFile("server:a", "tr-1", format, sizeBytes, fileSize, serverSize, serverType)
+
+    @Test
+    fun aDownloadOfASwappedFileDownloadsAgain() {
+        assertEquals(KeptCopyCheck.Keep, checkDownload(done("audio/flac", 31_000_000, 31_000_000, 31_000_000)))
+        assertEquals(KeptCopyCheck.Refetch, checkDownload(done("audio/flac", 31_000_000, 31_000_000, 28_500_000)))
+        assertEquals(KeptCopyCheck.Refetch, checkDownload(done("audio/mpeg", 7_000_000, 31_000_000, 28_500_000)))
+    }
+
+    @Test
+    fun anOlderDownloadIsCheckedByItsSizeWhenItIsTheFileAsItIs() {
+        assertEquals(KeptCopyCheck.Note, checkDownload(done("audio/flac", 31_000_000, null, 31_000_000)))
+        assertEquals(KeptCopyCheck.Refetch, checkDownload(done("audio/flac", 31_000_000, null, 28_500_000)))
+        // An MP3 may be the file as it is or a smaller copy: nothing tells.
+        assertEquals(KeptCopyCheck.Note, checkDownload(done("audio/mpeg", 7_000_000, null, 9_000_000, serverType = "audio/mpeg")))
+        assertEquals(KeptCopyCheck.Note, checkDownload(done("audio/mpeg", 7_000_000, null, 31_000_000)))
+        // A server song with no size keeps its download.
+        assertEquals(KeptCopyCheck.Keep, checkDownload(done("audio/flac", 31_000_000, null, null)))
+    }
+
     private val manual = Reasons.MANUAL
     private val liked = Reasons.LIKED
     private val gym = Reasons.playlist("gym")

@@ -283,8 +283,26 @@ class OfflineDownloads @Inject constructor(
     // After each copy of the server's library: downloads follow their songs
     // to new ids, and songs a rule wants that have just arrived download.
     suspend fun afterSync() {
+        refreshSwapped()
         lastWanted?.let { applyRules(it) }
         poke()
+    }
+
+    // A download whose server file is now another one (the server swapped
+    // it for a better copy, say, under the same id) downloads again. Until
+    // it has, the song streams, so the old file never plays. Downloads made
+    // before the server's size was noted have it noted here.
+    private suspend fun refreshSwapped() = merge.betweenRebuilds {
+        val source = serverInUse() ?: return@betweenRebuilds
+        lock.withLock {
+            for (file in dao.doneFiles(source)) {
+                when (checkDownload(file)) {
+                    KeptCopyCheck.Keep -> Unit
+                    KeptCopyCheck.Note -> file.serverSize?.let { dao.noteFileSize(file.sourceId, file.serverId, it) }
+                    KeptCopyCheck.Refetch -> dao.setState(file.sourceId, file.serverId, DownloadStatus.Queued, 0f)
+                }
+            }
+        }
     }
 
     // The finished downloads of these library songs whose files are there.
@@ -442,7 +460,9 @@ class OfflineDownloads @Inject constructor(
             }
             if (target.exists()) target.delete()
             if (!part.renameTo(target)) throw IOException("Could not save the file")
-            dao.finish(row.sourceId, row.serverId, target.absolutePath, size, format)
+            dao.finish(row.sourceId, row.serverId, target.absolutePath, size, format, copy.sizeBytes?.takeIf { it > 0 })
+            // A song downloaded again under a new name lets its old file go.
+            if (row.path.isNotEmpty() && row.path != target.absolutePath) File(row.path).delete()
             tries.remove(key)
         } catch (e: CancellationException) {
             part.delete()

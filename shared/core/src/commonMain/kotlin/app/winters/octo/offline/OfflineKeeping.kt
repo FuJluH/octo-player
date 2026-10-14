@@ -42,6 +42,35 @@ fun keepPlan(wanted: Map<String, Set<String>>, kept: Set<String>, unsure: Set<St
         remove = kept.filter { it !in wanted && it !in unsure },
     )
 
+// What to do with a copy of a server song kept on the device. The server
+// can swap a song's file for another (a better copy, say) and keep the
+// song's id, so the id alone never says the copy is still the song: the
+// file's size does. `keptFor` is the server's size for the file the copy
+// was made from. A copy made before that was noted has none: it is checked
+// by its own size when it is the file as it is (`asIs`), and otherwise
+// taken as it is, since nothing tells. A song the server gives no size for
+// keeps its copy.
+enum class KeptCopyCheck {
+    // The copy is of the file the server has now.
+    Keep,
+
+    // Nothing says the file changed: note the server's size with the copy.
+    Note,
+
+    // The server's file is another one: fetch it again.
+    Refetch,
+}
+
+fun checkKeptCopy(keptFor: Long?, serverSize: Long?, copySize: Long, asIs: Boolean): KeptCopyCheck {
+    val now = serverSize?.takeIf { it > 0 } ?: return KeptCopyCheck.Keep
+    val noted = keptFor?.takeIf { it > 0 }
+    return when {
+        noted != null -> if (noted == now) KeptCopyCheck.Keep else KeptCopyCheck.Refetch
+        !asIs || copySize == now -> KeptCopyCheck.Note
+        else -> KeptCopyCheck.Refetch
+    }
+}
+
 // Where a kept song goes inside the offline folder: by artist and album,
 // named by its place on the album and its title, with only characters every
 // system takes in a file name.

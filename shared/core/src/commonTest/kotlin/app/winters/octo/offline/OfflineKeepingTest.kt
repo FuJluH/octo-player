@@ -35,4 +35,38 @@ class OfflineKeepingTest {
         assertEquals("312 songs, 1.9 GB", keptLine(312, 1_900_000_000))
         assertEquals("1 song, 8 MB", keptLine(1, 8_000_000))
     }
+
+    @Test
+    fun aCopyOfTheFileTheServerHasStays() {
+        assertEquals(KeptCopyCheck.Keep, checkKeptCopy(keptFor = 31_000_000, serverSize = 31_000_000, copySize = 9_000_000, asIs = false))
+    }
+
+    @Test
+    fun aCopyOfAFileTheServerSwappedIsFetchedAgain() {
+        // The same id, a new file: a live take swapped for the studio one.
+        assertEquals(KeptCopyCheck.Refetch, checkKeptCopy(keptFor = 31_000_000, serverSize = 28_500_000, copySize = 31_000_000, asIs = true))
+        assertEquals(KeptCopyCheck.Refetch, checkKeptCopy(keptFor = 31_000_000, serverSize = 28_500_000, copySize = 9_000_000, asIs = false))
+    }
+
+    @Test
+    fun anOlderCopyOfTheFileAsItIsIsCheckedByItsOwnSize() {
+        assertEquals(KeptCopyCheck.Note, checkKeptCopy(keptFor = null, serverSize = 31_000_000, copySize = 31_000_000, asIs = true))
+        assertEquals(KeptCopyCheck.Refetch, checkKeptCopy(keptFor = null, serverSize = 28_500_000, copySize = 31_000_000, asIs = true))
+        // A copy cut short never matches.
+        assertEquals(KeptCopyCheck.Refetch, checkKeptCopy(keptFor = null, serverSize = 28_500_000, copySize = -1, asIs = true))
+    }
+
+    @Test
+    fun anOlderSmallerCopyIsTakenAsItIs() {
+        // A smaller copy's size says nothing about the file it came from.
+        assertEquals(KeptCopyCheck.Note, checkKeptCopy(keptFor = null, serverSize = 31_000_000, copySize = 7_000_000, asIs = false))
+    }
+
+    @Test
+    fun aSongWithNoSizeKeepsItsCopy() {
+        assertEquals(KeptCopyCheck.Keep, checkKeptCopy(keptFor = 31_000_000, serverSize = null, copySize = 31_000_000, asIs = true))
+        assertEquals(KeptCopyCheck.Keep, checkKeptCopy(keptFor = null, serverSize = 0, copySize = 5, asIs = true))
+        // A noted size of nothing counts as none noted.
+        assertEquals(KeptCopyCheck.Note, checkKeptCopy(keptFor = 0, serverSize = 31_000_000, copySize = 31_000_000, asIs = true))
+    }
 }

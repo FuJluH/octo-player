@@ -133,6 +133,50 @@ class DesktopOfflineTest {
     }
 
     @Test
+    fun aKeptFileOfASwappedServerFileIsFetchedAgain() {
+        server.file("stream", ByteArray(1000) { 7 })
+        liked = listOf(song("tr-1", "One").copy(size = 1000))
+        val offline = offline()
+        offline.keep(liked, true)
+        until("kept") { offline.localFile("tr-1") != null }
+        assertEquals(1000L, offline.files.single().fileSize)
+        // The server swaps the song's file for another under the same id.
+        server.file("stream", ByteArray(800) { 9 })
+        liked = listOf(song("tr-1", "One").copy(size = 800))
+        offline.poke()
+        until("fetched again") { offline.localFile("tr-1")?.length() == 800L }
+        assertEquals(800L, offline.files.single().fileSize)
+        assertEquals(2, server.calls.count { it.url.pathSegments.last() == "stream" })
+    }
+
+    @Test
+    fun aFileKeptBeforeSizesWereNotedIsCheckedByItsOwnSize() {
+        server.file("stream", ByteArray(1000) { 7 })
+        liked = listOf(song("tr-1", "One").copy(size = 1000))
+        val first = offline()
+        first.keep(liked, true)
+        until("kept") { first.localFile("tr-1") != null }
+        // As an older list of kept files has it: no size noted.
+        val index = File(first.folder, DesktopOffline.INDEX)
+        until("listed") { index.isFile && "fileSize" in index.readText() }
+        index.writeText(index.readText().replace(Regex(",\\s*\"fileSize\":\\s*\\d+"), ""))
+        val again = offline()
+        until("noted") { again.files.singleOrNull()?.fileSize == 1000L }
+        assertTrue(again.localFile("tr-1") != null)
+        assertEquals(1, server.calls.count { it.url.pathSegments.last() == "stream" })
+    }
+
+    @Test
+    fun aKeptFileIsTheFileAsItIsWhenItHasTheSongsType() {
+        assertTrue(keptAsIs("server/Artist/Album/01 One.flac", "flac"))
+        assertTrue(keptAsIs("server/Artist/Album/01 One.FLAC", "flac"))
+        assertFalse(keptAsIs("server/Artist/Album/01 One.opus", "flac"))
+        // Smaller copies are Opus too, so an Opus file never says.
+        assertFalse(keptAsIs("server/Artist/Album/01 One.opus", "opus"))
+        assertFalse(keptAsIs("server/Artist/Album/01 One", null))
+    }
+
+    @Test
     fun keptSongsAreFoundAgainAfterARestart() {
         server.file("stream", ByteArray(10) { 1 })
         val first = offline()

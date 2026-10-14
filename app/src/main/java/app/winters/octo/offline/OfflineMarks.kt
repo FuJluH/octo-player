@@ -6,6 +6,7 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import androidx.compose.runtime.Immutable
 import app.winters.octo.catalog.TrackEntity
+import app.winters.octo.playback.cacheKeyWithoutSize
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -45,8 +46,8 @@ data class OfflineMarks(
 
 fun savedSong(sourceId: String, serverId: String) = "$sourceId|$serverId"
 
-// The song a saved key is for: the key less its type and request.
-fun savedSongOf(key: String): String = key.substringBeforeLast('|').substringBeforeLast('|')
+// The song a saved key is for: the key less its type, request and file size.
+fun savedSongOf(key: String): String = cacheKeyWithoutSize(key).substringBeforeLast('|').substringBeforeLast('|')
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @Singleton

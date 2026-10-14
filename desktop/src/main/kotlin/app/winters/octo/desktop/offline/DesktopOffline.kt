@@ -9,6 +9,8 @@ import androidx.compose.runtime.setValue
 import app.winters.octo.desktop.server.Connection
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.offline.KeepChoices
+import app.winters.octo.offline.KeptCopyCheck
+import app.winters.octo.offline.checkKeptCopy
 import app.winters.octo.offline.keepPlan
 import app.winters.octo.offline.keptPath
 import app.winters.octo.offline.wantedCopies
@@ -36,7 +38,10 @@ import java.io.File
 import java.io.IOException
 
 // One song kept on this computer: whose server it is from, its id there,
-// and where its file is inside the offline folder.
+// and where its file is inside the offline folder. `fileSize` is the
+// server's size for the file it was made from, so a new file under the same
+// id is told apart; files kept before it was noted have none until the
+// next check.
 @Serializable
 data class KeptFile(
     val server: String,
@@ -45,7 +50,15 @@ data class KeptFile(
     val size: Long = 0,
     val title: String = "",
     val artist: String = "",
+    val fileSize: Long? = null,
 )
+
+// Whether a kept file is the server's file as it is: it has the song's own
+// type. Opus is left out, since smaller copies are made as Opus too.
+fun keptAsIs(path: String, suffix: String?): Boolean {
+    val type = path.substringAfterLast('/').substringAfterLast('.', "")
+    return type.isNotEmpty() && type.equals(suffix, ignoreCase = true) && !type.equals("opus", ignoreCase = true)
+}
 
 // How the keeping is going, for the settings line.
 data class KeepStatus(val kept: Int = 0, val bytes: Long = 0, val waiting: Int = 0, val failed: Int = 0, val busy: Boolean = false)
@@ -189,19 +202,28 @@ class DesktopOffline(
         val unsure = HashSet<String>()
         val lists = HashMap<String, List<String>>()
         val songs = HashMap<String, Song>()
+        // What the server says of each song now, for checking kept files.
+        val now = HashMap<String, Song>()
         songs.putAll(picked)
-        liked()?.forEach { songs[it.id] = it }
+        liked()?.forEach {
+            songs[it.id] = it
+            now[it.id] = it
+        }
         for (id in choices.playlists) {
             try {
                 val list = client.playlist(id)
                 lists[id] = list.entry.map { it.id }
-                list.entry.forEach { songs.putIfAbsent(it.id, it) }
+                list.entry.forEach {
+                    songs.putIfAbsent(it.id, it)
+                    now.putIfAbsent(it.id, it)
+                }
             } catch (e: SubsonicException) {
                 // A playlist that cannot be read now keeps its songs here.
                 unsure += files.filter { it.server == server }.map { it.id }
             }
         }
         val wanted = wantedCopies(choices, likedIds, lists)
+        checkFiles(server, now)
         val mine = files.filter { it.server == server }
         val plan = keepPlan(wanted, mine.map { it.id }.toSet(), unsure)
         // Letting go first frees the room.
@@ -251,10 +273,35 @@ class DesktopOffline(
             }
             if (target.exists()) target.delete()
             if (!part.renameTo(target)) return@withContext null
-            KeptFile(server, song.id, path, target.length(), song.title, song.artist.orEmpty())
+            KeptFile(server, song.id, path, target.length(), song.title, song.artist.orEmpty(), song.size?.takeIf { it > 0 })
         } catch (e: IOException) {
             part.delete()
             null
+        }
+    }
+
+    // The server can swap a song's file for another (a better copy, say)
+    // under the same id. A kept file of an old one goes, so it never plays,
+    // and is fetched again with the rest. Files kept before the server's
+    // size was noted have it noted here. A family account without offline
+    // copies keeps what it has.
+    private suspend fun checkFiles(server: String, now: Map<String, Song>) {
+        var changed = false
+        val swapped = ArrayList<KeptFile>()
+        val checked = files.map { kept ->
+            val song = now[kept.id]?.takeIf { kept.server == server } ?: return@map kept
+            when (checkKeptCopy(kept.fileSize, song.size, kept.size, keptAsIs(kept.path, song.suffix))) {
+                KeptCopyCheck.Keep -> kept
+                KeptCopyCheck.Note -> kept.copy(fileSize = song.size).also { changed = true }
+                KeptCopyCheck.Refetch -> kept.also { swapped += it }
+            }
+        }
+        val refused = swapped.isNotEmpty() && connection()?.family == true && !offlineCopiesAllowed(family.plan())
+        val going = if (refused) emptySet() else swapped.toSet()
+        going.forEach { File(folder, it.path).delete() }
+        if (changed || going.isNotEmpty()) {
+            files = checked - going
+            writeIndex(files)
         }
     }
 

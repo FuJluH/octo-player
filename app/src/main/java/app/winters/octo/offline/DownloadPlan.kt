@@ -18,6 +18,17 @@ object Reasons {
     fun join(reasons: Set<String>): String = reasons.sorted().joinToString(",")
 }
 
+// What to do with a finished download, now the server may have swapped the
+// song's file for another: see checkKeptCopy. A download is the file as it
+// is when it has the server's type, unless that type is MP3, which smaller
+// downloads are made as too.
+fun checkDownload(file: DownloadedFile): KeptCopyCheck = checkKeptCopy(
+    keptFor = file.fileSize,
+    serverSize = file.serverSize,
+    copySize = file.sizeBytes,
+    asIs = file.format != null && file.format == file.serverType && file.format != "audio/mpeg",
+)
+
 // What changes to bring the downloads in step with the rules: songs to
 // start downloading, songs whose reasons change, and songs to let go, all
 // by library id.
