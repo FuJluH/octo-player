@@ -20,6 +20,7 @@ fun LiveStation.radioDetails(): RadioDetails = RadioDetails(
     countryCode = countryCode,
     state = state,
     tags = tags,
+    homepage = homepage,
     uuid = uuid,
 )
 

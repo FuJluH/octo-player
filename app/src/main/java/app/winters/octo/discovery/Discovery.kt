@@ -69,7 +69,7 @@ data class OnlineArtist(val id: String, val name: String, val albumCount: Int, v
 // A Made for you list is shown and played the same way, with its song count.
 // An internet radio station added to the server has its stream instead.
 @Serializable
-data class Station(val id: String, val name: String, val artwork: String?, val songCount: Int? = null, val streamUrl: String? = null)
+data class Station(val id: String, val name: String, val artwork: String?, val songCount: Int? = null, val streamUrl: String? = null, val homepage: String? = null)
 
 // Whether it is one of Octo's stations, which keep going, rather than a list
 // with an end (a Made for you list) or an internet radio stream.
@@ -82,7 +82,7 @@ val Station.isRadio: Boolean get() = streamUrl == null && isStationId(id)
 internal fun homeStations(stations: List<RadioStation>, sourceId: String): List<Station> =
     stations.filter { it.coverArt == it.id || it.streamUrl.isNotBlank() }.map {
         val stream = it.streamUrl.takeIf { _ -> it.coverArt != it.id }
-        Station(it.id, it.name, ArtworkRef.Server(sourceId, it.coverArt ?: it.id).encode(), streamUrl = stream)
+        Station(it.id, it.name, ArtworkRef.Server(sourceId, it.coverArt ?: it.id).encode(), streamUrl = stream, homepage = it.homePageUrl?.takeIf(String::isNotBlank))
     }
 
 // The lists Octo made for the listener (New Releases, Rediscover, Deep Cuts),

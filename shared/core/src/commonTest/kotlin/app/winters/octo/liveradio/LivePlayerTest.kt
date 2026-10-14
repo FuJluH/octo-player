@@ -23,6 +23,7 @@ class LivePlayerTest {
         countryCode = "US",
         state = "California",
         tags = listOf("pop", "top 40"),
+        homepage = "https://kiisfm.iheart.com/",
     )
 
     @Test
@@ -37,6 +38,7 @@ class LivePlayerTest {
         assertEquals("California", details.state)
         assertEquals(listOf("pop", "top 40"), details.tags)
         assertEquals("u-kiis", details.uuid)
+        assertEquals("https://kiisfm.iheart.com/", details.homepage)
         val hls = kiis.copy(hls = true).radioId()
         assertTrue(radioIsHls(hls))
         assertEquals(kiis.favicon, radioDetailsOf(hls).logo)
