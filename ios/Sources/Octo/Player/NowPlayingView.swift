@@ -53,7 +53,7 @@ struct NowPlayingView: View {
     /// While a live station plays: its details, and the stations it was started from.
     @State private var showsStationInfo = false
     @State private var showsStations = false
-    @State private var liveHeart = LiveHeart()
+    @State private var liveSong = LiveSongControl()
 
     private static let pullShare: CGFloat = 0.45
     private static let slop: CGFloat = 8
@@ -175,7 +175,7 @@ struct NowPlayingView: View {
         let open = lyrics.open
         return VStack(spacing: 0) {
             topLine
-            artStage(maxSide: 312, folds: true)
+            artStage(maxSide: .infinity, folds: true)
             ZStack(alignment: .bottom) {
                 if open {
                     LyricsBar(ink: ink, close: toggleLyrics, timing: $showsTiming) { showsChooser = true }
@@ -283,9 +283,13 @@ struct NowPlayingView: View {
 
     // MARK: Artwork
 
+    /// The artwork in the room it has. Upright it is placed by `ArtPlacement` (as wide as the room
+    /// allows, a calm margin under the top line, the spare height mostly below it); sideways it is
+    /// centered, at most `maxSide`.
     private func artStage(maxSide: CGFloat, folds: Bool) -> some View {
         GeometryReader { box in
-            let side = max(0, min(maxSide, box.size.width, box.size.height))
+            let upright = folds ? ArtPlacement.upright(width: Double(box.size.width), height: Double(box.size.height)) : nil
+            let side = upright.map { CGFloat($0.side) } ?? max(0, min(maxSide, box.size.width, box.size.height))
             let folded = folds ? fold : 0
             PlayerCardCover(entrance: entrance, coverId: player.current?.coverArt, live: player.live, side: side,
                             online: player.current?.isExternal ?? false)
@@ -300,7 +304,8 @@ struct NowPlayingView: View {
                 .scaleEffect(1 - 0.08 * folded)
                 .opacity(1 - folded)
                 .modifier(SwipedCard(swipe: swipe, width: box.size.width))
-                .frame(width: box.size.width, height: box.size.height)
+                .padding(.top, upright.map { CGFloat($0.top) } ?? 0)
+                .frame(width: box.size.width, height: box.size.height, alignment: upright == nil ? .center : .top)
                 .accessibilityHidden(true)
         }
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { places.stage = $0 }
@@ -345,11 +350,12 @@ struct NowPlayingView: View {
         }
     }
 
-    /// The controls while a live station plays: the song on air with its heart, the live bar,
-    /// stations in place of songs, and only the switches that mean something live.
+    /// The controls while a live station plays: the song on air with its button, the live bar,
+    /// stations in place of songs, and only the switches that mean something live. The button
+    /// and More sit level with the title's line, not the middle of the title and the line under it.
     @ViewBuilder
     private func liveControls(_ song: Song, _ live: LiveShown, _ lineup: LiveLineup, roomy: Bool, gap: CGFloat) -> some View {
-        HStack(spacing: 0) {
+        HStack(alignment: .playerTitleLine, spacing: 0) {
             ZStack(alignment: .leading) {
                 PlayerTitleBlock(song: song, ink: ink, accent: accent, openArtist: nil)
                     .id("\(song.id)|\(live.title)")
@@ -357,7 +363,7 @@ struct NowPlayingView: View {
                                             removal: .opacity.animation(.octoTween(fixed: 150, OctoEasing.standard))))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            LiveHeartButton(onAir: live.onAir, ink: ink, heart: liveHeart, openSearch: openSearch)
+            LiveSongButtonView(onAir: live.onAir, ink: ink, control: liveSong, openSearch: openSearch)
             liveMoreButton(live)
         }
         LiveBar(ink: ink, muted: muted)
@@ -391,10 +397,13 @@ struct NowPlayingView: View {
         .accessibilityLabel("More")
     }
 
-    /// While a live station plays: the stations it was started from, and the sleep timer.
+    /// While a live station plays: the stations it was started from (when there is more than
+    /// one), and the sleep timer.
     private func liveSwitches(_ lineup: LiveLineup) -> some View {
         HStack(spacing: 20) {
-            PlayerSwitch(icon: .queue, label: "Stations", lit: false, ink: ink, state: "\(lineup.ids.count) stations") { showsStations = true }
+            if lineup.shows {
+                PlayerSwitch(icon: .queue, label: "Stations", lit: false, ink: ink, state: "\(lineup.ids.count) stations") { showsStations = true }
+            }
             sleepSwitch
         }
         .frame(maxWidth: .infinity)

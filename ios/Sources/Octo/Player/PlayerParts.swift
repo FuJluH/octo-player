@@ -108,6 +108,16 @@ struct PlayerMarquee: View {
     }
 }
 
+extension VerticalAlignment {
+    private enum PlayerTitleLine: AlignmentID {
+        static func defaultValue(in dimensions: ViewDimensions) -> CGFloat { dimensions[VerticalAlignment.center] }
+    }
+
+    /// The middle of the player's title line, for what sits level with the title rather than with
+    /// the title and the line under it.
+    static let playerTitleLine = VerticalAlignment(PlayerTitleLine.self)
+}
+
 /// The song's title (24 bold, scrolling when long, the explicit mark kept still after it) and
 /// its artist, who opens their page.
 struct PlayerTitleBlock: View {
@@ -124,6 +134,7 @@ struct PlayerTitleBlock: View {
                     ExplicitMark(size: 14, color: accent).fixedSize()
                 }
             }
+            .alignmentGuide(.playerTitleLine) { $0[VerticalAlignment.center] }
             // Only the name itself opens the artist.
             Group {
                 if let openArtist {

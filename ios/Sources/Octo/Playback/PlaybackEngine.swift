@@ -156,7 +156,12 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
         // while the system will not give the sound (a call).
         let playing = play && startOutput()
         playWhenReady = playing
-        loadCurrent(atMs: startMs)
+        if playing || queue.currentItem?.isRadioStation != true {
+            loadCurrent(atMs: startMs)
+        } else {
+            // A live station put in place paused is not opened until it plays.
+            deck.clear()
+        }
         onQueueChange?()
         onSongChange?(.playlistChanged)
         if playing {
@@ -584,13 +589,16 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
                 deck.pauseAtEndOfSong = false
                 onPlayWhenReadyChange?(false, true)
                 stopOutputLater()
-            } else if queue.currentItem?.isRadioStation == true {
-                // A live station that ends stops there: the next station never starts by itself,
-                // and playing again rejoins this one.
-                playWhenReady = false
-                deck.clear()
-                onPlayWhenReadyChange?(false, false)
-                stopOutputLater()
+            } else if let item = queue.currentItem, item.isRadioStation {
+                // A live station that ends stops there with its line, as one that fails does:
+                // the next station never starts by itself, and playing again rejoins this one.
+                if playWhenReady { onFailure?(item, PlayError(.networkConnectionFailed, detail: "the live stream ended")) }
+                if playWhenReady || deck.item != nil {
+                    playWhenReady = false
+                    deck.clear()
+                    onPlayWhenReadyChange?(false, false)
+                    stopOutputLater()
+                }
             } else if queue.nextOnEnd == nil {
                 ended = true
                 onStateChange?(.ended)

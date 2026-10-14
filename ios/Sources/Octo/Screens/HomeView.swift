@@ -188,11 +188,12 @@ struct HomeView: View {
         .animation(.easeInOut(duration: 0.25), value: kept.map(\.uuid))
     }
 
-    /// One of the server's internet radio stations as the queue holds it, with its server cover.
+    /// One of the server's internet radio stations as the queue holds it, with its server cover
+    /// and website.
     private func serverStationEntry(_ station: Station) -> (stream: String, id: String) {
         let stream = (station.streamUrl ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let cover = coverId(of: station.artwork) ?? station.id
-        return (stream, radioId(streamUrl: stream, name: station.name, details: RadioDetails(coverArt: cover)))
+        return (stream, radioId(streamUrl: stream, name: station.name, details: RadioDetails(coverArt: cover, homepage: station.homepage ?? "")))
     }
 
     /// The first shelf: albums, artists and playlists pinned there, in their order.

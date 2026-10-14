@@ -4,7 +4,7 @@ import SwiftUI
 import UIKit
 
 // The full player's parts while a live station plays: the live bar in place of the scrub bar,
-// Back, Play or Stop and Next for stations, the heart for the song on air, the station's menu,
+// Back, Play or Stop and Next for stations, the button for the song on air, the station's menu,
 // its details, and the stations it was started from.
 
 // MARK: The live bar
@@ -126,44 +126,21 @@ private struct DimmedIcon: View {
     }
 }
 
-// MARK: The heart
+// MARK: The song's button
 
-/// The heart for the song a live station has on air. A tap stars the song `LiveLookup` found in
-/// Octo for it, the one result whose title and artist both agree: a library song is liked, a
-/// song from outside the library is asked for, the way any outside song is. It starts over when
-/// the song on air changes.
+/// The button beside the song a live station has on air, from what `LiveLookup` found in Octo
+/// for it (the one result whose title and artist both agree): the heart for a library song, a
+/// plus that adds an outside song the way any outside song is added, and a plus that opens Search
+/// when Octo has no song that is surely it. It starts over when the song on air changes.
 @MainActor
 @Observable
-final class LiveHeart {
-    enum State: Equatable {
-        case idle
-        case looking
-        /// Liked in the library, by its library id.
-        case liked(String)
-        /// Asked for from outside the library.
-        case asked
-    }
-
-    private(set) var state: State = .idle
-    /// The song on air the state is for.
+final class LiveSongControl {
+    /// A tap waiting for the lookup's answer.
+    private(set) var waiting = false
+    /// Library track ids for songs found, by the song's id.
+    private(set) var libraryIds: [String: String] = [:]
     @ObservationIgnored private var song = OnAir.nothing
-    @ObservationIgnored private var looking: Task<Void, Never>?
-
-    var filled: Bool {
-        switch state {
-        case .liked, .asked: true
-        case .idle, .looking: false
-        }
-    }
-
-    /// The song on air now: a new one starts the heart over.
-    func follow(_ onAir: OnAir) {
-        guard onAir.title != song.title || onAir.artist != song.artist else { return }
-        song = onAir
-        looking?.cancel()
-        looking = nil
-        state = .idle
-    }
+    @ObservationIgnored private var task: Task<Void, Never>?
 
     struct Services {
         let session: Session
@@ -175,88 +152,104 @@ final class LiveHeart {
         let openSearch: (String) -> Void
     }
 
-    func tap(_ services: Services) {
-        switch state {
-        case .looking:
-            return
-        case .liked(let trackId):
-            services.likes.toggle(trackId)
-            state = .idle
-            return
-        case .asked:
-            services.router.show("\(song.title) is on its way to your library.")
-            return
-        case .idle:
-            break
+    /// The song on air now: a new one calls off a tap still waiting.
+    func follow(_ onAir: OnAir) {
+        guard onAir.title != song.title || onAir.artist != song.artist else { return }
+        song = onAir
+        task?.cancel()
+        task = nil
+        waiting = false
+    }
+
+    /// The button for `onAir` now.
+    func button(_ onAir: OnAir, _ services: Services) -> LiveSongButton {
+        let lookup = LiveLookup.shared
+        guard let found = lookup.found(onAir) else {
+            return liveSongButton(onAir, match: nil, looked: lookup.answered(onAir), starred: false, inLibrary: false, adding: false)
         }
-        let onAir = song
-        let query = heartQuery(onAir)
-        guard onAir.named, services.session.client != nil else {
-            missing(onAir, query, services)
-            return
+        let match = HeartCandidate(id: found.song.id, title: found.song.title, artist: found.song.artist ?? "", inLibrary: found.inLibrary)
+        let liked = libraryIds[found.song.id].map(services.likes.isLiked)
+        if found.inLibrary {
+            return liveSongButton(onAir, match: match, looked: true, starred: liked ?? false, inLibrary: true, adding: false)
         }
-        state = .looking
-        // The same lookup the cover uses: the answer is usually there already.
-        looking = Task { [weak self] in
-            let found = await LiveLookup.shared.find(onAir, session: services.session)
-            guard !Task.isCancelled, let self, self.song == onAir else { return }
-            guard let found else {
-                self.state = .idle
-                self.missing(onAir, query, services)
-                return
+        let phase = services.downloads.phase(found.song.id)
+        let landed = phase == .done
+        let saved = savesForFamily(services) && services.family.isSaved(findKey(found.song))
+        let adding = phase.state == .requested || saved
+        return liveSongButton(onAir, match: match, looked: true, starred: landed ? (liked ?? true) : adding, inLibrary: landed, adding: adding)
+    }
+
+    /// Reads which library song a song found is, so its heart shows whether it is liked.
+    func resolve(_ found: LiveLookup.Found, _ services: Services) async {
+        guard libraryIds[found.song.id] == nil else { return }
+        let song = found.inLibrary ? found.song : services.downloads.librarySong(found.song.id)
+        guard let song, let id = await PlayerSongFacts.libraryId(song, library: services.library) else { return }
+        libraryIds[found.song.id] = id
+    }
+
+    /// A tap: waits for the lookup when it has not answered yet, then does what the button says.
+    func tap(_ onAir: OnAir, _ services: Services) {
+        guard !waiting, onAir.named else { return }
+        guard LiveLookup.shared.answered(onAir) else {
+            waiting = true
+            task = Task { [weak self] in
+                _ = await LiveLookup.shared.find(onAir, session: services.session)
+                guard !Task.isCancelled, let self, self.song == onAir else { return }
+                self.waiting = false
+                guard LiveLookup.shared.answered(onAir) else {
+                    services.router.show("Couldn't reach Octo. Try again.")
+                    return
+                }
+                await self.act(onAir, services)
             }
-            if found.inLibrary {
-                await self.like(found.song, for: onAir, services)
-            } else {
-                await self.ask(found.song, for: onAir, services)
+            return
+        }
+        task = Task { [weak self] in await self?.act(onAir, services) }
+    }
+
+    private func act(_ onAir: OnAir, _ services: Services) async {
+        let button = button(onAir, services)
+        guard let found = LiveLookup.shared.found(onAir) else {
+            if button == .search { services.openSearch(heartQuery(onAir)) }
+            return
+        }
+        switch button {
+        case .none, .search:
+            return
+        case .heart(let starred):
+            await resolve(found, services)
+            if let id = libraryIds[found.song.id] {
+                if services.likes.isLiked(id) == starred { services.likes.toggle(id) }
+            } else if !starred, let client = services.session.client, (try? await client.star(songId: found.song.id)) == nil {
+                services.router.show("Couldn't heart \(found.song.title). Try again.")
+            }
+        case .add(let adding):
+            if adding {
+                if services.downloads.keepsLog {
+                    services.router.showServerDownloads(songId: found.song.id)
+                } else {
+                    services.router.show("\(found.song.title) is on its way to your library.")
+                }
+            } else if savesForFamily(services) {
+                services.family.toggleSaved(findKey(found.song), title: found.song.title)
+            } else if !(await services.downloads.request(found.song)) {
+                services.router.show("Couldn't add \(found.song.title). Try again.")
             }
         }
     }
 
-    /// Likes the library song found for `onAir`, unless another song came on air meanwhile.
-    private func like(_ song: Song, for onAir: OnAir, _ services: Services) async {
-        let trackId = await PlayerSongFacts.libraryId(song, library: services.library)
-        guard self.song == onAir else { return }
-        if let trackId {
-            if !services.likes.isLiked(trackId) { services.likes.toggle(trackId) }
-            state = .liked(trackId)
-        } else if let client = services.session.client, (try? await client.star(songId: song.id)) != nil {
-            // On the server but not yet in the phone's library: starred there.
-            state = .asked
-        } else {
-            state = .idle
-            services.router.show("Couldn't heart \(song.title). Try again.")
-        }
-    }
+    /// A family member whose outside songs are saved rather than added.
+    private func savesForFamily(_ services: Services) -> Bool { services.family.outside.addLabel != nil }
 
-    /// Asks for the outside song found for `onAir`, the way any song from outside the library is.
-    private func ask(_ song: Song, for onAir: OnAir, _ services: Services) async {
-        guard self.song == onAir else { return }
-        if services.family.outside.addLabel != nil {
-            let id = song.id.hasPrefix(findPrefix) ? song.id : findId(song.id)
-            if !services.family.isSaved(id) { services.family.toggleSaved(id, title: song.title) }
-            state = .asked
-            return
-        }
-        if await services.downloads.request(song) {
-            state = .asked
-            services.router.done("Adding \(song.title) to your library")
-        } else {
-            state = .idle
-            services.router.show("Couldn't ask for \(song.title). Try again.")
-        }
-    }
-
-    private func missing(_ onAir: OnAir, _ query: String, _ services: Services) {
-        services.router.show("Couldn't find \(onAir.title) in Octo", action: "Search") { services.openSearch(query) }
-    }
+    private func findKey(_ song: Song) -> String { song.id.hasPrefix(findPrefix) ? song.id : findId(song.id) }
 }
 
-/// The heart beside a live station's song: shown only while the station names a song.
-struct LiveHeartButton: View {
+/// The button beside a live station's song: the heart, the plus, or nothing while no song is
+/// named.
+struct LiveSongButtonView: View {
     let onAir: OnAir
     let ink: Color
-    let heart: LiveHeart
+    let control: LiveSongControl
     let openSearch: (String) -> Void
     @Environment(Session.self) private var session
     @Environment(Library.self) private var library
@@ -264,40 +257,83 @@ struct LiveHeartButton: View {
     @Environment(Downloads.self) private var downloads
     @Environment(Accounts.self) private var accounts
     @Environment(Router.self) private var router
+    @Environment(\.octoReduceMotion) private var calm
     @State private var beats = 0
+    @State private var release: (@Sendable () -> Void)?
+
+    private var services: LiveSongControl.Services {
+        LiveSongControl.Services(session: session, library: library, likes: likes, downloads: downloads, family: accounts.family,
+                                 router: router, openSearch: openSearch)
+    }
 
     var body: some View {
+        let button = control.button(onAir, services)
+        let found = LiveLookup.shared.found(onAir)
         Group {
-            if onAir.named {
+            if button == .none {
+                Color.clear.frame(width: 44, height: 44)
+            } else {
                 Button {
-                    if !heart.filled { beats += 1 }
-                    heart.tap(LiveHeart.Services(session: session, library: library, likes: likes, downloads: downloads,
-                                                 family: accounts.family, router: router, openSearch: openSearch))
+                    if case .heart(false) = button { beats += 1 }
+                    control.tap(onAir, services)
                 } label: {
                     ZStack {
-                        if heart.state == .looking {
+                        if control.waiting {
                             ProgressView().tint(ink)
                         } else {
-                            IconView(heart.filled ? .liked : .like, size: 24, color: heart.filled ? ink : ink.opacity(0.6))
-                                .iconGlow(heart.filled, color: ink)
-                                .iconAccent(.pulse, trigger: beats)
+                            face(button, found)
                         }
                     }
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(NoPress())
-                .accessibilityLabel(heartLabel)
-                .accessibilityValue(heart.filled ? "Hearted" : "Not hearted")
-            } else {
-                Color.clear.frame(width: 44, height: 44)
+                .accessibilityLabel(liveSongButtonLabel(button, onAir))
             }
         }
-        .onChange(of: onAir, initial: true) { _, now in heart.follow(now) }
+        .onChange(of: onAir, initial: true) { _, now in control.follow(now) }
+        .task(id: found?.song.id) {
+            guard let found else { return }
+            await control.resolve(found, services)
+        }
+        // An outside song's download is followed while its button shows.
+        .onChange(of: found.flatMap { $0.inLibrary ? nil : $0.song.id }, initial: true) { _, id in
+            release?()
+            release = id.map { downloads.showing($0) }
+        }
+        .onDisappear {
+            release?()
+            release = nil
+        }
     }
 
-    private var heartLabel: String {
-        onAir.artist.isEmpty ? "Heart \(onAir.title)" : "Heart \(onAir.title) by \(onAir.artist)"
+    @ViewBuilder
+    private func face(_ button: LiveSongButton, _ found: LiveLookup.Found?) -> some View {
+        switch button {
+        case .heart(let starred):
+            IconView(starred ? .liked : .like, size: 24, color: starred ? ink : ink.opacity(0.6))
+                .iconGlow(starred, color: ink)
+                .iconAccent(.pulse, trigger: beats)
+        case .add(let adding):
+            let phase = found.map { downloads.phase($0.song.id) } ?? .none
+            if adding && phase != .none {
+                DownloadRing(phase: phase, calm: calm).frame(width: 24, height: 24)
+            } else if adding {
+                Image(systemName: "checkmark").font(.system(size: 20, weight: .semibold)).foregroundStyle(ink)
+            } else {
+                plus
+            }
+        case .search:
+            plus
+        case .none:
+            EmptyView()
+        }
+    }
+
+    private var plus: some View {
+        Image(systemName: OctoIcon.addToLibrary.symbol)
+            .font(.system(size: 24 * 0.84, weight: .regular))
+            .foregroundStyle(ink.opacity(0.6))
     }
 }
 

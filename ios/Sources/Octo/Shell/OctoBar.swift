@@ -449,11 +449,12 @@ struct MiniPlayerPill: View {
         .contentShape(Capsule())
         .onTapGesture(perform: open)
         .task(id: flightKey(player.current)) {
-            // The player's card is at most 312 points; the flight draws the cover at that size.
+            // The player's card is at most the phone's width less its margins, under 430 points;
+            // the flight draws the cover at that size.
             if let live = player.live {
-                await flight.prepare(live: live, coverArt: player.current?.coverArt, size: Int(312 * scale), client: session.client)
+                await flight.prepare(live: live, coverArt: player.current?.coverArt, size: Int(430 * scale), client: session.client)
             } else {
-                await flight.prepare(player.current?.coverArt, size: Int(312 * scale), client: session.client)
+                await flight.prepare(player.current?.coverArt, size: Int(430 * scale), client: session.client)
             }
         }
         .accessibilityAction(named: "Open player", open)

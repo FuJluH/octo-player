@@ -35,6 +35,12 @@ final class LiveLookup {
         return found
     }
 
+    /// Whether Octo has answered for `onAir`, with a song or with none.
+    func answered(_ onAir: OnAir) -> Bool {
+        _ = answers
+        return cache[liveLookupKey(onAir)] != nil
+    }
+
     /// The cover of the song on air in Octo, when there is one.
     func cover(_ onAir: OnAir) -> (coverArt: String, online: Bool)? {
         guard let found = found(onAir), let coverArt = found.song.coverArt, !coverArt.isEmpty else { return nil }
