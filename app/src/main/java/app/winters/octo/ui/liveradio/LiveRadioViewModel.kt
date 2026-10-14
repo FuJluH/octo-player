@@ -28,6 +28,7 @@ import app.winters.octo.liveradio.radiusAt
 import app.winters.octo.liveradio.radiusMeters
 import app.winters.octo.liveradio.usesMiles
 import app.winters.octo.playback.PlaybackConnection
+import app.winters.octo.liveradio.lineupOf
 import app.winters.octo.liveradio.radioId
 import app.winters.octo.server.ServerControls
 import app.winters.octo.ui.common.Feedback
@@ -238,9 +239,12 @@ class LiveRadioViewModel @Inject constructor(
     fun actions(station: LiveStation): List<StationAction> =
         stationActions(kept.value.has(station.uuid), addable = adds.offers(station))
 
-    // Plays a station's stream, and tells the catalog it was started.
-    fun play(station: LiveStation) {
-        playback.playTracks(listOf(station.radioId()), source = station.name)
+    // Plays a station's stream, with the rest of the list it is in (the
+    // stations found, or the ones kept) in its order for Back and Next, and
+    // tells the catalog it was started.
+    fun play(list: List<LiveStation>, station: LiveStation) {
+        val (ids, start) = lineupOf(list, list.indexOf(station).coerceAtLeast(0), { it.streamUrl }, { it.radioId() })
+        playback.playLineup(ids.ifEmpty { listOf(station.radioId()) }, start, source = LIVE_NEAR_TITLE)
         viewModelScope.launch { catalog.started(station.uuid) }
     }
 

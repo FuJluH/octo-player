@@ -172,7 +172,7 @@ fun LiveRadioScreen(onBack: () -> Unit, vm: LiveRadioViewModel = hiltViewModel()
                             item(key = "none") { Note(noStationsLine(miles, vm.radius())) }
                         }
                         items(results.stations, key = { "near:${it.uuid}" }) { station ->
-                            LiveStationRow(station, miles, onPlay = { vm.play(station) }, onMenu = { menu(station) }, modifier = Modifier.choiceAnchor(sheet))
+                            LiveStationRow(station, miles, onPlay = { vm.play(results.stations, station) }, onMenu = { menu(station) }, modifier = Modifier.choiceAnchor(sheet))
                         }
                         hiddenLine(results.hidden)?.let { line -> item(key = "hidden") { Note(line, Modifier.padding(top = 8.dp)) } }
                     }
@@ -181,7 +181,7 @@ fun LiveRadioScreen(onBack: () -> Unit, vm: LiveRadioViewModel = hiltViewModel()
             if (kept.stations.isNotEmpty()) {
                 item(key = "kept-title") { SectionTitle("Kept on this phone", Modifier.padding(top = 18.dp)) }
                 items(kept.stations, key = { "kept:${it.uuid}" }) { station ->
-                    LiveStationRow(station, miles, onPlay = { vm.play(station) }, onMenu = { menu(station) }, modifier = Modifier.choiceAnchor(sheet))
+                    LiveStationRow(station, miles, onPlay = { vm.play(kept.stations, station) }, onMenu = { menu(station) }, modifier = Modifier.choiceAnchor(sheet))
                 }
             }
         }

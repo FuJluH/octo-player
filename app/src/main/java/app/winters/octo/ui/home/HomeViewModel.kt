@@ -34,7 +34,9 @@ import app.winters.octo.liveradio.LiveShelfEntry
 import app.winters.octo.liveradio.LiveRadioStore
 import app.winters.octo.liveradio.LiveStation
 import app.winters.octo.liveradio.RadioBrowser
+import app.winters.octo.liveradio.lineupOf
 import app.winters.octo.liveradio.radioId
+import app.winters.octo.liveradio.streamUrl
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.server.ServerSync
 import app.winters.octo.subsonic.SubsonicException
@@ -293,11 +295,13 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    // A station on the Live radio shelf plays its stream; for one kept on
-    // this phone, the catalog hears it was started.
+    // A station on the Live radio shelf plays its stream, with the shelf's
+    // other stations in its order for Back and Next; for one kept on this
+    // phone, the catalog hears it was started.
     fun playLive(entries: List<LiveShelfEntry>, index: Int) {
         val entry = entries.getOrNull(index) ?: return
-        playback.playTracks(listOf(entry.radioId()), source = (entry as? LiveShelfEntry.Kept)?.station?.name)
+        val (ids, start) = lineupOf(entries, index, { it.streamUrl }, { it.radioId() })
+        playback.playLineup(ids, start, source = HomeSection.InternetRadio.title)
         val uuid = (entry as? LiveShelfEntry.Kept)?.station?.uuid ?: (entry as? LiveShelfEntry.Server)?.kept?.uuid
         if (uuid != null) viewModelScope.launch { radioCatalog.started(uuid) }
     }
