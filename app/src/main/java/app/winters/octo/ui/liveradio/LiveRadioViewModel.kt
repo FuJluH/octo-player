@@ -28,7 +28,7 @@ import app.winters.octo.liveradio.radiusAt
 import app.winters.octo.liveradio.radiusMeters
 import app.winters.octo.liveradio.usesMiles
 import app.winters.octo.playback.PlaybackConnection
-import app.winters.octo.playback.radioId
+import app.winters.octo.liveradio.radioId
 import app.winters.octo.server.ServerControls
 import app.winters.octo.ui.common.Feedback
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -240,7 +240,7 @@ class LiveRadioViewModel @Inject constructor(
 
     // Plays a station's stream, and tells the catalog it was started.
     fun play(station: LiveStation) {
-        playback.playTracks(listOf(radioId(station.streamUrl, station.name, station.hls)), source = station.name)
+        playback.playTracks(listOf(station.radioId()), source = station.name)
         viewModelScope.launch { catalog.started(station.uuid) }
     }
 
