@@ -48,12 +48,14 @@ final class NowPlayingCenter {
         let picture = artworkKey(item, live)
         if artworkFor != picture { loadArtwork(item, live, key: picture) }
         let buttons = RemoteButtons.of(player.engine.queue.items.map(\.trackId), current: player.index)
+        // A live station connecting counts as on, so its Stop shows while it gets going.
+        let playing = live == nil ? player.isPlaying : player.liveOn
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: live?.title ?? item.title,
             MPMediaItemPropertyArtist: live?.subtitle ?? item.artist,
             MPMediaItemPropertyAlbumTitle: live == nil ? item.album : "",
             MPNowPlayingInfoPropertyElapsedPlaybackTime: player.elapsed,
-            MPNowPlayingInfoPropertyPlaybackRate: player.isPlaying ? Double(live == nil ? player.engine.pace.speed : 1) : 0.0,
+            MPNowPlayingInfoPropertyPlaybackRate: playing ? Double(live == nil ? player.engine.pace.speed : 1) : 0.0,
             MPNowPlayingInfoPropertyDefaultPlaybackRate: Double(live == nil ? player.engine.pace.speed : 1),
             MPNowPlayingInfoPropertyPlaybackQueueIndex: player.index,
             MPNowPlayingInfoPropertyPlaybackQueueCount: player.engine.queue.count,
@@ -66,13 +68,14 @@ final class NowPlayingCenter {
         if item.explicit { info[MPMediaItemPropertyIsExplicit] = true }
         if let artwork { info[MPMediaItemPropertyArtwork] = artwork }
         center.nowPlayingInfo = info
-        center.playbackState = player.isPlaying ? .playing : .paused
+        center.playbackState = playing ? .playing : .paused
         applyButtons(buttons)
         updateHeart(item)
     }
 
     /// Turns the lock screen's buttons on and off for what plays: a live station cannot be
-    /// moved through, and its Next and Previous stop at the ends of its list.
+    /// moved through, its Next and Previous stop at the ends of its list, and its transport is
+    /// Stop.
     private func applyButtons(_ buttons: RemoteButtons) {
         guard buttons != shownButtons else { return }
         shownButtons = buttons
@@ -84,6 +87,9 @@ final class NowPlayingCenter {
         commands.skipBackwardCommand.isEnabled = buttons.skipInterval
         commands.nextTrackCommand.isEnabled = buttons.next
         commands.previousTrackCommand.isEnabled = buttons.previous
+        commands.pauseCommand.isEnabled = buttons.pause
+        commands.togglePlayPauseCommand.isEnabled = buttons.togglePlayPause
+        commands.stopCommand.isEnabled = buttons.stop
     }
 
     /// Takes everything off the lock screen, as Close does.
@@ -223,7 +229,15 @@ final class NowPlayingCenter {
             return .success
         }
         commands.stopCommand.addTarget { [weak self] _ in
-            MainActor.assumeIsolated { self?.player.close() }
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                // A live station's Stop lets go of its stream and stays on the lock screen, so
+                // Play reconnects to what is on air; a song's Stop closes the player.
+                switch self.shownButtons?.stopDoes ?? .close {
+                case .stopStream: self.player.pause()
+                case .close: self.player.close()
+                }
+            }
             return .success
         }
         commands.dislikeCommand.isEnabled = false

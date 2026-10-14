@@ -269,8 +269,18 @@ public func liveShown(_ id: String, _ meta: IcyMeta?) -> LiveShown? {
 
 /// The lock screen's and headset's buttons for what plays now. A live station has no length and
 /// no seeking; its Next and Previous step through the stations it was started from, and stop at
-/// the ends. A song keeps every button.
+/// the ends. Its transport is Stop, not Pause: Pause and Play/Pause are off and Stop is on, so the
+/// system draws a stop square, and Stop lets go of the stream (Play reconnects to what is on air
+/// then). A song keeps every button, and its Stop closes the player.
 public struct RemoteButtons: Sendable, Equatable {
+    /// What Stop does.
+    public enum StopDoes: Sendable, Equatable {
+        /// Stops the music and takes it off the lock screen.
+        case close
+        /// Stops the live stream; the station stays on the lock screen, ready to play again.
+        case stopStream
+    }
+
     public var live: Bool
     /// Whether the lock screen is given a length.
     public var showsDuration: Bool
@@ -279,8 +289,13 @@ public struct RemoteButtons: Sendable, Equatable {
     public var skipInterval: Bool
     public var next: Bool
     public var previous: Bool
+    public var pause: Bool
+    public var togglePlayPause: Bool
+    public var stop: Bool
+    public var stopDoes: StopDoes
 
-    public init(live: Bool, showsDuration: Bool, seek: Bool, changePosition: Bool, skipInterval: Bool, next: Bool, previous: Bool) {
+    public init(live: Bool, showsDuration: Bool, seek: Bool, changePosition: Bool, skipInterval: Bool, next: Bool, previous: Bool,
+                pause: Bool = true, togglePlayPause: Bool = true, stop: Bool = true, stopDoes: StopDoes = .close) {
         self.live = live
         self.showsDuration = showsDuration
         self.seek = seek
@@ -288,6 +303,10 @@ public struct RemoteButtons: Sendable, Equatable {
         self.skipInterval = skipInterval
         self.next = next
         self.previous = previous
+        self.pause = pause
+        self.togglePlayPause = togglePlayPause
+        self.stop = stop
+        self.stopDoes = stopDoes
     }
 
     /// The buttons for the queue `queueIds` playing the entry at `current`.
@@ -296,7 +315,8 @@ public struct RemoteButtons: Sendable, Equatable {
             return RemoteButtons(live: false, showsDuration: true, seek: true, changePosition: true, skipInterval: false, next: true, previous: true)
         }
         return RemoteButtons(live: true, showsDuration: false, seek: false, changePosition: false, skipInterval: false,
-                             next: lineup.hasNext, previous: lineup.hasPrevious)
+                             next: lineup.hasNext, previous: lineup.hasPrevious,
+                             pause: false, togglePlayPause: false, stop: true, stopDoes: .stopStream)
     }
 }
 

@@ -749,6 +749,8 @@ final class Player {
                 self.engine.silentWaitSeconds = self.headset.anyOn ? 1_800 : 600
             }
             self.publishState()
+            // The lock screen's Play or Stop follows at once, a station still connecting too.
+            self.nowPlaying.publish()
             self.autoplay?.check()
         }
         engine.onQueueChange = { [weak self] in self?.queueChanged() }

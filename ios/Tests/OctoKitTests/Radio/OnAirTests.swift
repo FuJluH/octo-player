@@ -359,7 +359,14 @@ import Testing
         #expect(middle.next && middle.previous)
         let alone = RemoteButtons.of(["radio:a:A"], current: 0)
         #expect(alone.live && !alone.next && !alone.previous)
+        // Stop, never Pause: Pause and Play/Pause are off, Stop is on and lets go of the stream.
+        #expect(!first.pause && !first.togglePlayPause && first.stop && first.stopDoes == .stopStream)
+        #expect(!alone.pause && !alone.togglePlayPause && alone.stop && alone.stopDoes == .stopStream)
         let song = RemoteButtons.of(["s1", "s2"], current: 0)
+        #expect(song.pause && song.togglePlayPause && song.stop && song.stopDoes == .close)
+        // A station among songs is still live: Stop, not Pause.
+        let mixed = RemoteButtons.of(["s1", "radio:a:A"], current: 1)
+        #expect(mixed.live && !mixed.pause && mixed.stopDoes == .stopStream && !mixed.next && !mixed.previous)
         #expect(!song.live && song.showsDuration && song.seek && song.changePosition && song.next && song.previous)
     }
 }
