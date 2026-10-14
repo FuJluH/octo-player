@@ -47,6 +47,9 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.ControlHeight
 import app.winters.octo.design.Corner
@@ -77,7 +80,14 @@ import app.winters.octo.desktop.isKept
 import app.winters.octo.desktop.keepLive
 import app.winters.octo.desktop.liveStationOf
 import app.winters.octo.desktop.liveradio.HeartPhase
-import app.winters.octo.desktop.liveradio.heartLabel
+import app.winters.octo.desktop.search.FetchPhase
+import app.winters.octo.desktop.search.phaseText
+import app.winters.octo.liveradio.LiveSongButton
+import app.winters.octo.liveradio.liveSongButtonLabel
+import app.winters.octo.design.OctoTooltip
+import app.winters.octo.design.ProgressRing
+import androidx.compose.runtime.collectAsState
+import kotlinx.coroutines.flow.MutableStateFlow
 import app.winters.octo.desktop.liveradio.streamKey
 import app.winters.octo.desktop.pages.countryName
 import app.winters.octo.desktop.player.LiveNow
@@ -137,18 +147,41 @@ fun LivePill(modifier: Modifier = Modifier) {
 private val LiveRedInk = Color(0xFFFF8A80)
 
 // In place of the seek line: a calm thin line that cannot be dragged, how
-// long the station has been listened to since it started, and the LIVE pill.
+// long the station has been listened to since it started where a song's
+// time played is, and the LIVE pill. Stacked, the time and the pill sit
+// under the line, as the full player has its times; otherwise they sit
+// either side of it.
 @Composable
-fun LiveLine(app: AppState, color: Color, muted: Color, modifier: Modifier = Modifier, times: Boolean = true) {
+fun LiveLine(app: AppState, color: Color, muted: Color, modifier: Modifier = Modifier, times: Boolean = true, stacked: Boolean = false) {
     val position by rememberPosition(app.player)
-    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M)) {
-        Box(Modifier.weight(1f).height(2.dp).background(color.copy(alpha = 0.3f), CircleShape))
-        if (times) {
-            val listened = listenedFor(position)
-            Txt(listened, LiveTimeStyle, muted, Modifier.semantics { contentDescription = "Listening for $listened" })
+    val listened = listenedFor(position)
+    val line = @Composable { m: Modifier -> Box(m.height(2.dp).background(color.copy(alpha = 0.3f), CircleShape)) }
+    val time = @Composable { if (times) Txt(listened, LiveTimeStyle, muted, Modifier.semantics { contentDescription = "Listening for $listened" }) }
+    if (stacked) {
+        Column(modifier, verticalArrangement = Arrangement.spacedBy(Space.S)) {
+            line(Modifier.fillMaxWidth().padding(top = Space.S))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                time()
+                Spacer(Modifier.weight(1f))
+                LivePill()
+            }
         }
-        LivePill()
+    } else {
+        Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M)) {
+            time()
+            line(Modifier.weight(1f))
+            LivePill()
+        }
     }
+}
+
+// Holds a button centered on the first line of a title in this style: as
+// tall as that line, with the button free to reach past it, so it sits
+// level with the title rather than with the title and the line under it.
+@Composable
+fun OnTitleLine(style: TextStyle, content: @Composable () -> Unit) {
+    val line = with(LocalDensity.current) { (if (style.lineHeight.isSp) style.lineHeight else style.fontSize * 1.3f).toDp() }
+    Box(Modifier.height(line).wrapContentHeight(unbounded = true), contentAlignment = Alignment.Center) { content() }
 }
 
 private val LiveTimeStyle = DesktopType.meta.copy(fontFeatureSettings = "tnum")
@@ -166,36 +199,60 @@ fun LiveTransport(app: AppState, state: PlayerState, live: LiveNow, playSize: Dp
     }
 }
 
-// The heart for the song on air, while the station names one: a press
-// finds it in Octo and stars it; it fills once starred.
+// The button beside the song on air, while the station names one: the
+// heart for a song in the library (filled once a favorite), the add button
+// for one Octo found online (with how its download goes, then the heart
+// once it is in), and a plus that opens Search when Octo has no song it is
+// sure of. A press while Octo is still looking waits for its answer.
 @Composable
-fun LiveHeartButton(app: AppState, live: LiveNow, size: Dp, iconSize: Dp, tint: Color) {
+fun OnAirButton(app: AppState, live: LiveNow, size: Dp, iconSize: Dp, tint: Color) {
     val heart = app.liveHeart
     val onAir = live.shown.onAir
     LaunchedEffect(onAir) { heart.follow(onAir) }
     if (!heart.shows || heart.onAir != onAir) return
-    val label = heartLabel(onAir)
-    when (val phase = heart.phase) {
-        HeartPhase.Looking -> Box(
-            Modifier.size(size).semantics {
-                contentDescription = label
-                stateDescription = "Looking for it"
-            },
-            contentAlignment = Alignment.Center,
-        ) { Spinner(size = iconSize) }
-        else -> {
-            val starred = phase is HeartPhase.Starred
-            IconAction(
-                if (starred) OctoIcons.Liked else OctoIcons.Like,
-                label,
-                heart::press,
-                size = size,
-                iconSize = iconSize,
-                tint = tint,
-                toggled = starred,
-                tooltip = if (starred) "In your favorites. Press to take it out" else label,
-            )
+    val found = heart.match
+    val fetches = app.fetches
+    val phases by remember(fetches) { fetches?.phases ?: MutableStateFlow(emptyMap()) }.collectAsState()
+    val fetch = found?.song?.id?.let { phases[it] } ?: FetchPhase.None
+    val starred = found != null && app.isStarred(found.song)
+    val button = heart.button(fetch, starred)
+    val label = liveSongButtonLabel(button, onAir)
+    if (heart.phase == HeartPhase.Looking) {
+        Box(Modifier.size(size).semantics { contentDescription = label; stateDescription = "Looking for it in Octo" }, contentAlignment = Alignment.Center) { Spinner(size = iconSize) }
+        return
+    }
+    when (button) {
+        LiveSongButton.None -> Unit
+        is LiveSongButton.Heart -> IconAction(
+            if (button.starred) OctoIcons.Liked else OctoIcons.Like,
+            label,
+            { heart.press(starredNow = starred) },
+            size = size,
+            iconSize = iconSize,
+            tint = tint,
+            toggled = button.starred,
+        )
+        is LiveSongButton.Add -> if (button.adding) {
+            OctoTooltip(if (fetch == FetchPhase.None) "Adding it to your library" else phaseText(fetch)) {
+                Box(
+                    Modifier.size(size).semantics {
+                        contentDescription = label
+                        stateDescription = if (fetch == FetchPhase.None) "Adding" else phaseText(fetch)
+                    },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    when (fetch) {
+                        is FetchPhase.Downloading -> ProgressRing(fetch.progress, size = iconSize)
+                        FetchPhase.Adding -> ProgressRing(1f, size = iconSize)
+                        is FetchPhase.Failed -> Glyph(OctoIcons.Info, size = iconSize, tint = OctoColors.Error)
+                        else -> ProgressRing(null, size = iconSize)
+                    }
+                }
+            }
+        } else {
+            IconAction(OctoIcons.AddToLibrary, label, { heart.press() }, size = size, iconSize = iconSize, tint = tint, tooltip = "Not in your library. Press to add it")
         }
+        LiveSongButton.Search -> IconAction(OctoIcons.Add, label, { heart.press() }, size = size, iconSize = iconSize, tint = tint, tooltip = "Octo isn't sure which song this is. Press to search for it")
     }
 }
 

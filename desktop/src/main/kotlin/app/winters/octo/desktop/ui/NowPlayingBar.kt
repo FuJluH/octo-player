@@ -224,12 +224,13 @@ private fun SongZone(app: AppState, song: Song?) {
 // Station" under it, and the heart for the song on air.
 @Composable
 private fun LiveSongZone(app: AppState, song: Song, live: LiveNow) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.Xs)) {
+    // The button sits on the title's line.
+    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(Space.Xs)) {
         Column(Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(Space.Xs)) {
             CutTxt(song.title, DesktopType.emphasis, OctoColors.TextPrimary, Modifier)
             Txt(live.shown.subtitle, DesktopType.meta, OctoColors.TextSecondary)
         }
-        LiveHeartButton(app, live, ControlHeight.M, IconSize.Toolbar, OctoColors.TextPrimary)
+        OnTitleLine(DesktopType.emphasis) { OnAirButton(app, live, ControlHeight.M, IconSize.Toolbar, OctoColors.TextPrimary) }
     }
 }
 
@@ -314,7 +315,8 @@ private fun UtilityZone(app: AppState, state: PlayerState, compact: Boolean = fa
         if (!compact) {
             // A station has no lyrics.
             if (state.live == null) IconAction(OctoIcons.Lyrics, "Lyrics", { app.toggleSidePanel(SidePanel.Lyrics) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = app.sidePanel == SidePanel.Lyrics, toggled = app.sidePanel == SidePanel.Lyrics)
-            IconAction(OctoIcons.Queue, if (state.live != null) "Stations" else "Queue", { app.toggleSidePanel(SidePanel.Queue) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = app.sidePanel == SidePanel.Queue, toggled = app.sidePanel == SidePanel.Queue)
+            // A station alone has no stations to list.
+            if (state.live == null || state.queue.size > 1) IconAction(OctoIcons.Queue, if (state.live != null) "Stations" else "Queue", { app.toggleSidePanel(SidePanel.Queue) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = app.sidePanel == SidePanel.Queue, toggled = app.sidePanel == SidePanel.Queue)
         }
         VolumeButton(app, state.volume)
         MoreButton(app, state, compact)
@@ -350,7 +352,7 @@ private fun ColumnScope.MoreMenu(app: AppState, close: () -> Unit, compact: Bool
             // The panel buttons, when the player is too narrow to show them.
             if (compact) {
                 if (live == null) MenuRow("Lyrics", { app.toggleSidePanel(SidePanel.Lyrics); close() }, if (app.sidePanel == SidePanel.Lyrics) OctoIcons.Check else OctoIcons.Lyrics)
-                MenuRow(if (live != null) "Stations" else "Queue", { app.toggleSidePanel(SidePanel.Queue); close() }, if (app.sidePanel == SidePanel.Queue) OctoIcons.Check else OctoIcons.Queue)
+                if (live == null || now.queue.size > 1) MenuRow(if (live != null) "Stations" else "Queue", { app.toggleSidePanel(SidePanel.Queue); close() }, if (app.sidePanel == SidePanel.Queue) OctoIcons.Check else OctoIcons.Queue)
             }
             MenuRow("Play on", { page = MorePage.Output }, outputIcon(now.playingOn?.name), more = true, detail = now.playingOn?.name ?: "System default")
             MenuSeparator()

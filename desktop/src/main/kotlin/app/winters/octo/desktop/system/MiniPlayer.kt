@@ -95,7 +95,7 @@ import app.winters.octo.desktop.settings.WindowSpot
 import app.winters.octo.desktop.ui.ImmersiveBackdrop
 import app.winters.octo.desktop.ui.PlayButton
 import app.winters.octo.desktop.ui.LiveCover
-import app.winters.octo.desktop.ui.LiveHeartButton
+import app.winters.octo.desktop.ui.OnAirButton
 import app.winters.octo.desktop.ui.LiveLine
 import app.winters.octo.desktop.ui.LiveLineupList
 import app.winters.octo.desktop.ui.LiveTransport
@@ -372,7 +372,7 @@ private fun MiniCover(app: AppState, state: PlayerState, panel: MiniPanel?, pinn
             Spacer(Modifier.weight(1f))
             Transport(app, state)
             Spacer(Modifier.weight(1f))
-            PanelButton(MiniPanel.Queue, panel, actions)
+            if (state.live == null || state.queue.size > 1) PanelButton(MiniPanel.Queue, panel, actions)
         }
         VolumeLine(app, state.volume)
     }
@@ -398,7 +398,7 @@ private fun MiniWithPanel(app: AppState, state: PlayerState, panel: MiniPanel, p
             Transport(app, state)
             Spacer(Modifier.weight(1f))
             VolumeButton(app, state.volume)
-            PanelButton(MiniPanel.Queue, panel, actions)
+            if (state.live == null || state.queue.size > 1) PanelButton(MiniPanel.Queue, panel, actions)
         }
         Box(Modifier.fillMaxWidth().height(FrameSize.Hairline).background(SeparatorColor))
         Box(Modifier.fillMaxWidth().weight(1f)) {
@@ -493,7 +493,7 @@ private val TimeWidth: Dp = Space.Wide
 @Composable
 private fun Heart(app: AppState, state: PlayerState) {
     val song = state.current?.song ?: return
-    state.live?.let { live -> return LiveHeartButton(app, live, ControlHeight.S, IconSize.Toolbar, OctoColors.TextPrimary) }
+    state.live?.let { live -> return OnAirButton(app, live, ControlHeight.S, IconSize.Toolbar, OctoColors.TextPrimary) }
     if (isOpenedFile(song.id) || isOutside(app, song)) return
     val starred = app.isStarred(song)
     IconAction(if (starred) OctoIcons.Liked else OctoIcons.Like, if (starred) "Remove from favorites" else "Add to favorites", { app.setStarred(listOf(song), !starred) }, size = ControlHeight.S, iconSize = IconSize.Toolbar)

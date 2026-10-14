@@ -70,14 +70,13 @@ class LivePlayerSceneTest {
                 s.app.fullPlayer = true
             }
             engine.emit(EngineEvent.StreamTitle(engine.queue.single().id, song(s.server.address), ""))
+            s.waitFor { s.app.liveHeart.match != null }
             s.render(6)
             var names = s.nodes(merged = true).map { it.name() }
             listOf("Live", "Stop", "Next station", "Previous station", "Heart Petal by Ariana Grande", "Petal", "Ariana Grande · 102.7 KIIS FM").forEach {
                 assertTrue("shows $it", names.contains(it))
             }
             listOf("Song position", "Shuffle", "Repeat", "Lyrics").forEach { assertFalse("no $it", names.contains(it)) }
-            s.waitFor { s.app.liveHeart.match != null }
-            s.render(6)
             shot(s, "live-player-song")
 
             // A spot: the station, its tagline, and no heart.
@@ -86,7 +85,7 @@ class LivePlayerSceneTest {
             names = s.nodes(merged = true).map { it.name() }
             assertTrue(names.contains("102.7 KIIS FM"))
             assertTrue(names.contains("LA's #1 Hit Music Station"))
-            assertFalse(names.any { it.startsWith("Heart ") })
+            assertFalse(names.any { it.startsWith("Heart ") || it.endsWith("Petal by Ariana Grande to your library") || it == "Search for Petal by Ariana Grande" })
             shot(s, "live-player-station")
 
             // The stations being surfed, the one playing marked.

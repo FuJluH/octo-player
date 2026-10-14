@@ -67,13 +67,13 @@ fun AppState.playServerStation(station: RadioStationDetails, stations: List<Radi
 // details, the logo, and the server's picture.
 fun ShelfStation.radioId(): String {
     val details = kept?.radioDetails() ?: RadioDetails()
-    return radioId(streamUrl, name, kept?.hls == true, details.copy(logo = details.logo.ifBlank { logo }, coverArt = coverArt.orEmpty()))
+    return radioId(streamUrl, name, kept?.hls == true, details.copy(logo = details.logo.ifBlank { logo }, coverArt = coverArt.orEmpty(), homepage = details.homepage.ifBlank { homepage }))
 }
 
 fun RadioStationDetails.radioId(): String =
     radioId(streamUrl, name.ifBlank { streamUrl }, details = RadioDetails(coverArt = coverArt.orEmpty(), homepage = homePageUrl.orEmpty()))
 
-fun RadioStation.radioId(): String = radioId(streamUrl, name.ifBlank { streamUrl }, details = RadioDetails(coverArt = coverArt.orEmpty()))
+fun RadioStation.radioId(): String = radioId(streamUrl, name.ifBlank { streamUrl }, details = RadioDetails(coverArt = coverArt.orEmpty(), homepage = homePageUrl.orEmpty()))
 
 // The catalog station a station id stands for, as it would be kept: by its
 // catalog id, so only a station from the catalog can be.
@@ -93,6 +93,7 @@ fun liveStationOf(id: String): LiveStation? {
         countryCode = details.countryCode,
         state = details.state,
         tags = details.tags,
+        homepage = details.homepage,
     )
 }
 

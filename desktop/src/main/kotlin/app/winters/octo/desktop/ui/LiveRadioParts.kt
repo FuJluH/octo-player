@@ -53,6 +53,8 @@ import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import coil3.compose.LocalPlatformContext
 import coil3.request.ImageRequest
+import coil3.request.crossfade
+import app.winters.octo.design.LocalReduceMotion
 import kotlin.math.abs
 
 // Whether a logo address is one the app fetches: a web address.
@@ -117,8 +119,10 @@ fun LiveArt(
         }
         val client = LocalCovers.current
         val context = LocalPlatformContext.current
+        // Each picture fades in over the one under it, unless motion is reduced.
+        val still = LocalReduceMotion.current
         if (coverArt != null && client != null && !covered && !logoShown) {
-            val request = remember(coverArt, px, client) { coverRequest(context, client, coverArt, coverBucket(coverFetchPx(px))).build() }
+            val request = remember(coverArt, px, client, still) { coverRequest(context, client, coverArt, coverBucket(coverFetchPx(px))).crossfade(!still).build() }
             AsyncImage(
                 model = request,
                 contentDescription = null,
@@ -151,7 +155,7 @@ fun LiveArt(
             )
         }
         if (songCover != null && client != null) {
-            val request = remember(songCover, px, client, songOnline) { coverRequest(context, client, songCover, coverBucket(coverFetchPx(px)), songOnline).build() }
+            val request = remember(songCover, px, client, songOnline, still) { coverRequest(context, client, songCover, coverBucket(coverFetchPx(px)), songOnline).crossfade(!still).build() }
             AsyncImage(
                 model = request,
                 contentDescription = null,
@@ -185,8 +189,10 @@ private fun DesignedStation(app: AppState, name: String, streamUrl: String, px: 
 
 // A picture from the web, decoded no bigger than it is drawn.
 @Composable
-private fun webRequest(context: PlatformContext, url: String, px: Int): ImageRequest =
-    remember(url, px) { ImageRequest.Builder(context).data(url).size(coverFetchPx(px).coerceAtLeast(1)).build() }
+private fun webRequest(context: PlatformContext, url: String, px: Int): ImageRequest {
+    val still = LocalReduceMotion.current
+    return remember(url, px, still) { ImageRequest.Builder(context).data(url).size(coverFetchPx(px).coerceAtLeast(1)).crossfade(!still).build() }
+}
 
 // The tile a drawn logo sits on: the station's color, darker toward the foot.
 private fun drawnGround(hue: Float): Brush = Brush.verticalGradient(

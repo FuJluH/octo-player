@@ -150,6 +150,7 @@ data class ShelfStation(
     val coverArt: String? = null,
     val serverId: String? = null,
     val kept: LiveStation? = null,
+    val homepage: String = "",
 )
 
 // Whether a station from the server is one of Octo's own (songs it lines
@@ -167,7 +168,7 @@ fun liveShelf(server: List<RadioStation>, kept: List<LiveStation>): List<ShelfSt
     val seen = HashSet<String>()
     val fromServer = server.filter { it.streamUrl.isNotBlank() && seen.add(streamKey(it.streamUrl)) }.map { station ->
         val mine = byStream[streamKey(station.streamUrl)]
-        ShelfStation(station.name.ifBlank { station.streamUrl }, station.streamUrl, mine?.favicon.orEmpty(), station.coverArt, station.id, mine)
+        ShelfStation(station.name.ifBlank { station.streamUrl }, station.streamUrl, mine?.favicon.orEmpty(), station.coverArt, station.id, mine, station.homePageUrl.orEmpty())
     }
     val fromHere = kept.filter { seen.add(streamKey(it.streamUrl)) }.map { ShelfStation(it.name, it.streamUrl, it.favicon, kept = it) }
     return fromServer + fromHere

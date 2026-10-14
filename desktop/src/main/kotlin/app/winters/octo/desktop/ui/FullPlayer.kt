@@ -181,7 +181,7 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
         // The panel toggles and the way out.
         Row(Modifier.align(Alignment.TopEnd).padding(top = top + 4.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             if (live != null) {
-                IconAction(OctoIcons.Queue, "Stations", { app.togglePlayerPanel(SidePanel.Queue) }, size = 36.dp, iconSize = 20.dp, active = app.playerPanel == SidePanel.Queue, tint = ink)
+                if (state.queue.size > 1) IconAction(OctoIcons.Queue, "Stations", { app.togglePlayerPanel(SidePanel.Queue) }, size = 36.dp, iconSize = 20.dp, active = app.playerPanel == SidePanel.Queue, tint = ink)
                 LiveMoreButton(app, live, state.current?.song?.id.orEmpty(), ink)
             } else {
                 if (app.playerPanel == SidePanel.Lyrics) LyricsMenuButton(app, tint = ink)
@@ -315,15 +315,16 @@ private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Col
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun LivePlayerLines(app: AppState, song: Song, state: PlayerState, live: LiveNow, ink: Color, muted: Color) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    // The button sits on the title's line.
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
         Column(Modifier.weight(1f)) {
             Txt(song.title, OctoType.headline, ink, maxLines = 2)
             Txt(live.shown.subtitle, OctoType.body, muted, Modifier.heightIn(min = Focus.MinTarget), maxLines = 2)
         }
-        LiveHeartButton(app, live, 40.dp, 22.dp, ink)
+        OnTitleLine(OctoType.headline) { OnAirButton(app, live, 40.dp, 22.dp, ink) }
     }
     Spacer(Modifier.height(14.dp))
-    LiveLine(app, ink, muted, Modifier.fillMaxWidth().heightIn(min = 24.dp))
+    LiveLine(app, ink, muted, Modifier.fillMaxWidth(), stacked = true)
     Spacer(Modifier.height(16.dp))
     LiveTransport(app, state, live, playSize = 68.dp, stepSize = 48.dp, stepIcon = 30.dp, tint = ink, gap = 14.dp)
     Spacer(Modifier.height(10.dp))

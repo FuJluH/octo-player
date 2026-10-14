@@ -4,7 +4,10 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import app.winters.octo.desktop.search.FetchPhase
 import app.winters.octo.liveradio.HeartCandidate
+import app.winters.octo.liveradio.LiveSongButton
+import app.winters.octo.liveradio.liveSongButton
 import app.winters.octo.liveradio.OnAir
 import app.winters.octo.liveradio.heartMatch
 import app.winters.octo.liveradio.heartQuery
@@ -32,19 +35,24 @@ sealed interface HeartPhase {
 // The song a station has on air, found in Octo: one search each time the
 // song changes (a song heard before is not searched again), and the one
 // result that is surely it, library first. Its cover is the player's cover
-// for the song, and the heart stars it: a song found online is starred the
-// way any is, which has Octo download it. With no sure match nothing is
-// starred, and `missed` offers the search instead. The heart starts empty
-// again when the song on air changes, and an answer that comes back after
-// it changed is kept for that song only.
+// for the song, and the button beside the song acts on it: a song in the
+// library is hearted (`star`), one found online is added (`add`, which has
+// Octo download it), and with no sure match nothing is starred: `missed`
+// opens the search instead. A press while the search runs waits for its
+// answer. The button starts afresh when the song on air changes, and an
+// answer that comes back after it changed is kept for that song only.
 @Stable
 class LiveHeart(
     private val scope: CoroutineScope,
     // The search; null with no server to ask.
     private val find: suspend (String) -> List<FoundSong>?,
     private val star: (Song, Boolean) -> Unit,
-    // No sure match: the song on air and the search to offer.
+    // No sure match: the song on air and the search to open.
     private val missed: (OnAir, String) -> Unit,
+    // Brings a song found online into the library.
+    private val add: (Song) -> Unit = { star(it, true) },
+    // Whether a song asked for has landed in the library.
+    private val landed: (Song) -> Boolean = { false },
 ) {
     // The song on air the heart is for, and where it is.
     var onAir by mutableStateOf(OnAir.Nothing)
@@ -118,12 +126,20 @@ class LiveHeart(
         }
     }
 
-    // A press: stars the song on air, or takes back the star it gave.
-    fun press() {
+    // A press: hearts or adds the song on air, or takes back a heart
+    // (`starredNow`: the library's song is a favorite already).
+    fun press(starredNow: Boolean = false) {
         if (!shows) return
+        val found = match
+        if (phase == HeartPhase.Idle && answered && found != null && found.inLibrary && starredNow) {
+            star(found.song, false)
+            return
+        }
         when (val was = phase) {
             HeartPhase.Looking -> return
             is HeartPhase.Starred -> {
+                // A song on its way into the library waits there.
+                if (match?.inLibrary != true && !landed(was.song)) return
                 star(was.song, false)
                 phase = HeartPhase.Idle
                 return
@@ -137,13 +153,30 @@ class LiveHeart(
         if (job?.isActive != true) lookUp(onAir)
     }
 
+    // The button beside the song on air: the heart, the add button, the
+    // plus that searches, or none. `fetch` is how the match's download goes,
+    // `starredNow` whether the library has it as a favorite.
+    fun button(fetch: FetchPhase, starredNow: Boolean): LiveSongButton {
+        val found = match
+        val asked = phase is HeartPhase.Starred
+        val inFlight = fetch == FetchPhase.Queued || fetch is FetchPhase.Downloading || fetch == FetchPhase.Adding
+        return liveSongButton(
+            onAir,
+            found?.let { HeartCandidate(it.song.id, it.song.title, (it.song.displayArtist ?: it.song.artist).orEmpty(), it.inLibrary) },
+            looked,
+            starred = starredNow || asked,
+            inLibrary = fetch == FetchPhase.Done,
+            adding = inFlight || (asked && found?.inLibrary == false),
+        )
+    }
+
     private fun settle() {
         val pick = match
         if (pick == null) {
             phase = HeartPhase.Idle
             missed(onAir, heartQuery(onAir))
         } else {
-            star(pick.song, true)
+            if (pick.inLibrary) star(pick.song, true) else add(pick.song)
             phase = HeartPhase.Starred(pick.song)
         }
     }
@@ -156,10 +189,3 @@ class LiveHeart(
         const val KEPT_ANSWERS = 64
     }
 }
-
-// The heart's words for a screen reader: "Heart Petal by Ariana Grande".
-fun heartLabel(onAir: OnAir): String = "Heart " + listOf(onAir.title, onAir.artist).filter(String::isNotBlank).joinToString(" by ")
-
-// What the notice says when no song is surely the one on air.
-fun heartMissedLine(onAir: OnAir): String =
-    "Couldn't find " + listOf(onAir.title, onAir.artist).filter(String::isNotBlank).joinToString(" by ") + " in Octo for sure."

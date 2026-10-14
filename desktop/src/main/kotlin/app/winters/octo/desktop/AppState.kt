@@ -59,7 +59,10 @@ import app.winters.octo.desktop.search.SearchModel
 import app.winters.octo.desktop.search.SearchFilter
 import app.winters.octo.desktop.liveradio.FoundSong
 import app.winters.octo.desktop.liveradio.LiveHeart
-import app.winters.octo.desktop.liveradio.heartMissedLine
+import app.winters.octo.desktop.search.FetchPhase
+import app.winters.octo.ui.family.outsideActions
+import app.winters.octo.playback.stoppedLine
+import app.winters.octo.playback.isRadio
 import app.winters.octo.desktop.server.Accounts
 import app.winters.octo.desktop.server.Connection
 import app.winters.octo.desktop.server.ServerFactsModel
@@ -222,11 +225,15 @@ class AppState(
     val liveHeart = LiveHeart(
         scope,
         find = { query -> search?.search(query, SearchFilter.Songs)?.let { found -> found.library.songs.map { FoundSong(it, true) } + found.outside.songs.map { FoundSong(it, false) } } },
-        star = { song, on -> setStarred(listOf(song), on) },
-        missed = { onAir, query ->
-            val line = heartMissedLine(onAir)
-            passingNotice(line, NoticeAction(line, "Search") { searchFor(query) })
+        star = { song, on -> setStarred(listOf(fetches?.landedId(song.id)?.let { id -> song.copy(id = id) } ?: song), on) },
+        missed = { _, query -> searchFor(query) },
+        // Octo downloads a song found online once asked; a family member
+        // who saves songs saves it instead.
+        add = { song ->
+            val fetching = fetches
+            if (fetching != null && outsideActions(family.me).addLabel == null) fetching.request(song.id) else setStarred(listOf(song), true)
         },
+        landed = { song -> fetches?.phase(song.id) == FetchPhase.Done },
     )
 
     // Family, on an Octo server with it on: the account's abilities, which song actions and
@@ -456,7 +463,12 @@ class AppState(
                 if (problem == null) return@collect
                 val song = problem.song
                 if (song != null) failedSongs[song.id] = problem.words
-                notice = if (song != null) skippedLine(song.title, problem.words) else problem.words
+                // A station that fails stops there; a song is skipped.
+                notice = when {
+                    song == null -> problem.words
+                    isRadio(song.id) -> stoppedLine(song.title, problem.words)
+                    else -> skippedLine(song.title, problem.words)
+                }
                 noticeDetail = problem.detail
             }
         }
