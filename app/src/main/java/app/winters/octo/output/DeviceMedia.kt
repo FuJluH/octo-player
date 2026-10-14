@@ -15,6 +15,7 @@ import app.winters.octo.playback.artworkBitmap
 import app.winters.octo.playback.artworkRef
 import app.winters.octo.playback.entryId
 import app.winters.octo.playback.extra
+import app.winters.octo.playback.stationArtOf
 import app.winters.octo.playback.streamUri
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -126,7 +127,8 @@ class DeviceMedia @Inject constructor(
     // A cover for the device's screen: the server's own address for a
     // server cover it can reach, otherwise a small copy the phone serves.
     private suspend fun coverFor(key: String, ref: String?): String? {
-        val art = ArtworkRef.decode(ref) ?: return null
+        val art = ArtworkRef.decode(ref)
+        if (art == null && stationArtOf(ref) == null) return null
         if (art is ArtworkRef.Server && security.reachableByOtherDevices()) {
             streams.client()?.let { return it.coverArtUrl(art.coverId, COVER_PX).toString() }
         }

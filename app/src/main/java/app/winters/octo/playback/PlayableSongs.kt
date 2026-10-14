@@ -60,7 +60,7 @@ class PlayableSongs @Inject constructor(
         val prefs = if (finds.isEmpty()) StreamPrefs() else streams.prefs()
         return ids.map { id ->
             // A radio station plays from the address in its id.
-            if (isRadio(id)) return@map radioItem(id)
+            if (isRadio(id)) return@map radioItem(id, streams.currentSourceId())
             // So does a file opened from another app, while Octo may read it.
             if (isOpenedFile(id)) return@map openedFileItem(context, id)
             val find = finds[id] ?: return@map library[id]

@@ -30,11 +30,12 @@ import app.winters.octo.home.shows
 import app.winters.octo.home.answered
 import app.winters.octo.listening.PlayHistory
 import app.winters.octo.liveradio.KeptStations
+import app.winters.octo.liveradio.LiveShelfEntry
 import app.winters.octo.liveradio.LiveRadioStore
 import app.winters.octo.liveradio.LiveStation
 import app.winters.octo.liveradio.RadioBrowser
+import app.winters.octo.liveradio.radioId
 import app.winters.octo.playback.PlaybackConnection
-import app.winters.octo.playback.radioId
 import app.winters.octo.server.ServerSync
 import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.ui.common.Feedback
@@ -260,12 +261,10 @@ class HomeViewModel @Inject constructor(
 
     // Plays what a station has lined up today, or an added station's stream.
     // Taps while one is on the way are ignored.
-    // `hls` when the stream is known to be HLS (the same stream kept on the
-    // phone says so).
-    fun playStation(station: Station, hls: Boolean = false) {
+    fun playStation(station: Station) {
         if (startingStation != null) return
         if (station.streamUrl != null) {
-            playback.playTracks(listOf(radioId(station.streamUrl, station.name, hls)))
+            playback.playTracks(listOf(station.radioId()))
             return
         }
         startingStation = station.id
@@ -294,11 +293,13 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    // A station kept on this phone plays its stream, and the catalog hears
-    // it was started.
-    fun playKept(station: LiveStation) {
-        playback.playTracks(listOf(radioId(station.streamUrl, station.name, station.hls)), source = station.name)
-        viewModelScope.launch { radioCatalog.started(station.uuid) }
+    // A station on the Live radio shelf plays its stream; for one kept on
+    // this phone, the catalog hears it was started.
+    fun playLive(entries: List<LiveShelfEntry>, index: Int) {
+        val entry = entries.getOrNull(index) ?: return
+        playback.playTracks(listOf(entry.radioId()), source = (entry as? LiveShelfEntry.Kept)?.station?.name)
+        val uuid = (entry as? LiveShelfEntry.Kept)?.station?.uuid ?: (entry as? LiveShelfEntry.Server)?.kept?.uuid
+        if (uuid != null) viewModelScope.launch { radioCatalog.started(uuid) }
     }
 
     fun removeKept(station: LiveStation) {

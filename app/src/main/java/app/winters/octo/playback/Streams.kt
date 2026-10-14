@@ -233,7 +233,7 @@ class Streams @Inject constructor(
 
     private fun isStream(uri: Uri): Boolean = uri.scheme == STREAM_SCHEME
 
-    private fun currentSourceId(): String? = (sessions.state.value as? SessionState.SignedIn)?.session?.sourceId
+    fun currentSourceId(): String? = (sessions.state.value as? SessionState.SignedIn)?.session?.sourceId
 
     // Whether a song is another kept server's than the one in use.
     private fun fromAnotherServer(ref: StreamRef, inUse: String?): Boolean {

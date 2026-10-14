@@ -1,59 +1,86 @@
 package app.winters.octo.playback
 
+import android.os.Bundle
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
+import app.winters.octo.liveradio.LiveShown
+import app.winters.octo.liveradio.liveShown
 
-// What a station shows while its stream names no song.
-const val RADIO_ARTIST = "Radio"
+// Where a station's item keeps what its stream named last (its ICY
+// StreamTitle, and the StreamUrl or StreamArtwork sent with it), so every
+// screen reads the song on air the same way.
+const val EXTRA_STREAM_TITLE = "app.winters.octo.streamTitle"
+const val EXTRA_STREAM_URL = "app.winters.octo.streamUrl"
 
-// A station, ready to play, from its radio id.
-internal fun radioItem(id: String): MediaItem? {
-    val (stream, name) = radioOf(id) ?: return null
+// What a station's stream named last.
+data class IcyRead(val streamTitle: String?, val streamUrl: String?)
+
+// What a station shows: its two lines (the song on air over "Artist ·
+// Station", or the station's name over its tagline or where it is) and its
+// cover as an artwork reference (see StationArt).
+data class LiveLines(val title: String, val subtitle: String, val artwork: String, val shown: LiveShown)
+
+// The lines a station's item shows for what its stream named last; `art`
+// is the cover it shows now, whose station pictures are kept.
+fun liveLines(id: String, read: IcyRead?, art: StationArt? = null): LiveLines? {
+    val shown = liveShown(id, read?.streamTitle, read?.streamUrl) ?: return null
+    val base = art ?: stationArt(id) ?: return null
+    val cover = base.copy(artwork = shown.onAir.artwork.trim())
+    return LiveLines(shown.title.take(RADIO_TITLE_MAX), shown.subtitle.take(RADIO_TITLE_MAX), cover.encode(), shown)
+}
+
+private const val RADIO_TITLE_MAX = 200
+
+// A station, ready to play, from its radio id. A server cover in its
+// details is one on the server `sourceId`.
+internal fun radioItem(id: String, sourceId: String? = null): MediaItem? {
+    val (stream, _) = radioOf(id) ?: return null
+    val lines = liveLines(id, null, stationArt(id, sourceId = sourceId)) ?: return null
     return MediaItem.Builder()
         .setMediaId(id)
         .setUri(stream)
         .apply { if (radioIsHls(id)) setMimeType(MimeTypes.APPLICATION_M3U8) }
         .setMediaMetadata(
             MediaMetadata.Builder()
-                .setTitle(name.ifEmpty { stream })
-                .setArtist(RADIO_ARTIST)
                 .setIsPlayable(true)
                 .setIsBrowsable(false)
                 .setMediaType(MediaMetadata.MEDIA_TYPE_RADIO_STATION)
+                .withLines(lines, null, null)
                 .build(),
         )
         .build()
 }
 
-// The two lines a station shows: the song its stream names (ICY
-// StreamTitle) over the station's name, or, while it names none, the
-// station's name over "Radio". A title that is only the station's own name,
-// or only punctuation, names no song.
-data class RadioLines(val title: String, val artist: String)
+private fun MediaMetadata.Builder.withLines(lines: LiveLines, read: IcyRead?, extras: Bundle?): MediaMetadata.Builder =
+    setTitle(lines.title)
+        .setArtist(lines.subtitle)
+        .setStation(lines.shown.station)
+        .setArtworkUri(artworkUri(lines.artwork))
+        .setExtras(
+            Bundle(extras ?: Bundle.EMPTY).apply {
+                putString(EXTRA_ARTWORK, lines.artwork)
+                putString(EXTRA_STREAM_TITLE, read?.streamTitle)
+                putString(EXTRA_STREAM_URL, read?.streamUrl)
+            },
+        )
 
-fun radioLines(streamTitle: String?, stationName: String, streamUrl: String = ""): RadioLines {
-    val station = stationName.trim()
-    val song = streamTitle?.trim()?.take(RADIO_TITLE_MAX)?.trim()
-        ?.takeIf { title -> title.any { it.isLetterOrDigit() } && !title.equals(station, ignoreCase = true) }
-    return if (song == null) {
-        RadioLines(station.ifEmpty { streamUrl }, RADIO_ARTIST)
-    } else {
-        RadioLines(song, station.ifEmpty { RADIO_ARTIST })
-    }
+// What the item's stream named last, as kept in it.
+fun MediaMetadata.icyRead(): IcyRead? {
+    val extras = extras ?: return null
+    val title = extras.getString(EXTRA_STREAM_TITLE)
+    val url = extras.getString(EXTRA_STREAM_URL)
+    return if (title == null && url == null) null else IcyRead(title, url)
 }
 
-private const val RADIO_TITLE_MAX = 200
-
-// A station in the queue with its two lines as the stream names them now,
-// or null when they are already shown.
-internal fun MediaItem.withRadioLines(streamTitle: String?): MediaItem? {
-    val (stream, name) = radioOf(mediaId) ?: return null
-    val lines = radioLines(streamTitle, name, stream)
+// A station in the queue with its lines and cover as the stream names them
+// now, or null when they are already shown.
+internal fun MediaItem.withOnAir(read: IcyRead): MediaItem? {
     val meta = mediaMetadata
-    if (meta.title?.toString() == lines.title && meta.artist?.toString() == lines.artist) return null
-    return buildUpon().setMediaMetadata(meta.buildUpon().setTitle(lines.title).setArtist(lines.artist).build()).build()
+    val lines = liveLines(mediaId, read, stationArtOf(meta.artworkRef())) ?: return null
+    if (meta.title?.toString() == lines.title && meta.artist?.toString() == lines.subtitle && meta.artworkRef() == lines.artwork) return null
+    return buildUpon().setMediaMetadata(meta.buildUpon().withLines(lines, read, meta.extras).build()).build()
 }
 
 // How long a station waits before opening its stream again after it
@@ -66,4 +93,3 @@ fun radioRetryDelayMs(errorCount: Int, lasting: Boolean): Long =
 // How many times in a row a station's stream is opened again before the
 // player gives up on it.
 const val RADIO_RETRIES = 4
-

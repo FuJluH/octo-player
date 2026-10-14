@@ -51,7 +51,7 @@ import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.discovery.Discovery
 import app.winters.octo.playback.PlaybackConnection
-import app.winters.octo.playback.radioId
+import app.winters.octo.liveradio.radioId
 import app.winters.octo.server.ServerControls
 import app.winters.octo.subsonic.RadioStationDetails
 import app.winters.octo.subsonic.SubsonicException
@@ -183,7 +183,7 @@ class RadioStationsViewModel @Inject constructor(
     fun play(station: RadioStationDetails) {
         if (starting != null) return
         if (station.id !in readOnly.value) {
-            if (station.streamUrl.isNotBlank()) playback.playTracks(listOf(radioId(station.streamUrl, station.name)))
+            if (station.streamUrl.isNotBlank()) playback.playTracks(listOf(station.radioId()))
             return
         }
         starting = station.id
@@ -193,7 +193,7 @@ class RadioStationsViewModel @Inject constructor(
                 if (songs.isNotEmpty()) {
                     playback.playTracks(songs.map { it.id })
                 } else if (station.streamUrl.isNotBlank()) {
-                    playback.playTracks(listOf(radioId(station.streamUrl, station.name)))
+                    playback.playTracks(listOf(station.radioId()))
                 }
             } catch (e: CancellationException) {
                 throw e

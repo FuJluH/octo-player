@@ -29,7 +29,7 @@ class OnAirTest {
         val air = read(kiisSong, "102.7 KIIS FM")
         assertEquals("Petal", air.title)
         assertEquals("Ariana Grande", air.artist)
-        assertEquals("https://i.iheart.com/v3/catalog/track/421089822?ops=fit(200,200),format(%22jpeg%22)", air.artwork)
+        assertEquals("https://i.iheart.com/v3/catalog/track/421089822?ops=fit(600,600),format(%22jpeg%22)", air.artwork)
         assertEquals(OnAir("Lush Life", "Zara Larsson", "http://image.iheart.com/ihr-ingestion-pipeline-production-sbmg/A10301A00036327915_20190402040656160/45785635.20126.jpg"), read(kiisLushLife, "102.7 KIIS FM"))
     }
 
@@ -110,5 +110,13 @@ class OnAirTest {
         assertEquals(mapOf("StreamTitle" to "A - B", "StreamUrl" to "", "StreamArtwork" to ""), fields)
         assertEquals(emptyMap<String, String>(), icyFields(""))
         assertEquals(null, icyArtworkField(fields))
+    }
+
+    @Test
+    fun iHeartArtworkIsAskedForAtThePlayersSize() {
+        assertEquals("https://i.iheart.com/v3/catalog/track/1?ops=fit(600,600),format(%22jpeg%22)", sharperArtwork("https://i.iheart.com/v3/catalog/track/1?ops=fit(200,200),format(%22jpeg%22)"))
+        assertEquals("https://i.iheart.com/x?ops=fit(1000,1000)", sharperArtwork("https://i.iheart.com/x?ops=fit(1000,1000)"))
+        assertEquals("https://cdn.example/fit(200,200).jpg", sharperArtwork("https://cdn.example/fit(200,200).jpg"))
+        assertEquals("http://image.iheart.com/a/b.jpg", sharperArtwork("http://image.iheart.com/a/b.jpg"))
     }
 }

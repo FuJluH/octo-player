@@ -1,5 +1,7 @@
 package app.winters.octo.playback
 
+import androidx.media3.common.Metadata
+import androidx.media3.extractor.metadata.icy.IcyInfo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -9,24 +11,102 @@ import org.junit.Test
 // A station as the phone's player shows and opens it: the song its stream
 // names, which loader opens it, and how it is opened again after a drop.
 class RadioItemsTest {
+    // Blocks KIIS FM 102.7 sent on 2026-10-13, as the player hands them over.
+    private val kiisSong = "StreamTitle='Ariana Grande - text=\"Petal\" song_spot=\"M\" MediaBaseId=\"3246947\" itunesTrackId=\"0\" " +
+        "amgTrackId=\"-1\" amgArtistId=\"0\" TAID=\"0\" TPID=\"421089822\" cartcutId=\"0447960001\" " +
+        "amgArtworkURL=\"https://i.iheart.com/v3/catalog/track/421089822?ops=fit(200,200),format(%22jpeg%22)\" " +
+        "length=\"00:02:59\" unsID=\"-1\" spotInstanceId=\"-1\"';"
+    private val kiisSpot = "StreamTitle='LA's #1 Hit Music Station - text=\"102.7 KIIS FM\" song_spot=\"T\" MediaBaseId=\"0\" " +
+        "itunesTrackId=\"0\" amgTrackId=\"0\" amgArtistId=\"0\" TAID=\"0\" TPID=\"0\" cartcutId=\"0\" amgArtworkURL=\"\" " +
+        "length=\"00:00:00\" unsID=\"0\" spotInstanceId=\"-1\"';"
+    private val kiis = radioId(
+        "https://stream.revma.ihrhls.com/zc185",
+        "102.7 KIIS FM",
+        details = RadioDetails(logo = "https://cdn.example/kiis.png", country = "The United States Of America", state = "California", tags = listOf("pop")),
+    )
+
+    // What the player's ICY reader makes of a block: its own title cut at
+    // the first "';" it sees, the raw bytes alongside.
+    private fun icy(block: String): Metadata =
+        Metadata(IcyInfo(block.toByteArray(Charsets.UTF_8), block.substringAfter("StreamTitle='").substringBefore("';"), null))
+
     @Test
-    fun theStreamsSongGoesOverTheStationsName() {
-        assertEquals(RadioLines("Nina Simone - Feeling Good", "KEXP"), radioLines("  Nina Simone - Feeling Good ", "KEXP"))
+    fun theKiisSongShowsItsTitleArtistAndArtwork() {
+        val read = icyReadOf(icy(kiisSong))!!
+        val lines = liveLines(kiis, read)!!
+        assertEquals("Petal", lines.title)
+        assertEquals("Ariana Grande · 102.7 KIIS FM", lines.subtitle)
+        assertEquals("Ariana Grande", lines.shown.onAir.artist)
+        val art = stationArtOf(lines.artwork)!!
+        assertEquals("https://i.iheart.com/v3/catalog/track/421089822?ops=fit(600,600),format(%22jpeg%22)", art.artwork)
+        // The station's logo stays under it.
+        assertEquals(listOf("https://cdn.example/kiis.png"), art.logos)
+        assertEquals("102.7 KIIS FM", art.name)
     }
 
     @Test
-    fun withNoSongTheStationShowsOverRadio() {
-        listOf(null, "", "   ", " - ", "KEXP", "kexp").forEach {
-            assertEquals("$it", RadioLines("KEXP", RADIO_ARTIST), radioLines(it, "KEXP"))
-        }
-        // A station with no name shows its address.
-        assertEquals(RadioLines("http://host/live", RADIO_ARTIST), radioLines(null, "", "http://host/live"))
-        assertEquals(RadioLines("Song", RADIO_ARTIST), radioLines("Song", ""))
+    fun theKiisSpotShowsTheStationWithItsTagline() {
+        val lines = liveLines(kiis, icyReadOf(icy(kiisSpot)))!!
+        assertEquals("102.7 KIIS FM", lines.title)
+        assertEquals("LA's #1 Hit Music Station", lines.subtitle)
+        assertEquals("", stationArtOf(lines.artwork)!!.artwork)
+    }
+
+    @Test
+    fun withNothingNamedTheStationShowsWhereItIs() {
+        val lines = liveLines(kiis, null)!!
+        assertEquals("102.7 KIIS FM", lines.title)
+        assertEquals("California, The United States Of America · Pop", lines.subtitle)
+        // A station with nothing known about it says it is live radio, and
+        // one with no name shows its address.
+        assertEquals("Live radio", liveLines(radioId("http://host/live", "KEXP"), IcyRead("KEXP", null))!!.subtitle)
+        assertEquals("http://host/live", liveLines(radioId("http://host/live", ""), null)!!.title)
+        assertNull(liveLines("device:12", null))
+    }
+
+    @Test
+    fun aPlainTitleSplitsIntoSongAndArtist() {
+        val lines = liveLines(radioId("http://s/live.mp3", "KEXP"), icyReadOf(icy("StreamTitle='Nina Simone - Feeling Good';")))!!
+        assertEquals("Feeling Good", lines.title)
+        assertEquals("Nina Simone · KEXP", lines.subtitle)
     }
 
     @Test
     fun aVeryLongTitleIsCut() {
-        assertEquals(200, radioLines("x".repeat(500), "KEXP").title.length)
+        assertEquals(200, liveLines(radioId("http://s/live.mp3", "KEXP"), IcyRead("x".repeat(500), null))!!.title.length)
+    }
+
+    @Test
+    fun theBlockIsReadFromItsRawBytesWithTheTitleAsFallback() {
+        // Quotes inside a value stay in it, which the player's own title loses.
+        assertEquals(IcyRead("Riccardo Garzoni - Dick's Boogie", null), icyReadOf(icy("StreamTitle='Riccardo Garzoni - Dick's Boogie';")))
+        assertEquals(
+            IcyRead("Portugal. The Man - Angoon", "http://img.radioparadise.com/covers/l/24684.jpg"),
+            icyReadOf("StreamTitle='Portugal. The Man - Angoon';StreamUrl='http://img.radioparadise.com/covers/l/24684.jpg';".toByteArray(), "x", null),
+        )
+        // Latin-1 bytes still read.
+        assertEquals("Khruangbin - Maria También", icyReadOf("StreamTitle='Khruangbin - Maria También';".toByteArray(Charsets.ISO_8859_1), null, null).streamTitle)
+        // No raw block: the player's title and address.
+        assertEquals(IcyRead("Khruangbin - Maria También", null), icyReadOf(Metadata(IcyInfo(byteArrayOf(), "Khruangbin - Maria También", null))))
+        assertEquals(IcyRead(null, "https://x"), icyReadOf(Metadata(IcyInfo(byteArrayOf(), null, "https://x"))))
+        assertNull(icyReadOf(Metadata()))
+    }
+
+    @Test
+    fun aStationsCoverCarriesItsPicturesInOrder() {
+        val art = StationArt("A|B FM", "key", "https://art/1.jpg?a=b|c", listOf("https://logo/2.png", "server:src|cover-1"))
+        assertEquals(art, stationArtOf(art.encode()))
+        assertNull(stationArtOf("server:src|cover"))
+        assertNull(stationArtOf(null))
+        // A server cover id in the details becomes a cover on the server in use.
+        val id = radioId("http://s/live", "One", details = RadioDetails(logo = "https://logo", coverArt = "ra-1"))
+        assertEquals(listOf("https://logo", "server:src-1|ra-1"), stationArt(id, sourceId = "src-1")!!.logos)
+        assertEquals(listOf("https://logo"), stationArt(id)!!.logos)
+        // A station with no pictures has only its drawn cover.
+        assertEquals(emptyList<String>(), stationArt(radioId("http://s/live", "Two"))!!.logos)
+        assertEquals("Live radio", stationArt(radioId("http://s/live", "Two"))!!.drawnSpec().line)
+        assertTrue(isWebPicture("HTTPS://x"))
+        assertFalse(isWebPicture("server:a|b"))
     }
 
     @Test
@@ -78,14 +158,5 @@ class RadioItemsTest {
         assertFalse(wordsOnly(items, listOf("radio:c:d" to "q:1")))
         assertFalse(wordsOnly(items, listOf("radio:a:b" to null)))
         assertFalse(wordsOnly(emptyList(), emptyList()))
-    }
-
-    @Test
-    fun theSongIsReadFromTheStreamsIcyMetadata() {
-        val icy = androidx.media3.extractor.metadata.icy.IcyInfo(byteArrayOf(), "Khruangbin - Maria También", null)
-        assertEquals(IcyTitle("Khruangbin - Maria También"), icyTitleOf(androidx.media3.common.Metadata(icy)))
-        // ICY metadata that names no song, and metadata that is not ICY at all.
-        assertEquals(IcyTitle(null), icyTitleOf(androidx.media3.common.Metadata(androidx.media3.extractor.metadata.icy.IcyInfo(byteArrayOf(), null, "https://x"))))
-        assertNull(icyTitleOf(androidx.media3.common.Metadata()))
     }
 }
