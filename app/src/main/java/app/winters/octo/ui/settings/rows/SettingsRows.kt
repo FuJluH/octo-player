@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -330,7 +331,7 @@ fun NoteRow(text: String, entry: SettingEntry? = null, color: Color = OctoColors
 
 // A way into a page: its icon, title, and one line on how it is set now.
 @Composable
-fun CategoryRow(@DrawableRes icon: Int, title: String, summary: String, onClick: () -> Unit) {
+fun CategoryRow(@DrawableRes icon: Int, title: String, summary: String, mark: String? = null, onClick: () -> Unit) {
     RowFrame(null, Modifier.clickable(role = Role.Button, onClick = onClick)) {
         IconTile(icon)
         Column(Modifier.weight(1f).padding(start = 4.dp)) {
@@ -338,6 +339,10 @@ fun CategoryRow(@DrawableRes icon: Int, title: String, summary: String, onClick:
             if (summary.isNotEmpty()) {
                 Text(summary, style = OctoType.caption, color = OctoColors.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
+        }
+        // A small dot when something waits on the page, `mark` saying what.
+        if (mark != null) {
+            Box(Modifier.size(8.dp).background(OctoColors.Accent, CircleShape).semantics { contentDescription = mark })
         }
         Icon(painterResource(OctoIcons.Chevron), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.size(20.dp))
     }

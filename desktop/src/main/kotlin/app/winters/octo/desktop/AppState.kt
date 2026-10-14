@@ -1,5 +1,9 @@
 package app.winters.octo.desktop
 
+import app.winters.octo.serverupdate.LaterStore
+import app.winters.octo.serverupdate.ServerUpdateHttp
+import app.winters.octo.serverupdate.ServerUpdateWatcher
+import app.winters.octo.serverupdate.ownAddresses
 import app.winters.octo.ui.family.streamParams as streamParamsFor
 import app.winters.octo.ui.family.appPicksQuality
 import app.winters.octo.subsonic.StreamQuality
@@ -144,6 +148,9 @@ class AppState(
     // The live radio catalog; tests give one at a pretend address.
     radioCatalog: RadioBrowser = RadioBrowser(catalogHttp(http), liveRadioAgent()),
 ) {
+    // Opens a web page in the listener's browser.
+    val openUrl: (String) -> Unit = browse
+
     // The Sound page's settings, kept on the engine; none for the silent player.
     val sound: SoundController? = (player as? SoundTarget)?.let { SoundController(it, settings, scope) }
 
@@ -232,6 +239,33 @@ class AppState(
     // How the kept servers answer, and the scan and user of the one in use,
     // for Settings > Servers.
     val serverFacts = ServerFactsModel(accounts, { connection }, scope)
+
+    // A newer Octo for the server in use, for its admin, and updating it.
+    // Once an update followed here is in, the server's facts are read again.
+    val serverUpdate = ServerUpdateWatcher(
+        scope,
+        object : LaterStore {
+            override suspend fun dismissed(server: String): String? = settings.current.serverUpdateLater[server]
+
+            override suspend fun dismiss(server: String, tag: String) {
+                settings.update { it.copy(serverUpdateLater = it.serverUpdateLater + (server to tag)) }
+            }
+        },
+        onFinished = { serverFacts.refresh() },
+    )
+
+    // Asked only at the server's own addresses, signed as every other call.
+    private val serverUpdateCalls = ServerUpdateHttp(http) { connection?.let { ownAddresses(it.client, it.headers) } }
+
+    private fun followServerUpdate(connection: Connection?) {
+        serverUpdate.bind(connection?.takeIf { it.isOcto }?.server?.id, serverUpdateCalls)
+    }
+
+    // Octo's dashboard on the server in use, for what the app leaves to it.
+    fun openDashboard() {
+        val base = connection?.client?.baseUrl ?: return
+        openUrl(base.newBuilder().encodedPath("/admin/").query(null).build().toString())
+    }
 
     // The user's playlists, for the sidebar and "Add to playlist".
     var playlists by mutableStateOf<List<Playlist>>(emptyList())
@@ -547,6 +581,7 @@ class AppState(
         family.forget()
         serverFacts.forget()
         liveRadio.forget()
+        followServerUpdate(connection)
         // The family decides what adding an outside song does and who picks
         // the stream quality, so it is read before the first song plays.
         if (connection.family) scope.launch { family.plan() }
@@ -635,6 +670,7 @@ class AppState(
             family.forget()
             serverFacts.forget()
             liveRadio.forget()
+            followServerUpdate(null)
             playlists = emptyList()
             fullPlayer = false
             navigator.startOver()

@@ -115,6 +115,8 @@ import app.winters.octo.ui.settings.DisconnectSheetHost
 import app.winters.octo.ui.settings.LocalDisconnectPrompt
 import app.winters.octo.ui.settings.SettingsPageScreen
 import app.winters.octo.ui.settings.SettingsScreen
+import app.winters.octo.ui.settings.SERVER_UPDATE_MARK
+import app.winters.octo.ui.settings.rememberServerUpdateDot
 import app.winters.octo.ui.signin.SignInScreen
 import app.winters.octo.ui.sound.SoundScreen
 import dev.chrisbanes.haze.hazeSource
@@ -229,6 +231,9 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
         onPauseOrDispose { }
     }
 
+    // A newer Octo for the server, marked on the Settings tab.
+    val serverUpdateWaits = rememberServerUpdateDot()
+
     val songMenu = remember { SongMenuState() }
     val playlistSheets = remember { PlaylistSheets() }
     val disconnectPrompt = remember { DisconnectPrompt() }
@@ -304,6 +309,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                         artModifier = Modifier.sharedElement(rememberSharedContentState(ArtKey), this),
                         artShape = RoundedCornerShape(percent = corner),
                         film = barFilm.value,
+                        marks = if (serverUpdateWaits) mapOf(stacks.lastIndex to SERVER_UPDATE_MARK) else emptyMap(),
                     )
                 }
                 // Songs on their way: a small pill above the bar, on the

@@ -100,6 +100,8 @@ data class AppSettings(
     // Live radio near you: where, how far and in what order, and the
     // stations kept here.
     val liveRadio: LiveRadioPrefs = LiveRadioPrefs(),
+    // The newest server release the listener chose Later for, by server id.
+    val serverUpdateLater: Map<String, String> = emptyMap(),
 )
 
 // The Live radio page as the listener left it: what they typed in Where

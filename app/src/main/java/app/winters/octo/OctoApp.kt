@@ -1,6 +1,7 @@
 package app.winters.octo
 
 import android.app.Application
+import app.winters.octo.admin.ServerUpdates
 import app.winters.octo.data.ServerDownloads
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.LibraryFiles
@@ -46,6 +47,7 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
     @Inject lateinit var serverDownloads: ServerDownloads
     @Inject lateinit var libraryFiles: LibraryFiles
     @Inject lateinit var family: FamilyHub
+    @Inject lateinit var serverUpdates: ServerUpdates
 
     override fun onCreate() {
         super.onCreate()
@@ -69,6 +71,8 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
         libraryFiles.start()
         // Family on the server in use, and its requests checked now and then.
         family.start()
+        // A newer Octo for the server in use, for its admin.
+        serverUpdates.start()
     }
 
     override fun newImageLoader(context: PlatformContext): ImageLoader {

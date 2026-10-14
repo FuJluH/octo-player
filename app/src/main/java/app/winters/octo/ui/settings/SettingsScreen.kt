@@ -313,7 +313,8 @@ private fun Categories(onOpen: (NavKey) -> Unit, vm: SettingsViewModel) {
     }
     SettingsGroup(title = "Your music", separatorInset = IconRowInset) {
         CategoryRow(OctoIcons.Library, SettingsPage.Library.title, librarySummary(access, songs, folders)) { open(SettingsPage.Library) }
-        CategoryRow(OctoIcons.Cloud, SettingsPage.Server.title, serverLine) { open(SettingsPage.Server) }
+        val updateWaits = rememberServerUpdateDot()
+        CategoryRow(OctoIcons.Cloud, SettingsPage.Server.title, serverLine, mark = if (updateWaits) SERVER_UPDATE_MARK else null) { open(SettingsPage.Server) }
         CategoryRow(OctoIcons.Download, SettingsPage.Streaming.title, streamingSummary(stream, offline)) { open(SettingsPage.Streaming) }
         CategoryRow(OctoIcons.AudioQuality, SettingsPage.AudioQuality.title, "At home, away, on Wi-Fi and on mobile data") { open(SettingsPage.AudioQuality) }
     }

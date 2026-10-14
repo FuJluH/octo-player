@@ -8,6 +8,7 @@ import app.winters.octo.data.Session
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
 import app.winters.octo.data.accountId
+import app.winters.octo.serverupdate.AdminPlace
 import app.winters.octo.subsonic.SubsonicClient
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -150,6 +151,19 @@ class OctoAdmin @Inject constructor(
             it.remove(ADDRESS)
         }
         return found
+    }
+
+    // Where the admin pages answered last, and for which kept server.
+    @Volatile private var lastPlace: Pair<String, HttpUrl>? = null
+
+    // Where to ask about updating the server, and how to sign the call.
+    // With `reuse`, the address found last is asked again without looking
+    // for it, as while the server restarts, when nothing answers anywhere.
+    suspend fun updatePlace(reuse: Boolean): AdminPlace? {
+        val session = session() ?: return null
+        val kept = lastPlace?.takeIf { it.first == session.id && trusted?.server == session.id }?.second
+        val base = if (reuse && kept != null) kept else locate()?.also { lastPlace = session.id to it } ?: return null
+        return AdminPlace(base, ::sign)
     }
 
     // Forgets where a server taken off the list had its admin pages.

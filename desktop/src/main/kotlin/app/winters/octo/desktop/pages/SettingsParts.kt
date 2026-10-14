@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
@@ -95,6 +96,8 @@ class PageSection(
     val detail: String? = null,
     val brand: Boolean = false,
     val trailing: (@Composable () -> Unit)? = null,
+    // What waits in the section, which puts a small dot by its name.
+    val mark: String? = null,
     val content: @Composable ColumnScope.() -> Unit,
 )
 
@@ -188,6 +191,9 @@ private fun SectionPick(section: PageSection, chosen: Boolean, onPick: () -> Uni
         Row(Modifier.padding(horizontal = Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M)) {
             section.icon?.let { SectionIcon(it, section.brand, IconSize.Toolbar, if (chosen) OctoColors.TextPrimary else OctoColors.TextSecondary) }
             Txt(section.name, DesktopType.body, if (chosen) OctoColors.TextPrimary else OctoColors.TextSecondary)
+            section.mark?.let { what ->
+                Box(Modifier.size(FrameSize.NavMark).background(OctoColors.Accent, CircleShape).semantics { contentDescription = what })
+            }
         }
     }
 }

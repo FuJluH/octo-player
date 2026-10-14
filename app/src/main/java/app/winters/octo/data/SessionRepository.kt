@@ -216,6 +216,29 @@ class SessionRepository @Inject constructor(
         }
     }
 
+    // Asks the server in use what it is again, after it changed: an update
+    // brings a new version, and can bring new extensions. What it does not
+    // say stays as it was.
+    suspend fun refreshServerFacts() {
+        val session = current ?: return
+        val info = runCatching { session.client.ping() }.getOrNull() ?: return
+        val fresh = runCatching { session.client.extensions() }.getOrNull()
+            ?.flatMap { ext -> ext.versions.map { "${ext.name}:$it" } }?.toSet()
+            ?.takeIf { it.isNotEmpty() } ?: session.extensions
+        changes.withLock {
+            // Only while the same session is still the one in use.
+            if (current !== session) return@withLock
+            val type = info.type ?: session.serverType
+            val version = info.serverVersion ?: session.serverVersion
+            _servers.value.find(session.id)?.let { saved ->
+                _servers.value = store.update { it.replacing(saved.copy(serverType = type, serverVersion = version, extensions = fresh)) }
+            }
+            _state.value = SessionState.SignedIn(
+                Session(session.client, type, version, session.isOcto, session.adminReachable, fresh, session.connection, session.id, session.label),
+            )
+        }
+    }
+
     private val current: Session? get() = (_state.value as? SessionState.SignedIn)?.session
 
     suspend fun signIn(address: String, username: String, password: String): SignInError? =
