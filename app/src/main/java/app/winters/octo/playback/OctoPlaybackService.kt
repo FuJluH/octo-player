@@ -397,7 +397,8 @@ class OctoPlaybackService : MediaLibraryService() {
         // The saved shuffle order, less any songs that are gone.
         restoredShuffle(saved.shuffleOrder, found)?.let(player::setPlayOrder)
         player.shuffleModeEnabled = saved.shuffle
-        player.prepare()
+        // A station waits unopened: Play joins it live.
+        if (items.getOrNull(index)?.mediaId?.let(::isRadio) != true) player.prepare()
         serverQueue.restored(snapshot())
     }
 
@@ -470,7 +471,27 @@ class OctoPlaybackService : MediaLibraryService() {
         // Songs that failed one after another, back to 0 once one plays.
         private var failedInARow = 0
 
+        // The item that was on, and where, for a station that ends.
+        private var lastId: String? = null
+        private var lastIndex = C.INDEX_UNSET
+
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            val endedStation = lastId?.takeIf(::isRadio)
+            val endedAt = lastIndex
+            lastId = mediaItem?.mediaId
+            lastIndex = player.currentMediaItemIndex
+            // A station's stream that ended for good stops on that station
+            // rather than moving on to the next one by itself.
+            if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO && endedStation != null && mediaItem != null && isRadio(mediaItem.mediaId) &&
+                endedAt in 0 until player.mediaItemCount
+            ) {
+                scope.launch {
+                    player.seekToDefaultPosition(endedAt)
+                    player.pause()
+                    val name = radioOf(endedStation)?.second?.takeIf(String::isNotBlank) ?: "The station"
+                    feedback.show("$name stopped: its stream ended")
+                }
+            }
             currentId.value = mediaItem?.mediaId
             saveQueue()
             widgets.show(player)
@@ -499,7 +520,9 @@ class OctoPlaybackService : MediaLibraryService() {
             failedInARow++
             val title = player.currentMediaItem?.mediaMetadata?.title?.toString()?.takeIf(String::isNotBlank) ?: "a song"
             val why = playFailureOf(error, isFind(player.currentMediaItem?.mediaId.orEmpty())).words
-            if (failedInARow >= player.mediaItemCount || !player.hasNextMediaItem()) {
+            // A station that cannot play stops there: the next station is
+            // the listener's to choose.
+            if (failedInARow >= player.mediaItemCount || !player.hasNextMediaItem() || isRadio(player.currentMediaItem?.mediaId.orEmpty())) {
                 feedback.show(stoppedLine(title, why))
                 return
             }
