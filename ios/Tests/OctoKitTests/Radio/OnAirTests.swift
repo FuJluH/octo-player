@@ -122,7 +122,8 @@ import Testing
         country: "The United States Of America",
         countryCode: "US",
         state: "California",
-        tags: ["pop", "top 40"])
+        tags: ["pop", "top 40"],
+        homepage: "https://kiisfm.iheart.com/")
 
     @Test func aStationsDetailsRideInItsId() {
         let id = kiis.radioId()
@@ -136,6 +137,7 @@ import Testing
         #expect(details.state == "California")
         #expect(details.tags == ["pop", "top 40"])
         #expect(details.uuid == "u-kiis")
+        #expect(details.homepage == "https://kiisfm.iheart.com/")
         var hlsStation = kiis
         hlsStation.hls = true
         let hls = hlsStation.radioId()
@@ -150,6 +152,7 @@ import Testing
         #expect(back.uuid == kiis.uuid && back.name == kiis.name && back.streamUrl == kiis.streamUrl)
         #expect(back.favicon == kiis.favicon && back.codec == "AAC" && back.bitrate == 128 && back.tags == kiis.tags)
         #expect(back.state == "California" && back.countryCode == "US" && !back.hls)
+        #expect(back.homepage == "https://kiisfm.iheart.com/")
         // The server's own stations and old ids are not the catalog's.
         #expect(liveStationOf(radioId("http://h/s", "Mine")) == nil)
         #expect(liveStationOf("song-1") == nil)

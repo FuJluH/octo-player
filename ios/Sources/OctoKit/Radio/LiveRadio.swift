@@ -25,6 +25,8 @@ public struct LiveStation: Codable, Sendable, Hashable, Identifiable {
     public var countryCode: String
     public var state: String
     public var tags: [String]
+    /// The station's website, an http(s) address, or empty.
+    public var homepage: String
     /// How far from the place asked about, in meters; nil when the catalog does not know where
     /// the station is.
     public var distanceMeters: Double?
@@ -35,7 +37,7 @@ public struct LiveStation: Codable, Sendable, Hashable, Identifiable {
 
     public init(uuid: String, name: String, streamUrl: String, favicon: String = "", codec: String = "", bitrate: Int = 0,
                 hls: Bool = false, country: String = "", countryCode: String = "", state: String = "", tags: [String] = [],
-                distanceMeters: Double? = nil, clicks: Int = 0) {
+                homepage: String = "", distanceMeters: Double? = nil, clicks: Int = 0) {
         self.uuid = uuid
         self.name = name
         self.streamUrl = streamUrl
@@ -47,12 +49,13 @@ public struct LiveStation: Codable, Sendable, Hashable, Identifiable {
         self.countryCode = countryCode
         self.state = state
         self.tags = tags
+        self.homepage = homepage
         self.distanceMeters = distanceMeters
         self.clicks = clicks
     }
 
     enum CodingKeys: String, CodingKey {
-        case uuid, name, streamUrl, favicon, codec, bitrate, hls, country, countryCode, state, tags, distanceMeters, clicks
+        case uuid, name, streamUrl, favicon, codec, bitrate, hls, country, countryCode, state, tags, homepage, distanceMeters, clicks
     }
 
     /// Reads what any Octo app wrote: a missing field takes its default.
@@ -69,6 +72,7 @@ public struct LiveStation: Codable, Sendable, Hashable, Identifiable {
         countryCode = (try? c.decodeIfPresent(String.self, forKey: .countryCode)) ?? ""
         state = (try? c.decodeIfPresent(String.self, forKey: .state)) ?? ""
         tags = (try? c.decodeIfPresent([String].self, forKey: .tags)) ?? []
+        homepage = (try? c.decodeIfPresent(String.self, forKey: .homepage)) ?? ""
         distanceMeters = try? c.decodeIfPresent(Double.self, forKey: .distanceMeters)
         clicks = (try? c.decodeIfPresent(Int.self, forKey: .clicks)) ?? 0
     }
@@ -86,6 +90,7 @@ public struct LiveStation: Codable, Sendable, Hashable, Identifiable {
         try c.encode(countryCode, forKey: .countryCode)
         try c.encode(state, forKey: .state)
         try c.encode(tags, forKey: .tags)
+        try c.encode(homepage, forKey: .homepage)
         try c.encodeIfPresent(distanceMeters, forKey: .distanceMeters)
         try c.encode(clicks, forKey: .clicks)
     }
@@ -248,6 +253,7 @@ struct CatalogStation: Decodable {
     var countryCode = ""
     var state = ""
     var tags = ""
+    var homepage = ""
     var latitude: Double?
     var longitude: Double?
     var geoDistance: Double?
@@ -283,6 +289,7 @@ struct CatalogStation: Decodable {
         countryCode = text("countrycode")
         state = text("state")
         tags = text("tags")
+        homepage = text("homepage")
         latitude = number("geo_lat")
         longitude = number("geo_long")
         geoDistance = number("geo_distance")
@@ -310,13 +317,16 @@ struct CatalogStation: Decodable {
         let tagList = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty && seenTags.insert($0).inserted }
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let site = homepage.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lowerSite = site.lowercased()
+        let website = lowerSite.hasPrefix("http://") || lowerSite.hasPrefix("https://") ? site : ""
         return LiveStation(uuid: uuid, name: trimmedName.isEmpty ? stream : trimmedName, streamUrl: stream,
                            favicon: favicon.trimmingCharacters(in: .whitespacesAndNewlines),
                            codec: codec.trimmingCharacters(in: .whitespaces), bitrate: bitrate, hls: hls == 1,
                            country: country.trimmingCharacters(in: .whitespaces),
                            countryCode: countryCode.trimmingCharacters(in: .whitespaces).uppercased(),
                            state: state.trimmingCharacters(in: .whitespaces), tags: Array(tagList.prefix(6)),
-                           distanceMeters: distance, clicks: clickCount)
+                           homepage: website, distanceMeters: distance, clicks: clickCount)
     }
 }
 

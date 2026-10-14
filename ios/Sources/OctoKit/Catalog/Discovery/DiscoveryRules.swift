@@ -74,14 +74,18 @@ public struct Station: Sendable, Hashable, Identifiable, Codable {
     public var songCount: Int?
     public var streamUrl: String?
     public var octoGroup: String?
+    /// An internet radio station's website, when the server has one for it.
+    public var homepage: String?
 
-    public init(id: String, name: String, artwork: String?, songCount: Int? = nil, streamUrl: String? = nil, octoGroup: String? = nil) {
+    public init(id: String, name: String, artwork: String?, songCount: Int? = nil, streamUrl: String? = nil, octoGroup: String? = nil,
+                homepage: String? = nil) {
         self.id = id
         self.name = name
         self.artwork = artwork
         self.songCount = songCount
         self.streamUrl = streamUrl
         self.octoGroup = octoGroup
+        self.homepage = homepage
     }
 
     /// One of the server's playlists Octo made, its cover drawn from its id when it has none of
@@ -108,6 +112,8 @@ public func homeStations(_ stations: [RadioStation], sourceId: String) -> [Stati
         guard !stream.isEmpty else { return nil }
         var added = Station(station, sourceId: sourceId)
         added.streamUrl = stream
+        let site = (station.homePageUrl ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if site.lowercased().hasPrefix("http://") || site.lowercased().hasPrefix("https://") { added.homepage = site }
         return added
     }
 }

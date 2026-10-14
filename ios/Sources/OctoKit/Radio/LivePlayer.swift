@@ -10,7 +10,7 @@ extension LiveStation {
 
     public func radioDetails() -> RadioDetails {
         RadioDetails(logo: favicon, codec: codec, bitrate: bitrate, country: country, countryCode: countryCode, state: state,
-                     tags: tags, uuid: uuid)
+                     homepage: homepage, tags: tags, uuid: uuid)
     }
 }
 
@@ -22,7 +22,7 @@ public func liveStationOf(_ id: String) -> LiveStation? {
     guard !details.uuid.isEmpty else { return nil }
     return LiveStation(uuid: details.uuid, name: name, streamUrl: stream, favicon: details.logo, codec: details.codec,
                        bitrate: details.bitrate, hls: radioIsHls(id), country: details.country, countryCode: details.countryCode,
-                       state: details.state, tags: details.tags)
+                       state: details.state, tags: details.tags, homepage: details.homepage)
 }
 
 /// A stream address as a key for "the same stream": the scheme (http and https alike), the host
@@ -297,5 +297,40 @@ public struct RemoteButtons: Sendable, Equatable {
         }
         return RemoteButtons(live: true, showsDuration: false, seek: false, changePosition: false, skipInterval: false,
                              next: lineup.hasNext, previous: lineup.hasPrevious)
+    }
+}
+
+/// The button beside the song a live station has on air.
+public enum LiveSongButton: Sendable, Equatable {
+    /// No song named: no button.
+    case none
+    /// The song is in the library: the heart, filled once starred.
+    case heart(starred: Bool)
+    /// An outside song Octo can bring in; `adding` while it is on its way.
+    case add(adding: Bool)
+    /// No song Octo is sure of: the plus opens Search with the query.
+    case search
+}
+
+/// Which button the song on air gets. `match` is the song the lookup found (nil while it is
+/// still looking or found none), `looked` whether the lookup has answered, `starred` whether that
+/// song is starred, `inLibrary` whether it is in the library now (an added outside song lands
+/// there), `adding` whether it is on its way.
+public func liveSongButton(_ onAir: OnAir, match: HeartCandidate?, looked: Bool, starred: Bool, inLibrary: Bool, adding: Bool) -> LiveSongButton {
+    guard onAir.named else { return .none }
+    guard let match else { return looked ? .search : .add(adding: false) }
+    if match.inLibrary || inLibrary { return .heart(starred: starred) }
+    return .add(adding: adding || starred)
+}
+
+/// What a reader hears for the button: "Heart Petal by Ariana Grande", "Add Petal by Ariana
+/// Grande to your library", "Search for Petal by Ariana Grande".
+public func liveSongButtonLabel(_ button: LiveSongButton, _ onAir: OnAir) -> String {
+    let song = onAir.artist.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? onAir.title : "\(onAir.title) by \(onAir.artist)"
+    switch button {
+    case .none: return ""
+    case .heart(let starred): return starred ? "Remove heart from \(song)" : "Heart \(song)"
+    case .add(let adding): return adding ? "Adding \(song) to your library" : "Add \(song) to your library"
+    case .search: return "Search for \(song)"
     }
 }

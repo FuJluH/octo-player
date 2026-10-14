@@ -246,8 +246,9 @@ public struct RadioStation: Decodable, Sendable, Identifiable, Hashable {
     public var name: String
     public var streamUrl: String?
     public var coverArt: String?
+    public var homePageUrl: String?
 
-    enum CodingKeys: String, CodingKey { case id, name, streamUrl, coverArt }
+    enum CodingKeys: String, CodingKey { case id, name, streamUrl, coverArt, homePageUrl }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -255,6 +256,7 @@ public struct RadioStation: Decodable, Sendable, Identifiable, Hashable {
         name = c.string(.name) ?? ""
         streamUrl = c.string(.streamUrl)
         coverArt = c.string(.coverArt)
+        homePageUrl = c.string(.homePageUrl)
     }
 }
 

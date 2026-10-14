@@ -106,6 +106,27 @@ import Testing
         #expect(a.distanceMeters == 1234.5 && a.clicks == 77 && a.formatLine == "MP3 128k" && !a.hls)
         let b = found[1]
         #expect(b.name == "https://x/b" && b.streamUrl == "https://x/b" && b.bitrate == 64 && b.hls && b.distanceMeters == nil)
+        #expect(a.homepage == "" && b.homepage == "")
+    }
+
+    @Test func aStationsWebsiteIsKeptOnlyWhenItIsAWebAddress() throws {
+        let json = #"""
+        [{"stationuuid":"a","url":"https://x/a","homepage":" https://kut.org/ "},
+         {"stationuuid":"b","url":"https://x/b","homepage":"HTTP://town.example"},
+         {"stationuuid":"c","url":"https://x/c","homepage":"kut.org"},
+         {"stationuuid":"d","url":"https://x/d","homepage":"javascript:alert(1)"}]
+        """#
+        let found = try catalogStations(Data(json.utf8), from: nil)
+        #expect(found.map(\.homepage) == ["https://kut.org/", "HTTP://town.example", "", ""])
+    }
+
+    @Test func aKeptStationsWebsiteIsKeptAndOldOnesReadWithout() {
+        var a = station("a")
+        a.homepage = "https://kut.org/"
+        let kept = KeptStations().keep(a)
+        #expect(KeptStations.decoded(kept.encoded()).stations.first?.homepage == "https://kut.org/")
+        let old = KeptStations.decoded(#"{"stations":[{"uuid":"a","name":"A","streamUrl":"https://x/a","favicon":"","tags":[]}]}"#)
+        #expect(old.stations.first?.homepage == "")
     }
 
     @Test func aNearbyRowWithoutItsDistanceGetsOne() throws {
