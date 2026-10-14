@@ -94,6 +94,13 @@ import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.WindowSpot
 import app.winters.octo.desktop.ui.ImmersiveBackdrop
 import app.winters.octo.desktop.ui.PlayButton
+import app.winters.octo.desktop.ui.LiveCover
+import app.winters.octo.desktop.ui.LiveHeartButton
+import app.winters.octo.desktop.ui.LiveLine
+import app.winters.octo.desktop.ui.LiveLineupList
+import app.winters.octo.desktop.ui.LiveTransport
+import app.winters.octo.desktop.player.isLineup
+import androidx.compose.ui.graphics.Shape
 import app.winters.octo.desktop.ui.isOutside
 import app.winters.octo.desktop.ui.rememberPosition
 import app.winters.octo.desktop.window.Frame
@@ -323,7 +330,7 @@ private fun MiniBackdrop(app: AppState, state: PlayerState, modifier: Modifier) 
 private fun MiniBar(app: AppState, state: PlayerState, pinned: Boolean, actions: MiniActions, wide: Boolean) {
     val song = state.current?.song
     Row(Modifier.fillMaxSize().padding(Space.L), horizontalArrangement = Arrangement.spacedBy(Space.L), verticalAlignment = Alignment.CenterVertically) {
-        Cover(song?.coverArt, Modifier.fillMaxHeight().aspectRatio(1f), shape = Corner.ArtMShape, placeholder = OctoIcons.Songs, retry = true)
+        MiniArt(app, state, Modifier.fillMaxHeight().aspectRatio(1f), Corner.ArtMShape, small = true)
         Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.SpaceBetween) {
             Row(verticalAlignment = Alignment.Top) {
                 SongWords(state, Modifier.weight(1f))
@@ -349,7 +356,7 @@ private fun MiniCover(app: AppState, state: PlayerState, panel: MiniPanel?, pinn
         BoxWithConstraints(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
             val side = minOf(maxWidth, maxHeight)
             Box(Modifier.size(side)) {
-                Cover(song?.coverArt, Modifier.fillMaxSize(), shape = Corner.ArtLShape, placeholder = OctoIcons.Songs, retry = true)
+                MiniArt(app, state, Modifier.fillMaxSize(), Corner.ArtLShape)
                 // A soft shade at the top, so the buttons read on any cover.
                 Box(Modifier.fillMaxWidth().height(ControlHeight.L + Space.Xl).background(TopShade, Corner.ArtLShape))
                 Box(Modifier.align(Alignment.TopEnd).padding(Space.Xs)) { WindowButtons(pinned, bar = false, actions) }
@@ -361,7 +368,7 @@ private fun MiniCover(app: AppState, state: PlayerState, panel: MiniPanel?, pinn
         }
         Progress(app, state, Modifier.fillMaxWidth(), times = true)
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            PanelButton(MiniPanel.Lyrics, panel, actions)
+            if (state.live == null) PanelButton(MiniPanel.Lyrics, panel, actions) else Spacer(Modifier.size(ControlHeight.S))
             Spacer(Modifier.weight(1f))
             Transport(app, state)
             Spacer(Modifier.weight(1f))
@@ -379,13 +386,13 @@ private fun MiniWithPanel(app: AppState, state: PlayerState, panel: MiniPanel, p
     val song = state.current?.song
     Column(Modifier.fillMaxSize().padding(top = Space.L, start = Space.L, end = Space.L)) {
         Row(Modifier.fillMaxWidth().height(FrameSize.PlayerThumb), horizontalArrangement = Arrangement.spacedBy(Space.L), verticalAlignment = Alignment.CenterVertically) {
-            Cover(song?.coverArt, Modifier.size(FrameSize.PlayerThumb), shape = Corner.ArtMShape, placeholder = OctoIcons.Songs, retry = true)
+            MiniArt(app, state, Modifier.size(FrameSize.PlayerThumb), Corner.ArtMShape, small = true)
             SongWords(state, Modifier.weight(1f))
             WindowButtons(pinned, bar = false, actions)
         }
         Progress(app, state, Modifier.fillMaxWidth().padding(top = Space.M), times = true)
         Row(Modifier.fillMaxWidth().padding(vertical = Space.Xs), verticalAlignment = Alignment.CenterVertically) {
-            PanelButton(MiniPanel.Lyrics, panel, actions)
+            if (state.live == null) PanelButton(MiniPanel.Lyrics, panel, actions)
             Heart(app, state)
             Spacer(Modifier.weight(1f))
             Transport(app, state)
@@ -395,9 +402,10 @@ private fun MiniWithPanel(app: AppState, state: PlayerState, panel: MiniPanel, p
         }
         Box(Modifier.fillMaxWidth().height(FrameSize.Hairline).background(SeparatorColor))
         Box(Modifier.fillMaxWidth().weight(1f)) {
-            when (panel) {
-                MiniPanel.Lyrics -> LyricsView(app, Modifier.fillMaxSize())
-                MiniPanel.Queue -> UpNext(app, state)
+            when {
+                state.live != null && isLineup(state.queue.map { it.song }) -> LiveLineupList(app, state)
+                panel == MiniPanel.Lyrics && state.live == null -> LyricsView(app, Modifier.fillMaxSize())
+                else -> UpNext(app, state)
             }
         }
     }
@@ -405,13 +413,26 @@ private fun MiniWithPanel(app: AppState, state: PlayerState, panel: MiniPanel, p
 
 private val TopShade = Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.45f), Color.Transparent))
 
-// The song's title and artist, or that nothing plays.
+// The playing song's cover, or a station's picture.
+@Composable
+private fun MiniArt(app: AppState, state: PlayerState, modifier: Modifier, shape: Shape, small: Boolean = false) {
+    val live = state.live
+    if (live != null) LiveCover(app, live, modifier, shape, small = small)
+    else Cover(state.current?.song?.coverArt, modifier, shape = shape, placeholder = OctoIcons.Songs, retry = true)
+}
+
+// The song's title and artist, or that nothing plays. A station shows the
+// song on air (or itself) and "Artist · Station" (or its tagline).
 @Composable
 private fun SongWords(state: PlayerState, modifier: Modifier) {
     val song = state.current?.song
+    val live = state.live
     Column(modifier, verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
         if (song == null) {
             Txt("Nothing playing", DesktopType.emphasis, OctoColors.TextMuted)
+        } else if (live != null) {
+            Txt(song.title, DesktopType.emphasis, OctoColors.TextPrimary)
+            Txt(live.shown.subtitle, DesktopType.meta, OctoColors.TextSecondary)
         } else {
             MarkedTitle(song, DesktopType.emphasis) { Txt(song.title, DesktopType.emphasis, OctoColors.TextPrimary, it) }
             Txt((song.displayArtist ?: song.artist).orEmpty(), DesktopType.meta, OctoColors.TextSecondary)
@@ -434,10 +455,11 @@ private fun WindowButtons(pinned: Boolean, bar: Boolean, actions: MiniActions) {
     }
 }
 
-// Back, play and next.
+// Back, play and next; for a station, Back, Play or Stop, and Next station.
 @Composable
 private fun Transport(app: AppState, state: PlayerState) {
     val song = state.current?.song
+    state.live?.let { live -> return LiveTransport(app, state, live, playSize = FrameSize.PlayButton, stepSize = ControlHeight.S, stepIcon = IconSize.Toolbar, tint = OctoColors.TextPrimary, gap = Space.Xxs) }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.Xxs)) {
         IconAction(OctoIcons.Previous, "Previous", app.player::previous, size = ControlHeight.S, iconSize = IconSize.Toolbar, enabled = song != null)
         PlayButton(state.playing, enabled = song != null, size = FrameSize.PlayButton, waiting = state.buffering) { app.player.togglePlay() }
@@ -449,6 +471,7 @@ private fun Transport(app: AppState, state: PlayerState) {
 // there is room.
 @Composable
 private fun Progress(app: AppState, state: PlayerState, modifier: Modifier, times: Boolean) {
+    state.live?.let { live -> return LiveLine(app, live, OctoColors.TextPrimary, OctoColors.TextMuted, modifier, codec = false, times = times) }
     val position by rememberPosition(app.player)
     val duration = state.durationMs
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.S)) {
@@ -470,6 +493,7 @@ private val TimeWidth: Dp = Space.Wide
 @Composable
 private fun Heart(app: AppState, state: PlayerState) {
     val song = state.current?.song ?: return
+    state.live?.let { live -> return LiveHeartButton(app, live, ControlHeight.S, IconSize.Toolbar, OctoColors.TextPrimary) }
     if (isOpenedFile(song.id) || isOutside(app, song)) return
     val starred = app.isStarred(song)
     IconAction(if (starred) OctoIcons.Liked else OctoIcons.Like, if (starred) "Remove from favorites" else "Add to favorites", { app.setStarred(listOf(song), !starred) }, size = ControlHeight.S, iconSize = IconSize.Toolbar)

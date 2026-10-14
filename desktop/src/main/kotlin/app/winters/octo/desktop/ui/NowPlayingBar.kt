@@ -90,6 +90,7 @@ import app.winters.octo.desktop.library.Cover
 import app.winters.octo.desktop.library.lengthText
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.player.DesktopPlayer
+import app.winters.octo.desktop.player.LiveNow
 import app.winters.octo.desktop.player.PlayerState
 import app.winters.octo.desktop.player.RepeatMode
 import app.winters.octo.desktop.player.formatLabel
@@ -142,26 +143,36 @@ fun PlayerBar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier,
     FloatingGlaze(backdrop, modifier.dropTarget(PlayerDrop, "Add to the queue", layer = 1) { app.addToQueue(it) }, shape = MenuShape, film = IslandFilm, frost = IslandFrost, saturation = IslandSaturation, halo = true, seesAll = true) {
         if (over) Box(Modifier.matchParentSize().background(DropLit, MenuShape))
         Row(Modifier.fillMaxSize().padding(horizontal = Space.L), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.L)) {
+            val live = state.live
             OctoTooltip(if (song != null) "Open the player" else "") {
-                Cover(
-                    song?.coverArt,
-                    Modifier
-                        .size(FrameSize.PlayerThumb)
-                        .clickable(enabled = song != null, role = Role.Button) { app.fullPlayer = true }
-                        .semantics { contentDescription = "Open the player" },
-                    shape = Corner.ArtMShape,
-                    placeholder = OctoIcons.Songs,
-                    retry = true,
-                )
+                val thumb = Modifier
+                    .size(FrameSize.PlayerThumb)
+                    .clickable(enabled = song != null, role = Role.Button) { app.fullPlayer = true }
+                    .semantics { contentDescription = "Open the player" }
+                if (live != null) {
+                    LiveCover(app, live, thumb, Corner.ArtMShape, small = true)
+                } else {
+                    Cover(song?.coverArt, thumb, shape = Corner.ArtMShape, placeholder = OctoIcons.Songs, retry = true)
+                }
             }
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) { SongZone(app, song) }
-                    Transport(app, state)
+                    Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) { if (live != null && song != null) LiveSongZone(app, song, live) else SongZone(app, song) }
+                    if (live != null) {
+                        Box(Modifier.padding(horizontal = Space.M)) {
+                            LiveTransport(app, state, live, playSize = FrameSize.PlayButton, stepSize = ControlHeight.L, stepIcon = IconSize.Transport, tint = OctoColors.TextPrimary)
+                        }
+                    } else {
+                        Transport(app, state)
+                    }
                     if (compact) UtilityZone(app, state, compact = true)
                     else Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) { UtilityZone(app, state) }
                 }
-                ProgressLine(app, state)
+                if (live != null) {
+                    LiveLine(app, live, OctoColors.TextPrimary, OctoColors.TextMuted, Modifier.fillMaxWidth().heightIn(min = Focus.MinTarget))
+                } else {
+                    ProgressLine(app, state)
+                }
             }
         }
     }
@@ -206,6 +217,19 @@ private fun SongZone(app: AppState, song: Song?) {
             val starred = app.isStarred(song)
             IconAction(if (starred) OctoIcons.Liked else OctoIcons.Like, if (starred) "Remove from favorites" else "Add to favorites", { app.setStarred(listOf(song), !starred) }, size = ControlHeight.M, iconSize = IconSize.Toolbar)
         }
+    }
+}
+
+// A station's title (the song on air, or the station), "Artist ·
+// Station" under it, and the heart for the song on air.
+@Composable
+private fun LiveSongZone(app: AppState, song: Song, live: LiveNow) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.Xs)) {
+        Column(Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(Space.Xs)) {
+            CutTxt(song.title, DesktopType.emphasis, OctoColors.TextPrimary, Modifier)
+            Txt(live.shown.subtitle, DesktopType.meta, OctoColors.TextSecondary)
+        }
+        LiveHeartButton(app, live, ControlHeight.M, IconSize.Toolbar, OctoColors.TextPrimary)
     }
 }
 
@@ -288,8 +312,9 @@ private val TimeWidth = Space.Wide + Space.S
 private fun UtilityZone(app: AppState, state: PlayerState, compact: Boolean = false) {
     Row(horizontalArrangement = Arrangement.spacedBy(Space.Xxs), verticalAlignment = Alignment.CenterVertically) {
         if (!compact) {
-            IconAction(OctoIcons.Lyrics, "Lyrics", { app.toggleSidePanel(SidePanel.Lyrics) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = app.sidePanel == SidePanel.Lyrics, toggled = app.sidePanel == SidePanel.Lyrics)
-            IconAction(OctoIcons.Queue, "Queue", { app.toggleSidePanel(SidePanel.Queue) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = app.sidePanel == SidePanel.Queue, toggled = app.sidePanel == SidePanel.Queue)
+            // A station has no lyrics.
+            if (state.live == null) IconAction(OctoIcons.Lyrics, "Lyrics", { app.toggleSidePanel(SidePanel.Lyrics) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = app.sidePanel == SidePanel.Lyrics, toggled = app.sidePanel == SidePanel.Lyrics)
+            IconAction(OctoIcons.Queue, if (state.live != null) "Stations" else "Queue", { app.toggleSidePanel(SidePanel.Queue) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = app.sidePanel == SidePanel.Queue, toggled = app.sidePanel == SidePanel.Queue)
         }
         VolumeButton(app, state.volume)
         MoreButton(app, state, compact)
@@ -320,15 +345,23 @@ private fun ColumnScope.MoreMenu(app: AppState, close: () -> Unit, compact: Bool
     val sleep by app.sleep.state.collectAsState()
     when (page) {
         MorePage.Main -> {
+            val live = now.live
             MenuRow("Open the player", { app.fullPlayer = true; close() }, OctoIcons.Expand, enabled = now.current != null)
             // The panel buttons, when the player is too narrow to show them.
             if (compact) {
-                MenuRow("Lyrics", { app.toggleSidePanel(SidePanel.Lyrics); close() }, if (app.sidePanel == SidePanel.Lyrics) OctoIcons.Check else OctoIcons.Lyrics)
-                MenuRow("Queue", { app.toggleSidePanel(SidePanel.Queue); close() }, if (app.sidePanel == SidePanel.Queue) OctoIcons.Check else OctoIcons.Queue)
+                if (live == null) MenuRow("Lyrics", { app.toggleSidePanel(SidePanel.Lyrics); close() }, if (app.sidePanel == SidePanel.Lyrics) OctoIcons.Check else OctoIcons.Lyrics)
+                MenuRow(if (live != null) "Stations" else "Queue", { app.toggleSidePanel(SidePanel.Queue); close() }, if (app.sidePanel == SidePanel.Queue) OctoIcons.Check else OctoIcons.Queue)
             }
             MenuRow("Play on", { page = MorePage.Output }, outputIcon(now.playingOn?.name), more = true, detail = now.playingOn?.name ?: "System default")
             MenuSeparator()
             MenuRow("Sleep timer", { page = MorePage.Sleep }, OctoIcons.SleepTimer, more = true, detail = if (sleep != SleepState.Off) sleepSummary(sleep) else null)
+            // A station: its own rows, in place of the song's.
+            if (live != null) {
+                MenuSeparator()
+                LiveMenuRows(app, live, now.current?.song?.id.orEmpty(), close)
+                app.toggleMiniPlayer?.let { toggle -> MenuRow("Mini player", { toggle(); close() }, OctoIcons.Expand) }
+                return
+            }
             MenuRow(
                 "Stop after this song",
                 { app.player.setStopAfterCurrent(!now.stopAfterCurrent); close() },
@@ -365,32 +398,38 @@ private fun ColumnScope.SleepMenu(app: AppState, sleep: SleepState, back: () -> 
     SLEEP_MINUTES.forEach { minutes ->
         MenuRow(if (minutes == 60) "1 hour" else "$minutes minutes", { app.sleep.start(minutes); close() })
     }
-    MenuRow("At the end of this song", { app.sleep.endOfSong(); close() }, enabled = app.player.state.value.current != null)
-    SLEEP_SONG_COUNTS.filter { it > 1 }.forEach { count ->
-        MenuRow("After $count songs", { app.sleep.afterSongs(count); close() }, enabled = app.player.state.value.current != null)
+    // A station never ends a song, so it stops only after a while.
+    if (app.player.state.value.live == null) {
+        MenuRow("At the end of this song", { app.sleep.endOfSong(); close() }, enabled = app.player.state.value.current != null)
+        SLEEP_SONG_COUNTS.filter { it > 1 }.forEach { count ->
+            MenuRow("After $count songs", { app.sleep.afterSongs(count); close() }, enabled = app.player.state.value.current != null)
+        }
     }
 }
 
 // Play and pause: the one control in the glaze, a lit glass circle. While
-// waiting for sound, a spinner turns inside it.
+// waiting for sound, a spinner turns inside it. For a live station (`stop`)
+// it is Play and Stop.
 @Composable
-fun PlayButton(playing: Boolean, enabled: Boolean, size: Dp = FrameSize.PlayButtonLarge, waiting: Boolean = false, label: String? = null, onClick: () -> Unit) {
+fun PlayButton(playing: Boolean, enabled: Boolean, size: Dp = FrameSize.PlayButtonLarge, waiting: Boolean = false, label: String? = null, stop: Boolean = false, onClick: () -> Unit) {
     val tip = rememberTooltipState()
+    val words = if (!playing) "Play" else if (stop) "Stop" else "Pause"
     Glaze(
         Modifier
             .size(size)
             .hoverLift(CircleShape, clickable = enabled)
             .tooltipTarget(tip)
             .clickable(enabled = enabled, role = Role.Button, interactionSource = null, indication = FocusRing(CircleShape), onClick = onClick)
-            .semantics { contentDescription = label ?: if (playing) "Pause" else "Play" },
+            .semantics { contentDescription = label ?: words },
         light = GlazeLight.Lifted,
     ) {
         when {
             waiting && playing -> Spinner(size = size * 0.5f)
+            playing && stop -> StopGlyph(OctoColors.TextPrimary, size = size * 0.48f)
             playing -> PauseGlyph(OctoColors.TextPrimary, size = size * 0.48f)
             else -> Glyph(OctoIcons.Play, size = size * 0.48f)
         }
-        TooltipPopup(tip, if (playing) "Pause" else "Play")
+        TooltipPopup(tip, words)
     }
 }
 
