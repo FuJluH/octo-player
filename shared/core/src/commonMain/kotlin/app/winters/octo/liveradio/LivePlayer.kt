@@ -134,3 +134,40 @@ fun liveShown(id: String, streamTitle: String?, streamUrl: String? = null): Live
     val air = onAir(streamTitle, streamUrl, name)
     return LiveShown(liveTitle(air, name, stream), liveSubtitle(air, name, details), name, stream, air, details)
 }
+
+// The button beside the song on air. A song in the library gets the heart;
+// a song Octo finds outside it, or none it is sure of, gets the plus, since
+// tapping adds it (or searches for it); nothing named gets no button.
+sealed interface LiveSongButton {
+    data object None : LiveSongButton
+    // The song is in the library: the heart, filled once starred.
+    data class Heart(val starred: Boolean) : LiveSongButton
+    // An outside song Octo can bring in; `adding` while it is on its way.
+    data class Add(val adding: Boolean) : LiveSongButton
+    // No song Octo is sure of: the plus opens Search with the query.
+    data object Search : LiveSongButton
+}
+
+// `match` is the song the lookup found (null while it is still looking or
+// found none), `looked` whether the lookup has answered, `starred` whether
+// that song is starred, `inLibrary` whether it is in the library now (an
+// added outside song lands there), `adding` whether it is on its way.
+fun liveSongButton(onAir: OnAir, match: HeartCandidate?, looked: Boolean, starred: Boolean, inLibrary: Boolean, adding: Boolean): LiveSongButton = when {
+    !onAir.named -> LiveSongButton.None
+    match == null -> if (looked) LiveSongButton.Search else LiveSongButton.Add(adding = false)
+    match.inLibrary || inLibrary -> LiveSongButton.Heart(starred)
+    else -> LiveSongButton.Add(adding || starred)
+}
+
+// What a reader hears for the button: "Heart Petal by Ariana Grande", "Add
+// Petal by Ariana Grande to your library", "Search for Petal by Ariana
+// Grande".
+fun liveSongButtonLabel(button: LiveSongButton, onAir: OnAir): String {
+    val song = if (onAir.artist.isBlank()) onAir.title else "${onAir.title} by ${onAir.artist}"
+    return when (button) {
+        LiveSongButton.None -> ""
+        is LiveSongButton.Heart -> if (button.starred) "Remove heart from $song" else "Heart $song"
+        is LiveSongButton.Add -> if (button.adding) "Adding $song to your library" else "Add $song to your library"
+        LiveSongButton.Search -> "Search for $song"
+    }
+}
