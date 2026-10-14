@@ -5,15 +5,12 @@ import android.content.ClipboardManager
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.TrackEntity
-import app.winters.octo.catalog.searchKey
 import app.winters.octo.data.userMessage
-import app.winters.octo.discovery.Discovery
 import app.winters.octo.discovery.Downloads
 import app.winters.octo.liveradio.AddResult
-import app.winters.octo.liveradio.HeartCandidate
 import app.winters.octo.liveradio.KeptStations
+import app.winters.octo.liveradio.LiveLookup
 import app.winters.octo.liveradio.LiveRadioStore
 import app.winters.octo.liveradio.LiveStation
 import app.winters.octo.liveradio.OnAir
@@ -30,7 +27,6 @@ import app.winters.octo.ui.common.Feedback
 import app.winters.octo.ui.search.SearchAsks
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -46,8 +42,7 @@ import javax.inject.Inject
 class LivePlayerViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     playback: PlaybackConnection,
-    private val catalog: CatalogDao,
-    private val discovery: Discovery,
+    private val lookup: LiveLookup,
     private val downloads: Downloads,
     private val likes: LikeStore,
     private val store: LiveRadioStore,
@@ -55,18 +50,24 @@ class LivePlayerViewModel @Inject constructor(
     private val feedback: Feedback,
     private val searches: SearchAsks,
 ) : ViewModel() {
-    // Songs found outside the library for the last heart, by id, so the
-    // one starred can be downloaded.
-    private val outside = HashMap<String, TrackEntity>()
+    // The songs found for the last heart, by id, so one from outside the
+    // library can be downloaded.
+    private var found: Map<String, TrackEntity> = emptyMap()
 
+    // The heart weighs the same look the cover came from: kept per song, so
+    // it asks Octo again only when that look could not reach it.
     private val heart = LiveHeart(
-        find = { query, air -> candidates(query, air) },
+        find = { _, air ->
+            val look = lookup.look(air, again = true)
+            found = look.songs
+            look.candidates
+        },
         star = { song ->
             if (song.inLibrary) {
                 if (!likes.isLiked(song.id)) likes.toggle(song.id)
                 true
             } else {
-                outside[song.id]?.let { downloads.request(it) } == true
+                found[song.id]?.let { downloads.request(it) } == true
             }
         },
         unstar = { song ->
@@ -83,21 +84,6 @@ class LivePlayerViewModel @Inject constructor(
         }
     }
 
-    // The library's songs with the title on air, and the server's songs
-    // from outside the library for the whole search.
-    private suspend fun candidates(query: String, air: OnAir): List<HeartCandidate> {
-        val library = catalog.searchTracks(searchKey(air.title), LIBRARY_LOOK).map { HeartCandidate(it.id, it.title, it.artist, inLibrary = true) }
-        val found = try {
-            discovery.search(query)?.songs.orEmpty()
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            emptyList()
-        }
-        outside.clear()
-        found.forEach { outside[it.id] = it }
-        return library + found.map { HeartCandidate(it.id, it.title, it.artist, inLibrary = false) }
-    }
 
     fun tapHeart() {
         viewModelScope.launch {
@@ -180,11 +166,6 @@ class LivePlayerViewModel @Inject constructor(
         if (words.isBlank()) return
         context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("Song", words))
         feedback.done("Copied $words")
-    }
-
-    private companion object {
-        // How many library songs with the title are weighed.
-        const val LIBRARY_LOOK = 40
     }
 }
 

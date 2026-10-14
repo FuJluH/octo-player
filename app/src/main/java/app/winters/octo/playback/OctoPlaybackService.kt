@@ -31,6 +31,7 @@ import app.winters.octo.design.OctoIcons
 import app.winters.octo.discovery.Downloads
 import app.winters.octo.discovery.FindLengths
 import app.winters.octo.discovery.asTrack
+import app.winters.octo.liveradio.LiveLookup
 import app.winters.octo.offline.Prefetcher
 import app.winters.octo.output.Casting
 import app.winters.octo.output.DeviceMedia
@@ -127,6 +128,7 @@ class OctoPlaybackService : MediaLibraryService() {
     @Inject lateinit var feedback: Feedback
     @Inject lateinit var switcher: ServerSwitch
     @Inject lateinit var sessions: SessionRepository
+    @Inject lateinit var liveLookup: LiveLookup
 
     private val scope = MainScope()
     // While the server in use changes, the emptied player is not saved over
@@ -180,7 +182,7 @@ class OctoPlaybackService : MediaLibraryService() {
         tracker = PlayTracker(plays::started, plays::record, isPlaying = { player.isPlaying })
         player.addListener(tracker)
         player.addListener(Watcher())
-        player.addListener(RadioWatch(player, scope))
+        player.addListener(RadioWatch(player, scope, liveLookup::known) { liveLookup.look(it) })
         sleep.attach(player)
         // Saving songs ahead is for the phone's own playing.
         prefetch.attach(local)

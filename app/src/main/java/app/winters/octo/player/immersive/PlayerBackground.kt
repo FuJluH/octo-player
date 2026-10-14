@@ -187,7 +187,7 @@ private fun ClassicArtwork(ref: String?) {
     val model = remember(ref) {
         ArtworkRef.decode(ref)?.let { artworkRequest(context, it) }
             ?: stationArtOf(ref)?.let { art ->
-                (listOf(art.artwork) + art.logos).firstOrNull(String::isNotBlank)?.let { picture ->
+                art.pictures.firstOrNull()?.let { picture ->
                     ArtworkRef.decode(picture)?.let { artworkRequest(context, it) } ?: picture.takeIf(::isWebPicture)
                 }
             }

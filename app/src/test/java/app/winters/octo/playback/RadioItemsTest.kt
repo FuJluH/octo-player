@@ -45,6 +45,16 @@ class RadioItemsTest {
     }
 
     @Test
+    fun octosCoverForTheSongGoesOnTopAndOnlyWhileASongIsNamed() {
+        val song = stationArtOf(liveLines(kiis, icyReadOf(icy(kiisSong)), octoCover = "online:src|al-1")!!.artwork)!!
+        assertEquals("online:src|al-1", song.cover)
+        assertEquals("online:src|al-1", song.pictures.first())
+        val spot = stationArtOf(liveLines(kiis, icyReadOf(icy(kiisSpot)), octoCover = "online:src|al-1")!!.artwork)!!
+        assertEquals("", spot.cover)
+        assertEquals(listOf("https://cdn.example/kiis.png"), spot.pictures)
+    }
+
+    @Test
     fun theKiisSpotShowsTheStationWithItsTagline() {
         val lines = liveLines(kiis, icyReadOf(icy(kiisSpot)))!!
         assertEquals("102.7 KIIS FM", lines.title)
@@ -94,8 +104,11 @@ class RadioItemsTest {
 
     @Test
     fun aStationsCoverCarriesItsPicturesInOrder() {
-        val art = StationArt("A|B FM", "key", "https://art/1.jpg?a=b|c", listOf("https://logo/2.png", "server:src|cover-1"))
+        val art = StationArt("A|B FM", "key", "https://art/1.jpg?a=b|c", listOf("https://logo/2.png", "server:src|cover-1"), cover = "online:src|al-9")
         assertEquals(art, stationArtOf(art.encode()))
+        // Octo's cover for the song first, then the station's artwork, then its logos.
+        assertEquals(listOf("online:src|al-9", "https://art/1.jpg?a=b|c", "https://logo/2.png", "server:src|cover-1"), art.pictures)
+        assertEquals(listOf("https://logo/2.png"), StationArt("A", "k", logos = listOf("https://logo/2.png")).pictures)
         assertNull(stationArtOf("server:src|cover"))
         assertNull(stationArtOf(null))
         // A server cover id in the details becomes a cover on the server in use.

@@ -8,12 +8,14 @@ import app.winters.octo.liveradio.liveStreamKey
 import java.net.URLDecoder
 import java.net.URLEncoder
 
-// A live station's cover, as one artwork reference: the song's artwork
-// while the station names a song, over the station's own pictures (its
-// logo, a cover kept on the server), each tried in turn. When none of them
-// can be had, the cover Octo draws from the station's name shows.
+// A live station's cover, as one artwork reference, best first: the cover
+// of the song on air as Octo has it (`cover`, an artwork reference), the
+// artwork the station sends with the song, then the station's own pictures
+// (its logo, a cover kept on the server), each tried in turn. Under them
+// all, the cover drawn from the station's name shows at once and stays
+// whenever none of them can be had.
 //
-//   station-art:<name>|<key>|<artwork>|<logo>|<logo>...
+//   station-art:<name>|<key>|<cover>|<artwork>|<logo>|<logo>...
 //
 // Each part is url-encoded, so none holds a "|". `key` tells stations
 // apart for the drawn cover's colours. A logo is a web address or an
@@ -23,9 +25,13 @@ data class StationArt(
     val key: String,
     val artwork: String = "",
     val logos: List<String> = emptyList(),
+    val cover: String = "",
 ) {
     fun encode(): String =
-        STATION_ART_PREFIX + (listOf(name, key, artwork) + logos.filter(String::isNotBlank)).joinToString("|") { encode(it) }
+        STATION_ART_PREFIX + (listOf(name, key, cover, artwork) + logos.filter(String::isNotBlank)).joinToString("|") { encode(it) }
+
+    // Every picture to try, best first.
+    val pictures: List<String> get() = listOf(cover, artwork).filter(String::isNotBlank) + logos
 
     // What the drawn cover shows: the station's name over "Live radio".
     fun drawnSpec(): CoverSpec = CoverSpec(key, name, LIVE_RADIO_LINE, null, coverPalette(emptyList(), key))
@@ -36,8 +42,8 @@ const val STATION_ART_PREFIX = "station-art:"
 fun stationArtOf(ref: String?): StationArt? {
     if (ref == null || !ref.startsWith(STATION_ART_PREFIX)) return null
     val parts = ref.removePrefix(STATION_ART_PREFIX).split('|').map(::decode)
-    if (parts.size < 3) return null
-    return StationArt(parts[0], parts[1], parts[2], parts.drop(3).filter(String::isNotBlank))
+    if (parts.size < 4) return null
+    return StationArt(parts[0], parts[1], parts[3], parts.drop(4).filter(String::isNotBlank), parts[2])
 }
 
 // The cover a station's id shows, with `artwork` from what it has on air.
