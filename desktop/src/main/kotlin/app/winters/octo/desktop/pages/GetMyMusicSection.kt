@@ -60,7 +60,6 @@ import app.winters.octo.desktop.imports.chooseImportFile
 import app.winters.octo.desktop.imports.sendImportFile
 import app.winters.octo.subsonic.ImportServiceLink
 import app.winters.octo.subsonic.ImportServices
-import app.winters.octo.ui.imports.CONNECT_SPOTIFY_KEEPS_UPDATING
 import app.winters.octo.ui.imports.GET_MY_MUSIC_LINE
 import app.winters.octo.ui.imports.IMPORT
 import app.winters.octo.ui.imports.ImportModel
@@ -83,7 +82,6 @@ import app.winters.octo.ui.imports.waitingTitle
 // The section's line under its name.
 internal fun getDetail(model: ImportModel): String = when (val step = model.step) {
     ImportStep.Choose -> "From another service, a file or a list"
-    is ImportStep.SpotifyWays -> "Spotify"
     is ImportStep.Waiting -> waitingTitle(step.service)
     is ImportStep.Sending -> "Sending ${step.name}"
     is ImportStep.Sent -> "Your lists are in"
@@ -111,10 +109,6 @@ internal fun GetMyMusicSection(model: ImportModel, services: ImportServices) {
                 ActionRow(PASTE_A_LIST, PASTE_LINE, "Paste", paste)
             }
         }
-        is ImportStep.SpotifyWays -> {
-            SpotifyWaysCard(model, step.service)
-            grid()
-        }
         is ImportStep.Waiting -> {
             WaitingCard(model, step.service, pickFile, paste)
             grid()
@@ -130,24 +124,6 @@ internal fun GetMyMusicSection(model: ImportModel, services: ImportServices) {
             grid()
         }
     }
-}
-
-// Spotify on a server that can sign in to it: the sign-in that keeps lists
-// updating first, a one-time file second.
-@Composable
-private fun SpotifyWaysCard(model: ImportModel, service: ImportServiceLink) {
-    Card {
-        Column(Modifier.fillMaxWidth().padding(horizontal = RowInset, vertical = Space.L), verticalArrangement = Arrangement.spacedBy(Space.M)) {
-            Txt(service.name, DesktopType.emphasis, maxLines = 2)
-            Txt("Connecting keeps your Spotify lists updating in Octo. A file is a copy of them as they are today.", DesktopType.meta, OctoColors.TextMuted, maxLines = 3)
-            Buttons {
-                GlazeCapsule(OctoIcons.Cloud, CONNECT_SPOTIFY_KEEPS_UPDATING, { model.connectSpotify() }, lit = true, enabled = !model.signingIn)
-                GlazeCapsule(OctoIcons.Download, USE_A_FILE, { model.openExport(service) })
-                GlazeCapsule(null, "Back", model::backToServices)
-            }
-        }
-    }
-    Said(model)
 }
 
 // The export page is open in the browser: what to do there, then the file.

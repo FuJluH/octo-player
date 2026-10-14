@@ -37,9 +37,13 @@ class GetMyMusicTest {
 
     private fun until(check: () -> Boolean) = runBlocking { withTimeout(5_000) { while (!check()) delay(20) } }
 
+    // `spotifyConnect` is what an older server says when it can still sign in to Spotify.
     private fun octo(versions: String = "[1,2]", spotifyConnect: Boolean = false, approval: String? = null) {
         server.answer("getOpenSubsonicExtensions") { """"openSubsonicExtensions":[{"name":"octoImports","versions":$versions}]""" }
-        server.answer("getImports") { """"imports":{"lists":[],"trickle":{"state":"idle"}${approval?.let { ",\"approval\":$it" }.orEmpty()}}""" }
+        server.answer("getImports") {
+            val account = if (spotifyConnect) """"spotify":{"configured":true,"connected":true,"redirectUri":"http://127.0.0.1/callback"},""" else ""
+            """"imports":{$account"lists":[],"trickle":{"state":"idle"}${approval?.let { ",\"approval\":$it" }.orEmpty()}}"""
+        }
         server.answer("getImportServices") {
             """"importServices":{"services":[
             {"id":"spotify","name":"Spotify","exportUrl":"${spotify.exportUrl}","tile":"Spotify"},
@@ -130,25 +134,18 @@ class GetMyMusicTest {
     }
 
     @Test
-    fun spotifyOffersTheSignInFirstWhenTheServerHasIt() {
-        octo(spotifyConnect = true)
-        val model = model()
-        until { model.services != null }
-        model.choose(spotify)
-        assertEquals(ImportStep.SpotifyWays(spotify), model.step)
-        assertTrue(opened.isEmpty())
-        model.openExport(spotify)
-        assertEquals(ImportStep.Waiting(spotify), model.step)
-        assertEquals(listOf(spotify.exportUrl), opened.toList())
-    }
-
-    @Test
-    fun spotifyWithoutTheSignInOpensItsExportPage() {
-        octo(spotifyConnect = false)
-        val model = model()
-        until { model.services != null }
-        model.choose(spotify)
-        assertEquals(ImportStep.Waiting(spotify), model.step)
+    fun spotifyOpensItsExportPage_EvenOnAServerThatCanSignInToIt() {
+        for (connect in listOf(true, false)) {
+            opened.clear()
+            octo(spotifyConnect = connect)
+            val model = model()
+            until { model.services != null }
+            model.choose(spotify)
+            assertEquals(ImportStep.Waiting(spotify), model.step)
+            assertEquals(listOf(spotify.exportUrl), opened.toList())
+            model.forget()
+        }
+        assertTrue(server.called("importAction").isEmpty())
     }
 
     @Test

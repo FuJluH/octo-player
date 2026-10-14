@@ -2,10 +2,11 @@ package app.winters.octo.subsonic
 
 import kotlinx.serialization.Serializable
 
-// The OpenSubsonic extension an Octo server lists when it can import from
-// Spotify: the signed-in user's Spotify sign-in, their imported lists with
-// what the library has of each, and the trickle that fetches the rest. The
-// field names below are the server's, so they decode by name.
+// The OpenSubsonic extension an Octo server lists when it imports lists:
+// the signed-in user's imported lists with what the library has of each,
+// and the trickle that fetches the rest. The field names below are the
+// server's, so they decode by name, and fields the apps do not read are
+// left out.
 const val OCTO_IMPORTS = "octoImports"
 
 // The octoImports version that adds the services list and file and text
@@ -15,13 +16,10 @@ const val OCTO_IMPORTS_FILES = 2
 // The largest file importFile takes.
 const val IMPORT_FILE_MAX_BYTES = 64L * 1024 * 1024
 
-// The services a person can bring their music from, and whether the
-// server can also sign in to Spotify itself.
+// The services a person can bring their music from.
 @Serializable
 data class ImportServices(
     val services: List<ImportServiceLink> = emptyList(),
-    // The owner set a Spotify client ID, so the Spotify sign-in works.
-    val spotifyConnect: Boolean = false,
 )
 
 // One service: its name, the page that exports its lists to a file, and
@@ -35,14 +33,9 @@ data class ImportServiceLink(
     val tile: String = "",
 )
 
-// The service id the server gives Spotify.
-const val SPOTIFY_SERVICE = "spotify"
-
 // Everything the import view shows for the signed-in user.
 @Serializable
 data class ImportOverview(
-    val spotify: SpotifyStatus = SpotifyStatus(),
-    val reading: ImportReading = ImportReading(),
     val lists: List<ImportListSummary> = emptyList(),
     val trickle: TrickleStatus = TrickleStatus(),
     // Why the server cannot tell which songs the library has, when it cannot.
@@ -60,35 +53,6 @@ data class ImportApproval(
     val by: String? = null,
 )
 
-@Serializable
-data class SpotifyStatus(
-    // A Spotify app's Client ID is set on the server.
-    val configured: Boolean = false,
-    val connected: Boolean = false,
-    // The Spotify account's name.
-    val account: String? = null,
-    // Why the sign-in stopped working, in the server's words.
-    val problem: String? = null,
-    // The redirect address registered on the Spotify app.
-    val redirectUri: String = "",
-    // Why Spotify would refuse that address, when it would.
-    val redirectProblem: String? = null,
-    // The redirect is the server's own address, so it finishes the sign-in itself.
-    val octoFinishes: Boolean = false,
-    // Spotify ends every sign-in six months after it was made.
-    val endsUtc: String? = null,
-)
-
-// Reading lists from Spotify, which runs on the server after a sign-in.
-@Serializable
-data class ImportReading(
-    val busy: Boolean = false,
-    // What it is reading now, like "Reading playlist 3 of 12: Road trip".
-    val step: String? = null,
-    val error: String? = null,
-    val finishedUtc: String? = null,
-)
-
 // Where a list came from.
 enum class ImportSource(val wire: String) {
     SpotifyLiked("spotifyLiked"),
@@ -97,6 +61,10 @@ enum class ImportSource(val wire: String) {
     File("file"),
     Unknown(""),
     ;
+
+    // Liked songs or a playlist read through a Spotify account sign-in: it
+    // stays as it was last read and no longer updates.
+    val fromSignIn: Boolean get() = this == SpotifyLiked || this == SpotifyPlaylist
 
     companion object {
         fun of(text: String?): ImportSource = entries.firstOrNull { it != Unknown && it.wire == text } ?: Unknown
@@ -127,14 +95,16 @@ data class ImportListSummary(
     val getMissing: Boolean = false,
     // Why only part of it could be read, in the server's words.
     val partial: String? = null,
-    // No longer on the Spotify account.
-    val gone: Boolean = false,
     // It can be read again from where it came from.
     val canRefresh: Boolean = false,
     val readUtc: String? = null,
     val matchedUtc: String? = null,
 ) {
     val origin: ImportSource get() = ImportSource.of(source)
+
+    // It can be read again from where it came from: a link or a file, never
+    // a list from a Spotify account sign-in.
+    val readsAgain: Boolean get() = canRefresh && !origin.fromSignIn
 
     // How much of it the library has, 0 to 1.
     val fraction: Float get() = if (total <= 0) 0f else (have.toFloat() / total).coerceIn(0f, 1f)
@@ -245,8 +215,6 @@ data class TrickleStatus(
 data class ImportAnswer(
     val ok: Boolean = false,
     val message: String = "",
-    // The Spotify sign-in address, from connect.
-    val url: String? = null,
     // The list a link or file became.
     val listId: String? = null,
     val count: Int = 0,
@@ -254,10 +222,6 @@ data class ImportAnswer(
 
 // The actions importAction knows.
 object ImportActions {
-    const val CONNECT = "connect"
-    const val FINISH = "finish"
-    const val DISCONNECT = "disconnect"
-    const val READ = "read"
     const val ADD_LINK = "addLink"
     const val PLAYLIST = "playlist"
     const val FETCH = "fetch"

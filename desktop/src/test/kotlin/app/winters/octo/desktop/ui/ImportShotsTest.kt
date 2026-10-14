@@ -13,8 +13,8 @@ import org.junit.rules.TemporaryFolder
 import javax.swing.SwingUtilities
 
 // Import as it looks: Get my music's tiles, the wait for a file and what the
-// server said, the Spotify account, the lists with their switches, one
-// list's songs, and the trickle. Made-up lists, from a pretend Octo server.
+// server said, the public link, the lists with their switches, one list's
+// songs, and the trickle. Made-up lists, from a pretend Octo server.
 // Only when asked: OCTO_SHOTS=1 ./gradlew :desktop:test --tests '*ImportShotsTest*'.
 // Saved under build/shots/polish/imports/.
 class ImportShotsTest {
@@ -36,13 +36,12 @@ class ImportShotsTest {
                 )
                 server.answer("getImportServices", """"importServices":{"services":[${SERVICES.joinToString(",") { (id, name) ->
                     """{"id":"$id","name":"$name","exportUrl":"https://www.tunemymusic.com/transfer/$id-to-file","tile":"$name"}"""
-                }}],"spotifyConnect":true}""", type = "octo")
+                }}]}""", type = "octo")
                 server.answer("importFile", """"importAction":{"ok":true,"message":"Read 2 lists, 340 songs."}""", type = "octo")
                 val angel = track("s:2", "Angel", "Massive Attack", "Mezzanine", "downloading", "Downloading from Soulseek", 0.42)
                 server.answer(
                     "getImports",
-                    """"imports":{"spotify":{"configured":true,"connected":true,"account":"Brandon","redirectUri":"http://127.0.0.1/callback",
-                    "endsUtc":"2027-04-01T00:00:00Z"},"reading":{"busy":false},"approval":{"needed":true,"by":"Sam"},
+                    """"imports":{"approval":{"needed":true,"by":"Sam"},
                     "lists":[
                       {"id":"spotify-liked","name":"Liked Songs","source":"spotifyLiked","total":412,"have":371,"missing":28,"queued":9,"downloading":1,"notFound":3,"getMissing":true,"canRefresh":true},
                       {"id":"spotify-road","name":"Road trip","source":"spotifyPlaylist","total":48,"have":44,"missing":4,"keepPlaylist":true,"playlistId":"pl1","canRefresh":true},
@@ -67,11 +66,10 @@ class ImportShotsTest {
                 rig.signIn()
                 val app = rig.app
                 val apple = ImportServiceLink("apple-music", "Apple Music", "https://www.tunemymusic.com/transfer/apple-music-to-file", "Apple Music")
-                val spotify = ImportServiceLink("spotify", "Spotify", "https://www.tunemymusic.com/transfer/spotify-to-file", "Spotify")
                 for (size in listOf(PolishShotsTest.Size.Hd, PolishShotsTest.Size.Min)) {
                     rig.scene(size) { scene ->
                         val at = "imports/${size.label}"
-                        for (section in listOf("get", "spotify", "lists", "trickle")) {
+                        for (section in listOf("get", "link", "lists", "trickle")) {
                             rig.reset(scene)
                             SwingUtilities.invokeAndWait {
                                 app.imports.backToServices()
@@ -80,13 +78,6 @@ class ImportShotsTest {
                             }
                             rig.shot(scene, "$at/$section", 2_000)
                         }
-                        rig.reset(scene)
-                        SwingUtilities.invokeAndWait {
-                            showSection(IMPORT, "get")
-                            app.imports.choose(spotify)
-                            app.navigator.go(Page.Imports)
-                        }
-                        rig.shot(scene, "$at/get-spotify", 2_000)
                         rig.reset(scene)
                         SwingUtilities.invokeAndWait {
                             showSection(IMPORT, "get")

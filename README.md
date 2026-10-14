@@ -21,7 +21,7 @@
 - **Whole albums.** Every track shows, the ones you have are marked, and one press adds the rest.
 - **Stations on Home,** each with its own painted cover, and radio that reaches past your library.
 - **Honest labels.** A song you don't own is marked as such until you add it.
-- **Spotify import.** Connect Spotify, or add a public playlist link, to see what your library has of each list, keep one as a playlist, and let Octo fetch the rest a few songs an hour. On the desktop it is in the sidebar; on the phone, under Settings, Server. Needs an Octo with Spotify import.
+- **Import your lists.** Bring playlists and liked songs from Spotify, Apple Music and more as a TuneMyMusic file, or add a public Spotify playlist or album link, to see what your library has of each list, keep one as a playlist, and let Octo fetch the rest a few songs an hour. On the desktop it is in the sidebar; on the phone, under Settings, Server. Needs an Octo with imports.
 
 These need Octo 2026.09.29 or newer.
 

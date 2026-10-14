@@ -23,10 +23,9 @@ import kotlinx.coroutines.launch
 
 // The Import view's state, for the server in use, on the phone and the
 // desktop alike: the server's overview, the services to get music from and
-// where a "Get my music" visit stands, the list opened, the last thing the
-// server said, and the Spotify sign-in while it waits for the browser. The
-// server does the work; this asks it, every few seconds while the view is
-// open and something moves.
+// where a "Get my music" visit stands, the list opened, and the last thing
+// the server said. The server does the work; this asks it, every few
+// seconds while the view is open and something moves.
 @Stable
 class ImportModel(
     private val client: () -> SubsonicClient?,
@@ -39,7 +38,7 @@ class ImportModel(
         private set
 
     // The services to get music from, on a server that lists them (octoImports
-    // version 2); null on an older one, which shows the Spotify import alone.
+    // version 2); null on an older one, which shows the link and the lists alone.
     var services by mutableStateOf<ImportServices?>(null)
         private set
 
@@ -64,11 +63,8 @@ class ImportModel(
         private set
     var working by mutableStateOf(false)
         private set
-    var signingIn by mutableStateOf(false)
-        private set
 
     private var watching: Job? = null
-    private var signIn: Job? = null
 
     // While the page shows: read now, then again soon while anything moves.
     fun watch() {
@@ -76,7 +72,7 @@ class ImportModel(
         watching = scope.launch {
             while (isActive) {
                 refresh()
-                delay(if (overview?.moving() == true || signingIn) busyPollMs else idlePollMs)
+                delay(if (overview?.moving() == true) busyPollMs else idlePollMs)
             }
         }
     }
@@ -89,7 +85,6 @@ class ImportModel(
     // Another server: nothing of this one's stays.
     fun forget() {
         stop()
-        signIn?.cancel()
         overview = null
         services = null
         filesKnown = null
@@ -109,7 +104,7 @@ class ImportModel(
         } catch (e: SubsonicException.Unreachable) {
             problem = "Octo can't reach the server right now."
         } catch (e: SubsonicException) {
-            // An Octo from before Spotify import passes the call on to Navidrome, which does not know it.
+            // An Octo from before imports passes the call on to Navidrome, which does not know it.
             problem = if (overview == null) "This server has no imports yet. Update Octo on the server to use it." else e.message
         }
         val id = openId ?: return
@@ -130,13 +125,11 @@ class ImportModel(
 
     // ---- Get my music ---------------------------------------------------------------------
 
-    // A service's tile tapped. Spotify, when the server can sign in to it,
-    // first offers that; every other service opens its export page.
+    // A service's tile tapped: its export page opens.
     fun choose(service: ImportServiceLink) {
         if (step is ImportStep.Sending) return
         said = null
-        if (service.offersSpotifySignIn(services?.spotifyConnect == true)) step = ImportStep.SpotifyWays(service)
-        else openExport(service)
+        openExport(service)
     }
 
     // Opens the service's export page on TuneMyMusic in the browser and
@@ -157,12 +150,6 @@ class ImportModel(
         if (step is ImportStep.Sending) return
         said = null
         step = ImportStep.Waiting(null)
-    }
-
-    // The Spotify sign-in from the Spotify tile; its lists keep updating.
-    fun connectSpotify(open: (String) -> Unit = openUrl) {
-        step = ImportStep.Choose
-        connect(open)
     }
 
     // Back to the grid.
@@ -226,32 +213,6 @@ class ImportModel(
         }
     }
 
-    // Opens Spotify in the browser and waits for its answer on this device.
-    fun connect(open: (String) -> Unit = openUrl) {
-        val client = client() ?: return
-        if (signingIn) return
-        signIn = scope.launch {
-            signingIn = true
-            said = "Allow Octo in your browser, then come back here."
-            try {
-                said = signInToSpotify(client, open).message
-            } catch (e: SubsonicException) {
-                said = e.message
-            } finally {
-                signingIn = false
-                refresh()
-            }
-        }
-    }
-
-    fun cancelSignIn() {
-        signIn?.cancel()
-        signingIn = false
-        said = null
-    }
-
-    fun disconnect() = act(ImportActions.DISCONNECT)
-    fun readAgain() = act(ImportActions.READ)
     fun keepPlaylist(id: String, on: Boolean) = act(ImportActions.PLAYLIST, mapOf("id" to id, "on" to on.toString()))
     fun getMissing(id: String, on: Boolean) = act(ImportActions.FETCH, mapOf("id" to id, "on" to on.toString()))
     fun getSongs(id: String, keys: List<String>) = act(ImportActions.SONGS, mapOf("id" to id), keys)

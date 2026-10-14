@@ -1,24 +1,19 @@
 package app.winters.octo.subsonic
 
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import okhttp3.OkHttpClient
-import okhttp3.Request
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-// Octo's Spotify import as the apps call it: the overview, one list, the
-// actions, and the loopback page that catches Spotify's answer on the device.
+// Octo's imports as the apps call it: the overview, one list, the actions,
+// the services, and files and text sent to the server.
 class ImportsTest {
     private val server = MockWebServer()
 
@@ -34,6 +29,8 @@ class ImportsTest {
 
     private fun ok(inner: String) = """{"subsonic-response":{"status":"ok","version":"1.16.1","type":"octo","openSubsonic":true,$inner}}"""
 
+    // An older server still sends its Spotify sign-in and reading state;
+    // they are not read, and the rest still is.
     @Test
     fun readsTheOverview() = runBlocking {
         answer(
@@ -48,10 +45,10 @@ class ImportsTest {
         )
         val overview = client().imports()
         assertEquals("/rest/getImports", server.takeRequest().url.encodedPath)
-        assertTrue(overview.spotify.connected)
-        assertEquals("Reading your liked songs", overview.reading.step)
         val liked = overview.lists.single()
         assertEquals(ImportSource.SpotifyLiked, liked.origin)
+        assertTrue(liked.origin.fromSignIn)
+        assertFalse(liked.readsAgain)
         assertEquals(0.6f, liked.fraction, 0.001f)
         assertEquals(2, liked.coming)
         assertEquals(TrickleState.WaitingForSoulseek, overview.trickle.stage)
@@ -85,10 +82,14 @@ class ImportsTest {
 
     @Test
     fun aRefusedActionStillReadsAsAnAnswer() = runBlocking {
-        answer(ok(""""importAction":{"ok":false,"message":"Add your Spotify app's Client ID first."}"""))
-        val result = client().importAction(ImportActions.CONNECT, mapOf("redirect" to "http://127.0.0.1:5000/callback"))
+        answer(ok(""""importAction":{"ok":false,"message":"That link is not a public playlist or album."}"""))
+        val result = client().importAction(ImportActions.ADD_LINK, mapOf("url" to "https://example.com/x"))
+        val request = server.takeRequest()
+        assertEquals("addLink", request.url.queryParameter("action"))
+        assertEquals("https://example.com/x", request.url.queryParameter("url"))
         assertFalse(result.ok)
-        assertNull(result.url)
+        assertEquals("That link is not a public playlist or album.", result.message)
+        assertNull(result.listId)
     }
 
     @Test
@@ -138,7 +139,6 @@ class ImportsTest {
         )
         val services = client().importServices()
         assertEquals("/rest/getImportServices", server.takeRequest().url.encodedPath)
-        assertTrue(services.spotifyConnect)
         assertEquals(listOf("spotify", "apple-music"), services.services.map { it.id })
         assertEquals("Apple Music", services.services[1].tile)
         assertEquals("https://www.tunemymusic.com/transfer/apple-music-to-file", services.services[1].exportUrl)
@@ -149,7 +149,6 @@ class ImportsTest {
         answer(ok(""""other":{}"""))
         val services = client().importServices()
         assertTrue(services.services.isEmpty())
-        assertFalse(services.spotifyConnect)
     }
 
     @Test
@@ -203,46 +202,5 @@ class ImportsTest {
         assertEquals("application/zip", importFileType("export.zip").toString())
         assertEquals("application/json", importFileType("x.json").toString())
         assertEquals("application/octet-stream", importFileType("noending").toString())
-    }
-
-    // ---- The loopback page -------------------------------------------------------------------
-
-    @Test
-    fun onlyAPortlessLoopbackRedirectCanBeCaughtOnTheDevice() {
-        LoopbackCallback.open("http://127.0.0.1/callback")!!.use { catcher ->
-            assertTrue(catcher.redirectUri.matches(Regex("""http://127\.0\.0\.1:\d+/callback""")))
-        }
-        assertNull(LoopbackCallback.open("http://127.0.0.1:8888/callback"))
-        assertNull(LoopbackCallback.open("https://octo.example.com/imports/spotify/callback"))
-        assertNull(LoopbackCallback.open("http://localhost/callback"))
-        assertNull(LoopbackCallback.open("not a uri"))
-    }
-
-    @Test
-    fun theBrowsersReturnIsCaught_AndAnyOtherAddressIsNot() = runBlocking {
-        LoopbackCallback.open("http://127.0.0.1/callback")!!.use { catcher ->
-            val waiting = async(Dispatchers.IO) { catcher.await(10_000) }
-            val http = OkHttpClient()
-            val elsewhere = withContext(Dispatchers.IO) {
-                http.newCall(Request.Builder().url("${catcher.redirectUri.removeSuffix("/callback")}/favicon.ico").build()).execute().use { it.code }
-            }
-            assertEquals(404, elsewhere)
-            val page = withContext(Dispatchers.IO) {
-                http.newCall(Request.Builder().url("${catcher.redirectUri}?code=AQB%2Fx&state=s1").build()).execute().use { it.body.string() }
-            }
-            assertTrue(page.contains("go back to Octo"))
-            val answer = waiting.await()
-            assertNotNull(answer)
-            assertEquals(LoopbackAnswer("AQB/x", "s1", null), answer)
-        }
-    }
-
-    @Test
-    fun aRefusalIsCaughtToo() {
-        LoopbackCallback.open("http://127.0.0.1/callback")!!.use { catcher ->
-            assertEquals(LoopbackAnswer(null, "s1", "access_denied"), catcher.parse("/callback?error=access_denied&state=s1"))
-            assertNull(catcher.parse("/callback"))
-            assertNull(catcher.parse("/other?code=x"))
-        }
     }
 }
