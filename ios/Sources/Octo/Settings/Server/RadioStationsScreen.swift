@@ -147,7 +147,11 @@ struct RadioStationsScreen: View {
         guard starting == nil else { return }
         let stream = station.streamUrl.trimmingCharacters(in: .whitespacesAndNewlines)
         guard readOnly else {
-            if !stream.isEmpty, let song = radioSong(radioId(streamUrl: station.streamUrl, name: station.name)) { player.play([song], from: 0) }
+            // Among the other streams listed here, so Back and Next step through them.
+            let streams = streamStations
+            if !stream.isEmpty, let tapped = streams.firstIndex(where: { $0.id == station.id }) {
+                player.playStations(streams.map(Self.entry), tapped: tapped)
+            }
             return
         }
         starting = station.id
@@ -157,8 +161,8 @@ struct RadioStationsScreen: View {
                 let songs = try await discovery.stationSongs(station.id)
                 if !songs.isEmpty {
                     player.playServerList(songs, id: station.id, name: station.name)
-                } else if !stream.isEmpty, let song = radioSong(radioId(streamUrl: station.streamUrl, name: station.name)) {
-                    player.play([song], from: 0)
+                } else if !stream.isEmpty {
+                    player.playStations([Self.entry(station).id], from: 0)
                 }
             } catch {
                 if isCancellation(error) { return }
@@ -170,6 +174,22 @@ struct RadioStationsScreen: View {
                 }
             }
         }
+    }
+
+    /// The stations listed here that play a stream, in their order.
+    private var streamStations: [ServerStationDetails] {
+        guard case .ready(let list) = stations else { return [] }
+        return list.filter { station in
+            controls.canEdit(stationId: station.id, coverArt: station.coverArt)
+                && !station.streamUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
+    /// A station as the queue holds it: its stream, with its server cover and website.
+    private static func entry(_ station: ServerStationDetails) -> (stream: String, id: String) {
+        let stream = station.streamUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        let details = RadioDetails(coverArt: station.coverArt ?? "", homepage: station.homePageUrl ?? "")
+        return (stream, radioId(streamUrl: stream, name: station.name, details: details))
     }
 
     private func save(_ next: StationDraft) {

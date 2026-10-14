@@ -10,6 +10,7 @@ struct SearchView: View {
     @Environment(Downloads.self) private var downloads
     @Environment(Discovery.self) private var discovery
     @Environment(Library.self) private var library
+    @Environment(Router.self) private var router
     @State private var model = SearchModel()
     @State private var listWidth: CGFloat = 390
     private var libraryOnly: Bool { AppSettings.shared.player.libraryOnly }
@@ -43,6 +44,11 @@ struct SearchView: View {
         .onChange(of: session.activeId) { _, _ in model.serverChanged() }
         .onChange(of: session.client == nil) { _, _ in model.serverChanged() }
         .onChange(of: library.stamp(.playlists)) { _, _ in model.playlistsChanged() }
+        .onChange(of: router.searchText, initial: true) { _, asked in
+            guard let asked else { return }
+            router.searchText = nil
+            model.text = asked
+        }
         .background { WakeWatch(alsoOnActive: true) { model.shownAgain() } }
         #if DEBUG
         .onReceive(NotificationCenter.default.publisher(for: .driveSearch)) { note in

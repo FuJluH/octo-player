@@ -10,27 +10,32 @@ protocol LiveByteSource: ByteSource {
     func next(_ count: Int) throws -> Data
 }
 
-/// What each live station is playing now, by its queue id, as its stream says (ICY titles).
+/// What each live station named last, by its queue id, as its stream says (its ICY metadata):
+/// the title and the address sent with it. An empty title stays, since it says the station names
+/// nothing now.
 @MainActor
 @Observable
 final class LiveTitleBoard {
     static let shared = LiveTitleBoard()
 
-    private(set) var titles: [String: String] = [:]
+    private(set) var titles: [String: IcyMeta] = [:]
     /// Told after a title changes, for the lock screen.
     @ObservationIgnored var onChange: (() -> Void)?
 
     private init() {}
 
-    func set(_ trackId: String, _ title: String?) {
-        guard titles[trackId] != title else { return }
-        titles[trackId] = title
+    func set(_ trackId: String, _ meta: IcyMeta?) {
+        guard titles[trackId] != meta else { return }
+        titles[trackId] = meta
         onChange?()
     }
 
+    /// What the live player shows for the station `trackId` now.
+    func shown(_ trackId: String) -> LiveShown? { liveShown(trackId, titles[trackId]) }
+
     /// Sets a title from a stream's own thread.
-    nonisolated static func post(_ trackId: String, _ title: String?) {
-        Task { @MainActor in shared.set(trackId, title) }
+    nonisolated static func post(_ trackId: String, _ meta: IcyMeta?) {
+        Task { @MainActor in shared.set(trackId, meta) }
     }
 }
 
@@ -43,7 +48,7 @@ final class LiveTitleBoard {
 final class LiveBytes: NSObject, LiveByteSource, URLSessionDataDelegate, @unchecked Sendable {
     private let condition = NSCondition()
     private let request: URLRequest
-    private let onTitle: (@Sendable (String?) -> Void)?
+    private let onTitle: (@Sendable (IcyMeta?) -> Void)?
     private var buffer = Data()
     private var failure: PlayError?
     private var cancelled = false
@@ -74,7 +79,7 @@ final class LiveBytes: NSObject, LiveByteSource, URLSessionDataDelegate, @unchec
     private static let holdAbove = 1 << 20
     private static let carryOnBelow = 256 << 10
 
-    init(request: URLRequest, onTitle: (@Sendable (String?) -> Void)? = nil) {
+    init(request: URLRequest, onTitle: (@Sendable (IcyMeta?) -> Void)? = nil) {
         var asked = request
         asked.setValue("1", forHTTPHeaderField: "Icy-MetaData")
         self.request = asked
@@ -211,7 +216,7 @@ final class LiveBytes: NSObject, LiveByteSource, URLSessionDataDelegate, @unchec
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        var titles: [String] = []
+        var titles: [IcyMeta] = []
         condition.lock()
         guard dataTask === task else {
             condition.unlock()

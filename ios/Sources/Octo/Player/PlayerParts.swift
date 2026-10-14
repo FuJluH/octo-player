@@ -315,7 +315,7 @@ struct PlayerTransport: View {
 
 /// The play and pause swap: the new one grows in from 0.6 over 150 ms, the old one shrinks away
 /// over 100 ms.
-private enum PlayPop {
+enum PlayPop {
     static var transition: AnyTransition {
         .asymmetric(insertion: .scale(scale: 0.6).combined(with: .opacity).animation(.octoTween(fixed: 150)),
                     removal: .scale(scale: 0.6).combined(with: .opacity).animation(.octoTween(fixed: 100)))
@@ -324,7 +324,7 @@ private enum PlayPop {
 
 /// One transport control in a 72 point box: it shrinks while held and springs back; previous and
 /// next nudge the way they go on every tap.
-private struct TransportButton<Icon: View>: View {
+struct TransportButton<Icon: View>: View {
     let nudge: CGFloat
     let label: String
     let action: () -> Void

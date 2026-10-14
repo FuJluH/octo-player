@@ -170,20 +170,29 @@ struct HomeView: View {
         let kept = liveRadio.kept.stations
         let keptStreams = Set(kept.map(\.streamUrl))
         let server = internetRadio(model.stations).filter { !keptStreams.contains($0.streamUrl ?? "") }
+        // Every station on the shelf, in its order: Back and Next step through them.
+        let shelf = kept.map { (stream: $0.streamUrl, id: $0.radioId()) } + server.map(serverStationEntry)
         HomeShelfTitle(title: title, destination: .liveRadioNear)
         SideScroller {
             FindNearbyCard()
             ForEach(kept) { station in
-                KeptStationCard(station: station) { liveRadio.play(station, on: player) }
+                KeptStationCard(station: station) { liveRadio.play(station, among: shelf, on: player) }
             }
-            ForEach(server) { station in
+            ForEach(Array(server.enumerated()), id: \.element.id) { place, station in
                 StationCard(name: station.name, coverArt: coverId(of: station.artwork) ?? station.id, songCount: nil,
                             loading: model.startingStation == station.id, open: nil) {
-                    model.playStation(station)
+                    player.playStations(shelf, tapped: kept.count + place)
                 }
             }
         }
         .animation(.easeInOut(duration: 0.25), value: kept.map(\.uuid))
+    }
+
+    /// One of the server's internet radio stations as the queue holds it, with its server cover.
+    private func serverStationEntry(_ station: Station) -> (stream: String, id: String) {
+        let stream = (station.streamUrl ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let cover = coverId(of: station.artwork) ?? station.id
+        return (stream, radioId(streamUrl: stream, name: station.name, details: RadioDetails(coverArt: cover)))
     }
 
     /// The first shelf: albums, artists and playlists pinned there, in their order.

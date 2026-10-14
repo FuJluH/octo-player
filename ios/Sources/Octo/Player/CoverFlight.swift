@@ -57,6 +57,21 @@ final class CoverFlight {
         image = (coverId, picture)
     }
 
+    /// The same for a live station: the song's artwork, else its logo, else its server cover,
+    /// else the tile Octo draws for it, kept under `flightKey`.
+    func prepare(live shown: LiveShown, coverArt: String?, size: Int, client: SubsonicClient?) async {
+        let key = liveFlightKey(shown)
+        if image?.coverId == key { return }
+        var picture: UIImage?
+        for address in [shown.onAir.artwork, shown.details.logo] where picture == nil && !address.isEmpty {
+            picture = await StationLogos.shared.image(address, pixels: size)
+        }
+        if picture == nil, let coverArt, !coverArt.isEmpty {
+            picture = await Covers.shared.image(coverArt, size: size, client: client)
+        }
+        image = (key, picture ?? drawnStationTile(shown.station, pixels: size))
+    }
+
     /// The player has appeared. With the small player showing, the card stays hidden until its
     /// place is known, then the cover flies there.
     func playerOpening(_ coverId: String?) {
@@ -122,6 +137,17 @@ final class CoverFlight {
 
 /// The card's corners once the player is open, as a share of its side.
 let PlayerArtCorner = 0.03
+
+/// What the flying cover of `song` is kept under: its cover id, or, for a live station, what its
+/// cover shows now.
+@MainActor
+func flightKey(_ song: Song?) -> String? {
+    guard let song else { return nil }
+    if isRadio(song.id), let shown = LiveTitleBoard.shared.shown(song.id) { return liveFlightKey(shown) }
+    return song.coverArt
+}
+
+private func liveFlightKey(_ shown: LiveShown) -> String { "live|\(shown.cover)|\(shown.station)" }
 
 /// Draws the cover while it flies, above the bar and the player. It never takes a touch.
 struct CoverFlightLayer: View {

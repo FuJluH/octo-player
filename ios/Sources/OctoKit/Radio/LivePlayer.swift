@@ -14,6 +14,17 @@ extension LiveStation {
     }
 }
 
+/// The catalog station a radio id was made from, for keeping it on the phone; nil for one the
+/// catalog does not know (the server's own stations, an address typed in).
+public func liveStationOf(_ id: String) -> LiveStation? {
+    guard let (stream, name) = radioOf(id) else { return nil }
+    let details = radioDetailsOf(id)
+    guard !details.uuid.isEmpty else { return nil }
+    return LiveStation(uuid: details.uuid, name: name, streamUrl: stream, favicon: details.logo, codec: details.codec,
+                       bitrate: details.bitrate, hls: radioIsHls(id), country: details.country, countryCode: details.countryCode,
+                       state: details.state, tags: details.tags)
+}
+
 /// A stream address as a key for "the same stream": the scheme (http and https alike), the host
 /// in lower case and the path without a trailing slash, the rest as written.
 public func liveStreamKey(_ url: String) -> String {

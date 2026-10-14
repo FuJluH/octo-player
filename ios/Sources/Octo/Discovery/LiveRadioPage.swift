@@ -114,7 +114,7 @@ struct LiveRadioPage: View {
                     .padding(.horizontal, 20)
                     .padding(.vertical, 4)
             } else {
-                ForEach(shown.stations) { station in row(station) }
+                ForEach(shown.stations) { station in row(station, among: shown.stations) }
             }
             if let note = hiddenStationsNote(shown.hidden) {
                 Text(note + ".")
@@ -126,9 +126,9 @@ struct LiveRadioPage: View {
         }
     }
 
-    private func row(_ station: LiveStation) -> some View {
+    private func row(_ station: LiveStation, among stations: [LiveStation]) -> some View {
         LiveStationRow(station: station, miles: radio.miles, kept: radio.isKept(station.uuid), adding: adding == station.uuid,
-                       play: { radio.play(station, on: player) }) {
+                       play: { radio.play(station, among: stations, on: player) }) {
             LiveStationMenuItems(station: station, adding: $adding)
         }
     }
@@ -238,19 +238,25 @@ struct LiveStationMenuItems: View {
     private func addToServer() {
         guard adding == nil, controls.isAdmin else { return }
         adding = station.uuid
-        let controls = controls
+        let station = station
         Task {
             defer { adding = nil }
-            do {
-                try await controls.createStation(streamUrl: station.streamUrl, name: station.name, homepageUrl: nil)
-                router.done("Added \(station.name) to the server")
-            } catch {
-                if stationChangeRefused(error) {
-                    router.show("The server refused: only an admin can add stations.")
-                } else {
-                    router.show("Couldn't add \(station.name). \(userMessage(plainError(error)))")
-                }
-            }
+            await addStationToServer(station, controls: controls, router: router)
+        }
+    }
+}
+
+/// Adds a catalog station to the server's own stations, saying how it went; only an admin may.
+@MainActor
+func addStationToServer(_ station: LiveStation, controls: ServerControls, router: Router) async {
+    do {
+        try await controls.createStation(streamUrl: station.streamUrl, name: station.name, homepageUrl: nil)
+        router.done("Added \(station.name) to the server")
+    } catch {
+        if stationChangeRefused(error) {
+            router.show("The server refused: only an admin can add stations.")
+        } else {
+            router.show("Couldn't add \(station.name). \(userMessage(plainError(error)))")
         }
     }
 }

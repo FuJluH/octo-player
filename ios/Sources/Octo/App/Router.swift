@@ -33,6 +33,15 @@ final class Router {
     /// The full player opens on its lyrics when this is set; it clears it.
     var lyricsRequested = false
 
+    /// Words for Search to look for, asked for from outside it (the player); Search takes them.
+    var searchText: String?
+
+    /// Opens Search looking for `text`.
+    func openSearch(_ text: String) {
+        searchText = text
+        drive = .tab(.search)
+    }
+
     /// The server downloads sheet, while it is open.
     var serverDownloads: DownloadsSheetPage?
 

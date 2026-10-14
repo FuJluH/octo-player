@@ -99,9 +99,7 @@ enum PlaybackDrive {
         case "station":
             // A live station by its address, with an optional name after a "|".
             let parts = value.split(separator: "|", maxSplits: 1).map(String.init)
-            if let url = parts.first, let song = radioSong(radioId(streamUrl: url, name: parts.count > 1 ? parts[1] : "")) {
-                player.play([song], from: 0)
-            }
+            if let url = parts.first { player.playStations([radioId(streamUrl: url, name: parts.count > 1 ? parts[1] : "")], from: 0) }
         case "castkeep": settings.setCastKeepPlaying(value != "off")
         case "queuesync": player.setQueueSync(value != "off")
         case "prefetch":

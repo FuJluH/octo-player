@@ -129,12 +129,23 @@ final class LiveRadioStore {
 
     // MARK: Playing
 
-    /// Plays a station, and tells the catalog it was started.
-    func play(_ station: LiveStation, on player: Player) {
-        guard var song = radioSong(radioId(streamUrl: station.streamUrl, name: station.name)) else { return }
-        // An HLS station whose address does not say so is queued as one.
-        if station.isHls { song.contentType = hlsPlaylistTypes[0] }
-        player.play([song], from: 0)
+    /// Plays a station among the stations of the list it was tapped in (`among`, in its order), so
+    /// Back and Next step through them, and tells the catalog it was started. An HLS station
+    /// whose address does not say so is queued as one, since its id says so.
+    func play(_ station: LiveStation, among stations: [LiveStation], on player: Player) {
+        play(station, among: stations.map { (stream: $0.streamUrl, id: $0.radioId()) }, on: player)
+    }
+
+    /// The same, for a list that also holds stations the catalog does not know, each by its
+    /// stream and radio id.
+    func play(_ station: LiveStation, among stations: [(stream: String, id: String)], on player: Player) {
+        let id = station.radioId()
+        let tapped = stations.firstIndex { $0.id == id } ?? stations.firstIndex { liveStreamKey($0.stream) == liveStreamKey(station.streamUrl) }
+        if let tapped {
+            player.playStations(stations, tapped: tapped)
+        } else {
+            player.playStations([id], from: 0)
+        }
         let browser = browser
         let uuid = station.uuid
         Task.detached { await browser.started(uuid) }

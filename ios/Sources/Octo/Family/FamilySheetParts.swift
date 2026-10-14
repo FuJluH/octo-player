@@ -173,6 +173,8 @@ struct SheetHeader: View {
 /// "More below" button that brings `target` into view, both gone once the bottom is reached.
 struct SheetScrollArea<Content: View>: View {
     var target: String?
+    /// What to bring into view as the sheet opens, by its id.
+    var startAt: String?
     @ViewBuilder var content: Content
     @State private var moreBelow = false
 
@@ -189,6 +191,9 @@ struct SheetScrollArea<Content: View>: View {
                 geometry.contentOffset.y + geometry.containerSize.height < geometry.contentSize.height - 2
             } action: { _, more in
                 withAnimation(.easeInOut(duration: 0.2)) { moreBelow = more }
+            }
+            .onAppear {
+                if let startAt { proxy.scrollTo(startAt, anchor: .center) }
             }
             .overlay(alignment: .bottom) {
                 if moreBelow {

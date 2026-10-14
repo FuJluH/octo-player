@@ -405,7 +405,12 @@ struct QueueSongRow<Trailing: View>: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            BadgedCover(id: song.coverArt, size: 44, radius: 6, external: song.isExternal)
+            if isRadio(song.id) {
+                // A station shows its logo, or the tile Octo draws for it.
+                LiveCover(artwork: "", logo: radioDetailsOf(song.id).logo, coverArt: song.coverArt, name: song.title, size: 44, radius: 6)
+            } else {
+                BadgedCover(id: song.coverArt, size: 44, radius: 6, external: song.isExternal)
+            }
             VStack(alignment: .leading, spacing: 0) {
                 SongTitleLine(song.title, explicit: song.isExplicit, font: .octo(14, .regular), color: .white)
                 Text(song.byline)

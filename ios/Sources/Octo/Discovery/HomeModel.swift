@@ -303,7 +303,7 @@ final class HomeModel {
         guard startingStation == nil, let discovery, let player, let router else { return }
         let id = station.id, name = station.name
         if case .playStream(let stream) = stationTap(station) {
-            if let song = radioSong(radioId(streamUrl: stream, name: name)) { player.play([song], from: 0) }
+            player.playStations([radioId(streamUrl: stream, name: name, details: RadioDetails(coverArt: coverId(of: station.artwork) ?? id))], from: 0)
             return
         }
         startingStation = id

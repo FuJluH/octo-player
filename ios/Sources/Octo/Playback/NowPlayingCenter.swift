@@ -11,6 +11,10 @@ final class NowPlayingCenter {
     private unowned let player: Player
     private var artwork: MPMediaItemArtwork?
     private var artworkFor: String?
+    /// The queue entry the picture shown belongs to.
+    private var artworkEntry: String?
+    /// The buttons last turned on and off, so they change only when what plays changes.
+    private var shownButtons: RemoteButtons?
     /// The heart or download for the song on now.
     private(set) var heart: NotificationHeart = .none
     /// Told when the heart changes, for the car's now playing screen.
@@ -38,29 +42,48 @@ final class NowPlayingCenter {
             updateHeart(nil)
             return
         }
-        if artworkFor != item.entryId { loadArtwork(item) }
-        // A station that names what it plays shows that, with the station's name as the artist.
-        let live = item.isRadioStation ? LiveTitleBoard.shared.titles[item.trackId] : nil
+        // A live station shows what it has on air, with "Artist · Station" under it, and the
+        // song's artwork when the station sends one.
+        let live = item.isRadioStation ? LiveTitleBoard.shared.shown(item.trackId) : nil
+        let picture = artworkKey(item, live)
+        if artworkFor != picture { loadArtwork(item, live, key: picture) }
+        let buttons = RemoteButtons.of(player.engine.queue.items.map(\.trackId), current: player.index)
         var info: [String: Any] = [
-            MPMediaItemPropertyTitle: live ?? item.title,
-            MPMediaItemPropertyArtist: live == nil ? item.artist : item.title,
-            MPMediaItemPropertyAlbumTitle: item.album,
-            MPMediaItemPropertyPlaybackDuration: player.duration,
+            MPMediaItemPropertyTitle: live?.title ?? item.title,
+            MPMediaItemPropertyArtist: live?.subtitle ?? item.artist,
+            MPMediaItemPropertyAlbumTitle: live == nil ? item.album : "",
             MPNowPlayingInfoPropertyElapsedPlaybackTime: player.elapsed,
-            MPNowPlayingInfoPropertyPlaybackRate: player.isPlaying ? Double(player.engine.pace.speed) : 0.0,
-            MPNowPlayingInfoPropertyDefaultPlaybackRate: Double(player.engine.pace.speed),
+            MPNowPlayingInfoPropertyPlaybackRate: player.isPlaying ? Double(live == nil ? player.engine.pace.speed : 1) : 0.0,
+            MPNowPlayingInfoPropertyDefaultPlaybackRate: Double(live == nil ? player.engine.pace.speed : 1),
             MPNowPlayingInfoPropertyPlaybackQueueIndex: player.index,
             MPNowPlayingInfoPropertyPlaybackQueueCount: player.engine.queue.count,
             MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
-            MPNowPlayingInfoPropertyIsLiveStream: item.isRadioStation,
+            MPNowPlayingInfoPropertyIsLiveStream: buttons.live,
         ]
+        if buttons.showsDuration { info[MPMediaItemPropertyPlaybackDuration] = player.duration }
         if let track = item.trackNo { info[MPMediaItemPropertyAlbumTrackNumber] = track }
         if let disc = item.discNo { info[MPMediaItemPropertyDiscNumber] = disc }
         if item.explicit { info[MPMediaItemPropertyIsExplicit] = true }
         if let artwork { info[MPMediaItemPropertyArtwork] = artwork }
         center.nowPlayingInfo = info
         center.playbackState = player.isPlaying ? .playing : .paused
+        applyButtons(buttons)
         updateHeart(item)
+    }
+
+    /// Turns the lock screen's buttons on and off for what plays: a live station cannot be
+    /// moved through, and its Next and Previous stop at the ends of its list.
+    private func applyButtons(_ buttons: RemoteButtons) {
+        guard buttons != shownButtons else { return }
+        shownButtons = buttons
+        let commands = MPRemoteCommandCenter.shared()
+        commands.changePlaybackPositionCommand.isEnabled = buttons.changePosition
+        commands.seekForwardCommand.isEnabled = buttons.seek
+        commands.seekBackwardCommand.isEnabled = buttons.seek
+        commands.skipForwardCommand.isEnabled = buttons.skipInterval
+        commands.skipBackwardCommand.isEnabled = buttons.skipInterval
+        commands.nextTrackCommand.isEnabled = buttons.next
+        commands.previousTrackCommand.isEnabled = buttons.previous
     }
 
     /// Takes everything off the lock screen, as Close does.
@@ -70,21 +93,37 @@ final class NowPlayingCenter {
         MPNowPlayingInfoCenter.default().playbackState = .stopped
     }
 
-    /// The lock screen and car pictures are drawn about 512 px wide.
-    private func loadArtwork(_ item: QueueItem) {
-        artworkFor = item.entryId
-        artwork = nil
+    /// What the picture on the lock screen is for: the entry, and for a live station the
+    /// artwork or logo it shows.
+    private func artworkKey(_ item: QueueItem, _ live: LiveShown?) -> String {
+        "\(item.entryId ?? item.trackId)|\(live?.cover ?? "")"
+    }
+
+    /// The lock screen and car pictures are drawn about 512 px wide. A live station shows the
+    /// song's artwork, else its logo, else its server cover, else the tile Octo draws for it.
+    private func loadArtwork(_ item: QueueItem, _ live: LiveShown?, key: String) {
+        // A station's song changing keeps its picture until the new one is ready.
+        let entry = item.entryId ?? item.trackId
+        if artworkEntry != entry { artwork = nil }
+        artworkEntry = entry
+        artworkFor = key
         let session = player.session
-        let entry = item.entryId
-        let reference = item.artwork
+        let stationCover = radioDetailsOf(item.trackId).coverArt
+        let reference = live == nil ? item.artwork : (stationCover.isEmpty ? nil : stationCover)
+        let addresses = live.map { [$0.onAir.artwork, $0.details.logo].filter { !$0.isEmpty } } ?? []
+        let name = live?.station ?? item.title
         Task {
             var image: UIImage?
-            if ArtworkRef.decode(reference) != nil {
+            for address in addresses where image == nil {
+                image = await StationLogos.shared.image(address, pixels: 512)
+            }
+            if image == nil, ArtworkRef.decode(reference) != nil {
                 image = await ArtworkCache.shared.image(reference, px: 512, client: session.client, signedInSource: session.inUse?.sourceId)
-            } else if let coverId = reference, let client = session.client {
+            } else if image == nil, let coverId = reference, let client = session.client {
                 image = await Covers.shared.image(coverId, size: 512, client: client)
             }
-            guard let image, artworkFor == entry else { return }
+            if image == nil, live != nil { image = drawnStationTile(name, pixels: 512) }
+            guard let image, artworkFor == key else { return }
             artwork = Self.artwork(image)
             publish()
         }

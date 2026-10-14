@@ -14,7 +14,7 @@ enum OctoIcon: String, CaseIterable, Sendable {
     case homeSelected, searchSelected, librarySelected, settings, settingsSelected, cast, castConnected, tv
     case speaker, speakerGroup, headphones, globe, lock, lockOpen, key, sparkle, sync, storage, servers
     case timer, listeners, layout, wifi, camera, qrCode, copy, link, audioQuality, visible, hidden
-    case minimize, maximize, restore, system, keyboard, loudness, balance, crossfade
+    case minimize, maximize, restore, system, keyboard, loudness, balance, crossfade, stop
 
     /// The SF Symbol drawn for it.
     var symbol: String {
@@ -118,6 +118,7 @@ enum OctoIcon: String, CaseIterable, Sendable {
         case .loudness: "speaker.wave.2"
         case .balance: "dial.medium"
         case .crossfade: "arrow.triangle.merge"
+        case .stop: "stop.fill"
         }
     }
 

@@ -21,6 +21,8 @@ final class Player {
     private(set) var isPlaying = false
     /// Waiting for sound while it should play.
     private(set) var isWaiting = false
+    /// Whether it should play: playing, or on its way to (connecting, buffering).
+    private(set) var wantsToPlay = false
     private(set) var elapsed: TimeInterval = 0
     private(set) var duration: TimeInterval = 0
     /// The song radio was started from, while the queue is a radio.
@@ -59,22 +61,38 @@ final class Player {
         case afterSongs(Int)
     }
 
-    /// The song on now. A live station that names what it plays shows that as the song, with
-    /// the station's name as the artist.
+    /// The song on now. A live station shows what it has on air as the song, with "Artist ·
+    /// Station" under it; while it names no song, its own name with its tagline or where it is.
     var current: Song? {
         guard queue.indices.contains(index) else { return nil }
         return liveShown(queue[index])
     }
 
-    /// A station's song line as its stream names it now; any other song as it is.
+    /// A station's lines as its stream names them now; any other song as it is.
     func liveShown(_ song: Song) -> Song {
-        guard isRadio(song.id), let title = LiveTitleBoard.shared.titles[song.id] else { return song }
+        guard isRadio(song.id), let live = LiveTitleBoard.shared.shown(song.id) else { return song }
         var shown = song
-        shown.title = title
-        shown.artist = radioTitle(song.id) ?? song.title
-        shown.displayArtist = shown.artist
+        shown.title = live.title
+        shown.artist = live.subtitle
+        shown.displayArtist = live.subtitle
         return shown
     }
+
+    /// What the live station on now has on air, nil while a song plays.
+    var live: LiveShown? {
+        guard let item = currentItem, item.isRadioStation else { return nil }
+        return LiveTitleBoard.shared.shown(item.trackId)
+    }
+
+    /// The stations Back and Next step through while a live station plays, nil while a song
+    /// plays.
+    var lineup: LiveLineup? { liveLineup(items.map(\.trackId), current: index) }
+
+    /// Whether the live station on now is on: playing or connecting, so its button is Stop.
+    var liveOn: Bool { isPlaying || wantsToPlay }
+
+    /// How long the listener has been on the live station, as the live bar shows it.
+    var listened: String { listenedFor(Int(elapsed * 1_000)) }
     var currentItem: QueueItem? { items.indices.contains(index) ? items[index] : nil }
     /// How far through the song, from 0 to 1.
     var progress: Double { duration > 0 ? min(elapsed / duration, 1) : 0 }
@@ -335,6 +353,28 @@ final class Player {
         load(items, startIndex: 0, shuffled: false)
     }
 
+    /// Plays the live station at `start` among the stations of the list it was tapped in, each
+    /// by its radio id: the whole list is queued, in its order and never shuffled, so Back and
+    /// Next step through it.
+    func playStations(_ ids: [String], from start: Int) {
+        let songs = ids.compactMap(radioSong)
+        guard !songs.isEmpty else { return }
+        radioSeed = nil
+        Task {
+            let found = await playable.items(songs, source: .played(nil))
+            let items = found.compactMap { $0 }
+            guard !items.isEmpty else { return }
+            load(items, startIndex: chosenStart(found, min(max(start, 0), songs.count - 1)), shuffled: false)
+        }
+    }
+
+    /// Plays the station tapped (`tapped` is its place in `stations`) among the stations of the
+    /// list it was tapped in, each stream once, in the list's order.
+    func playStations(_ stations: [(stream: String, id: String)], tapped: Int) {
+        let lineup = lineupOf(stations, tapped: tapped, stream: { $0.stream }, id: { $0.id })
+        playStations(lineup.ids, from: lineup.index)
+    }
+
     /// Play or pause. With nothing queued, the whole library plays shuffled. Asked while the saved
     /// queue is still coming back, it waits for it.
     func toggle() {
@@ -397,14 +437,30 @@ final class Player {
         onClose?()
     }
 
-    /// Next always moves on, even when repeating one song.
+    /// Next always moves on, even when repeating one song. On a live station it is the next
+    /// station of its list, and nothing at the last one.
     func next() {
-        whenRestored { [weak self] in self?.engine.next() }
+        whenRestored { [weak self] in
+            guard let self else { return }
+            if let lineup = self.lineup {
+                if let next = lineup.next { self.jump(to: next) }
+                return
+            }
+            self.engine.next()
+        }
     }
 
-    /// Back to the start of the song, or to the one before when the song has barely begun.
+    /// Back to the start of the song, or to the one before when the song has barely begun. On a
+    /// live station it is the station before in its list, and nothing at the first one.
     func previous() {
-        whenRestored { [weak self] in self?.engine.previous() }
+        whenRestored { [weak self] in
+            guard let self else { return }
+            if let lineup = self.lineup {
+                if let previous = lineup.previous { self.jump(to: previous) }
+                return
+            }
+            self.engine.previous()
+        }
     }
 
     /// Plays the song at a queue position.
@@ -420,7 +476,9 @@ final class Player {
         jump(to: slot.index)
     }
 
+    /// Moves to `seconds` into the song. A live station cannot be moved through.
     func seek(to seconds: TimeInterval) {
+        guard currentItem?.isRadioStation != true else { return }
         elapsed = max(0, seconds)
         tickedAt = Date()
         engine.seek(toMs: Int(max(0, seconds) * 1000))
@@ -774,14 +832,15 @@ final class Player {
 
     /// A song that fails while music should play is skipped with one line; once as many songs
     /// have failed in a row as the queue holds, or nothing is next, it stops. The count starts
-    /// over only when a song becomes ready.
+    /// over only when a song becomes ready. A live station that fails stops there with its line,
+    /// never moving on to the next station by itself.
     private func failed(_ item: QueueItem, _ error: PlayError) {
         guard engine.playWhenReady else { return }
         let why = item.isRadioStation ? stationFailureWords(error) : playFailureOf(error, outside: item.isFind).words
         let title = item.title.trimmingCharacters(in: .whitespaces).isEmpty ? "a song" : item.title
         failuresInARow += 1
         playbackLog.info("playback failed: \(error.detail, privacy: .public)")
-        if failuresInARow >= engine.queue.count || engine.queue.nextForSkip == nil {
+        if item.isRadioStation || failuresInARow >= engine.queue.count || engine.queue.nextForSkip == nil {
             announce(stoppedLine(title, why))
             engine.pause()
         } else {
@@ -861,6 +920,7 @@ final class Player {
     private func publishState() {
         isPlaying = engine.isPlaying
         isWaiting = engine.playWhenReady && engine.state == .buffering
+        wantsToPlay = engine.playWhenReady && engine.state != .ended
     }
 
     private func publishPosition() {

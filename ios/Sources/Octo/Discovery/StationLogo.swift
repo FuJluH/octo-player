@@ -127,10 +127,100 @@ struct StationLogo: View {
         return words.compactMap { $0.first.map { String($0).uppercased() } }.joined()
     }
 
-    /// A steady color for the name: the same station always gets the same one.
-    private var drawnColor: Color {
-        var hash: UInt32 = 2_166_136_261
-        for byte in name.lowercased().utf8 { hash = (hash ^ UInt32(byte)) &* 16_777_619 }
-        return Color(hue: Double(hash % 360) / 360, saturation: 0.55, brightness: 0.55)
+    private var drawnColor: Color { Color(hue: stationHue(name), saturation: 0.55, brightness: 0.55) }
+}
+
+/// A steady hue for a station's name, 0 to 1: the same station always gets the same one.
+func stationHue(_ name: String) -> Double {
+    var hash: UInt32 = 2_166_136_261
+    for byte in name.lowercased().utf8 { hash = (hash ^ UInt32(byte)) &* 16_777_619 }
+    return Double(hash % 360) / 360
+}
+
+/// The tile Octo draws for a station with no picture, as an image for the lock screen: the
+/// station's color, lighter at the top, with the live radio symbol.
+func drawnStationTile(_ name: String, pixels: Int) -> UIImage {
+    let side = CGFloat(max(pixels, 1))
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = 1
+    return UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { context in
+        let hue = stationHue(name)
+        let top = UIColor(hue: hue, saturation: 0.5, brightness: 0.65, alpha: 1)
+        let bottom = UIColor(hue: hue, saturation: 0.55, brightness: 0.5, alpha: 1)
+        if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: [top.cgColor, bottom.cgColor] as CFArray, locations: [0, 1]) {
+            context.cgContext.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: 0, y: side), options: [])
+        }
+        let config = UIImage.SymbolConfiguration(pointSize: side * 0.22, weight: .semibold)
+        if let symbol = UIImage(systemName: "dot.radiowaves.left.and.right", withConfiguration: config)?
+            .withTintColor(UIColor.white.withAlphaComponent(0.92), renderingMode: .alwaysOriginal) {
+            symbol.draw(at: CGPoint(x: (side - symbol.size.width) / 2, y: (side - symbol.size.height) / 2))
+        }
+    }
+}
+
+/// A live station's cover: the song on air's artwork, else the station's logo, else its cover on
+/// the server, else the tile Octo draws for it. Each picture is cut down to the size drawn, and
+/// one that fails to load falls back to the next, so a station never shows an empty square.
+struct LiveCover: View {
+    /// The song's artwork address, empty when the station sends none.
+    let artwork: String
+    /// The station's logo address, empty when it has none.
+    let logo: String
+    /// The station's cover id on the server, for the server's own stations.
+    let coverArt: String?
+    let name: String
+    var size: CGFloat
+    var radius: CGFloat = OctoRadius.artS
+    @Environment(Session.self) private var session
+    @Environment(\.displayScale) private var scale
+    @State private var picture: UIImage?
+    @State private var serverCover: UIImage?
+
+    var body: some View {
+        ZStack {
+            if let serverCover, logo.isEmpty {
+                Image(uiImage: serverCover).resizable().scaledToFill()
+            } else {
+                StationLogo(address: logo, name: name, size: size, radius: radius)
+            }
+            if let picture, !artwork.isEmpty {
+                Image(uiImage: picture)
+                    .resizable()
+                    .scaledToFill()
+                    .transition(.opacity)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .task(id: artwork) {
+            guard !artwork.isEmpty else {
+                picture = nil
+                return
+            }
+            let pixels = Int(size * scale)
+            if let quick = StationLogos.shared.cached(artwork, pixels: pixels) {
+                picture = quick
+                return
+            }
+            let loaded = await StationLogos.shared.image(artwork, pixels: pixels)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.25)) { picture = loaded }
+        }
+        .task(id: "\(coverArt ?? "")|\(logo.isEmpty)") {
+            guard logo.isEmpty, let coverArt, !coverArt.isEmpty, let client = session.client else {
+                serverCover = nil
+                return
+            }
+            serverCover = await Covers.shared.image(coverArt, size: Int(size * scale), client: client)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+extension LiveCover {
+    /// The cover for what a station shows now.
+    init(_ shown: LiveShown, coverArt: String?, size: CGFloat, radius: CGFloat = OctoRadius.artS) {
+        self.init(artwork: shown.onAir.artwork, logo: shown.details.logo, coverArt: coverArt ?? (shown.details.coverArt.isEmpty ? nil : shown.details.coverArt),
+                  name: shown.station, size: size, radius: radius)
     }
 }

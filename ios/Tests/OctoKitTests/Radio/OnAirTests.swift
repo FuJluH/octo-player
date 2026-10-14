@@ -137,6 +137,16 @@ import Testing
         #expect(radioSong(id)?.contentType == nil)
     }
 
+    @Test func aCatalogStationComesBackFromItsIdForKeeping() throws {
+        let back = try #require(liveStationOf(kiis.radioId()))
+        #expect(back.uuid == kiis.uuid && back.name == kiis.name && back.streamUrl == kiis.streamUrl)
+        #expect(back.favicon == kiis.favicon && back.codec == "AAC" && back.bitrate == 128 && back.tags == kiis.tags)
+        #expect(back.state == "California" && back.countryCode == "US" && !back.hls)
+        // The server's own stations and old ids are not the catalog's.
+        #expect(liveStationOf(radioId("http://h/s", "Mine")) == nil)
+        #expect(liveStationOf("song-1") == nil)
+    }
+
     @Test func oldIdsReadWithNoDetails() {
         #expect(radioDetailsOf(radioId("http://host/live", "Name")) == RadioDetails())
         #expect(radioDetailsOf(radioId("http://host/live", "Name", hls: true)) == RadioDetails())

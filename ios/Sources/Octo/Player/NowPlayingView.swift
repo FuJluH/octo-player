@@ -50,6 +50,10 @@ struct NowPlayingView: View {
     @State private var airPlay = AirPlayTrigger()
     @State private var showsTiming = false
     @State private var showsChooser = false
+    /// While a live station plays: its details, and the stations it was started from.
+    @State private var showsStationInfo = false
+    @State private var showsStations = false
+    @State private var liveHeart = LiveHeart()
 
     private static let pullShare: CGFloat = 0.45
     private static let slop: CGFloat = 8
@@ -119,7 +123,11 @@ struct NowPlayingView: View {
         .onChange(of: router.lyricsRequested, initial: true) { _, asked in
             guard asked else { return }
             router.lyricsRequested = false
-            if !lyrics.open { toggleLyrics() }
+            if !lyrics.open && player.live == nil { toggleLyrics() }
+        }
+        // A live station has no lyrics: they close, and its controls show.
+        .onChange(of: player.currentItem?.isRadioStation == true, initial: true) { _, live in
+            if live && lyrics.open { toggleLyrics() }
         }
         .onChange(of: lyrics.open) { _, open in showLyrics(open, animated: true) }
         .onChange(of: drive.request, initial: true) { _, request in
@@ -141,12 +149,24 @@ struct NowPlayingView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showsStations) {
+            StationListSheet { showsStations = false }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showsStationInfo) {
+            if let live = player.live {
+                StationInfoSheet(shown: live, coverArt: player.current?.coverArt) { showsStationInfo = false }
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
+        }
     }
 
     /// The wash slows to 10 frames a second while a card is open over it or the app is not in
     /// front.
     private var focused: Bool {
-        scenePhase == .active && !(showsSleep || showsSpeed || showsTiming || showsChooser)
+        scenePhase == .active && !(showsSleep || showsSpeed || showsTiming || showsChooser || showsStationInfo || showsStations)
     }
 
     // MARK: Layouts
@@ -267,7 +287,8 @@ struct NowPlayingView: View {
         GeometryReader { box in
             let side = max(0, min(maxSide, box.size.width, box.size.height))
             let folded = folds ? fold : 0
-            PlayerCardCover(entrance: entrance, coverId: player.current?.coverArt, side: side, online: player.current?.isExternal ?? false)
+            PlayerCardCover(entrance: entrance, coverId: player.current?.coverArt, live: player.live, side: side,
+                            online: player.current?.isExternal ?? false)
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
                     flight.cardPlaced(frame)
                     places.card = frame
@@ -290,7 +311,9 @@ struct NowPlayingView: View {
     private func controls(roomy: Bool) -> some View {
         let gap: CGFloat = roomy ? 12 : 4
         return VStack(spacing: 0) {
-            if let song = player.current {
+            if let song = player.current, let live = player.live, let lineup = player.lineup {
+                liveControls(song, live, lineup, roomy: roomy, gap: gap)
+            } else if let song = player.current {
                 HStack(spacing: 0) {
                     ZStack(alignment: .leading) {
                         PlayerTitleBlock(song: song, ink: ink, accent: accent, openArtist: artistOpener(song))
@@ -320,6 +343,66 @@ struct NowPlayingView: View {
                     .padding(.bottom, gap)
             }
         }
+    }
+
+    /// The controls while a live station plays: the song on air with its heart, the live bar,
+    /// stations in place of songs, and only the switches that mean something live.
+    @ViewBuilder
+    private func liveControls(_ song: Song, _ live: LiveShown, _ lineup: LiveLineup, roomy: Bool, gap: CGFloat) -> some View {
+        HStack(spacing: 0) {
+            ZStack(alignment: .leading) {
+                PlayerTitleBlock(song: song, ink: ink, accent: accent, openArtist: nil)
+                    .id("\(song.id)|\(live.title)")
+                    .transition(.asymmetric(insertion: .opacity.animation(.octoTween(fixed: 250, OctoEasing.standard)),
+                                            removal: .opacity.animation(.octoTween(fixed: 150, OctoEasing.standard))))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            LiveHeartButton(onAir: live.onAir, ink: ink, heart: liveHeart, openSearch: openSearch)
+            liveMoreButton(live)
+        }
+        LiveBar(ink: ink, muted: muted, details: live.details)
+            .padding(.top, 12)
+        LiveTransport(ink: ink, lineup: lineup)
+            .padding(.top, gap)
+        if roomy {
+            PlayerVolume(ink: ink, muted: muted)
+                .padding(.top, 8)
+        }
+        liveSwitches(lineup)
+            .padding(.top, gap)
+            .padding(.bottom, gap)
+    }
+
+    /// The live station's menu, then AirPlay and Sound.
+    private func liveMoreButton(_ live: LiveShown) -> some View {
+        Menu {
+            if let item = player.currentItem {
+                LiveMenuItems(trackId: item.trackId, onAir: live.onAir, showInfo: { showsStationInfo = true }, openSearch: openSearch)
+            }
+            Section {
+                PlayerMenuExtras(airPlay: airPlay) { route in close { router.go(route) } }
+            }
+        } label: {
+            IconView(.more, size: 24, color: ink.opacity(0.6))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .menuOrder(.fixed)
+        .accessibilityLabel("More")
+    }
+
+    /// While a live station plays: the stations it was started from, and the sleep timer.
+    private func liveSwitches(_ lineup: LiveLineup) -> some View {
+        HStack(spacing: 20) {
+            PlayerSwitch(icon: .queue, label: "Stations", lit: false, ink: ink, state: "\(lineup.ids.count) stations") { showsStations = true }
+            sleepSwitch
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// Closes the player and opens Search on `text`.
+    private func openSearch(_ text: String) {
+        close { router.openSearch(text) }
     }
 
     private func artistOpener(_ song: Song) -> (() -> Void)? {
@@ -367,23 +450,27 @@ struct NowPlayingView: View {
             PlayerSwitch(icon: .lyrics, label: "Lyrics", lit: lyrics.open, ink: ink, state: lyrics.open ? "Showing" : "Hidden",
                          action: toggleLyrics)
             PlayerSwitch(icon: .queue, label: "Up next", lit: false, ink: ink, state: "Off") { showsQueue = true }
-            let state = player.sleepState
-            PlayerSwitch(icon: .sleepTimer, label: "Sleep timer", lit: state != .off, ink: ink,
-                         state: sleepSummary(state)) { openSleep(.sleep) }
-                .overlay(alignment: .topTrailing) {
-                    if case .counting(let left) = state {
-                        SleepBadge(minutes: (left + 59_999) / 60_000)
-                            .offset(x: 6, y: -4)
-                    }
-                }
-                .glassPopover(isPresented: $showsSleep) {
-                    TimeCard(start: .sleep, opening: sleepOpening) { showsSleep = false }
-                }
+            sleepSwitch
             PlayerSwitch(icon: .shuffle, label: "Shuffle", lit: player.shuffled, ink: ink) { player.toggleShuffle() }
             PlayerSwitch(icon: player.repeatMode == .one ? .repeatOne : .repeatAll, label: "Repeat", lit: player.repeatMode != .off,
                          ink: ink, state: repeatWords) { player.cycleRepeat() }
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private var sleepSwitch: some View {
+        let state = player.sleepState
+        return PlayerSwitch(icon: .sleepTimer, label: "Sleep timer", lit: state != .off, ink: ink,
+                            state: sleepSummary(state)) { openSleep(.sleep) }
+            .overlay(alignment: .topTrailing) {
+                if case .counting(let left) = state {
+                    SleepBadge(minutes: (left + 59_999) / 60_000)
+                        .offset(x: 6, y: -4)
+                }
+            }
+            .glassPopover(isPresented: $showsSleep) {
+                TimeCard(start: .sleep, opening: sleepOpening) { showsSleep = false }
+            }
     }
 
     private var repeatWords: String {
@@ -559,7 +646,11 @@ struct NowPlayingView: View {
     /// song, and brings the new one in from 20% out on the other side; otherwise it springs back.
     /// A new swipe calls off a settle still under way.
     private func finishSwipe(_ offset: CGFloat, _ velocity: CGFloat) {
-        let result = swipeSkip(offset: Double(offset), velocity: Double(velocity), distance: Double(Self.skipAt), fling: 900)
+        var result = swipeSkip(offset: Double(offset), velocity: Double(velocity), distance: Double(Self.skipAt), fling: 900)
+        // A live station swipes to the next or previous station of its list, and not past its ends.
+        if let lineup = player.lineup {
+            if (result == .next && !lineup.hasNext) || (result == .previous && !lineup.hasPrevious) { result = .stay }
+        }
         if result != .stay && !book.armed { ticks += 1 }
         book.armed = false
         book.settle += 1
@@ -622,7 +713,9 @@ struct NowPlayingView: View {
             if let song = player.current, let albumId = song.albumId, !albumId.isEmpty {
                 router.go(.album(Album(id: albumId, name: song.album ?? "", artist: song.artist ?? "", coverArt: song.coverArt)))
             }
-        case "queue": showsQueue = true
+        case "queue":
+            if player.live != nil { showsStations = true } else { showsQueue = true }
+        case "stationinfo": showsStationInfo = true
         case "sleep":
             if let minutes = Int(request.value) { player.startSleep(minutes: minutes) }
             openSleep(.sleep)
@@ -762,14 +855,20 @@ private struct Rising: ViewModifier {
     }
 }
 
-/// The card's cover, its corners following the opening and closing.
+/// The card's cover, its corners following the opening and closing. A live station shows the
+/// song on air's artwork, else its logo, else the tile Octo draws for it.
 private struct PlayerCardCover: View {
     let entrance: PlayerEntrance
     let coverId: String?
+    let live: LiveShown?
     let side: CGFloat
     let online: Bool
 
     var body: some View {
-        Cover(id: coverId, size: side, radius: side * entrance.corner / 100, online: online)
+        if let live {
+            LiveCover(live, coverArt: coverId, size: side, radius: side * entrance.corner / 100)
+        } else {
+            Cover(id: coverId, size: side, radius: side * entrance.corner / 100, online: online)
+        }
     }
 }

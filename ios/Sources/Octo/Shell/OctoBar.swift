@@ -355,16 +355,22 @@ struct NowPlayingFace: View {
         Button(action: tap) {
             ZStack {
                 // With no artwork, no picture and no dim: the sign sits on the glass.
-                if let cover = player.current?.coverArt {
+                if let live = player.live {
+                    LiveCover(live, coverArt: player.current?.coverArt, size: OctoBar.height - 12, radius: (OctoBar.height - 12) / 2)
+                        .overlay(Circle().fill(.black.opacity(0.35)))
+                } else if let cover = player.current?.coverArt {
                     Cover(id: cover, size: OctoBar.height - 12, radius: (OctoBar.height - 12) / 2, online: player.current?.isExternal ?? false)
                         .overlay(Circle().fill(.black.opacity(0.35)))
                 }
-                if player.isPlaying {
+                if player.live != nil {
+                    IconView(player.liveOn ? .stop : .play, size: 22, color: .white)
+                } else if player.isPlaying {
                     PauseGlyph(size: 22, color: .white)
                 } else {
                     IconView(.play, size: 22, color: .white)
                 }
-                if player.current != nil {
+                // A live station has no progress to ring.
+                if player.current != nil && player.live == nil {
                     ProgressRing(lineWidth: 2).padding(3)
                 }
             }
@@ -397,11 +403,19 @@ struct MiniPlayerPill: View {
     var body: some View {
         HStack(spacing: 0) {
             ZStack {
-                BadgedCover(id: player.current?.coverArt, size: 36, radius: 18, external: player.current?.isExternal ?? false)
-                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { flight.barFrame = $0 }
-                    .opacity(flight.hidesBar ? 0 : 1)
-                    .onDisappear { flight.barFrame = nil }
-                ProgressRing(lineWidth: 2).padding(1)
+                Group {
+                    if let live = player.live {
+                        LiveCover(live, coverArt: player.current?.coverArt, size: 36, radius: 18)
+                    } else {
+                        BadgedCover(id: player.current?.coverArt, size: 36, radius: 18, external: player.current?.isExternal ?? false)
+                    }
+                }
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { flight.barFrame = $0 }
+                .opacity(flight.hidesBar ? 0 : 1)
+                .onDisappear { flight.barFrame = nil }
+                if player.live == nil {
+                    ProgressRing(lineWidth: 2).padding(1)
+                }
             }
             .frame(width: 44, height: 44)
             VStack(alignment: .leading, spacing: 0) {
@@ -414,26 +428,40 @@ struct MiniPlayerPill: View {
             }
             .padding(.horizontal, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            transport(.previous, "Previous", action: player.previous)
-            transport(player.isPlaying ? .pause : .play, player.isPlaying ? "Pause" : "Play", action: player.toggle)
-            transport(.next, "Next", action: player.next)
+            if let lineup = player.lineup {
+                // A live station: Back and Next change station, and Play and Stop rejoin and
+                // leave what is on air.
+                if lineup.shows {
+                    transport(.previous, "Previous station", action: player.previous).disabled(!lineup.hasPrevious)
+                }
+                transport(player.liveOn ? .stop : .play, player.liveOn ? "Stop" : "Play", action: player.toggle)
+                if lineup.shows {
+                    transport(.next, "Next station", action: player.next).disabled(!lineup.hasNext)
+                }
+            } else {
+                transport(.previous, "Previous", action: player.previous)
+                transport(player.isPlaying ? .pause : .play, player.isPlaying ? "Pause" : "Play", action: player.toggle)
+                transport(.next, "Next", action: player.next)
+            }
         }
         .padding(.leading, 6)
         .padding(.trailing, 4)
         .contentShape(Capsule())
         .onTapGesture(perform: open)
-        .task(id: player.current?.coverArt) {
+        .task(id: flightKey(player.current)) {
             // The player's card is at most 312 points; the flight draws the cover at that size.
-            await flight.prepare(player.current?.coverArt, size: Int(312 * scale), client: session.client)
+            if let live = player.live {
+                await flight.prepare(live: live, coverArt: player.current?.coverArt, size: Int(312 * scale), client: session.client)
+            } else {
+                await flight.prepare(player.current?.coverArt, size: Int(312 * scale), client: session.client)
+            }
         }
         .accessibilityAction(named: "Open player", open)
     }
 
     private func transport(_ icon: OctoIcon, _ label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            IconView(icon, size: 28, color: .white)
-                .frame(width: 36, height: 36)
-                .contentShape(Rectangle())
+            TransportIcon(icon: icon)
         }
         .buttonStyle(NoHighlight())
         .accessibilityLabel(label)
@@ -485,5 +513,17 @@ struct ExplicitMark: View {
             .compositingGroup()
             .accessibilityElement()
             .accessibilityLabel("Explicit")
+    }
+}
+
+/// A mini player button's icon, dimmed while the button cannot be used.
+private struct TransportIcon: View {
+    let icon: OctoIcon
+    @Environment(\.isEnabled) private var enabled
+
+    var body: some View {
+        IconView(icon, size: 28, color: .white.opacity(enabled ? 1 : 0.35))
+            .frame(width: 36, height: 36)
+            .contentShape(Rectangle())
     }
 }

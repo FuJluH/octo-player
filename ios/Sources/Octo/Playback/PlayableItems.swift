@@ -152,11 +152,14 @@ struct PlayableItems {
         return item
     }
 
-    /// A station; `mimeType` names an HLS one whose address does not say so.
+    /// A station; `mimeType`, or the id's HLS mark, names an HLS one whose address does not say
+    /// so. A server station carries its server cover.
     private func radioItem(_ id: String, mimeType: String? = nil, source: QueueSource) -> QueueItem? {
         guard let station = radioOf(id) else { return nil }
+        let cover = radioDetailsOf(id).coverArt
         return QueueItem(trackId: id, uri: station.stream, title: radioTitle(id) ?? station.stream, artist: radioArtist,
-                         mimeType: mimeType, source: source)
+                         mimeType: mimeType ?? (radioIsHls(id) ? hlsPlaylistTypes[0] : nil), artwork: cover.isEmpty ? nil : cover,
+                         source: source)
     }
 
     private func openedFileItem(_ id: String, source: QueueSource) -> QueueItem? {

@@ -242,8 +242,16 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
         playWhenReady = false
         crossfader.interrupt()
         deck.playWhenReady = false
+        dropLiveStream()
         onPlayWhenReadyChange?(false, false)
         stopOutputLater()
+    }
+
+    /// A live station stopped lets go of its stream, so playing again rejoins what is on air
+    /// then instead of what was buffered when it stopped.
+    private func dropLiveStream() {
+        guard deck.item?.isRadioStation == true else { return }
+        deck.clear()
     }
 
     /// Stops and empties the player.
@@ -481,6 +489,7 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
             playWhenReady = false
             crossfader.interrupt()
             deck.playWhenReady = false
+            dropLiveStream()
             onPlayWhenReadyChange?(false, false)
         } else {
             let resume = resumeWhenFocusReturns && shouldResume
@@ -575,6 +584,13 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
                 deck.pauseAtEndOfSong = false
                 onPlayWhenReadyChange?(false, true)
                 stopOutputLater()
+            } else if queue.currentItem?.isRadioStation == true {
+                // A live station that ends stops there: the next station never starts by itself,
+                // and playing again rejoins this one.
+                playWhenReady = false
+                deck.clear()
+                onPlayWhenReadyChange?(false, false)
+                stopOutputLater()
             } else if queue.nextOnEnd == nil {
                 ended = true
                 onStateChange?(.ended)
@@ -600,9 +616,10 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
         }
     }
 
-    /// The song to follow is loaded once the one on now is close to its end.
+    /// The song to follow is loaded once the one on now is close to its end. A live station has
+    /// no end, so nothing is loaded to follow it.
     private func loadFollowingWhenNear() {
-        guard deck.followingItem == nil, !deck.pauseAtEndOfSong, let current = deck.current,
+        guard deck.followingItem == nil, !deck.pauseAtEndOfSong, let current = deck.current, !current.item.isRadioStation,
               current.item.entryId == queue.currentItem?.entryId, let next = queue.nextOnEnd else { return }
         let length = playingLengthMs(listedMs: lengths.lengthMs(current.item.trackId, listedMs: current.item.durationMs),
                                      playerMs: current.measuredMs, positionMs: deck.positionMs)

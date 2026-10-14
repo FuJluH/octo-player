@@ -208,7 +208,9 @@ final class Crossfader {
             return
         }
         let queue = player.queue
-        guard fadeMs > 0, let next = queue.nextOnEnd, let current = queue.currentItem else {
+        // A live station has no end to fade out of, and is never faded into.
+        guard fadeMs > 0, let next = queue.nextOnEnd, let current = queue.currentItem, !current.isRadioStation,
+              !queue.items[next].isRadioStation else {
             dropPlan()
             unloadSpare()
             schedule(farCheckMs)
