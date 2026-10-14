@@ -1,56 +1,47 @@
-Arrange **Home** your way, a new icon, a smoother player, and new music shows up on its own. Earlier: ALAC songs on every phone, faster covers, **Automix**, **Family**, **Charts** and more.
+**Live radio near you**, stations that keep going, Octo's mixes in Playlists, crossfade curves, headphone crossfeed and server updates from the app.
 
 ## Sound
 
-- **ALAC** songs (Apple's .m4a music files) play on every phone. Some phones used to play them in silence.
-- A song the phone cannot play is skipped with a note, never played in silence.
-- **Automix** blends songs like a DJ: lined up on the beat, with filter sweeps and matched tempo.
-- Crossfade runs from 2 to 16 seconds, with Smart transitions, Filter sweeps and Match tempo under it.
+- **Crossfade curve** picks how songs fade into each other: Equal power, Linear, S-curve, Even in loudness or Mix only.
+- **Crossfeed** for headphones lets each ear hear a little of the other side, for a more relaxed, natural sound. Choose Natural, Chu Moy, Jan Meier or your own in Sound. It is off until you turn it on.
 
 ## Library
 
-- **Home sections**: drag Home's shelves into your own order or hide them, in Settings > Appearance or with Edit Home at the end of Home.
-- New songs on your server show up in search right away, and the app notices new music on its own.
-- **Library songs only** hides songs found online, everywhere or for one album.
-- **Charts** on Home and on their own page, when your server is Octo and has charts.
-- Liked Songs, Review and Duplicates carry their own pictures.
-- **Get my music** brings in your playlists from other services through TuneMyMusic, a file or pasted text.
+- **From Octo** in Playlists: the mixes, charts, stations and Made for you lists your Octo server makes for you, grouped by kind.
+- Home has new shelves of Year, Genre, Artist and Country mixes. Move or hide them in Edit Home.
+- Octo's stations are on a shelf named **Radio**, and internet radio stations added to your server get their own **Live radio** shelf.
+- Get my music no longer signs in to Spotify: its tile opens TuneMyMusic like the other services. Public links, files and pasted lists work as before.
 
 ## Playback
 
-- The player and lyrics run at your screen's full refresh rate, 90 or 120 Hz on phones that have it.
-- The player has more room: pull it down to close, and Cast and Sound are in its More menu.
-- The playing song's cover and the next ones load ahead, so the artwork is there when a song starts.
-- **Start playing after** sets how much of a song loads before it plays, for spotty connections.
-- The background no longer jumps back to the last cover when you skip.
-- Song lengths are exact, so the progress bar matches the song.
+- **Live radio near you**: find radio stations around a ZIP code, postal code, town or your location, choose how far to look, and keep the ones you like. Open it from Home, Search or your server's stations.
+- Live radio shows the song the station is playing, plays more kinds of station streams and reconnects when the connection drops.
+- After a long pause, live radio picks up with what is on now.
+- **Stations keep going**: a tap on a station or a Made for you list shows its songs, with a play button on the cover. A station adds more songs as you near the end, even after the app restarts.
+- Internet radio stations added to your server play from Home.
 
 ## Server
 
-- **Radio** has new settings: Discovery, Adventure, Artist variety and Favorites. Songs from outside your library spread through it at random.
-- **Find songs** asks before a copy that is not better replaces yours, and a replacement can be undone.
-- A song found online that the server will not send says so.
-- The downloads pill shows each step, and its log follows along.
-- Each phone names itself to your server, so you can tell your devices apart.
+- **Server updates**: when a newer Octo is out, your server's page says so and shows what's new. If you are the server's admin, Update now updates it from the app. Later hides it until the next release.
+- Add a live radio station to your server's stations with Add to your server, if you are its admin.
+- Places you type, and your town from your location, are looked up on your Octo server when it can.
 
 ## Lyrics
 
-- Lyrics keep time with the song's real length, so they stay in step to the end.
+- **Bloom fast singing**: a word a singer drags out swells and glows like a held note. It is on by default in Settings > Lyrics.
 
 ## Offline
 
-- Songs you download for offline no longer count as plays on an Octo server.
+- A song whose file was replaced on your server, by Better quality or Find songs, plays and downloads the new file instead of the old one.
 
 ## Everyday touches
 
-- A new, cleaner **Octo icon**.
-- Home no longer jumps as it opens: your stations and mixes show at once.
-- Song, artist and playlist rows run closer to the screen's edges.
-- Covers show up faster everywhere, and a screen full of them never holds up the player's.
+- An added station with nothing to play stays off Home.
+- A list that is gone from your server leaves Playlists.
+- A station's play button says which station it plays.
 
 ## Settings
 
-- **Family** under Settings > Server: share your server, each person with their own library, plan and devices.
-- Join a family with a code or its link.
-- Original quality comes first, and is the default, in every quality picker.
-- ListenBrainz gets each play's real length.
+- Crossfade curve and Crossfeed can be found in Settings search.
+- Backups keep your crossfade curve and the live radio stations you kept.
+- Live radio can use your location, or you can type a place instead.

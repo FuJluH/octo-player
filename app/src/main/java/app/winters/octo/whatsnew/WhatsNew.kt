@@ -14,7 +14,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 // The one line the card on Home shows. Kept short.
-const val WhatsNewSummary = "Arrange Home your way, a new icon and a smoother player"
+const val WhatsNewSummary = "Live radio near you, stations that keep going and headphone crossfeed"
 
 // What this update brings, part by part, as markdown in the app's assets.
 // Rewrite it with each update.
