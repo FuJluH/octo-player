@@ -17,6 +17,8 @@ import androidx.compose.ui.window.TrayState
 import androidx.compose.ui.window.isTraySupported
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.drawnStationPicture
+import app.winters.octo.desktop.liveSongCover
+import androidx.compose.runtime.snapshotFlow
 import app.winters.octo.desktop.audio.CHECK_PLAY
 import app.winters.octo.desktop.settings.AppPlaces
 import app.winters.octo.desktop.settings.DesktopOs
@@ -77,16 +79,22 @@ class SystemIntegration(
         DesktopOs.Linux -> LinuxMediaControls(app.player::positionMs)
     }
 
+    private val serverCovers = ServerCovers(
+        app.http,
+        { app.connection?.client },
+        File(places.cache, "now-playing"),
+        images = { app.coverImages?.invoke() },
+        drawn = { name, stream -> app.drawnStationPicture(name, stream) },
+    )
+
     private val session = MediaSession(
         player = app.player,
         controls = controls,
-        covers = ServerCovers(
-            app.http,
-            { app.connection?.client },
-            File(places.cache, "now-playing"),
-            images = { app.coverImages?.invoke() },
-            drawn = { name, stream -> app.drawnStationPicture(name, stream) },
-        ),
+        // A station's song on air shows its cover from Octo once found there.
+        covers = object : CoverSource by serverCovers {
+            override suspend fun live(now: NowPlaying): CoverArt? =
+                app.liveSongCover(now.title, now.artist)?.let { serverCovers.load(it) } ?: serverCovers.live(now)
+        },
         scope = app.scope,
         others = ::otherEvent,
     )
@@ -145,6 +153,7 @@ class SystemIntegration(
 
     fun start(launchArgs: List<String>) {
         session.start { works -> mediaKeysWork = works }
+        app.scope.launch { snapshotFlow { app.liveHeart.match }.collect { if (it != null) session.refreshCover() } }
         shell.start()
         family.start()
         startDiscord()

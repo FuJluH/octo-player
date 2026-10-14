@@ -471,7 +471,7 @@ private fun Transport(app: AppState, state: PlayerState) {
 // there is room.
 @Composable
 private fun Progress(app: AppState, state: PlayerState, modifier: Modifier, times: Boolean) {
-    state.live?.let { live -> return LiveLine(app, live, OctoColors.TextPrimary, OctoColors.TextMuted, modifier, codec = false, times = times) }
+    if (state.live != null) return LiveLine(app, OctoColors.TextPrimary, OctoColors.TextMuted, modifier, times = times)
     val position by rememberPosition(app.player)
     val duration = state.durationMs
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.S)) {

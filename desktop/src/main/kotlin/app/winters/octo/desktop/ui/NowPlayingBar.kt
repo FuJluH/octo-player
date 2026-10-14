@@ -169,7 +169,7 @@ fun PlayerBar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier,
                     else Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) { UtilityZone(app, state) }
                 }
                 if (live != null) {
-                    LiveLine(app, live, OctoColors.TextPrimary, OctoColors.TextMuted, Modifier.fillMaxWidth().heightIn(min = Focus.MinTarget))
+                    LiveLine(app, OctoColors.TextPrimary, OctoColors.TextMuted, Modifier.fillMaxWidth().heightIn(min = Focus.MinTarget))
                 } else {
                     ProgressLine(app, state)
                 }

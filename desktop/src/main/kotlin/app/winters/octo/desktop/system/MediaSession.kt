@@ -222,8 +222,12 @@ class MediaSession(
 
     private fun showTrack(now: NowPlaying) {
         coverJob?.cancel()
-        val cover = now.coverId
         controls.showTrack(now, null)
+        loadCover(now)
+    }
+
+    private fun loadCover(now: NowPlaying) {
+        val cover = now.coverId
         if ((cover == null && !now.live) || covers == null) return
         coverJob = scope.launch {
             val art = (if (now.live) covers.live(now) else cover?.let { covers.load(it) }) ?: return@launch
@@ -233,6 +237,14 @@ class MediaSession(
             controls.showTrack(current, art)
             tell(current, jumped = false)
         }
+    }
+
+    // Asks for a station's cover again, keeping the one shown meanwhile:
+    // once the song on air is found in Octo, its cover takes the place.
+    fun refreshCover() {
+        val now = shown?.takeIf { it.live } ?: return
+        coverJob?.cancel()
+        loadCover(now)
     }
 
     // A live station has no place in it to show.

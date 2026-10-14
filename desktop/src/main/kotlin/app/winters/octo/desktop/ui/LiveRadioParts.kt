@@ -19,6 +19,13 @@ import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.Image
+import androidx.compose.runtime.produceState
+import app.winters.octo.covers.CoverPalette
+import app.winters.octo.covers.CoverSpec
+import app.winters.octo.covers.coverArtKey
+import app.winters.octo.covers.coverPaletteKey
+import app.winters.octo.covers.coverSide
 import app.winters.octo.design.Glyph
 import app.winters.octo.design.MenuRow
 import app.winters.octo.design.MenuSeparator
@@ -70,13 +77,14 @@ fun StationArt(app: AppState, logo: String, name: String, streamUrl: String, mod
     LiveArt(name, streamUrl, modifier, shape, logo = logo, coverArt = coverArt, app = app)
 }
 
-// A station's picture from the best there is: the artwork of the song on
-// the air (filling it), the station's logo (on a dark tile), its picture on
-// the server. Each shows only once it has loaded, over the station's drawn
-// cover, which shows while they load and for good when none does, so a
-// station never shows an empty square: the designed cover with its name on
-// a large picture (given the app), a radio in the station's own color on a
-// small one.
+// A station's picture from the best there is: the song on air as Octo
+// has it (its cover from the server), the artwork the station sends with
+// it, the station's logo (on a dark tile), its picture on the server. Each
+// shows only once it has loaded, over the station's drawn cover, which is
+// drawn here at once (no wait on the network) and stays when none loads,
+// so a station never shows an empty or black square: a radio in the
+// station's own color, and on a large picture (given the app) the designed
+// cover with its name over it once drawn.
 @Composable
 fun LiveArt(
     name: String,
@@ -88,26 +96,28 @@ fun LiveArt(
     coverArt: String? = null,
     small: Boolean = false,
     app: AppState? = null,
+    // The cover of the song in Octo, and whether it is one found online.
+    songCover: String? = null,
+    songOnline: Boolean = false,
 ) {
+    var songShown by remember(songCover) { mutableStateOf(false) }
     var artShown by remember(artwork) { mutableStateOf(false) }
     var logoShown by remember(logo) { mutableStateOf(false) }
     var serverShown by remember(coverArt) { mutableStateOf(false) }
     BoxWithConstraints(modifier.clip(shape), contentAlignment = Alignment.Center) {
         val px = with(LocalDensity.current) { maxOf(maxWidth, maxHeight).roundToPx() }
         val glyph = maxWidth * 0.5f
-        if (!artShown && !logoShown && !serverShown) {
-            if (small || app == null) {
-                val hue = remember(name) { stationHue(name) }
-                Box(Modifier.matchParentSize().background(drawnGround(hue)), contentAlignment = Alignment.Center) {
-                    Glyph(OctoIcons.Radio, size = glyph, tint = Color.White.copy(alpha = 0.85f))
-                }
-            } else {
-                DesignedCover(app, liveCoverOrder(name, streamUrl), Modifier.matchParentSize(), shape)
+        val covered = songShown || artShown
+        if (!covered && !logoShown && !serverShown) {
+            val hue = remember(name) { stationHue(name) }
+            Box(Modifier.matchParentSize().background(drawnGround(hue)), contentAlignment = Alignment.Center) {
+                Glyph(OctoIcons.Radio, size = glyph, tint = Color.White.copy(alpha = 0.85f))
             }
+            if (!small && app != null) DesignedStation(app, name, streamUrl, px)
         }
         val client = LocalCovers.current
         val context = LocalPlatformContext.current
-        if (coverArt != null && client != null && !artShown && !logoShown) {
+        if (coverArt != null && client != null && !covered && !logoShown) {
             val request = remember(coverArt, px, client) { coverRequest(context, client, coverArt, coverBucket(coverFetchPx(px))).build() }
             AsyncImage(
                 model = request,
@@ -118,7 +128,7 @@ fun LiveArt(
                 onState = { serverShown = it is AsyncImagePainter.State.Success },
             )
         }
-        if (isLogoAddress(logo) && !artShown) {
+        if (isLogoAddress(logo) && !covered) {
             Box(Modifier.matchParentSize().then(if (logoShown) Modifier.background(OctoColors.BackgroundTertiary) else Modifier), contentAlignment = Alignment.Center) {
                 AsyncImage(
                     model = webRequest(context, logo, px),
@@ -130,7 +140,7 @@ fun LiveArt(
                 )
             }
         }
-        if (isLogoAddress(artwork)) {
+        if (isLogoAddress(artwork) && !songShown) {
             AsyncImage(
                 model = webRequest(context, artwork, px),
                 contentDescription = null,
@@ -140,8 +150,37 @@ fun LiveArt(
                 onState = { artShown = it is AsyncImagePainter.State.Success },
             )
         }
+        if (songCover != null && client != null) {
+            val request = remember(songCover, px, client, songOnline) { coverRequest(context, client, songCover, coverBucket(coverFetchPx(px)), songOnline).build() }
+            AsyncImage(
+                model = request,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.matchParentSize(),
+                filterQuality = FilterQuality.Medium,
+                onState = { songShown = it is AsyncImagePainter.State.Success },
+            )
+        }
         Box(Modifier.matchParentSize().artworkRim(shape))
     }
+}
+
+// The station's designed cover, with its name, as the shelf's cards have
+// it: drawn off the window's thread and shown once drawn (at once when
+// drawn before), over the drawn tile under it, with no ground of its own.
+@Composable
+private fun DesignedStation(app: AppState, name: String, streamUrl: String, px: Int) {
+    val client = LocalCovers.current
+    val store = app.playlistArt
+    val side = coverSide(px)
+    val order = remember(name, streamUrl) { liveCoverOrder(name, streamUrl) }
+    val paletteKey = coverPaletteKey(client?.primaryUrl?.host.orEmpty(), order.sources + listOfNotNull(order.stamp))
+    fun specOf(palette: CoverPalette) = CoverSpec(order.id, order.name, order.line, order.footer, palette, order.coverTitle, order.glyph)
+    val ready = remember(paletteKey, side) { store.knownPalette(paletteKey)?.let { store.known(coverArtKey(specOf(it), side)) } }
+    val picture by produceState(ready, paletteKey, side) {
+        if (value == null) value = store.art(specOf(store.palette(client, order, paletteKey)), side)
+    }
+    picture?.let { Image(it, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds, filterQuality = FilterQuality.High) }
 }
 
 // A picture from the web, decoded no bigger than it is drawn.

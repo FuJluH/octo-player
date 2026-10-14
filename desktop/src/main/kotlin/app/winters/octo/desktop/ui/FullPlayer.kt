@@ -323,7 +323,7 @@ private fun LivePlayerLines(app: AppState, song: Song, state: PlayerState, live:
         LiveHeartButton(app, live, 40.dp, 22.dp, ink)
     }
     Spacer(Modifier.height(14.dp))
-    LiveLine(app, live, ink, muted, Modifier.fillMaxWidth().heightIn(min = 24.dp))
+    LiveLine(app, ink, muted, Modifier.fillMaxWidth().heightIn(min = 24.dp))
     Spacer(Modifier.height(16.dp))
     LiveTransport(app, state, live, playSize = 68.dp, stepSize = 48.dp, stepIcon = 30.dp, tint = ink, gap = 14.dp)
     Spacer(Modifier.height(10.dp))

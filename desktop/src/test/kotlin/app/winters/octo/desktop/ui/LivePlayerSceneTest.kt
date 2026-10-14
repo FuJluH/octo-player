@@ -54,6 +54,9 @@ class LivePlayerSceneTest {
         A11yScene(folder.newFolder(), player = player).use { s ->
             s.server.file("petal.png", picture(0xFFE8B4C8.toInt(), 0xFF7A3B69.toInt()))
             s.server.file("kiis.png", picture(0xFFFFFFFF.toInt(), 0xFFD6202F.toInt()))
+            // Octo has the song on air, with its own cover, which the player shows.
+            s.server.answer("search3", """"searchResult3":{"song":[{"id":"petal-1","title":"Petal","artist":"Ariana Grande","album":"eternal sunshine","coverArt":"petal-c","duration":180}]}""")
+            s.server.file("getCoverArt", picture(0xFF2B3F6B.toInt(), 0xFFF2C14E.toInt()))
             val kiis = LiveStation(
                 "u-kiis", "102.7 KIIS FM", "https://stream.revma.ihrhls.com/zc185", favicon = "${s.server.address}art/kiis.png",
                 codec = "AAC", bitrate = 128, country = "The United States Of America", countryCode = "US", state = "California", tags = listOf("pop", "top 40"),
@@ -73,6 +76,8 @@ class LivePlayerSceneTest {
                 assertTrue("shows $it", names.contains(it))
             }
             listOf("Song position", "Shuffle", "Repeat", "Lyrics").forEach { assertFalse("no $it", names.contains(it)) }
+            s.waitFor { s.app.liveHeart.match != null }
+            s.render(6)
             shot(s, "live-player-song")
 
             // A spot: the station, its tagline, and no heart.

@@ -96,6 +96,26 @@ class LiveHeartTest {
     }
 
     @Test
+    fun eachSongIsLookedForOnceAndItsMatchIsKept() = runTest(UnconfinedTestDispatcher()) {
+        val heart = LiveHeart(backgroundScope, { asked += it; found(FoundSong(library, true)) }, { s, on -> starred += s.id to on }, { _, q -> missed += q })
+        heart.follow(petal)
+        runCurrent()
+        // Looked for as soon as it is on air, for its cover, before any press.
+        assertEquals(listOf("Ariana Grande Petal"), asked)
+        assertEquals(library, heart.match?.song)
+        heart.follow(OnAir("Lush Life", "Zara Larsson"))
+        runCurrent()
+        assertEquals(null, heart.match)
+        heart.follow(petal)
+        runCurrent()
+        assertEquals("a song heard before is not searched again", 2, asked.size)
+        assertEquals(library, heart.match?.song)
+        heart.press()
+        assertEquals("the press uses the answer", 2, asked.size)
+        assertEquals(listOf("lib-1" to true), starred)
+    }
+
+    @Test
     fun anAnswerForASongGoneByStarsNothing() = runTest(UnconfinedTestDispatcher()) {
         val answer = CompletableDeferred<List<FoundSong>>()
         val heart = LiveHeart(backgroundScope, { answer.await() }, { s, on -> starred += s.id to on }, { _, q -> missed += q })

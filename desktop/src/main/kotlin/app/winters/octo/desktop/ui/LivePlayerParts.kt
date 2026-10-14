@@ -109,10 +109,10 @@ fun StopGlyph(color: Color, modifier: Modifier = Modifier, size: Dp = 20.dp) {
     }
 }
 
-// LIVE with a red dot that breathes gently, held still when motion is
-// reduced. A screen reader hears "Live".
+// The LIVE pill: a red dot that breathes gently (held still when motion
+// is reduced) and LIVE, on a red tint. A screen reader hears "Live".
 @Composable
-fun LiveMarker(color: Color, modifier: Modifier = Modifier) {
+fun LivePill(modifier: Modifier = Modifier) {
     val still = LocalReduceMotion.current
     val glow: State<Float> = if (still) {
         remember { mutableFloatStateOf(1f) }
@@ -120,38 +120,34 @@ fun LiveMarker(color: Color, modifier: Modifier = Modifier) {
         rememberInfiniteTransition(label = "live").animateFloat(1f, 0.35f, infiniteRepeatable(tween(1_100, easing = FastOutSlowInEasing), Bounce.Reverse), label = "live dot")
     }
     Row(
-        modifier.clearAndSetSemantics { contentDescription = "Live" },
+        modifier
+            .clearAndSetSemantics { contentDescription = "Live" }
+            .background(OctoColors.SignalRed.copy(alpha = 0.16f), CircleShape)
+            .border(1.dp, OctoColors.SignalRed.copy(alpha = 0.55f), CircleShape)
+            .padding(horizontal = Space.S, vertical = Space.Xxs),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.Xs),
     ) {
-        Box(Modifier.size(8.dp).graphicsLayer { alpha = glow.value }.background(OctoColors.SignalRed, CircleShape))
-        Txt("LIVE", DesktopType.label, color)
+        Box(Modifier.size(7.dp).graphicsLayer { alpha = glow.value }.background(OctoColors.SignalRed, CircleShape))
+        Txt("LIVE", DesktopType.label, LiveRedInk)
     }
 }
 
-// The station's codec and bitrate in a quiet outlined pill ("AAC 128 kbps").
-@Composable
-fun CodecPill(details: RadioDetails, color: Color) {
-    val text = liveCodecLine(details)
-    if (text.isEmpty()) return
-    Box(Modifier.border(1.dp, color.copy(alpha = 0.4f), CircleShape).padding(horizontal = Space.S, vertical = Space.Xxs)) {
-        Txt(text, DesktopType.meta, color)
-    }
-}
+// The pill's words: the red, lifted enough to read on the dark.
+private val LiveRedInk = Color(0xFFFF8A80)
 
-// In place of the seek line: LIVE, a thin line that cannot be dragged, how
-// long the station has been listened to since it started, and its codec.
+// In place of the seek line: a calm thin line that cannot be dragged, how
+// long the station has been listened to since it started, and the LIVE pill.
 @Composable
-fun LiveLine(app: AppState, live: LiveNow, color: Color, muted: Color, modifier: Modifier = Modifier, codec: Boolean = true, times: Boolean = true) {
+fun LiveLine(app: AppState, color: Color, muted: Color, modifier: Modifier = Modifier, times: Boolean = true) {
     val position by rememberPosition(app.player)
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M)) {
-        LiveMarker(color)
-        Box(Modifier.weight(1f).height(3.dp).background(color.copy(alpha = 0.45f), CircleShape))
+        Box(Modifier.weight(1f).height(2.dp).background(color.copy(alpha = 0.3f), CircleShape))
         if (times) {
             val listened = listenedFor(position)
             Txt(listened, LiveTimeStyle, muted, Modifier.semantics { contentDescription = "Listening for $listened" })
         }
-        if (codec) CodecPill(live.shown.details, muted)
+        LivePill()
     }
 }
 
@@ -203,11 +199,14 @@ fun LiveHeartButton(app: AppState, live: LiveNow, size: Dp, iconSize: Dp, tint: 
     }
 }
 
-// A station's picture in the player: the song's artwork, else the
-// station's logo or server picture, else its drawn cover.
+// A station's picture in the player: the song on air as Octo has it, else
+// the artwork the station sends, else its logo or server picture, else its
+// drawn cover.
 @Composable
 fun LiveCover(app: AppState, live: LiveNow, modifier: Modifier, shape: Shape, small: Boolean = false) {
     val shown = live.shown
+    val heart = app.liveHeart
+    val found = heart.match?.song?.takeIf { heart.onAir == shown.onAir }
     LiveArt(
         shown.station,
         shown.streamUrl,
@@ -218,6 +217,8 @@ fun LiveCover(app: AppState, live: LiveNow, modifier: Modifier, shape: Shape, sm
         coverArt = shown.details.coverArt.ifBlank { null },
         small = small,
         app = app,
+        songCover = found?.coverArt,
+        songOnline = found?.isExternal == true,
     )
 }
 
@@ -275,7 +276,7 @@ fun ColumnScope.LiveMenuRows(app: AppState, live: LiveNow, stationId: String, cl
     MenuRow("Station info", {
         close()
         showStationInfo(app, live)
-    }, OctoIcons.Info, detail = liveCodecLine(shown.details).ifEmpty { null })
+    }, OctoIcons.Info)
     val catalog = remember(stationId) { liveStationOf(stationId) }
     if (catalog != null) {
         val kept = app.isKept(catalog)

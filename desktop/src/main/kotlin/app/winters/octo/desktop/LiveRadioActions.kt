@@ -126,6 +126,11 @@ fun AppState.addLiveToServer(station: LiveStation) {
     }
 }
 
+// The cover of the song a station has on air as Octo has it, once the
+// search for it found it surely.
+fun AppState.liveSongCover(title: String, artist: String): String? =
+    liveHeart.match?.song?.coverArt?.takeIf { liveHeart.onAir.title == title && liveHeart.onAir.artist == artist }
+
 // Opens Search with these words in it, from anywhere, the full player too.
 fun AppState.searchFor(words: String) {
     if (words.isBlank()) return

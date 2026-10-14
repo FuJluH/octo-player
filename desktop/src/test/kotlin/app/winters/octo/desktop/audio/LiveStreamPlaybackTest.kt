@@ -114,7 +114,8 @@ class LiveStreamPlaybackTest {
         assertEquals("Petal", player.state.value.current!!.song.title)
         assertEquals("Ariana Grande", player.state.value.current!!.song.artist)
         assertEquals("Ariana Grande · 102.7 KIIS FM", live.shown.subtitle)
-        assertEquals("https://i.iheart.com/v3/catalog/track/421089822?ops=fit(200,200),format(%22jpeg%22)", live.shown.cover)
+        // iHeart is asked for its artwork at the size the player draws.
+        assertEquals("https://i.iheart.com/v3/catalog/track/421089822?ops=fit(600,600),format(%22jpeg%22)", live.shown.cover)
         assertEquals("AAC 128 kbps", liveCodecLine(live.shown.details))
         assertEquals("Ariana Grande - Petal", live.songName)
         // A spot names no song: the station, with its tagline, and its logo.
