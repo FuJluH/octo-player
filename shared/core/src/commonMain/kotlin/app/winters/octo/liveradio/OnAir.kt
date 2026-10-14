@@ -87,7 +87,7 @@ fun onAir(streamTitle: String?, streamUrl: String? = null, station: String = "")
         val artist = keys["artist"]?.takeIf(String::isNotEmpty) ?: lead
         val spot = keys["song_spot"]?.trim().orEmpty()
         val music = spot.isEmpty() || spot.equals("M", ignoreCase = true)
-        val artwork = keys["amgartworkurl"]?.takeIf(::isWebAddress)
+        val artwork = (keys["amgartworkurl"]?.takeIf(::isWebAddress)?.let(::sharperArtwork))
             ?: keys["artworkurl"]?.takeIf(::isWebAddress)
             ?: streamUrl?.trim()?.takeIf(::isImageAddress).orEmpty()
         if (!music || namesNothing(title, artist, stationKey)) {
@@ -105,6 +105,23 @@ fun icyArtworkField(fields: Map<String, String>): String? =
     listOfNotNull(fields["StreamArtwork"], fields["StreamUrl"]).map(String::trim).firstOrNull { it.isNotEmpty() }
 
 // "Artist - Title" at its first " - ", or a title alone.
+// iHeart's artwork asked for at the size the player draws: its catalog
+// addresses say `ops=fit(200,200)`, which is blurry on a phone, and it
+// serves any fit up to the original. Other addresses stay as they are.
+fun sharperArtwork(url: String): String {
+    val host = url.substringAfter("://", "").substringBefore('/').substringBefore(':').lowercase()
+    if (host != "iheart.com" && !host.endsWith(".iheart.com")) return url
+    return IHeartFit.replace(url) { match ->
+        val size = match.groupValues[1].toIntOrNull() ?: return@replace match.value
+        if (size >= ARTWORK_SIZE) match.value else "fit($ARTWORK_SIZE,$ARTWORK_SIZE)"
+    }
+}
+
+private val IHeartFit = Regex("""fit\((\d+),\s*\d+\)""")
+
+// The longest side asked of a station's artwork, in pixels.
+const val ARTWORK_SIZE = 600
+
 private fun splitArtist(text: String): Pair<String, String> {
     val bare = text.trim()
     if (bare.startsWith("-")) return "" to bare.trimStart('-', ' ')
