@@ -319,12 +319,18 @@ final class AppSettings {
         lyricsLook.arc = on
     }
 
+    func setBloomFast(_ on: Bool) {
+        lyricsStore.set(on, forKey: Keys.bloomFast)
+        lyricsLook.bloomFast = on
+    }
+
     /// Puts back the whole look from a backup, each dial held to its range.
     func restoreLook(_ look: LyricsLook) {
         setLyricsStyle(look.style)
         for dial in LookDial.allCases { setLookDial(dial, look.percent(dial)) }
         setKeepCompleted(look.keepCompleted)
         setArc(look.arc)
+        setBloomFast(look.bloomFast)
     }
 
     /// An output's lyrics timing, and whether it is the automatic one (never set by the listener).
@@ -485,6 +491,7 @@ final class AppSettings {
         static let lyricsStyle = "lyrics_style"
         static let keepCompleted = "lyrics_keep_completed"
         static let arc = "lyrics_arc"
+        static let bloomFast = "lyrics_bloom_fast"
 
         static let enabled = "enabled"
         static let user = "user"
@@ -628,6 +635,7 @@ final class AppSettings {
         }
         look.keepCompleted = s.object(forKey: Keys.keepCompleted) as? Bool ?? true
         look.arc = s.object(forKey: Keys.arc) as? Bool ?? false
+        look.bloomFast = s.object(forKey: Keys.bloomFast) as? Bool ?? true
         return look
     }
 

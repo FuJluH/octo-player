@@ -168,13 +168,14 @@ final class LyricsLayout: @unchecked Sendable {
     /// Heights for the engine; an interlude counts closed.
     func baseHeights() -> [Double] { lines.map { Double($0.height) } }
 
-    /// Splits a line's held words into letters, so they can swell one by one.
-    func prepare(_ index: Int, _ line: SyncLine) {
+    /// Splits a line's held words (see `heldWords`; with `fast`, fast singing's held notes too)
+    /// into letters, so they can swell one by one.
+    func prepare(_ index: Int, _ line: SyncLine, fast: Bool) {
         let box = lines[index]
         if box.words.isEmpty { return }
+        let held = heldWords(line.words, fast: fast)
         box.glyphs = line.words.indices.map { j in
-            let word = line.words[j]
-            return word.end - word.start >= EMPHASIS_MIN_S ? letters(box.words[j], word.text, box.font, rtl: line.rtl) : nil
+            held[j] ? letters(box.words[j], line.words[j].text, box.font, rtl: line.rtl) : nil
         }
     }
 

@@ -50,6 +50,8 @@ struct LyricsSettingsPage: View {
                 ToggleRow(SettingsIndex.lyricsKeepCompleted, isOn: look.keepCompleted, helper: "Sung lines stay faintly above.",
                           onChange: settings.setKeepCompleted)
                 ToggleRow(SettingsIndex.lyricsArc, isOn: look.arc, helper: "Lines bend round a drum.", onChange: settings.setArc)
+                ToggleRow(SettingsIndex.lyricsBloomFast, isOn: look.bloomFast, helper: "Off, only notes held a second or more bloom.",
+                          onChange: settings.setBloomFast)
             }
         }
     }

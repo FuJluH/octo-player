@@ -265,19 +265,50 @@ public func easeInOutBack(_ x: Double) -> Double {
 
 public let LIFT_EM = 0.05
 public let BACKGROUND_LIFT_EM = 0.10
+/// How far sung words rise with fast singing blooming too.
+public let FAST_LIFT_EM = 0.08
+public let FAST_BACKGROUND_LIFT_EM = 0.16
+
+/// How far a sung word rises in all, in em, before the Lift setting.
+public func liftHeightEm(background: Bool, fast: Bool) -> Double {
+    fast ? (background ? FAST_BACKGROUND_LIFT_EM : FAST_LIFT_EM) : (background ? BACKGROUND_LIFT_EM : LIFT_EM)
+}
 
 /// How far a sung word has risen, in em (up is negative): it eases up over at least a second from
-/// its start and stays up.
-public func liftEm(_ t: Double, start: Double, end: Double, background: Bool, lift: Double) -> Double {
+/// its start and stays up. With fast singing blooming too, it rises further.
+public func liftEm(_ t: Double, start: Double, end: Double, background: Bool, lift: Double, fast: Bool = false) -> Double {
     let over = max(1.0, end - start)
     let done = ((t - start) / over).clamped(0.0, 1.0)
-    return -(background ? BACKGROUND_LIFT_EM : LIFT_EM) * lift * EaseOut.at(done)
+    return -liftHeightEm(background: background, fast: fast) * lift * EaseOut.at(done)
 }
 
 // MARK: - Long-word emphasis
 
 /// Words held at least this long bloom letter by letter.
 public let EMPHASIS_MIN_S = 1.0
+/// With fast singing blooming too, a shorter word blooms when it is held at least this long and
+/// this many times as long as the line's middle word.
+public let FAST_HELD_MIN_S = 0.6
+public let FAST_HELD_OVER_MIDDLE = 2.5
+/// A fast-held word blooms as strongly as one held this long.
+public let FAST_BLOOM_MIN_S = 1.6
+
+/// Which of a line's words are held long enough to bloom: those held `EMPHASIS_MIN_S` or more,
+/// and with `fast`, those held `FAST_HELD_MIN_S` or more and `FAST_HELD_OVER_MIDDLE` times the
+/// middle length of the line's words (the median of those above zero), so a held note stands
+/// out from quick singing around it.
+public func heldWords(_ words: [SyncWord], fast: Bool) -> [Bool] {
+    heldDurations(words.map { $0.end - $0.start }, fast: fast)
+}
+
+/// The same, for the words' lengths in seconds.
+public func heldDurations(_ durations: [Double], fast: Bool) -> [Bool] {
+    let timed = durations.filter { $0 > 0 }.sorted()
+    let middle = timed.isEmpty ? 0 : timed[timed.count / 2]
+    return durations.map { d in
+        d >= EMPHASIS_MIN_S || (fast && d >= FAST_HELD_MIN_S && d >= FAST_HELD_OVER_MIDDLE * middle)
+    }
+}
 
 /// How strongly a held word blooms, and over how long.
 public struct Emphasis: Equatable, Sendable {
@@ -302,14 +333,18 @@ public struct Emphasis: Equatable, Sendable {
 }
 
 /// The bloom for a word held `duration` seconds with `glyphs` letters (not counting spaces), or
-/// nil when it is too short. The line's last word blooms harder and longer.
-public func emphasisFor(_ duration: Double, glyphs: Int, last: Bool, emphasis: Double, glow: Double) -> Emphasis? {
-    if duration < EMPHASIS_MIN_S || glyphs <= 0 { return nil }
-    let d = duration * 1000
+/// nil when it is not `held` (see `heldWords`; left out, held for `EMPHASIS_MIN_S` or more). The
+/// line's last word blooms harder and longer. With `fast`, a held word swells and glows at least as
+/// much as one held `FAST_BLOOM_MIN_S`, and a glow under three seconds comes up sooner (to the
+/// power 1.5, not cubed); each still runs for its own length.
+public func emphasisFor(_ duration: Double, glyphs: Int, last: Bool, emphasis: Double, glow: Double,
+                        fast: Bool = false, held: Bool? = nil) -> Emphasis? {
+    guard held ?? (duration >= EMPHASIS_MIN_S), glyphs > 0 else { return nil }
+    let d = (fast ? max(duration, FAST_BLOOM_MIN_S) : duration) * 1000
     var a = d / 2000
     a = (a > 1 ? a.squareRoot() : a * a * a) * 0.6
     var g = d / 3000
-    g = (g > 1 ? g.squareRoot() : g * g * g) * 0.5
+    g = (g > 1 ? g.squareRoot() : (fast ? g * g.squareRoot() : g * g * g)) * 0.5
     var run = duration
     if last {
         a *= 1.6
