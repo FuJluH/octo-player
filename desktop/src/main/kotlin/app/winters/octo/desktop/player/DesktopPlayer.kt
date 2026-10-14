@@ -56,6 +56,10 @@ data class PlayerState(
     // Counts each time the place in the song was moved (a seek, a song
     // started over), so a paused song's place is read again only then.
     val moves: Int = 0,
+    // While a live station plays: what it has on air and the stations Back
+    // and Next step through. Its place (positionMs) is how long it has been
+    // listened to since it started.
+    val live: LiveNow? = null,
 )
 
 // Why a song could not play: in plain words for the listener, the song if
@@ -94,18 +98,23 @@ interface DesktopPlayer : AutoCloseable {
     // Replaces the queue and plays from `start`. Shuffled, that song plays
     // first and the rest in a random order. `source` is the list they came
     // from, for the queue's headings.
+    // A lineup (every song a live station) plays in its own order, never
+    // shuffled.
     fun play(songs: List<Song>, start: Int = 0, shuffle: Boolean = false, source: QueueSource = NoSource)
 
+    // For a live station, joins what is on air now, afresh.
     fun resume()
 
+    // For a live station, stops its stream.
     fun pause()
 
     fun togglePlay()
 
+    // In a lineup, the next station; nothing after the last.
     fun next()
 
     // Back to the start of the song, or to the one before when it has only
-    // just begun.
+    // just begun. In a lineup, the station before; nothing before the first.
     fun previous()
 
     fun seekTo(positionMs: Long)
