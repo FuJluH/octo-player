@@ -56,6 +56,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -95,6 +96,7 @@ import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -640,9 +642,19 @@ private fun AnimatedVisibilityScope.Controls(
     ) {
         val live = now.live
         val liveModel: LivePlayerViewModel? = if (live != null) hiltViewModel() else null
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        // A station's heart and menu sit on the title's own line, centered
+        // on it, their touch room reaching past it.
+        val measurer = rememberTextMeasurer()
+        val titleLine = with(LocalDensity.current) { remember(measurer, this) { measurer.measure("Ag", TitleStyle).size.height.toDp() } }
+        Row(verticalAlignment = if (live != null) Alignment.Top else Alignment.CenterVertically) {
             Box(Modifier.weight(1f)) { TitleBlock(now, onOpenArtist, onClose) }
-            if (live != null && liveModel != null) LiveSongButtons(live, liveModel) else SongButtons(now, model)
+            if (live != null && liveModel != null) {
+                Row(Modifier.height(titleLine).wrapContentHeight(unbounded = true), verticalAlignment = Alignment.CenterVertically) {
+                    LiveSongButtons(live, liveModel)
+                }
+            } else {
+                SongButtons(now, model)
+            }
         }
         if (live == null) {
             // The song's rating, only once it has one.
@@ -766,7 +778,7 @@ private fun TitleBlock(now: NowPlaying, onOpenArtist: (String) -> Unit, onClose:
             SongTitle(
                 song.title.orEmpty(),
                 explicit = song.explicit,
-                style = OctoType.title.copy(fontWeight = FontWeight.Bold),
+                style = TitleStyle,
                 color = LocalContentColor.current,
                 markColor = accentInk,
                 titleModifier = Modifier.basicMarquee().closesPlayer(onClose),
@@ -1174,3 +1186,6 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
     is ContextWrapper -> baseContext.findActivity()
     else -> null
 }
+
+// The song's name in the player.
+private val TitleStyle = OctoType.title.copy(fontWeight = FontWeight.Bold)

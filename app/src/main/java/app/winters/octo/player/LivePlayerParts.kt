@@ -48,7 +48,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.winters.octo.R
-import app.winters.octo.design.GlazeClearFilm
 import app.winters.octo.design.Glaze
 import app.winters.octo.design.GlowIcon
 import app.winters.octo.design.IconAccent
@@ -76,10 +75,10 @@ val LiveStopIcon = R.drawable.sym_live_stop
 // The red of the "LIVE" mark.
 private val LiveRed = Color(0xFFFF3B30)
 
-// In place of the scrub bar while a station plays: a thin line that cannot
-// be dragged, the LIVE mark with its red dot (gently pulsing, unless motion
-// is reduced), the station's codec, and how long the listener has been on
-// the station.
+// In place of the scrub bar while a station plays: a calm thin line that
+// cannot be dragged, how long the listener has been on the station where a
+// song's played time would be, and the LIVE pill where a song's quality
+// label would be. The station's codec is in Station info.
 @Composable
 internal fun LiveBar(live: LiveNow, calm: Boolean) {
     Box(
@@ -87,19 +86,19 @@ internal fun LiveBar(live: LiveNow, calm: Boolean) {
             .fillMaxWidth()
             .padding(vertical = 10.dp)
             .height(3.dp)
-            .background(LocalContentColor.current.copy(alpha = 0.5f), CircleShape)
+            .background(LocalContentColor.current.copy(alpha = 0.24f), CircleShape)
             .clearAndSetSemantics { },
     )
     Box(Modifier.fillMaxWidth().offset(y = (-2).dp)) {
-        LiveMark(calm, Modifier.align(Alignment.CenterStart))
-        val codec = liveCodecLine(live.shown.details)
-        if (codec.isNotEmpty()) CodecPill(codec, Modifier.align(Alignment.Center))
-        ListenedTime(live.since, Modifier.align(Alignment.CenterEnd))
+        ListenedTime(live.since, Modifier.align(Alignment.CenterStart))
+        LivePill(calm, Modifier.align(Alignment.Center))
     }
 }
 
+// The red-tinted LIVE pill: a red dot, gently pulsing unless motion is
+// reduced, and "LIVE".
 @Composable
-private fun LiveMark(calm: Boolean, modifier: Modifier) {
+private fun LivePill(calm: Boolean, modifier: Modifier) {
     val glow = if (calm) {
         1f
     } else {
@@ -107,13 +106,19 @@ private fun LiveMark(calm: Boolean, modifier: Modifier) {
         val value by pulse.animateFloat(1f, 0.35f, infiniteRepeatable(tween(1_100), RepeatMode.Reverse), label = "live dot")
         value
     }
-    Row(
-        modifier.semantics { contentDescription = "Live" },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    Glaze(
+        modifier.height(24.dp).clearAndSetSemantics { contentDescription = "Live" },
+        backdrop = LocalHaze.current,
+        film = LiveRed.copy(alpha = 0.22f),
     ) {
-        Box(Modifier.size(8.dp).graphicsLayer { alpha = glow }.background(LiveRed, CircleShape))
-        Text("LIVE", style = LiveLabel, color = LocalContentColor.current, modifier = Modifier.clearAndSetSemantics { })
+        Row(
+            Modifier.padding(horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Box(Modifier.size(7.dp).graphicsLayer { alpha = glow }.background(LiveRed, CircleShape))
+            Text("LIVE", style = LiveLabel, color = LocalContentColor.current, maxLines = 1)
+        }
     }
 }
 
@@ -134,18 +139,6 @@ private fun ListenedTime(since: Long?, modifier: Modifier) {
         color = mutedInk,
         modifier = modifier.semantics { contentDescription = "Listening for $shown" },
     )
-}
-
-// The station's stream, as "AAC 128 kbps", on a small glazed label.
-@Composable
-private fun CodecPill(text: String, modifier: Modifier) {
-    Glaze(
-        modifier.height(24.dp).clearAndSetSemantics { contentDescription = "Stream $text" },
-        backdrop = LocalHaze.current,
-        film = GlazeClearFilm,
-    ) {
-        Text(text, style = LiveLabel, color = LocalContentColor.current, maxLines = 1, modifier = Modifier.padding(horizontal = 10.dp))
-    }
 }
 
 private val LiveLabel = OctoType.caption.copy(fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp)
