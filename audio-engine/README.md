@@ -25,8 +25,9 @@ same sound shaping as the Android app, and a sample-accurate clock.
 | `src/pace.rs` | Speed (pitch kept) and pitch shift |
 | `src/output/` | Device callback, audio clock, cpal and silent drivers |
 | `src/timeline.rs` | Which song and second each ring frame holds |
+| `src/video/` | Animated covers: muted video loops decoded by the system (Media Foundation, AVFoundation, GStreamer) |
 | `bindings/kotlin/` | Generated Kotlin bindings |
-| `examples/` | `play` (manual testing), `bench` (CPU), `render_transition` (blends to WAVs, with checks), `bpm_check` (tempo against tags) |
+| `examples/` | `play` (manual testing), `bench` (CPU), `render_transition` (blends to WAVs, with checks), `bpm_check` (tempo against tags), `loop_video` (a video loop's decode speed and pace) |
 | `tools/make-fixtures/` | Makes the small mp3 and opus test files |
 
 <!-- markdownlint-enable MD013 -->
@@ -100,6 +101,9 @@ All newest stable, checked with `python scripts/check-deps.py`.
 | rustls, rustls-platform-verifier, ring | 0.23.45, 0.7.1, 0.17.14 | ureq's own TLS, named to add pinned certificates to the OS check |
 | uniffi | 0.32.2 | Kotlin bindings |
 | crossbeam-channel, thiserror, log | 0.5.17, 2.0.21, 0.4.34 | Commands, errors, logs |
+| windows (Windows only) | 0.62.2 | Media Foundation and Direct3D 11 for video loops (already in the tree through cpal) |
+| objc2-av-foundation, objc2-core-media, objc2-core-video (macOS only) | 0.3.2 | AVFoundation for video loops |
+| libloading (Linux only) | 0.9.0 | Loads GStreamer when a video loop is opened, so the engine needs none |
 | flacenc (tests only) | 0.5.1 | FLAC files made while testing |
 | rcgen (tests only) | 0.14.10 | Self-signed certificates for the HTTPS test server |
 
@@ -229,6 +233,55 @@ looks like.
   AAC-LC core: half the sample rate, no rebuilt high band, and for HE-AAC
   v2 its mono core. In ADTS that happens by itself; an MP4 config that
   names SBR or PS is turned into its core's.
+
+## Video loops
+
+Animated album covers are short muted H.264 loops in fragmented MP4 (as
+Apple keeps them). The app fetches one file and opens a `LoopVideo` on it:
+
+```kotlin
+val video = LoopVideo.open(path, widthPx, heightPx)   // scaled down to cover it
+video.play()
+val n = video.waitFrame(have, 500u)                     // blocks until a newer frame
+have = video.copyFrame(pixmap.addr.toULong(), rowBytes, length, have)
+video.hold()                                            // decodes nothing until play
+video.stop()
+```
+
+- **Thread.** Each loop decodes on its own thread, one frame ahead, and
+  shows each at its timestamp. At the end it goes back to the first frame
+  and carries on, so a round follows the last by one frame's length. Held,
+  the thread waits and decodes nothing. A frame more than 250 ms late
+  (after sleep, say) restarts the clock from it rather than rushing.
+- **Frames.** BGRA, top row first, alpha 255. `copyFrame` copies the
+  newest frame into memory the app owns (a bitmap's pixels) only when it
+  is newer than the one the app has, so no frame crosses as a new array.
+  It refuses memory too small for a frame.
+- **Windows.** A Media Foundation Source Reader with advanced video
+  processing gives RGB32 at the size asked for. It decodes on the graphics
+  card through a Direct3D 11 device when one opens and decodes the first
+  frame, else on the processor. `OCTO_VIDEO_SOFTWARE=1` forces the
+  processor, for comparing.
+- **macOS.** An `AVAssetReader` on the video track gives 32BGRA pixel
+  buffers (VideoToolbox decodes). A reader cannot go back, so each round
+  has a new one.
+- **Linux.** GStreamer (`libgstreamer-1.0.so.0` and `libgstapp-1.0.so.0`)
+  is loaded the first time a loop opens: `filesrc ! qtdemux ! decodebin !
+  videoconvert ! videoscale ! appsink` in BGRA. H.264 needs
+  `gstreamer1.0-libav` (or another H.264 decoder). Without GStreamer,
+  `loopVideoAvailable()` is false, opening fails with `Unsupported`, and
+  the app shows the still; the engine links neither GStreamer nor GLib.
+- **Measured (Windows 11, RTX 3080 Ti, Apple's Short n' Sweet loops, 24
+  frames a second, 24 s):** on the graphics card, 486x486 takes 1.6 % of
+  one core while playing and 1078x1438 6.9 %; on the processor 2.8 % and
+  32.5 % (its decoder spreads each frame over many threads: 0.3 ms and 1.6
+  ms a frame of wall time, about 3 and 16 ms of processor time). Held, 0 %.
+  Linux (WSL, `avdec_h264`): 486x486 decodes in 1.9 ms a frame and plays
+  at about 5 % of one core.
+
+```sh
+cargo run --release --example loop_video -- loop.mp4 --seconds 20 --size 486 --hold-after 10
+```
 
 ## Transitions
 
