@@ -37,10 +37,10 @@ struct CoverLoop: View {
         loopPlay(seen: shown && !held && scenePhase == .active, powerSave: stage.lowPower, reduceMotion: calm)
     }
 
-    /// The space the loop fills, in pixels, in steps of 64 so a small change in layout fetches
-    /// nothing new.
+    /// The space the loop is picked for, in pixels, in steps of 32 so a small change in layout
+    /// fetches nothing new.
     private var pixels: CGSize {
-        let side = (loopPixels(.square, points: CGSize(width: self.side, height: self.side), scale: scale).width / 64).rounded(.up) * 64
+        let side = (loopPixels(.square, points: CGSize(width: self.side, height: self.side), scale: scale).width / 32).rounded() * 32
         return CGSize(width: side, height: side)
     }
 

@@ -145,13 +145,17 @@ func loopFetcher(for clip: AnimatedClip, client: SubsonicClient?) -> LoopFetcher
     return LoopFetcher(session: .shared)
 }
 
-/// The space a loop of `shape` fills, in pixels: the square at the screen's full sharpness, the
-/// tall one behind the controls at twice the points at most, as nothing sharp sits there.
+/// The space a loop of `shape` is picked for, in pixels: the square at the screen's full
+/// sharpness, the tall one at twice the points at most, both less the enlarging allowed.
 @MainActor
 func loopPixels(_ shape: LoopShape, points: CGSize, scale: CGFloat) -> CGSize {
-    let used = shape == .square ? scale : min(scale, 2)
+    let used = (shape == .square ? scale : min(scale, 2)) / loopEnlargeAllowed
     return CGSize(width: (points.width * used).rounded(), height: (points.height * used).rounded())
 }
+
+/// How far a loop may be enlarged to fit its space: a tenth, far less than a moving picture shows,
+/// and it saves decoding the next version up, often twice the pixels or more.
+let loopEnlargeAllowed: CGFloat = 1.1
 
 /// Downloaded albums keep their animated art on the phone: its answer, and both loops and their
 /// stills beside the songs, so the album shows it with no connection. They go when the album's

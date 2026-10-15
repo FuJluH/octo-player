@@ -22,6 +22,9 @@ struct PlayerBackground: View {
     let bpm: Int?
     let entrance: PlayerEntrance
     let focused: Bool
+    /// An album's animated art plays in the player: the background holds still under it, so the
+    /// phone draws one moving thing, not two.
+    var rests = false
     @State private var motion = PlayerMotion.shared
 
     var body: some View {
@@ -43,7 +46,7 @@ struct PlayerBackground: View {
         case .immersive:
             if WashGPU.shared != nil {
                 ImmersiveWash(inputs: WashInputs(cover: cover, bpm: paceBpm(bpm, useBpm: prefs.useBpm), fpsLimit: prefs.fps,
-                                                 speed: Float(prefs.speed) / 100, moving: live && !calm, focused: focused,
+                                                 speed: Float(prefs.speed) / 100, moving: live && !calm && !rests, focused: focused,
                                                  closing: entrance.closing))
             } else {
                 // A phone whose graphics cannot run the wash shows the still artwork in its place.
@@ -56,7 +59,7 @@ struct PlayerBackground: View {
                 .animation(.timingCurve(0.65, 0, 0.35, 1, duration: 0.5), value: colors.dominant)
         case .classic:
             if live && WashGPU.shared != nil {
-                ClassicMesh(colors: colors.mesh, playing: playing, moving: motion.moving)
+                ClassicMesh(colors: colors.mesh, playing: playing && !rests, moving: motion.moving)
             } else {
                 BlurredCover(coverId: coverId)
                     .opacity(0.6)

@@ -109,12 +109,12 @@ final class LoopVideoView: UIView {
         let player: AVQueuePlayer
         let looper: AVPlayerLooper
         let layer: AVPlayerLayer
-        let back: AVPlayerLayer
+        let back: AVPlayerLayer?
         var ready: NSKeyValueObservation?
         var counted: NSKeyValueObservation?
         var shown = false
 
-        init(source: URL, player: AVQueuePlayer, looper: AVPlayerLooper, layer: AVPlayerLayer, back: AVPlayerLayer) {
+        init(source: URL, player: AVQueuePlayer, looper: AVPlayerLooper, layer: AVPlayerLayer, back: AVPlayerLayer?) {
             self.source = source
             self.player = player
             self.looper = looper
@@ -129,9 +129,9 @@ final class LoopVideoView: UIView {
             looper.disableLooping()
             player.removeAllItems()
             layer.player = nil
-            back.player = nil
+            back?.player = nil
             layer.removeFromSuperlayer()
-            back.removeFromSuperlayer()
+            back?.removeFromSuperlayer()
         }
     }
 
@@ -175,7 +175,7 @@ final class LoopVideoView: UIView {
         // The blurred copy a little larger than the view, so its soft edges never show.
         let spill = backHost.bounds.insetBy(dx: -40, dy: -40)
         backPoster.frame = spill
-        take?.back.frame = spill
+        take?.back?.frame = spill
         if let fit {
             frontHost.frame = CGRect(x: 0, y: 0, width: bounds.width, height: fit.height)
             let height = max(fit.height, 1)
@@ -262,8 +262,9 @@ final class LoopVideoView: UIView {
         let item = AVPlayerItem(asset: AVURLAsset(url: source))
         let looper = AVPlayerLooper(player: player, templateItem: item)
         let layer = AVPlayerLayer(player: player)
-        let back = AVPlayerLayer(player: player)
-        for drawn in [layer, back] {
+        // The blurred copy only as a backdrop; a cover draws the loop once.
+        let back = fit == nil ? nil : AVPlayerLayer(player: player)
+        for drawn in [layer] + [back].compactMap({ $0 }) {
             drawn.videoGravity = .resizeAspectFill
             drawn.opacity = 0
         }
@@ -271,8 +272,10 @@ final class LoopVideoView: UIView {
         CATransaction.setDisableActions(true)
         layer.frame = frontHost.bounds
         frontHost.layer.addSublayer(layer)
-        back.frame = backHost.bounds.insetBy(dx: -40, dy: -40)
-        backHost.layer.insertSublayer(back, above: backPoster)
+        if let back {
+            back.frame = backHost.bounds.insetBy(dx: -40, dy: -40)
+            backHost.layer.insertSublayer(back, above: backPoster)
+        }
         CATransaction.commit()
         let take = Take(source: source, player: player, looper: looper, layer: layer, back: back)
         let id = ObjectIdentifier(take)
@@ -289,7 +292,7 @@ final class LoopVideoView: UIView {
     private func reveal(_ id: ObjectIdentifier) {
         guard let take, ObjectIdentifier(take) == id, !take.shown, take.layer.isReadyForDisplay else { return }
         take.shown = true
-        for drawn in [take.layer, take.back] { fade(drawn, to: 1, seconds: Double(loopFadeMs) / 1000) }
+        for drawn in [take.layer] + [take.back].compactMap({ $0 }) { fade(drawn, to: 1, seconds: Double(loopFadeMs) / 1000) }
         showing?(true)
     }
 
@@ -303,7 +306,7 @@ final class LoopVideoView: UIView {
         }
         CATransaction.begin()
         CATransaction.setCompletionBlock { old.end() }
-        for drawn in [old.layer, old.back] { self.fade(drawn, to: 0, seconds: Double(loopFadeMs) / 1000) }
+        for drawn in [old.layer] + [old.back].compactMap({ $0 }) { self.fade(drawn, to: 0, seconds: Double(loopFadeMs) / 1000) }
         CATransaction.commit()
     }
 

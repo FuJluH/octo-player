@@ -122,7 +122,7 @@ struct NowPlayingView: View {
                     PlayerBackground(prefs: settings.player.background, colors: colors, cover: look.cover,
                                      coverId: player.current?.coverArt, live: settings.player.liveBackground, calm: calm,
                                      playing: player.isPlaying, bpm: facts.bpm, entrance: entrance,
-                                     focused: focused)
+                                     focused: focused, rests: loop != .none)
                     if case .backdrop(let clip) = loop {
                         BackdropFrame(clip: clip, albumId: loopAlbumId, color: backdropShade(clip), entrance: entrance, pull: pull,
                                       fit: backdropFit, lyricsOpen: lyrics.open, covers: { backdropCovers = $0 },
