@@ -51,6 +51,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -166,9 +167,13 @@ fun BottomBar(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
                             role = Role.Button,
+                            onClickLabel = if (now.trackId != null) "Show the player controls" else null,
                             onClick = actions.onRoundButton,
                         )
-                        .semantics { contentDescription = "Now playing" },
+                        .semantics {
+                            contentDescription = nowPlayingWords(now)
+                            nowPlayingState(now).takeIf(String::isNotEmpty)?.let { stateDescription = it }
+                        },
                 ) {
                     NowPlayingFace(now, progress)
                 }
@@ -334,8 +339,8 @@ private fun TabButton(
     }
 }
 
-// The small player: artwork with its progress ring, the song, and back,
-// play and next. Tapping anywhere else opens the full player; so does a
+// The small player: artwork with its progress ring (breathing while
+// paused), the song, and back, play and next. Tapping anywhere else opens the full player; so does a
 // swipe up, and a swipe sideways skips.
 @Composable
 private fun PlayerCapsule(
@@ -368,7 +373,7 @@ private fun PlayerCapsule(
         ) {
             Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
                 Artwork(now.artwork, 36.dp, artModifier, shape = artShape, outside = isOutsideLibrary(now.trackId))
-                ProgressRing(progress, Modifier.matchParentSize().padding(1.dp))
+                ProgressRing(progress, paused = isPaused(now), modifier = Modifier.matchParentSize().padding(1.dp), whole = now.live != null)
             }
             Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
                 SongTitle(
