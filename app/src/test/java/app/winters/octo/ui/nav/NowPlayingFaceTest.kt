@@ -19,8 +19,18 @@ class NowPlayingFaceTest {
     }
 
     @Test
-    fun thePauseRedrawsAtMostAboutThirtyTimesASecond() {
-        assertTrue(PauseFrameMs >= 33)
+    fun thePauseRedrawsAtMostAboutTwelveTimesASecond() {
+        assertTrue(PauseFrameMs >= 83)
+    }
+
+    @Test
+    fun aBreathSettlesAfterAMinuteNearItsFaintest() {
+        assertFalse(breathSettles(10.0))
+        assertFalse("not mid-breath", breathSettles(PauseBreathLimitSeconds + 0.0))
+        val settles = generateSequence(PauseBreathLimitSeconds) { it + PauseFrameMs / 1000.0 }.first { breathSettles(it) }
+        assertTrue("within one breath of the limit", settles < PauseBreathLimitSeconds + PauseBreathSeconds)
+        assertTrue(pauseBreath(settles) <= 0.2f)
+        assertTrue(BreathRested < 0f)
     }
 
     @Test
