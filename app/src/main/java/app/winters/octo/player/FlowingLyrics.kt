@@ -9,6 +9,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -16,6 +17,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.IntState
+import androidx.compose.runtime.MutableIntState
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -104,6 +108,7 @@ import app.winters.octo.ui.common.rememberSystemReduceMotion
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlin.math.ceil
+import kotlin.math.max
 import kotlin.math.roundToLong
 import app.winters.octo.lyrics.engine.liftOf
 
@@ -219,6 +224,7 @@ fun FlowingLyrics(
         }
         DisposableEffect(copies) { onDispose { copies?.close() } }
         val currentCopies by rememberUpdatedState(copies)
+        val rests = remember(shown, textColor, calm, look) { LineRests() }
         val drawDensity by rememberUpdatedState(density)
 
         // The one frame loop. It stops while the app is in the background
@@ -238,6 +244,7 @@ fun FlowingLyrics(
                             prepare = { shown.prepare(it, lines[it], measurer, look.bloomFast) },
                             release = shown::release,
                         )
+                        rests.follow(engine, engine.shown.value, calm)
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                             currentCopies?.follow(
                                 engine.states,
@@ -284,7 +291,7 @@ fun FlowingLyrics(
                 val range = engine.shown.value
                 for (index in range) {
                     key(index) {
-                        LineNode(engine, index, shown, copies, textColor, calm, onTap = tap, onLongPress = { stamp = it })
+                        LineNode(engine, index, shown, copies, rests.line(index), textColor, calm, onTap = tap, onLongPress = { stamp = it })
                     }
                 }
                 stamp?.let { TimeStamp(engine, it, shown, totalOffset(offset, outputOffset)) }
@@ -333,6 +340,7 @@ private fun LineNode(
     index: Int,
     shown: LyricsLayout,
     copies: LyricCopies?,
+    rest: IntState,
     color: Color,
     calm: Boolean,
     onTap: (Int) -> Unit,
@@ -379,16 +387,32 @@ private fun LineNode(
                     }
                 },
             )
+            // A line sung word by word draws what holds still here, again only
+            // when that changes (`rest`), and its moving words in the layer
+            // below, every frame they move.
             .drawBehind {
-                st.drawVersion.intValue
+                val words = box.words.isNotEmpty()
+                if (words) rest.intValue else st.drawVersion.intValue
                 val blurred = copy?.value
                 if (blurred != null) {
                     drawIntoCanvas { blurred.draw(it.nativeCanvas) }
                 } else {
-                    drawLyricLine(engine, st, box, shown, color, calm)
+                    drawLyricLine(engine, st, box, shown, color, calm, if (words) WordPass.Resting else WordPass.All)
                 }
             },
-    )
+    ) {
+        if (box.words.isNotEmpty()) {
+            Spacer(
+                Modifier
+                    .matchParentSize()
+                    .graphicsLayer()
+                    .drawBehind {
+                        st.drawVersion.intValue
+                        if (copy?.value == null) drawLyricLine(engine, st, box, shown, color, calm, WordPass.Moving)
+                    },
+            )
+        }
+    }
 }
 
 // A line's height as laid out: an interlude's has room for its dots open.
@@ -449,23 +473,41 @@ private fun GraphicsLayerScope.placeLine(engine: LyricEngine, st: LineState, box
 
 // Draws a line: its dots, its words with their fill, lift and bloom, or its
 // text whole, then any translation or romanization under it.
-private fun DrawScope.drawLyricLine(engine: LyricEngine, st: LineState, box: LineBox, shown: LyricsLayout, color: Color, calm: Boolean) {
+// `pass` draws all of it, only what holds still now (`Resting`), or only
+// the words moving now (`Moving`).
+private fun DrawScope.drawLyricLine(engine: LyricEngine, st: LineState, box: LineBox, shown: LyricsLayout, color: Color, calm: Boolean, pass: WordPass = WordPass.All) {
     val line = st.line
     if (line.isInterlude) {
-        drawDots(engine, st, shown, color, calm)
+        if (pass != WordPass.Moving) drawDots(engine, st, shown, color, calm)
         return
     }
     val pair = st.brightness()
     val voice = if (line.isBackground) BACKGROUND_ALPHA else 1f
-    box.block?.let { piece ->
-        val alpha = if (line.isCredit) CREDIT_ALPHA else pair.bright.toFloat() * voice
-        drawText(piece.layout, color, Offset(piece.x, piece.y), alpha)
+    if (pass != WordPass.Moving) {
+        box.block?.let { piece ->
+            val alpha = if (line.isCredit) CREDIT_ALPHA else pair.bright.toFloat() * voice
+            drawText(piece.layout, color, Offset(piece.x, piece.y), alpha)
+        }
     }
-    if (box.words.isNotEmpty()) drawWords(engine, st, box, color, calm, pair.bright.toFloat() * voice, pair.dark.toFloat() * voice)
-    box.extras.forEach { drawText(it.layout, color, Offset(it.x, it.y), EXTRA_ALPHA) }
+    if (box.words.isNotEmpty()) drawWords(engine, st, box, color, calm, pair.bright.toFloat() * voice, pair.dark.toFloat() * voice, pass)
+    if (pass != WordPass.Moving) box.extras.forEach { drawText(it.layout, color, Offset(it.x, it.y), EXTRA_ALPHA) }
 }
 
-private fun DrawScope.drawWords(engine: LyricEngine, st: LineState, box: LineBox, color: Color, calm: Boolean, bright: Float, dark: Float) {
+// Which of a line's words a drawing takes.
+internal enum class WordPass { All, Resting, Moving }
+
+// Whether a word's drawing changes with the time around `t`: from just
+// before its fill reaches it (and its letters start to bob) until its rise,
+// bloom and bob have settled, about 2.2 lengths after it starts.
+internal fun wordMoves(t: Double, word: SyncWord): Boolean {
+    val length = word.end - word.start
+    val until = max(word.start + max(1.0, length), word.start + 2.2 * length)
+    return t >= word.start - WORD_MOTION_LEAD_S && t <= until
+}
+
+private const val WORD_MOTION_LEAD_S = 0.5
+
+private fun DrawScope.drawWords(engine: LyricEngine, st: LineState, box: LineBox, color: Color, calm: Boolean, bright: Float, dark: Float, pass: WordPass) {
     val line = st.line
     val look = engine.look
     val t = engine.lyricTime
@@ -475,6 +517,8 @@ private fun DrawScope.drawWords(engine: LyricEngine, st: LineState, box: LineBox
     val letters = if (calm || !st.live) null else box.glyphs
     val lastGroup = line.words.dropLast(1).indexOfLast { it.trailingSpace } + 1
     line.words.forEachIndexed { j, word ->
+        if (pass != WordPass.All && !cold && wordMoves(t, word) != (pass == WordPass.Moving)) return@forEachIndexed
+        if (pass == WordPass.Moving && cold) return@forEachIndexed
         val wb = box.words[j]
         val rise = when {
             lift == 0.0 -> 0.0
@@ -616,3 +660,32 @@ private fun TimeStamp(engine: LyricEngine, index: Int, shown: LyricsLayout, offs
 
 // A time as the player shows it, like 1:05.
 private fun clockText(ms: Long): String = (ms / 1000).coerceAtLeast(0).toInt().asClock()
+
+// What each word-by-word line draws while holding still: a count that goes
+// up whenever that changes, for the line's resting drawing to read. It
+// changes when a word starts or stops moving, and with the line's
+// brightness, its word animation being got ready or let go, and its being
+// sung long ago.
+private class LineRests {
+    private val counts = HashMap<Int, MutableIntState>()
+    private val keys = HashMap<Int, Long>()
+
+    fun line(index: Int): IntState = counts.getOrPut(index) { mutableIntStateOf(0) }
+
+    fun follow(engine: LyricEngine, shown: IntRange, calm: Boolean) {
+        val t = engine.lyricTime
+        for (index in shown) {
+            val st = engine.states.getOrNull(index) ?: continue
+            val words = st.line.words
+            if (words.isEmpty() || st.line.isLineTimed || st.line.isInterlude) continue
+            var key = st.brightness().hashCode().toLong()
+            key = key * 31 + (if (st.live) 1 else 0) + (if (st.status == LineStatus.Passed) 2 else 0) + (if (calm) 4 else 0)
+            key = key * 31 + engine.look.hashCode()
+            for (j in words.indices) if (wordMoves(t, words[j])) key = key * 31 + j + 1
+            if (keys[index] != key) {
+                keys[index] = key
+                (counts.getOrPut(index) { mutableIntStateOf(0) }).intValue++
+            }
+        }
+    }
+}

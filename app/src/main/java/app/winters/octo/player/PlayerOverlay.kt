@@ -702,7 +702,9 @@ private fun AnimatedVisibilityScope.UprightPlayer(
     RhythmColumn(Modifier.fillMaxSize()) {
         header()
         ArtStage(now, model, folded = folded, calm = calm, maxSide = Dp.Infinity, modifier = Modifier, artModifier = artModifier)
-        Box(look) { TitleRow(now, model, onClose, onOpenArtist) }
+        // Folded away under the lyrics, a long name rests rather than
+        // scrolling unseen.
+        Box(look) { TitleRow(now, model, onClose, onOpenArtist, scrolls = !folded) }
         Box(look) { BarBlock(now, model, onOpenSpeed) }
         Box(look) { Transport(now, model) }
         Box(look) { Volume(model) }
@@ -776,7 +778,7 @@ private fun AnimatedVisibilityScope.risesIn(): Modifier {
 // kept the same height whether it has one or not (and for a station), so
 // the player's blocks keep their places from song to song.
 @Composable
-private fun TitleRow(now: NowPlaying, model: PlayerViewModel, onClose: () -> Unit, onOpenArtist: (String) -> Unit) {
+private fun TitleRow(now: NowPlaying, model: PlayerViewModel, onClose: () -> Unit, onOpenArtist: (String) -> Unit, scrolls: Boolean = true) {
     Column(Modifier.fillMaxWidth()) {
         val live = now.live
         val liveModel: LivePlayerViewModel? = if (live != null) hiltViewModel() else null
@@ -793,7 +795,7 @@ private fun TitleRow(now: NowPlaying, model: PlayerViewModel, onClose: () -> Uni
                 titleBaseline = titleBaseline,
                 icons = icons,
                 sideMargin = PlayerSideMargin,
-                title = { TitleBlock(now, calm, onOpenArtist, onClose) },
+                title = { TitleBlock(now, calm || !scrolls, onOpenArtist, onClose) },
             ) {
                 if (live != null && liveModel != null) {
                     LiveSongButtons(live, liveModel, calm = calm)
