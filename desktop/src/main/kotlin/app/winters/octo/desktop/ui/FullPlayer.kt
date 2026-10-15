@@ -36,6 +36,7 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -206,7 +207,7 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
             val inner = playerArea(player.maxWidth, player.maxHeight, top, panel != null)
             val density = LocalDensity.current
             var origin by remember { mutableStateOf(0f) }
-            TallBackdrop(
+            key(albumId) { TallBackdrop(
                 app.animated,
                 albumId,
                 tall,
@@ -220,7 +221,7 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
                 ink = { tallInk = it },
                 shown = { covered = true },
                 measured = { w, h -> app.animated.tallPx = w to h },
-            )
+            ) }
         }
         BoxWithConstraints(Modifier.fillMaxSize().padding(start = PlayerStart, end = 40.dp, top = top + 48.dp, bottom = 32.dp)) {
             val artSide = minOf(440.dp, maxHeight - 290.dp, if (panel != null) maxWidth * 0.36f else maxWidth * 0.6f).coerceAtLeast(120.dp)

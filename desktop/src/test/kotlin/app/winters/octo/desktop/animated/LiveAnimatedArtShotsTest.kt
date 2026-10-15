@@ -52,8 +52,28 @@ class LiveAnimatedArtShotsTest {
 
     private val out = File(System.getenv("OCTO_SHOTS_DIR") ?: "build/shots/animated")
 
+    // Signs a separate profile (OCTO_LIVE_PROFILE, the folder OCTO_PROFILE_DIR
+    // then names for a run of the app) in to the server, with its password in
+    // the system's store, the volume at 0 and Animated art on Full screen,
+    // so the app itself can be run against it.
+    @Test(timeout = 120_000)
+    fun seedsAProfile() {
+        val profile = System.getenv("OCTO_LIVE_PROFILE")
+        val address = System.getenv("OCTO_LIVE_ADDRESS")
+        val user = System.getenv("OCTO_LIVE_USER")
+        val password = System.getenv("OCTO_LIVE_PASSWORD")
+        assumeTrue(!profile.isNullOrBlank() && !address.isNullOrBlank() && !user.isNullOrBlank() && !password.isNullOrBlank())
+        val config = File(profile!!, "config").apply { mkdirs() }
+        val settings = SettingsStore(File(config, SettingsStore.FILE_NAME), 0)
+        settings.update { it.copy(playback = it.playback.copy(volume = 0f), appearance = it.appearance.copy(animatedArt = AnimatedArtSetting.FullScreen.key)) }
+        val accounts = Accounts(settings, app.winters.octo.desktop.secrets.SecretStore.forSystem(DesktopOs.Windows), OkHttpClient())
+        val signed = runBlocking { accounts.signIn(address!!, user!!, password!!) }
+        check(signed is SignInOutcome.Done && signed.remembered) { "could not sign in: $signed" }
+    }
+
     @Test(timeout = 900_000)
     fun everyStateAgainstARealServer() {
+        assumeTrue(System.getenv("OCTO_LIVE_PROFILE").isNullOrBlank())
         val address = System.getenv("OCTO_LIVE_ADDRESS")
         val user = System.getenv("OCTO_LIVE_USER")
         val password = System.getenv("OCTO_LIVE_PASSWORD")

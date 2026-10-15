@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -55,6 +56,10 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import org.jetbrains.skia.Bitmap
+import org.jetbrains.skia.FilterMipmap
+import org.jetbrains.skia.FilterMode
+import org.jetbrains.skia.MipmapMode
+import org.jetbrains.skia.Surface
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.ImageInfo
@@ -83,7 +88,7 @@ fun rememberLoopPlay(model: AnimatedArtModel, seen: Boolean): LoopPlay {
 // The frames of one loop, handed from the thread that reads them to the
 // drawing: the newest waits in `mailbox` until it is drawn, and the one
 // drawn stays until a newer one comes.
-private class FrameBox {
+internal class FrameBox {
     val mailbox = AtomicReference<SkiaImage?>(null)
     val arrived = mutableIntStateOf(0)
 
@@ -112,32 +117,43 @@ private class FrameBox {
     }
 }
 
-// A loop's frames filling the box, scaled to cover it: nothing at all
-// until the first frame is drawn, then that frame fades in over what is
-// under it. Frames are read only while it plays, as the loop makes them
-// (24 a second), so the window draws again only for a new frame. Held,
-// the last frame stays and nothing is decoded; with only the still, no
-// decoder is opened.
+// One loop being read: its frames, a small copy of each when asked for
+// (a few dozen pixels across, for drawing blurred), and the fade in that
+// starts once the first frame is there.
+@Stable
+internal class LoopFeed(val small: IntSize?) {
+    val frames = FrameBox()
+    val smalls: FrameBox? = small?.let { FrameBox() }
+    val fade = Animatable(0f)
+
+    fun close() {
+        frames.close()
+        smalls?.close()
+    }
+}
+
+// Reads the loop in `file` at `size` pixels while `play` says so: frames
+// are read only while it plays, as the loop makes them (24 a second), so
+// the window draws again only for a new frame. Held, the last frame stays
+// and nothing is decoded; with only the still, no decoder is opened.
 @Composable
-fun LoopFrames(file: File?, play: LoopPlay, modifier: Modifier = Modifier) {
-    val box = remember(file) { FrameBox() }
-    DisposableEffect(box) { onDispose { box.close() } }
-    var size by remember { mutableStateOf(IntSize.Zero) }
-    val fade = remember(file) { Animatable(0f) }
+internal fun rememberLoopFeed(file: File?, play: LoopPlay, size: IntSize, small: IntSize? = null): LoopFeed {
+    val feed = remember(file, small) { LoopFeed(small) }
+    DisposableEffect(feed) { onDispose { feed.close() } }
     val playing by rememberUpdatedState(play)
     val opened = file != null && play != LoopPlay.StillOnly && size != IntSize.Zero && videoAvailable
-
-    LaunchedEffect(box, opened) {
+    val wanted by rememberUpdatedState(size)
+    LaunchedEffect(feed, opened) {
         val target = file?.takeIf { opened } ?: return@LaunchedEffect
-        val wanted = size
+        val at = wanted
         val video = withContext(NonCancellable + Dispatchers.IO) {
-            runCatching { LoopVideo.open(target.path, wanted.width.toUInt(), wanted.height.toUInt()) }.getOrNull()
+            runCatching { LoopVideo.open(target.path, at.width.toUInt(), at.height.toUInt()) }.getOrNull()
         } ?: return@LaunchedEffect
         try {
             snapshotFlow { playing }.collectLatest { now ->
                 if (now == LoopPlay.Play) {
                     video.play()
-                    readFrames(video, box)
+                    readFrames(video, feed)
                 } else {
                     video.hold()
                 }
@@ -150,43 +166,64 @@ fun LoopFrames(file: File?, play: LoopPlay, modifier: Modifier = Modifier) {
         }
     }
     // The fade in, once the first frame is there to draw.
-    LaunchedEffect(box) {
-        snapshotFlow { box.arrived.intValue }.first { it > 0 }
-        fade.animateTo(1f, tween(LOOP_FADE_MS))
+    LaunchedEffect(feed) {
+        snapshotFlow { feed.frames.arrived.intValue }.first { it > 0 }
+        feed.fade.animateTo(1f, tween(LOOP_FADE_MS))
     }
+    return feed
+}
 
+// A loop's frames filling the box, scaled to cover it: nothing at all
+// until the first frame is drawn, then that frame fades in over what is
+// under it.
+@Composable
+fun LoopFrames(file: File?, play: LoopPlay, modifier: Modifier = Modifier) {
+    var size by remember { mutableStateOf(IntSize.Zero) }
+    val feed = rememberLoopFeed(file, play, size)
     val paint = remember { Paint() }
     Spacer(
         modifier
             .onSizeChanged { size = it }
-            .graphicsLayer { alpha = fade.value }
+            .graphicsLayer { alpha = feed.fade.value }
             .drawBehind {
-                box.arrived.intValue
-                val image = box.take() ?: return@drawBehind
-                val iw = image.width.toFloat()
-                val ih = image.height.toFloat()
-                val scale = maxOf(this.size.width / iw, this.size.height / ih)
-                val sw = this.size.width / scale
-                val sh = this.size.height / scale
-                val src = Rect.makeXYWH((iw - sw) / 2f, (ih - sh) / 2f, sw, sh)
-                val dst = Rect.makeWH(this.size.width, this.size.height)
-                drawIntoCanvas { it.skiaCanvas.drawImageRect(image, src, dst, SamplingMode.LINEAR, paint, true) }
+                feed.frames.arrived.intValue
+                val image = feed.frames.take() ?: return@drawBehind
+                drawIntoCanvas { coverDraw(it.skiaCanvas, image, this.size.width, this.size.height, paint) }
             },
     )
 }
 
+// Draws `image` scaled to cover a box `width` by `height`, centered.
+internal fun coverDraw(canvas: org.jetbrains.skia.Canvas, image: SkiaImage, width: Float, height: Float, paint: Paint) {
+    val iw = image.width.toFloat()
+    val ih = image.height.toFloat()
+    val scale = maxOf(width / iw, height / ih)
+    val sw = width / scale
+    val sh = height / scale
+    val src = Rect.makeXYWH((iw - sw) / 2f, (ih - sh) / 2f, sw, sh)
+    canvas.drawImageRect(image, src, Rect.makeWH(width, height), SamplingMode.LINEAR, paint, true)
+}
+
+// How a frame is brought down to its small copy: averaged over its mipmaps,
+// so the copy does not flicker as the picture moves.
+private val Shrink = FilterMipmap(FilterMode.LINEAR, MipmapMode.LINEAR)
+
 // Reads frames while the loop plays: each new one is copied into a bitmap
-// of the loop's size and handed to the drawing as an image of its own.
-private suspend fun readFrames(video: LoopVideo, box: FrameBox) = withContext(Dispatchers.IO) {
+// of the loop's size and handed to the drawing as an image of its own, and
+// shrunk for the small copy when the feed has one.
+private suspend fun readFrames(video: LoopVideo, feed: LoopFeed) = withContext(Dispatchers.IO) {
     val width = video.width().toInt()
     val height = video.height().toInt()
     val bitmap = Bitmap()
+    val small = feed.small?.let { Surface.makeRasterN32Premul(it.width, it.height) }
     try {
         if (!bitmap.allocPixels(ImageInfo(width, height, ColorType.BGRA_8888, ColorAlphaType.OPAQUE))) return@withContext
         val pixels = bitmap.peekPixels() ?: return@withContext
         val address = pixels.addr.toULong()
         val rowBytes = pixels.rowBytes.toUInt()
         val length = pixels.computeByteSize().toULong()
+        val all = Rect.makeWH(width.toFloat(), height.toFloat())
+        val paint = Paint()
         var have = 0uL
         while (isActive) {
             val newest = video.waitFrame(have, WaitMs)
@@ -196,14 +233,19 @@ private suspend fun readFrames(video: LoopVideo, box: FrameBox) = withContext(Di
             }
             have = video.copyFrame(address, rowBytes, length, have)
             bitmap.notifyPixelsChanged()
-            box.put(SkiaImage.makeFromBitmap(bitmap))
-            withContext(Dispatchers.Main) { box.arrived.intValue++ }
+            val frame = SkiaImage.makeFromBitmap(bitmap)
+            if (small != null) {
+                small.canvas.drawImageRect(frame, all, Rect.makeWH(small.width.toFloat(), small.height.toFloat()), Shrink, paint, true)
+                feed.smalls?.put(small.makeImageSnapshot())
+            }
+            feed.frames.put(frame)
+            withContext(Dispatchers.Main) { feed.frames.arrived.intValue++ }
         }
     } finally {
         bitmap.close()
+        small?.close()
     }
 }
-
 // The album's square loop over its cover: the cover first, then the loop
 // fading in once its first frame is drawn, in the same box, corners and
 // rim, so nothing jumps and nothing goes black. `seen` is whether the loop

@@ -144,19 +144,20 @@ class AnimatedArtTest {
     @Test
     fun theTallLoopKeepsItsShapeAndIsGoneBeforeTheTitle() {
         // Alone in a 1440x900 player: as tall as the player, 3:4, centered.
-        val alone = tallPlacement(900f, 0f, 1440f, 720f, titleTop = 640f, aspect = 0.75f, gap = 12f, leastFade = 110f)
+        val alone = tallPlacement(900f, 0f, 1440f, 720f, titleTop = 640f, aspect = 0.75f, gap = 0f, leastRamp = 96f)
         assertEquals(675f, alone.width, 0.01f)
         assertEquals(900f, alone.height, 0.01f)
         assertEquals(382.5f, alone.x, 0.01f)
-        assertEquals(628f, alone.fadeEnd, 0.01f)
-        assertTrue(alone.fadeStart in 400f..518f)
+        // Sharp down to an eased band that is gone right at the title.
+        assertEquals(640f, alone.fadeEnd, 0.01f)
+        assertEquals(514f, alone.fadeStart, 0.01f)
         // Beside the lyrics: as wide as the cover's side, from the left edge.
-        val beside = tallPlacement(900f, 0f, 520f, 276f, titleTop = 640f, aspect = 0.75f, gap = 12f, leastFade = 110f)
+        val beside = tallPlacement(900f, 0f, 520f, 276f, titleTop = 640f, aspect = 0.75f, gap = 0f, leastRamp = 96f)
         assertEquals(520f, beside.width, 0.01f)
         assertEquals(693.33f, beside.height, 0.01f)
         assertEquals(0f, beside.x, 0.01f)
         // Never enlarged past the player's height, whatever the space.
-        val wide = tallPlacement(600f, 0f, 3000f, 1500f, titleTop = null, aspect = 0.75f, gap = 12f, leastFade = 110f)
+        val wide = tallPlacement(600f, 0f, 3000f, 1500f, titleTop = null, aspect = 0.75f, gap = 0f, leastRamp = 96f)
         assertEquals(600f, wide.height, 0.01f)
         assertEquals(600f, wide.fadeEnd, 0.01f)
     }

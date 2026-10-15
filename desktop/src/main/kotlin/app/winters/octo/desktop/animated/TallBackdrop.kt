@@ -1,13 +1,13 @@
 package app.winters.octo.desktop.animated
 
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -27,10 +27,9 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.skiaCanvas
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.graphics.toComposeImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import app.winters.octo.animated.LOOP_FADE_MS
 import app.winters.octo.animated.LoopPlay
@@ -44,12 +43,15 @@ import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorFilter
 import org.jetbrains.skia.ColorMatrix
 import org.jetbrains.skia.ColorType
+import org.jetbrains.skia.CubicResampler
+import org.jetbrains.skia.FilterMipmap
+import org.jetbrains.skia.FilterMode
 import org.jetbrains.skia.FilterTileMode
-import org.jetbrains.skia.ImageFilter
 import org.jetbrains.skia.ImageInfo
+import org.jetbrains.skia.Matrix33
+import org.jetbrains.skia.MipmapMode
 import org.jetbrains.skia.Paint
 import org.jetbrains.skia.Rect
-import org.jetbrains.skia.SamplingMode
 import org.jetbrains.skia.Surface
 import java.io.File
 import kotlin.math.max
@@ -62,15 +64,16 @@ import org.jetbrains.skia.Image as SkiaImage
 // clip's color alone.
 private const val StillWaitMs = 1_500L
 
-// The blurred fill is drawn this many pixels wide, then stretched.
-private const val FillWidth = 96
+// The blurred copy of the loop is this many pixels across, then drawn
+// large and smooth, which blurs it with no blur filter at all.
+private const val SoftWidth = 20
 
-// How soft the blur is, in the fill's own pixels (about 75 window pixels
-// at 1440 wide).
-private const val FillBlur = 5f
+// A smooth cubic (B-spline), so the enlarged copy has no edges or rings.
+private val Smooth = CubicResampler(1f, 0f)
 
 // Where the tall loop sits in the full player, in the player's pixels: its
-// left edge, size, and where its foot starts and finishes fading out.
+// left edge, size, and where its foot starts and finishes giving way to
+// its blurred copy.
 data class TallPlacement(val x: Float, val width: Float, val height: Float, val fadeStart: Float, val fadeEnd: Float) {
     val right: Float get() = x + width
 }
@@ -78,9 +81,10 @@ data class TallPlacement(val x: Float, val width: Float, val height: Float, val 
 // The tall loop at its own shape, never enlarged past it: as tall as the
 // player where the space beside allows, else as wide as the space (from
 // `areaLeft` to `areaRight`), from the top, centered on `center` within
-// that space. Its top runs clean to the player's edge; its foot fades out,
-// eased, as late as it can while it is still gone `gap` above the title
-// (`titleTop`, or the loop's foot when not known yet).
+// that space. Its top runs clean to the player's edge; towards the title
+// it dissolves into its blurred copy over an eased band (`leastRamp` at
+// least, a seventh of its height on a tall one) that ends `gap` above the
+// title (`titleTop`, or the loop's foot when not known yet).
 fun tallPlacement(
     playerHeight: Float,
     areaLeft: Float,
@@ -89,56 +93,38 @@ fun tallPlacement(
     titleTop: Float?,
     aspect: Float,
     gap: Float,
-    leastFade: Float,
+    leastRamp: Float,
 ): TallPlacement {
     val shape = aspect.takeIf { it > 0f } ?: 0.75f
     val width = min(max(areaRight - areaLeft, 1f), playerHeight * shape)
     val height = width / shape
     val x = (center - width / 2f).coerceIn(areaLeft, max(areaLeft, areaRight - width))
     val end = min(height, titleTop?.let { it - gap } ?: height).coerceAtLeast(0f)
-    val start = (end - max(height * 0.2f, leastFade)).coerceAtLeast(0f)
+    val start = (end - max(height * 0.14f, leastRamp)).coerceAtLeast(0f)
     return TallPlacement(x, width, height, start, end)
 }
 
-// The still picture behind everything for a tall loop, made once for its
-// still and place: the still drawn where the loop is, its edges stretched
-// out to the player's edges, blurred hard, and toned so the words read.
-class TallFill(val image: SkiaImage, val ink: Color)
+// The still's small copy and how the blurred loop is toned so the words
+// read on it, made once per clip.
+class SoftStill(val small: SkiaImage?, val tone: FillTone, val ink: Color)
 
-// Builds that fill, off the window's thread. Without a still it is the
-// clip's color.
-fun makeTallFill(still: SkiaImage?, color: Color, playerWidth: Float, playerHeight: Float, place: TallPlacement): TallFill {
-    val w = FillWidth
-    val h = max(1, (FillWidth * playerHeight / playerWidth).roundToInt())
-    val s = w / playerWidth
-    val raw = Surface.makeRasterN32Premul(w, h)
-    raw.canvas.clear(color.toArgb())
+// Shrinks the still to the blurred copy's size and works out its tone;
+// without a still, the clip's color.
+fun softStill(still: SkiaImage?, color: Color, aspect: Float): SoftStill {
+    val w = SoftWidth
+    val h = max(1, (SoftWidth / aspect).roundToInt())
+    val surface = Surface.makeRasterN32Premul(w, h)
+    surface.canvas.clear(color.toArgb())
     if (still != null) {
-        val pw = still.width.toFloat()
-        val ph = still.height.toFloat()
-        val left = place.x * s
-        val right = place.right * s
-        val bottom = place.height * s
-        val paint = Paint()
-        val linear = SamplingMode.LINEAR
-        // The foot's band across the whole width below the loop, then each
-        // side's band out to the edge, then the still itself.
-        raw.canvas.drawImageRect(still, Rect.makeLTRB(0f, ph * 0.9f, pw, ph), Rect.makeLTRB(0f, bottom - 1f, w.toFloat(), h.toFloat()), linear, paint, true)
-        raw.canvas.drawImageRect(still, Rect.makeLTRB(0f, 0f, pw * 0.08f, ph), Rect.makeLTRB(0f, 0f, left + 1f, bottom), linear, paint, true)
-        raw.canvas.drawImageRect(still, Rect.makeLTRB(pw * 0.92f, 0f, pw, ph), Rect.makeLTRB(right - 1f, 0f, w.toFloat(), bottom), linear, paint, true)
-        raw.canvas.drawImageRect(still, Rect.makeWH(pw, ph), Rect.makeLTRB(left, 0f, right, bottom), linear, paint, true)
+        surface.canvas.drawImageRect(
+            still, Rect.makeWH(still.width.toFloat(), still.height.toFloat()), Rect.makeWH(w.toFloat(), h.toFloat()),
+            FilterMipmap(FilterMode.LINEAR, MipmapMode.LINEAR), Paint(), true,
+        )
     }
-    val drawn = raw.makeImageSnapshot()
-    val blurred = Surface.makeRasterN32Premul(w, h)
-    blurred.canvas.drawImage(drawn, 0f, 0f, Paint().apply { imageFilter = ImageFilter.makeBlur(FillBlur, FillBlur, FilterTileMode.CLAMP) })
-    val soft = blurred.makeImageSnapshot()
-    val tone = fillTone(lightnesses(soft))
-    val toned = Surface.makeRasterN32Premul(w, h)
-    toned.canvas.drawImage(soft, 0f, 0f, Paint().apply { colorFilter = tone.filter() })
-    val image = toned.makeImageSnapshot()
-    listOf(drawn, soft).forEach(SkiaImage::close)
-    listOf(raw, blurred, toned).forEach(Surface::close)
-    return TallFill(image, if (tone.white) Color.White else DarkInk)
+    val small = surface.makeImageSnapshot()
+    surface.close()
+    val tone = fillTone(lightnesses(small))
+    return SoftStill(small, tone, if (tone.white) Color.White else DarkInk)
 }
 
 // How the fill is toned for its words: white words on a fill darkened by
@@ -202,11 +188,15 @@ private fun lightnesses(image: SkiaImage): List<Triple<Float, Float, Float>> {
     }
 }
 
-// The tall loop behind the full player, as Full screen shows it: at its own
-// shape on the cover's side, its foot fading out before the title, on a
-// blurred fill made from its still. Nothing shows until the still is there
-// (or it has been waited for a moment); then it fades in, and `shown` is
-// called once it covers what was under it. `ink` hears the words' color.
+// The tall loop behind the full player, as Full screen shows it, the way
+// Apple Music does: sharp at its own shape on the cover's side, running
+// clean to the top, and towards the title dissolving over an eased band
+// into a blurred copy of itself that carries on, still moving, behind the
+// title, the controls and everything else, toned so the words read. The
+// blur is the loop's small copy drawn large and smooth, so no frame is
+// ever blurred by a filter. Nothing shows until the still is there (or it
+// has been waited for a moment); then it fades in, and `shown` is called
+// once it covers what was under it. `ink` hears the words' color.
 @Composable
 fun TallBackdrop(
     model: AnimatedArtModel,
@@ -235,7 +225,7 @@ fun TallBackdrop(
         val place = with(density) {
             tallPlacement(
                 maxHeight.toPx(), areaLeft.toPx(), areaRight.toPx(), center.toPx(), titleTop?.toPx(),
-                aspect, gap = 12.dp.toPx(), leastFade = 110.dp.toPx(),
+                aspect, gap = 0f, leastRamp = 96.dp.toPx(),
             )
         }
         val playerWidth = with(density) { maxWidth.toPx() }
@@ -244,7 +234,7 @@ fun TallBackdrop(
         val hPx = place.height.roundToInt()
         LaunchedEffect(wPx, hPx) { measured(wPx, hPx) }
 
-        // The still, read once.
+        // The still and its small copy, made once.
         var stillWaited by remember(albumId) { mutableStateOf(false) }
         val still by produceState<SkiaImage?>(null, albumId, clip.poster) {
             val got = withTimeoutOrNull(StillWaitMs) { model.posterFile(albumId, LoopShape.Tall, clip) }
@@ -252,71 +242,114 @@ fun TallBackdrop(
             val file = got ?: model.posterFile(albumId, LoopShape.Tall, clip) ?: return@produceState
             value = withContext(Dispatchers.IO) { readStill(file) }
         }
-        val stillBitmap = remember(still) { still?.toComposeImageBitmap() }
-        // The fill, made again only when the still or the place changes.
-        val fill by produceState<TallFill?>(null, still, place, playerWidth, playerHeight, color) {
+        val soft by produceState<SoftStill?>(null, still, stillWaited, color, aspect) {
             if (still == null && !stillWaited) return@produceState
-            val made = withContext(Dispatchers.Default) { makeTallFill(still, color, playerWidth, playerHeight, place) }
-            value?.image?.close()
-            value = made
+            value = withContext(Dispatchers.Default) { softStill(still, color, aspect) }
         }
-        LaunchedEffect(fill?.ink) { fill?.ink?.let(inkNow) }
+        LaunchedEffect(soft) { soft?.ink?.let(inkNow) }
         val alpha = remember(albumId) { Animatable(0f) }
-        LaunchedEffect(albumId, fill != null) {
-            if (fill == null) return@LaunchedEffect
+        LaunchedEffect(albumId, soft != null) {
+            if (soft == null) return@LaunchedEffect
             if (calm) alpha.snapTo(1f) else alpha.animateTo(1f, tween(LOOP_FADE_MS))
             shownNow()
         }
-        val current = fill ?: return@BoxWithConstraints
-        val paint = remember { Paint() }
-        Box(
-            Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha.value }.drawBehind {
-                drawIntoCanvas {
-                    val image = current.image
-                    it.skiaCanvas.drawImageRect(
-                        image, Rect.makeWH(image.width.toFloat(), image.height.toFloat()), Rect.makeWH(size.width, size.height),
-                        SamplingMode.MITCHELL, paint, true,
-                    )
-                }
-            },
-        ) {
+        val ready = soft ?: return@BoxWithConstraints
+        val file by produceState<File?>(null, albumId, clip.video, play == LoopPlay.StillOnly) {
+            if (play == LoopPlay.StillOnly) return@produceState
+            value = model.loopFile(albumId, LoopShape.Tall, clip, wPx, hPx)
+        }
+        ShowingFile(model, file)
+        val smallSize = ready.small?.let { IntSize(it.width, it.height) }
+        val feed = rememberLoopFeed(file, play, IntSize(wPx, hPx), small = smallSize)
+        val tone = remember(ready) { ready.tone.filter() }
+        val blurPaint = remember(tone) { Paint().apply { colorFilter = tone } }
+        val sharpPaint = remember { Paint() }
+        // The words' side darkens (or lightens) a little more, gently.
+        val shade = if (ready.tone.white) Color.Black else Color.White
+        Box(Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha.value }) {
+            // The small copy of the newest frame (the still's before the
+            // first), taken once per frame for both blurred layers.
+            fun smallNow(): SkiaImage? {
+                feed.smalls?.arrived?.intValue
+                return feed.smalls?.take()?.takeIf { feed.frames.arrived.intValue > 0 } ?: ready.small
+            }
             val x: Dp = with(density) { place.x.toDp() }
             val width: Dp = with(density) { place.width.toDp() }
             val height: Dp = with(density) { place.height.toDp() }
             val atLeft = place.x <= 1f
             val atRight = place.right >= playerWidth - 1f
-            Box(
+            // The blurred loop over the whole player, scaled to cover it.
+            Spacer(
+                Modifier.fillMaxSize().drawBehind {
+                    feed.frames.arrived.intValue
+                    val image = smallNow() ?: return@drawBehind
+                    drawIntoCanvas { smoothCover(it.skiaCanvas, image, size.width, size.height, blurPaint) }
+                },
+            )
+            // And at the sharp loop's own place and size, so what the sharp
+            // loop dissolves into is itself, blurred; its edges melt into
+            // the layer under it.
+            Spacer(
+                Modifier.offset(x = x).size(width, height)
+                    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                    .drawWithContent {
+                        drawContent()
+                        drawRect(softSides(atLeft, atRight, size.width), blendMode = BlendMode.DstIn)
+                        if (place.height < playerHeight - 1f) drawRect(softFoot(size.height), blendMode = BlendMode.DstIn)
+                    }
+                    .drawBehind {
+                        feed.frames.arrived.intValue
+                        val image = smallNow() ?: return@drawBehind
+                        drawIntoCanvas { smoothCover(it.skiaCanvas, image, size.width, size.height, blurPaint) }
+                    },
+            )
+            // A little more shade on the words' side, gently, never at the top.
+            Spacer(
+                Modifier.fillMaxSize().drawBehind {
+                    drawRect(
+                        Brush.verticalGradient(
+                            0f to Color.Transparent,
+                            (place.fadeStart / size.height).coerceIn(0f, 1f) to Color.Transparent,
+                            1f to shade.copy(alpha = 0.28f),
+                        ),
+                    )
+                },
+            )
+            // The sharp loop, dissolving into the blurred one at its foot
+            // and softly at its sides (not at the player's own edges).
+            Spacer(
                 Modifier.offset(x = x).size(width, height)
                     .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
                     .drawWithContent {
                         drawContent()
                         drawRect(footMask(place), blendMode = BlendMode.DstIn)
                         drawRect(sideMask(atLeft, atRight, size.width), blendMode = BlendMode.DstIn)
-                    },
-            ) {
-                stillBitmap?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
-                if (play != LoopPlay.StillOnly) {
-                    val file by produceState<File?>(null, albumId, clip.video) {
-                        value = model.loopFile(albumId, LoopShape.Tall, clip, wPx, hPx)
                     }
-                    ShowingFile(model, file)
-                    LoopFrames(file, play, Modifier.fillMaxSize())
-                }
-            }
+                    .drawBehind {
+                        feed.frames.arrived.intValue
+                        drawIntoCanvas { canvas ->
+                            still?.let { coverDraw(canvas.skiaCanvas, it, size.width, size.height, sharpPaint) }
+                            val frame = feed.frames.take() ?: return@drawIntoCanvas
+                            sharpPaint.alpha = (feed.fade.value * 255).roundToInt()
+                            coverDraw(canvas.skiaCanvas, frame, size.width, size.height, sharpPaint)
+                            sharpPaint.alpha = 255
+                        }
+                    },
+            )
         }
     }
 }
 
-// Opaque down to the fade's start, then eased out to nothing at its end.
+// Opaque down to the band's start, then eased out to nothing at its end.
 private fun footMask(place: TallPlacement): Brush {
-    val steps = 8
+    val steps = 10
     val stops = buildList {
         add(0f to Color.Black)
         for (i in 0..steps) {
             val t = i / steps.toFloat()
             val y = place.fadeStart + (place.fadeEnd - place.fadeStart) * t
-            // Smoothstep, so neither end of the fade shows as a line.
-            val eased = t * t * (3 - 2 * t)
+            // Smootherstep, so neither end of the band shows as a line.
+            val eased = t * t * t * (t * (t * 6 - 15) + 10)
             add((y / place.height).coerceIn(0f, 1f) to Color.Black.copy(alpha = 1f - eased))
         }
         add(1f to Color.Transparent)
@@ -324,14 +357,39 @@ private fun footMask(place: TallPlacement): Brush {
     return Brush.verticalGradient(*stops.distinctBy { it.first }.toTypedArray(), startY = 0f, endY = place.height)
 }
 
-// The sides fade softly into the fill, but not at the player's own edge.
+// The sides dissolve softly into the blurred copy, but not at the player's
+// own edge.
 private fun sideMask(atLeft: Boolean, atRight: Boolean, width: Float): Brush = Brush.horizontalGradient(
     0f to if (atLeft) Color.Black else Color.Transparent,
-    0.1f to Color.Black,
-    0.9f to Color.Black,
+    0.16f to Color.Black,
+    0.84f to Color.Black,
     1f to if (atRight) Color.Black else Color.Transparent,
     startX = 0f,
     endX = width,
 )
+
+// Draws a small image scaled to cover the box, enlarged smoothly.
+private fun smoothCover(canvas: org.jetbrains.skia.Canvas, image: SkiaImage, width: Float, height: Float, paint: Paint) {
+    val iw = image.width.toFloat()
+    val ih = image.height.toFloat()
+    val scale = max(width / iw, height / ih)
+    val sw = width / scale
+    val sh = height / scale
+    canvas.drawImageRect(image, Rect.makeXYWH((iw - sw) / 2f, (ih - sh) / 2f, sw, sh), Rect.makeWH(width, height), Smooth, paint, false)
+}
+
+// The aligned blurred copy's edges: its sides (not at the player's own
+// edges), and its foot when it ends above the player's, melt away.
+private fun softSides(atLeft: Boolean, atRight: Boolean, width: Float): Brush = Brush.horizontalGradient(
+    0f to if (atLeft) Color.Black else Color.Transparent,
+    0.3f to Color.Black,
+    0.7f to Color.Black,
+    1f to if (atRight) Color.Black else Color.Transparent,
+    startX = 0f,
+    endX = width,
+)
+
+private fun softFoot(height: Float): Brush =
+    Brush.verticalGradient(0f to Color.Black, 0.8f to Color.Black, 1f to Color.Transparent, startY = 0f, endY = height)
 
 private fun readStill(file: File): SkiaImage? = runCatching { SkiaImage.makeFromEncoded(file.readBytes()) }.getOrNull()
