@@ -74,6 +74,21 @@ class BackdropInkTest {
     }
 
     @Test
+    fun overATallLoopTheQuieterWordsAreShadesOfWhite() {
+        // The brown under Short n' Sweet's name, as Apple Music shows it.
+        val brown = 0xFF69391F.toInt()
+        val ink = fillInk(brown, brown, LoopInkNeeds)
+        assertFalse(ink.dark)
+        val under = dimmed(brown, ink.gain)
+        assertTrue(contrastRatio(white, under) >= 7.0)
+        assertTrue(contrastRatio(overlay(white, 0.82f, under), under) >= 4.5)
+        assertTrue(contrastRatio(overlay(white, 0.7f, under), under) >= 4.5)
+        assertTrue(contrastRatio(overlay(white, 0.45f, under), under) >= 3.0)
+        // Shades of white ask for less dimming than Octo's blue gray does.
+        assertTrue(ink.gain >= fillInk(brown, brown).gain)
+    }
+
+    @Test
     fun everyFillReads() {
         for (r in 0..255 step 51) for (g in 0..255 step 51) for (b in 0..255 step 51) {
             val color = 0xFF000000.toInt() or (r shl 16) or (g shl 8) or b
