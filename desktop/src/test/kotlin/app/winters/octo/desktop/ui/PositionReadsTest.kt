@@ -37,7 +37,7 @@ class PositionReadsTest {
         var seen = -1L
         val scene = ImageComposeScene(100, 100) {
             CompositionLocalProvider(LocalWindowShown provides shown) {
-                val position by rememberPosition(player)
+                val position by rememberPosition(player, lengthPx = 600f)
                 seen = position
             }
         }

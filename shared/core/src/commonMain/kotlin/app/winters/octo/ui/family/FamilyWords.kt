@@ -159,7 +159,7 @@ fun requestStateLine(request: FamilyRequest): String = when (request.state) {
     FamilyRequestState.Pending -> "Waiting for approval"
     FamilyRequestState.Approved -> "Approved, getting it now"
     FamilyRequestState.Declined -> "Declined"
-    FamilyRequestState.Cancelled -> "Cancelled"
+    FamilyRequestState.Cancelled -> "Canceled"
     FamilyRequestState.Failed -> request.failure?.takeIf(String::isNotBlank)?.let { "Failed: $it" } ?: "Failed"
     FamilyRequestState.Done -> outcomeLine(request.outcome)
 }

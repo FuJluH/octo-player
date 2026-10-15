@@ -5,11 +5,12 @@ import org.jetbrains.skia.ColorSpace
 import org.jetbrains.skia.Surface
 import org.jetbrains.skia.SurfaceColorFormat
 import org.jetbrains.skia.SurfaceOrigin
+import org.jetbrains.skia.SurfaceProps
 import org.jetbrains.skiko.graphicapi.DirectXOffscreenContext
 
 // A Direct3D texture off screen and a Skia surface over it, for timing
 // Compose frames as the window draws them (on the graphics card).
-internal class GpuTarget(private val context: DirectXOffscreenContext, width: Int, height: Int) : AutoCloseable {
+internal class GpuTarget(private val context: DirectXOffscreenContext, width: Int, height: Int, props: SurfaceProps = SurfaceProps()) : AutoCloseable {
     private val texture = context.Texture(width, height)
     val surface: Surface = Surface.makeFromBackendRenderTarget(
         context.directContext,
@@ -17,6 +18,7 @@ internal class GpuTarget(private val context: DirectXOffscreenContext, width: In
         SurfaceOrigin.TOP_LEFT,
         SurfaceColorFormat.BGRA_8888,
         ColorSpace.sRGB,
+        props,
     )!!
 
     // Waits until the graphics card has drawn everything sent so far.

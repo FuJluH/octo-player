@@ -24,9 +24,10 @@ class TypeTest {
         for ((name, style) in styles) {
             assertEquals(name, TextDrawing, style.platformStyle?.paragraphStyle?.fontRasterizationSettings)
         }
-        // Grey smoothing, fitted to the grid: colour smoothing falls back
-        // to a softer grey in the window, and no fitting blurs small text.
-        assertEquals(FontSmoothing.AntiAlias, TextDrawing.smoothing)
+        // Unless the start asked for colour smoothing (TextLook.colour),
+        // grey smoothing; fitted to the grid either way, since no fitting
+        // blurs small text.
+        assertEquals(if (TextLook.colour) FontSmoothing.SubpixelAntiAlias else FontSmoothing.AntiAlias, TextDrawing.smoothing)
         assertNotEquals(FontHinting.None, TextDrawing.hinting)
     }
 

@@ -69,7 +69,7 @@ import app.winters.octo.subsonic.Playlist
 import app.winters.octo.subsonic.RadioStation
 import app.winters.octo.subsonic.SubsonicException
 import kotlinx.coroutines.launch
-import app.winters.octo.desktop.ui.PlayButton
+import app.winters.octo.desktop.ui.PlayBadge
 import app.winters.octo.desktop.home.octoLists
 import app.winters.octo.home.mixGroup
 import app.winters.octo.desktop.liveradio.FIND_STATIONS_NEAR
@@ -280,7 +280,7 @@ private fun StationCard(app: AppState, station: RadioStation, starting: Boolean,
         "Station",
         station.coverArt ?: station.id,
         onOpen = { app.navigator.go(Page.Playlist(station.id)) },
-        badge = { if (starting) Spinner(size = IconSize.Transport) else PlayButton(playing = false, enabled = true, size = ControlHeight.L, label = "Play ${station.name}", onClick = onPlay) },
+        badge = { if (starting) Spinner(size = IconSize.Transport) else PlayBadge(ControlHeight.L, "Play ${station.name}", onPlay) },
         picture = { modifier, shape -> StationPicture(app, station, modifier, shape) },
     )
 }
@@ -310,7 +310,7 @@ private fun LiveShelfCard(app: AppState, station: ShelfStation, shelf: List<Shel
         null,
         onOpen = play,
         onMenu = kept?.let { liveStationMenu(app, it, kept = true, play = play) },
-        badge = { PlayButton(playing = false, enabled = true, size = ControlHeight.L, label = "Play ${station.name}", onClick = play) },
+        badge = { PlayBadge(ControlHeight.L, "Play ${station.name}", play) },
         picture = { modifier, shape -> StationArt(app, station.logo, station.name, station.streamUrl, modifier, shape, station.coverArt) },
     )
 }

@@ -246,9 +246,9 @@ class DesktopUpdates(
         DesktopOs.Windows -> "Octo closes, installs it, and opens again. Your queue and settings stay."
         DesktopOs.Mac -> "Opens the disk image; drag Octo into Applications to replace this one."
         DesktopOs.Linux -> if (update.asset.kind == "deb") {
-            "Install it with your software centre, or: sudo apt install ./${update.file.name}"
+            "Install it with your software center, or: sudo apt install ./${update.file.name}"
         } else {
-            "Install it with your software centre, or: sudo dnf install ./${update.file.name}"
+            "Install it with your software center, or: sudo dnf install ./${update.file.name}"
         }
     }
 
