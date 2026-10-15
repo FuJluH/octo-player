@@ -49,46 +49,57 @@ struct RoutePicker: UIViewRepresentable {
 
 // MARK: Title
 
-/// A line too long for its room scrolls sideways three times, waiting 1.2 s before each run, at
-/// 30 points a second, with a third of the room between the end and the start again.
+/// A single line too long for its room. It fades out softly at its right edge; with `scroll` it
+/// also scrolls through three times, waiting 1.2 s before each pass, at 30 points a second, with a
+/// third of the room between the end and the start again, fading softly at its left edge only
+/// while it moves, so at rest its first letter sits crisp. The fades are eased masks over 28
+/// points on the line's own room. Once the passes are done, or for a line that fits, nothing
+/// ticks; a new line starts it over.
 struct PlayerMarquee: View {
     let text: String
     let font: Font
     let color: Color
+    var scroll = true
     @State private var textWidth: CGFloat = 0
     @State private var room: CGFloat = 0
     @State private var started = Date()
-
-    private static let runs = 3
-    private static let pause = 1.2
-    private static let speed: CGFloat = 30
+    @State private var resting = false
 
     var body: some View {
+        let overflow = textWidth > room + 0.5 && room > 0
+        let gap = room * Marquee.spacing
+        let distance = textWidth + gap
+        let moving = overflow && scroll && !resting
         Text(text)
             .font(font)
             .lineLimit(1)
             .hidden()
             .overlay(alignment: .leading) {
-                let gap = room / 3
-                let distance = textWidth + gap
-                let moving = textWidth > room + 0.5 && room > 0
                 TimelineView(.animation(paused: !moving)) { time in
-                    let x = moving ? offset(time.date, distance) : 0
+                    let at: (offset: Double, leftFade: Double) =
+                        moving ? Marquee.at(time.date.timeIntervalSince(started), distance: Double(distance)) : (0, 0)
                     HStack(spacing: gap) {
                         line
                         if moving { line }
                     }
-                    .offset(x: x)
+                    .offset(x: -CGFloat(at.offset))
                     .frame(width: max(room, 1), alignment: .leading)
+                    .clipped()
+                    .mask { if overflow { MarqueeFades(left: at.leftFade) } else { Rectangle() } }
                 }
-                .clipped()
             }
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { room = $0 }
             .background {
                 line.fixedSize().hidden()
                     .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { textWidth = $0 }
             }
-            .onChange(of: text) { _, _ in started = Date() }
+            .task(id: MarqueeRun(text: text, distance: distance, scrolls: overflow && scroll)) {
+                started = Date()
+                resting = false
+                guard overflow && scroll else { return }
+                try? await Task.sleep(for: .seconds(Marquee.duration(distance: Double(distance))))
+                if !Task.isCancelled { resting = true }
+            }
             .accessibilityElement()
             .accessibilityLabel(text)
     }
@@ -97,14 +108,98 @@ struct PlayerMarquee: View {
         Text(text).font(font).foregroundStyle(color).lineLimit(1).fixedSize()
     }
 
-    private func offset(_ now: Date, _ distance: CGFloat) -> CGFloat {
-        let cycle = Self.pause + Double(distance / Self.speed)
-        let t = now.timeIntervalSince(started)
-        let run = Int(t / cycle)
-        guard run < Self.runs else { return 0 }
-        let local = t - Double(run) * cycle
-        guard local > Self.pause else { return 0 }
-        return -min(CGFloat(local - Self.pause) * Self.speed, distance)
+    private struct MarqueeRun: Equatable {
+        let text: String
+        let distance: CGFloat
+        let scrolls: Bool
+    }
+}
+
+/// The marquee's masks: the right edge always faded out over the fade's length, eased, and the
+/// left edge as much as `left` (0 to 1) of the same.
+private struct MarqueeFades: View {
+    let left: Double
+
+    var body: some View {
+        GeometryReader { box in
+            let fade = min(CGFloat(Marquee.fade), box.size.width / 2)
+            HStack(spacing: 0) {
+                LinearGradient(stops: Marquee.easedOut.reversed().map { stop in
+                    Gradient.Stop(color: .black.opacity(1 - left * (1 - stop.alpha)), location: 1 - stop.at)
+                }, startPoint: .leading, endPoint: .trailing)
+                .frame(width: fade)
+                Rectangle()
+                LinearGradient(stops: Marquee.easedOut.map { Gradient.Stop(color: .black.opacity($0.alpha), location: $0.at) },
+                               startPoint: .leading, endPoint: .trailing)
+                .frame(width: fade)
+            }
+        }
+    }
+}
+
+/// The full player's buttons beside the song's name, measured from the name's font: their icons
+/// stand about 1.15 times as tall as its capitals, at the weight of the switches under the
+/// controls, and sit on the middle of those capitals.
+struct TitleIcons: Equatable, Sendable {
+    /// The name's font, as `Font.octo(24, .bold, .title1)` draws it: its size, how far its
+    /// baseline sits below the top of its line, and its capitals' height.
+    let fontSize: CGFloat
+    let ascender: CGFloat
+    let capHeight: CGFloat
+    /// The symbols' point size.
+    let pointSize: CGFloat
+    /// Half of what the heart and the dots cover across.
+    let heartHalf: CGFloat
+    let dotsHalf: CGFloat
+    /// How strongly the icons show while not lit.
+    var alpha: Double = Double(PlayerTitleRow.iconAlpha)
+
+    /// Down from the top of the name's line to the middle of its capitals.
+    var capMiddleFromTop: CGFloat { CGFloat(capMiddle(baseline: Double(ascender), capHeight: Double(capHeight))) }
+
+    /// How far the buttons reach into the row's side margin so the gaps read even.
+    func reach(sideMargin: CGFloat) -> CGFloat {
+        CGFloat(titleButtonsReach(sideMargin: Double(sideMargin), heartHalf: Double(heartHalf), dotsHalf: Double(dotsHalf)))
+    }
+
+    /// For the phone's text size now.
+    @MainActor static func current() -> TitleIcons {
+        let font = UIFontMetrics(forTextStyle: .title1).scaledFont(for: .systemFont(ofSize: 24, weight: .bold))
+        if let known = cache, known.fontSize == font.pointSize { return known }
+        let target = font.capHeight * CGFloat(PlayerTitleRow.heightOverCap)
+        func size(_ symbol: String, _ point: CGFloat) -> CGSize {
+            UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: point, weight: .regular))?.size
+                ?? CGSize(width: point, height: point)
+        }
+        let probe = size(OctoIcon.like.symbol, 100)
+        let point = probe.height > 0 ? 100 * target / probe.height : target
+        let icons = TitleIcons(fontSize: font.pointSize, ascender: font.ascender, capHeight: font.capHeight, pointSize: point,
+                               heartHalf: size(OctoIcon.like.symbol, point).width / 2,
+                               dotsHalf: size(OctoIcon.more.symbol, point).width / 2)
+        cache = icons
+        return icons
+    }
+
+    @MainActor private static var cache: TitleIcons?
+}
+
+extension EnvironmentValues {
+    /// Set inside the full player's title row: the icons' measures and how quiet they are.
+    @Entry var titleIcons: TitleIcons? = nil
+}
+
+/// One of the title row's icons, an SF Symbol at the row's measures in a 44 point target.
+struct TitleGlyph: View {
+    let icon: OctoIcon
+    let color: Color
+    @Environment(\.titleIcons) private var icons
+
+    var body: some View {
+        Image(systemName: icon.symbol)
+            .font(.system(size: icons?.pointSize ?? 19, weight: .regular))
+            .foregroundStyle(color)
+            .frame(width: PlayerTitleRow.buttonSize, height: PlayerTitleRow.buttonSize)
+            .accessibilityHidden(true)
     }
 }
 
@@ -118,23 +213,29 @@ extension VerticalAlignment {
     static let playerTitleLine = VerticalAlignment(PlayerTitleLine.self)
 }
 
-/// The song's title (24 bold, scrolling when long, the explicit mark kept still after it) and
-/// its artist, who opens their page.
+/// The song's name (24 bold, scrolling when long unless motion is reduced, the explicit mark kept
+/// still after it) and its artist, who opens their page, the two close together so they read as
+/// one. Either line too long fades out at its end. The buttons beside it sit on the middle of the
+/// name's capitals, taken from the name's font, so they hold their place whatever the name is
+/// doing.
 struct PlayerTitleBlock: View {
     let song: Song
     let ink: Color
     let accent: Color
     let openArtist: (() -> Void)?
+    @Environment(\.octoReduceMotion) private var calm
+    @Environment(\.titleIcons) private var icons
 
     var body: some View {
+        let capMiddle = icons?.capMiddleFromTop
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
-                PlayerMarquee(text: song.title, font: .octo(24, .bold, .title1), color: ink)
+                PlayerMarquee(text: song.title, font: .octo(24, .bold, .title1), color: ink, scroll: !calm)
                 if song.isExplicit {
                     ExplicitMark(size: 14, color: accent).fixedSize()
                 }
             }
-            .alignmentGuide(.playerTitleLine) { $0[VerticalAlignment.center] }
+            .alignmentGuide(.playerTitleLine) { d in capMiddle ?? d[VerticalAlignment.center] }
             // Only the name itself opens the artist.
             Group {
                 if let openArtist {
@@ -145,24 +246,23 @@ struct PlayerTitleBlock: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, -CGFloat(PlayerTitleRow.artistRaise))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var artist: some View {
-        Text(song.byline)
-            .font(.octoBody)
-            .foregroundStyle(accent)
-            .lineLimit(1)
+        PlayerMarquee(text: song.byline, font: .octoBody, color: accent, scroll: false)
     }
 }
 
-/// The heart for a library song: filled, full and glowing while liked; an outline at 60%
-/// otherwise. Liking it gives a small beat.
+/// The heart for a library song: filled, full and glowing while liked; an outline a step quieter
+/// than the name otherwise. Liking it gives a small beat.
 struct PlayerHeart: View {
     let liked: Bool
     let ink: Color
     let toggle: () -> Void
+    @Environment(\.titleIcons) private var icons
     @State private var beats = 0
 
     var body: some View {
@@ -170,10 +270,9 @@ struct PlayerHeart: View {
             if !liked { beats += 1 }
             toggle()
         } label: {
-            IconView(liked ? .liked : .like, size: 24, color: liked ? ink : ink.opacity(0.6))
+            TitleGlyph(icon: liked ? .liked : .like, color: liked ? ink : ink.opacity(icons?.alpha ?? 0.7))
                 .iconGlow(liked, color: ink)
                 .iconAccent(.pulse, trigger: beats)
-                .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
         .buttonStyle(NoPress())
@@ -186,38 +285,42 @@ struct PlayerHeart: View {
 
 /// The song's place: a glowing line that seeks where it is tapped or where a drag ends, the time
 /// gone and the time left under it, and between them the quality badge and, when the speed is
-/// not 1x, the speed, which opens the speed card in a popover. The position is read every frame
-/// while the song plays.
+/// not 1x, the speed, which opens the speed card in a popover. While the song plays the line is
+/// read each time it moves on by half a pixel (every frame for a short song) and the times once
+/// a second; paused, nothing ticks, and a seek redraws them at once.
 struct PlayerProgress: View {
     let ink: Color
     let muted: Color
     let song: Song
     @Binding var speedOpen: Bool
     @Environment(Player.self) private var player
+    @Environment(\.displayScale) private var scale
     @State private var settings = AppSettings.shared
+    @State private var lineWidth: CGFloat = 0
+
+    /// Whole seconds of the clock.
+    private static let wholeSeconds = Date(timeIntervalSinceReferenceDate: 0)
 
     var body: some View {
+        let _ = player.timeEvents
+        let step = progressStepSeconds(player.duration / Double(max(player.speed, 0.1)), lengthPixels: Double(lineWidth * scale))
         VStack(spacing: 0) {
-            TimelineView(.animation(paused: !player.isPlaying)) { _ in
+            TimelineView(.animation(minimumInterval: step > 0 ? step : nil, paused: !player.isPlaying)) { _ in
                 let length = player.duration
                 OctoSlider(value: length > 0 ? min(max(player.livePosition / length, 0), 1) : 0, onChange: { fraction in
                     player.seek(to: fraction * player.duration)
                 }, color: ink, trackColor: ink.opacity(0.24))
                 .accessibilityHidden(true)
             }
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { lineWidth = $0 }
             ZStack {
                 // An unknown length shows 0:00 both sides.
-                TimelineView(.periodic(from: .now, by: 1)) { _ in
-                    let length = max(player.duration, 0)
-                    let gone = Int(min(max(player.livePosition, 0), length))
-                    let left = max(Int(length) - gone, 0)
-                    HStack {
-                        Text(asClock(gone))
-                        Spacer()
-                        Text("-" + asClock(left))
+                Group {
+                    if player.isPlaying {
+                        TimelineView(.periodic(from: Self.wholeSeconds, by: 1)) { _ in times }
+                    } else {
+                        times
                     }
-                    .font(.octoCaption.monospacedDigit())
-                    .foregroundStyle(muted)
                 }
                 HStack(spacing: 8) {
                     QualityBadge(song: song, ink: ink)
@@ -240,6 +343,20 @@ struct PlayerProgress: View {
             }
             .padding(.top, -8)
         }
+    }
+
+    /// The time gone and the time left.
+    private var times: some View {
+        let length = max(player.duration, 0)
+        let gone = Int(min(max(player.livePosition, 0), length))
+        let left = max(Int(length) - gone, 0)
+        return HStack {
+            Text(asClock(gone))
+            Spacer()
+            Text("-" + asClock(left))
+        }
+        .font(.octoCaption.monospacedDigit())
+        .foregroundStyle(muted)
     }
 }
 

@@ -503,6 +503,7 @@ final class MeshView: UIView {
     private var colorTo: [SIMD4<Float>] = []
     private var colorAt: CFTimeInterval = 0
     private var last: CFTimeInterval?
+    private var drawnAt: CFTimeInterval?
     private var watches: [NSObjectProtocol] = []
 
     override init(frame: CGRect) {
@@ -557,7 +558,11 @@ final class MeshView: UIView {
     private func start() {
         guard link == nil else { return }
         last = nil
+        drawnAt = nil
         let link = CADisplayLink(target: MeshTarget(self), selector: #selector(MeshTarget.tick(_:)))
+        // The mesh paces itself; the range never caps the screen below what the rest of the app
+        // asks for (the system picks one rate that suits every link).
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 10, maximum: 120, preferred: Float(meshFullFps))
         link.add(to: .main, forMode: .common)
         self.link = link
     }
@@ -579,6 +584,11 @@ final class MeshView: UIView {
         pace = paceFrom + (paceTo - paceFrom) * Float(Easing.fastOutSlowIn(Double(t)))
         if let last { time += Float(now - last) * pace }
         last = now
+        // A slow flow needs few frames: 30 a second at full speed, down to 10 paused. A twentieth
+        // short, so a frame landing a hair early still counts.
+        let step = 1 / meshFps(pace)
+        if let drawnAt, now - drawnAt < step - step / 20 { return }
+        drawnAt = now
         draw(now)
     }
 

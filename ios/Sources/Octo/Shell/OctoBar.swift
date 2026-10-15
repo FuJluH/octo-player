@@ -343,8 +343,10 @@ private struct BarSwipes: ViewModifier {
     }
 }
 
-/// The round now-playing button: the cover in a circle under a light shade, play or pause on
-/// top, and the song's progress as a ring.
+/// The round now-playing button: the song's artwork in a circle with a thin ring round it showing
+/// how far through the song it is (the whole ring for a station), which breathes while paused.
+/// A tap opens the small player, which has play and pause. With nothing loaded it shows the play
+/// sign, since the button then shuffles the library.
 struct NowPlayingFace: View {
     let tap: () -> Void
     @Environment(Player.self) private var player
@@ -352,26 +354,18 @@ struct NowPlayingFace: View {
     @State private var route = AudioRoute()
 
     var body: some View {
+        let song = player.current
         Button(action: tap) {
             ZStack {
-                // With no artwork, no picture and no dim: the sign sits on the glass.
                 if let live = player.live {
-                    LiveCover(live, coverArt: player.current?.coverArt, size: OctoBar.height - 12, radius: (OctoBar.height - 12) / 2)
-                        .overlay(Circle().fill(.black.opacity(0.35)))
-                } else if let cover = player.current?.coverArt {
-                    Cover(id: cover, size: OctoBar.height - 12, radius: (OctoBar.height - 12) / 2, online: player.current?.isExternal ?? false)
-                        .overlay(Circle().fill(.black.opacity(0.35)))
+                    LiveCover(live, coverArt: song?.coverArt, size: OctoBar.height - 12, radius: (OctoBar.height - 12) / 2)
+                } else if let song {
+                    Cover(id: song.coverArt, size: OctoBar.height - 12, radius: (OctoBar.height - 12) / 2, online: song.isExternal)
                 }
-                if player.live != nil {
-                    IconView(player.liveOn ? .stop : .play, size: 22, color: .white)
-                } else if player.isPlaying {
-                    PauseGlyph(size: 22, color: .white)
-                } else {
+                if song == nil {
                     IconView(.play, size: 22, color: .white)
-                }
-                // A live station has no progress to ring.
-                if player.current != nil && player.live == nil {
-                    ProgressRing(lineWidth: 2).padding(3)
+                } else {
+                    ProgressRing().padding(3)
                 }
             }
             .frame(width: OctoBar.height, height: OctoBar.height)
@@ -387,7 +381,8 @@ struct NowPlayingFace: View {
             .contentShape(Circle())
         }
         .buttonStyle(NoHighlight())
-        .accessibilityLabel("Now playing")
+        .accessibilityLabel(nowPlayingWords(title: song?.title, artist: song?.byline, loaded: song != nil))
+        .accessibilityValue(nowPlayingState(loaded: song != nil, paused: !player.liveOn, live: player.live != nil))
     }
 }
 
@@ -413,8 +408,8 @@ struct MiniPlayerPill: View {
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { flight.barFrame = $0 }
                 .opacity(flight.hidesBar ? 0 : 1)
                 .onDisappear { flight.barFrame = nil }
-                if player.live == nil {
-                    ProgressRing(lineWidth: 2).padding(1)
+                if player.current != nil {
+                    ProgressRing().padding(1)
                 }
             }
             .frame(width: 44, height: 44)
@@ -469,22 +464,89 @@ struct MiniPlayerPill: View {
     }
 }
 
-/// The song's progress as an accent ring that starts at twelve o'clock, read every frame while
-/// the song plays.
+/// The song's progress as an accent ring that starts at twelve o'clock, the whole circle for a
+/// station. Playing, it holds steady and steps once a second, on the clock's whole seconds, so
+/// every small ring on screen moves in the same frame; a seek or a new song moves it at once.
+/// Paused, a faint track shows the full circle and the arc breathes for a minute, about twelve
+/// times a second, then settles into a still dimmed look; with motion reduced it holds that look
+/// at once. Nothing ticks while the app is out of sight. `scrub` shows a place being dragged to
+/// instead. With `speaks`, a screen reader hears the song (`speaks`) and how much has played.
 struct ProgressRing: View {
-    let lineWidth: CGFloat
+    var scrub: Double?
+    var speaks: String?
     @Environment(Player.self) private var player
+    @Environment(\.octoReduceMotion) private var calm
+    @Environment(\.scenePhase) private var phase
+    @State private var pausedAt = Date()
+    @State private var settled = false
+
+    /// Whole seconds of the clock.
+    private static let wholeSeconds = Date(timeIntervalSinceReferenceDate: 0)
 
     var body: some View {
-        TimelineView(.animation(paused: !player.isPlaying)) { _ in
-            let length = max(player.duration, player.livePosition)
-            let progress = length > 0 ? min(max(player.livePosition / length, 0), 1) : 0
+        let live = player.live != nil
+        let paused = player.current != nil && !player.liveOn
+        let away = phase != .active
+        // A seek, a new song, play or pause: drawn again at once.
+        let _ = player.timeEvents
+        ZStack {
+            if let scrub {
+                ring(sweep: scrub, arc: .of(paused: false, breath: nil), track: false)
+            } else if paused {
+                let still = calm || settled || away
+                TimelineView(.animation(minimumInterval: RingLook.breathFrameSeconds, paused: still)) { time in
+                    let breath = still ? nil : pauseBreath(max(0, time.date.timeIntervalSince(pausedAt)))
+                    ring(sweep: sweep(live: live), arc: .of(paused: true, breath: breath), track: true)
+                }
+            } else if live || away {
+                ring(sweep: sweep(live: live), arc: .of(paused: false, breath: nil), track: false)
+            } else {
+                TimelineView(.periodic(from: Self.wholeSeconds, by: RingLook.stepSeconds)) { _ in
+                    ring(sweep: sweep(live: false), arc: .of(paused: false, breath: nil), track: false)
+                }
+            }
+        }
+        .task(id: BreathKey(paused: paused, active: !away)) {
+            // Each pause breathes from its start, for a minute; coming back to the app starts it
+            // over.
+            settled = false
+            guard paused, !away else { return }
+            pausedAt = Date()
+            try? await Task.sleep(for: .seconds(breathSettleSeconds()))
+            if !Task.isCancelled { settled = true }
+        }
+    }
+
+    private func sweep(live: Bool) -> Double {
+        ringSweep(position: player.livePosition, length: max(player.duration, player.livePosition), live: live)
+    }
+
+    @ViewBuilder
+    private func ring(sweep: Double, arc: RingArc, track: Bool) -> some View {
+        let accent = OctoColor.accent
+        let drawn = ZStack {
+            if track {
+                Circle().stroke(accent.opacity(RingLook.pausedTrackAlpha), lineWidth: RingLook.thinWidth)
+            }
             Circle()
-                .trim(from: 0, to: progress)
-                .stroke(OctoColor.accent, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                .trim(from: 0, to: sweep)
+                .stroke(accent.opacity(arc.alpha), style: StrokeStyle(lineWidth: arc.width, lineCap: .round))
                 .rotationEffect(.degrees(-90))
         }
-        .accessibilityHidden(true)
+        if let speaks {
+            drawn
+                .accessibilityElement()
+                .accessibilityLabel(speaks)
+                .accessibilityValue(playedWords(playedSeconds: Int(player.livePosition), lengthSeconds: Int(player.duration),
+                                                live: player.live != nil))
+        } else {
+            drawn.accessibilityHidden(true)
+        }
+    }
+
+    private struct BreathKey: Equatable {
+        let paused: Bool
+        let active: Bool
     }
 }
 

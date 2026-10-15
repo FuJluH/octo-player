@@ -10,9 +10,11 @@ struct AddToLibraryButton: View {
     let song: Song
     var size: CGFloat = 44
     var iconSize: CGFloat = 24
+    /// The color of its plus and heart: white, or the player's dark words over a light background.
+    var ink: Color = .white
 
     var body: some View {
-        AddButton(song: song, size: size, iconSize: iconSize)
+        AddButton(song: song, size: size, iconSize: iconSize, ink: ink)
     }
 }
 
@@ -20,6 +22,8 @@ private struct AddButton: View {
     let song: Song
     let size: CGFloat
     let iconSize: CGFloat
+    let ink: Color
+    @Environment(\.titleIcons) private var titleIcons
     @Environment(Downloads.self) private var downloads
     @Environment(Router.self) private var router
     @Environment(Accounts.self) private var accounts
@@ -34,13 +38,17 @@ private struct AddButton: View {
         }
     }
 
+    /// How strongly the plus and the empty heart show: the player's title row's quiet step, else
+    /// 60%.
+    private var quiet: Double { titleIcons?.alpha ?? 0.6 }
+
     /// For a family member whose songs are saved rather than added: a heart that saves the song or
     /// takes it off Saved.
     private var saveHeart: some View {
         let id = song.id.hasPrefix("find:") ? song.id : findId(song.id)
         let saved = accounts.family.isSaved(id)
         return Button { accounts.family.toggleSaved(id, title: song.title) } label: {
-            IconView(saved ? .liked : .like, size: iconSize, color: saved ? .white : .white.opacity(0.6))
+            IconView(saved ? .liked : .like, size: iconSize, color: saved ? ink : ink.opacity(quiet))
                 .iconGlow(saved)
                 .frame(width: size, height: size)
                 .contentShape(Rectangle())
@@ -69,7 +77,7 @@ private struct AddButton: View {
                 case .none:
                     Image(systemName: "plus")
                         .font(.system(size: iconSize * 0.84, weight: .regular))
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(ink.opacity(quiet))
                 case .failed:
                     DownloadAlert().frame(width: iconSize, height: iconSize)
                 default:

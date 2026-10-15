@@ -15,6 +15,9 @@ struct PlayerColors: Equatable {
     var dominant: UInt32?
     var dark = false
     var show: Float = 1
+    /// How strongly the quieter icons beside the name show: 70%, more over a background close to
+    /// the words' limit, as far as 4.5:1 needs.
+    var quiet: Float = PlayerTitleRow.iconAlpha
 
     /// Before artwork loads, or for music without any: quiet shades of the app's own accent.
     static let quiet = PlayerColors(artwork: .quiet)
@@ -29,12 +32,16 @@ struct PlayerColors: Equatable {
     var content: Color { dark ? Color(argb: DarkInkArgb) : .white }
 
     /// The words' color decided from what is drawn behind them, and the background dimmed as far
-    /// as they need. Until that is known, white words over the background as it is.
+    /// as they need. Until that is known, white words over the background as it is. The quieter
+    /// icons are as strong as reading over the background's hardest part needs: its brightest
+    /// under white words, its darkest under dark ones.
     func over(_ range: WashRange?) -> PlayerColors {
         var colors = self
         let ink = range.map { inkOver($0, base) } ?? WashInk(dark: false, show: 1)
         colors.dark = ink.dark
         colors.show = ink.show
+        let under = quietIconsUnder(range, base: base, dark: ink.dark, show: ink.show)
+        colors.quiet = quietAlpha(under, ink: ink.dark ? DarkInkArgb : 0xFFFF_FFFF, soft: PlayerTitleRow.iconAlpha)
         return colors
     }
 }

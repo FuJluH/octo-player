@@ -45,6 +45,8 @@ final class FlowingModel {
     /// The layers the lines are drawn in, placed again every frame.
     @ObservationIgnored weak var surface: FlowingLayerView?
     @ObservationIgnored private var slow = false
+    /// The loop stopped because nothing can move: paused, every line in place.
+    @ObservationIgnored private var idle = false
     @ObservationIgnored private var measuring: Task<Void, Never>?
     /// The size and text scale last laid out for.
     @ObservationIgnored private var measuredFor: (size: CGSize, textScale: CGFloat)?
@@ -83,22 +85,44 @@ final class FlowingModel {
 
     /// The loop runs while the view shows and the app is in front; coming back starts it fresh.
     func start() {
+        if idle {
+            wake()
+            return
+        }
         guard layout != nil, link == nil else { return }
         engine.restart()
+        runLink()
+    }
+
+    func stop() {
+        idle = false
+        link?.invalidate()
+        link = nil
+    }
+
+    /// The clock takes a fresh anchor: the player played, paused, seeked or changed song.
+    func anchor() {
+        engine.clock.requestAnchor()
+        wake()
+    }
+
+    /// The loop again after it rested, where it left off: a finger on the lines, a seek, play, or
+    /// anything else that can move them.
+    func wake() {
+        guard idle else { return }
+        idle = false
+        guard layout != nil, link == nil else { return }
+        engine.clock.requestAnchor()
+        runLink()
+    }
+
+    private func runLink() {
         let link = CADisplayLink(target: DisplayTarget(self), selector: #selector(DisplayTarget.tick(_:)))
         link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 120, preferred: 120)
         link.add(to: .main, forMode: .common)
         self.link = link
         slow = false
     }
-
-    func stop() {
-        link?.invalidate()
-        link = nil
-    }
-
-    /// The clock takes a fresh anchor: the player played, paused, seeked or changed song.
-    func anchor() { engine.clock.requestAnchor() }
 
     fileprivate func tick(_ link: CADisplayLink) {
         guard let layout else { return }
@@ -125,8 +149,16 @@ final class FlowingModel {
         #if DEBUG
         FrameProbe.shared.trace(engine, time: link.timestamp)
         #endif
-        // Nothing moved, nothing plays and nobody scrolls: look again about every 32 ms.
+        // Paused with every line in place and nobody scrolling: nothing can move until something
+        // wakes the loop, so it stops.
         let rest = engine.settled
+        if rest && !playing {
+            idle = true
+            link.invalidate()
+            self.link = nil
+            return
+        }
+        // Nothing moved, nothing plays and nobody scrolls: look again about every 32 ms.
         if rest != slow {
             slow = rest
             link.preferredFrameRateRange = rest
@@ -180,10 +212,22 @@ struct FlowingLyricsView: View {
             ZStack(alignment: .topLeading) {
                 if model.layout != nil {
                     FlowingLayers(model: model, ink: ink, calm: calm, tap: tap, hold: hold,
-                                  press: { index, down in model.engine.press(index, down: down) },
-                                  dragStart: { model.engine.dragStart() },
-                                  dragBy: { model.engine.dragBy($0) },
-                                  dragEnd: { model.engine.dragEnd() })
+                                  press: { index, down in
+                                      model.wake()
+                                      model.engine.press(index, down: down)
+                                  },
+                                  dragStart: {
+                                      model.wake()
+                                      model.engine.dragStart()
+                                  },
+                                  dragBy: {
+                                      model.wake()
+                                      model.engine.dragBy($0)
+                                  },
+                                  dragEnd: {
+                                      model.wake()
+                                      model.engine.dragEnd()
+                                  })
                     if let stamp, let layout = model.layout, model.engine.states.indices.contains(stamp) {
                         FrameFollower(model: model) {
                             TimeStampPill(engine: model.engine, index: stamp, spec: layout.spec,
@@ -239,6 +283,7 @@ struct FlowingLyricsView: View {
         // Played from where it is heard, with both timings, so the line is just starting when
         // the tap lands.
         let target = heardAt(Int((line.start * 1000).rounded()), totalOffset(songMs: songOffsetMs, outputMs: outputOffsetMs))
+        model.wake()
         model.engine.tapped(index, playerTarget: Double(target) / 1000)
         seek(Double(target) / 1000)
         UIAccessibility.post(notification: .announcement, argument: NSAttributedString(

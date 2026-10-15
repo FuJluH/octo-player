@@ -1,10 +1,12 @@
 import OctoKit
 import SwiftUI
 
-/// While lyrics show, the controls fold into one glass bar: the song (a tap on it leaves the
-/// lyrics), previous, play and next, the lit lyrics switch and the lyrics menu, a system menu
-/// whose timing opens in a popover beside it, with the song's progress along the bottom edge.
-/// A sideways drag starting along that edge scrubs; an upright one is the player's pull.
+/// While lyrics show, the controls fold into one glass bar: the round artwork with the song's
+/// progress as a ring round it (as the bar's round button has it: full for a station, breathing
+/// while paused), the song (a tap on it leaves the lyrics), previous, play and next, the lit
+/// lyrics switch and the lyrics menu, a system menu whose timing opens in a popover beside it. A
+/// sideways drag starting along the bottom edge scrubs, the ring following the finger; an upright
+/// one is the player's pull.
 struct LyricsBar: View {
     let ink: Color
     let close: () -> Void
@@ -20,14 +22,24 @@ struct LyricsBar: View {
     @State private var width: CGFloat = 0
 
     private static let height: CGFloat = 64
-    /// The progress line keeps to the capsule's straight part.
+    /// A scrub keeps to the capsule's straight part.
     private static let inset: CGFloat = 32
+    /// The room between the artwork and its ring.
+    private static let ringRoom: CGFloat = 3
     private static let scrubZone: CGFloat = 22
 
     var body: some View {
         HStack(spacing: 0) {
-            BadgedCover(id: player.current?.coverArt, size: 40, radius: 10,
-                        external: isOutsideLibrary(player.current, adopted: downloads.adopted))
+            // The artwork sits 12 points in; its ring takes the room around it.
+            ZStack {
+                BadgedCover(id: player.current?.coverArt, size: 40, radius: 20,
+                            external: isOutsideLibrary(player.current, adopted: downloads.adopted))
+                if player.current != nil {
+                    ProgressRing(scrub: scrub, speaks: songWords)
+                }
+            }
+            .frame(width: 40 + Self.ringRoom * 2, height: 40 + Self.ringRoom * 2)
+            .padding(.trailing, -Self.ringRoom)
             Button(action: close) {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(player.current?.title ?? "")
@@ -72,11 +84,10 @@ struct LyricsBar: View {
                 if let trackId = player.current?.id { TimingCard(trackId: trackId) }
             }
         }
-        .padding(.leading, 12)
+        .padding(.leading, 12 - Self.ringRoom)
         .padding(.trailing, 6)
         .frame(height: Self.height)
         .frame(maxWidth: .infinity)
-        .overlay(alignment: .bottom) { progress }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .floatingGlass(Capsule())
         .simultaneousGesture(scrubbing)
@@ -91,29 +102,9 @@ struct LyricsBar: View {
         }
     }
 
-    private var progress: some View {
-        TimelineView(.animation(paused: !player.isPlaying || scrub != nil)) { _ in
-            let length = max(player.duration, player.livePosition)
-            let fraction = scrub ?? (length > 0 ? min(max(player.livePosition / length, 0), 1) : 0)
-            Canvas { context, size in
-                let stroke: CGFloat = scrub == nil ? 2 : 3
-                let y = size.height - stroke / 2
-                var track = Path()
-                track.move(to: CGPoint(x: 0, y: y))
-                track.addLine(to: CGPoint(x: size.width, y: y))
-                context.stroke(track, with: .color(ink.opacity(0.18)), style: StrokeStyle(lineWidth: stroke, lineCap: .round))
-                guard fraction > 0 else { return }
-                var played = Path()
-                played.move(to: CGPoint(x: 0, y: y))
-                played.addLine(to: CGPoint(x: size.width * fraction, y: y))
-                context.stroke(played, with: .color(ink.opacity(scrub == nil ? 0.7 : 0.95)),
-                               style: StrokeStyle(lineWidth: stroke, lineCap: .round))
-            }
-        }
-        .frame(height: 3)
-        .padding(.horizontal, Self.inset)
-        .padding(.bottom, 4)
-        .allowsHitTesting(false)
+    /// The song and its artist, as a screen reader hears the artwork.
+    private var songWords: String {
+        [player.current?.title, player.current?.byline].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
     }
 
     /// A sideways drag that starts in the bottom 22 points scrubs, once the song's length is known;

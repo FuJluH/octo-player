@@ -319,7 +319,9 @@ struct NowPlayingView: View {
             if let song = player.current, let live = player.live, let lineup = player.lineup {
                 liveControls(song, live, lineup, roomy: roomy, gap: gap)
             } else if let song = player.current {
-                HStack(spacing: 0) {
+                // The heart and More sit on the middle of the name's capitals, the same for a
+                // song and a station.
+                HStack(alignment: .playerTitleLine, spacing: 0) {
                     ZStack(alignment: .leading) {
                         PlayerTitleBlock(song: song, ink: ink, accent: accent, openArtist: artistOpener(song))
                             .id(song.id)
@@ -327,9 +329,12 @@ struct NowPlayingView: View {
                                                     removal: .opacity.animation(.octoTween(fixed: 150, OctoEasing.standard))))
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    keeper(song)
-                    moreButton
+                    titleButtons {
+                        keeper(song)
+                        moreButton
+                    }
                 }
+                .environment(\.titleIcons, titleIcons)
                 if facts.rating > 0 {
                     RatingStars(rating: facts.rating)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -363,9 +368,12 @@ struct NowPlayingView: View {
                                             removal: .opacity.animation(.octoTween(fixed: 150, OctoEasing.standard))))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            LiveSongButtonView(onAir: live.onAir, ink: ink, control: liveSong, openSearch: openSearch)
-            liveMoreButton(live)
+            titleButtons {
+                LiveSongButtonView(onAir: live.onAir, ink: ink, control: liveSong, openSearch: openSearch)
+                liveMoreButton(live)
+            }
         }
+        .environment(\.titleIcons, titleIcons)
         LiveBar(ink: ink, muted: muted)
             .padding(.top, 12)
         LiveTransport(ink: ink, lineup: lineup)
@@ -389,13 +397,30 @@ struct NowPlayingView: View {
                 PlayerMenuExtras(airPlay: airPlay) { route in close { router.go(route) } }
             }
         } label: {
-            IconView(.more, size: 24, color: ink.opacity(0.6))
-                .frame(width: 44, height: 44)
+            TitleGlyph(icon: .more, color: ink.opacity(titleIcons.alpha))
                 .contentShape(Rectangle())
         }
         .menuOrder(.fixed)
         .accessibilityLabel("More")
     }
+
+    /// The name's buttons side by side, reaching into the side margin so the gap between the
+    /// heart and the dots is also the gap from the dots to the screen's edge.
+    private func titleButtons<Buttons: View>(@ViewBuilder _ buttons: () -> Buttons) -> some View {
+        HStack(spacing: 0) { buttons() }
+            .padding(.trailing, -titleIcons.reach(sideMargin: Self.sideMargin))
+    }
+
+    /// The title row's icon measures for the phone's text size, as quiet as the background
+    /// allows.
+    private var titleIcons: TitleIcons {
+        var icons = TitleIcons.current()
+        icons.alpha = Double(colors.quiet)
+        return icons
+    }
+
+    /// The room between the player's content and the screen's sides.
+    private static let sideMargin: CGFloat = 24
 
     /// While a live station plays: the stations it was started from (when there is more than
     /// one), and the sleep timer.
@@ -423,11 +448,11 @@ struct NowPlayingView: View {
     @ViewBuilder
     private func keeper(_ song: Song) -> some View {
         if song.isExternal || isFind(song.id) {
-            AddToLibraryButton(song: song).id(song.id)
+            AddToLibraryButton(song: song, size: PlayerTitleRow.buttonSize, iconSize: titleIcons.pointSize / 0.84, ink: ink).id(song.id)
         } else if let trackId = facts.trackId {
             PlayerHeart(liked: likes.isLiked(trackId), ink: ink) { likes.toggle(trackId) }
         } else {
-            Color.clear.frame(width: 44, height: 44)
+            Color.clear.frame(width: PlayerTitleRow.buttonSize, height: PlayerTitleRow.buttonSize)
         }
     }
 
@@ -445,8 +470,7 @@ struct NowPlayingView: View {
                 }
             }
         } label: {
-            IconView(.more, size: 24, color: ink.opacity(0.6))
-                .frame(width: 44, height: 44)
+            TitleGlyph(icon: .more, color: ink.opacity(titleIcons.alpha))
                 .contentShape(Rectangle())
         }
         .menuOrder(.fixed)

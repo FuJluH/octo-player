@@ -50,7 +50,8 @@ struct LivePill: View {
     var body: some View {
         HStack(spacing: 6) {
             let moving = beating && !calm
-            TimelineView(.animation(paused: !moving)) { context in
+            // A slow fade needs no more than 30 steps a second.
+            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !moving)) { context in
                 // Fades to a third and back every 1.8 s.
                 let phase = context.date.timeIntervalSinceReferenceDate * .pi / 0.9
                 Circle()
@@ -258,6 +259,7 @@ struct LiveSongButtonView: View {
     @Environment(Accounts.self) private var accounts
     @Environment(Router.self) private var router
     @Environment(\.octoReduceMotion) private var calm
+    @Environment(\.titleIcons) private var titleIcons
     @State private var beats = 0
     @State private var release: (@Sendable () -> Void)?
 
@@ -311,7 +313,7 @@ struct LiveSongButtonView: View {
     private func face(_ button: LiveSongButton, _ found: LiveLookup.Found?) -> some View {
         switch button {
         case .heart(let starred):
-            IconView(starred ? .liked : .like, size: 24, color: starred ? ink : ink.opacity(0.6))
+            TitleGlyph(icon: starred ? .liked : .like, color: starred ? ink : ink.opacity(quiet))
                 .iconGlow(starred, color: ink)
                 .iconAccent(.pulse, trigger: beats)
         case .add(let adding):
@@ -331,10 +333,11 @@ struct LiveSongButtonView: View {
     }
 
     private var plus: some View {
-        Image(systemName: OctoIcon.addToLibrary.symbol)
-            .font(.system(size: 24 * 0.84, weight: .regular))
-            .foregroundStyle(ink.opacity(0.6))
+        TitleGlyph(icon: .addToLibrary, color: ink.opacity(quiet))
     }
+
+    /// How strongly the plus and the empty heart show: a step quieter than the name.
+    private var quiet: Double { titleIcons?.alpha ?? Double(PlayerTitleRow.iconAlpha) }
 }
 
 // MARK: The menu

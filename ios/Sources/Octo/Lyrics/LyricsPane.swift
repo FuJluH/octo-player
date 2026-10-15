@@ -279,8 +279,10 @@ private struct ClassicLyrics: View {
 
     var body: some View {
         let lines = lyrics.shownLines()
+        // Paused, nothing moves until a seek, which redraws the lines at once.
+        let _ = player.timeEvents
         GeometryReader { box in
-            TimelineView(.animation(minimumInterval: player.isPlaying ? nil : 0.3, paused: false)) { time in
+            TimelineView(.animation(paused: !player.isPlaying && heldAt == nil)) { time in
                 let position = heldAt ?? lyricsClock(Int((player.livePosition * 1000).rounded()), offsetMs)
                 let current = lines.lineAt(position)
                 ScrollViewReader { reader in
