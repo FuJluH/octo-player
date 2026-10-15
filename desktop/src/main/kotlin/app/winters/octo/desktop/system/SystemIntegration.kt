@@ -9,9 +9,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
-import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.painter.Painter
-import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.window.ApplicationScope
 import androidx.compose.ui.window.TrayState
 import androidx.compose.ui.window.isTraySupported
@@ -103,7 +101,8 @@ class SystemIntegration(
 
     val trayAvailable: Boolean = runCatching { isTraySupported }.getOrDefault(false)
     val trayState = TrayState()
-    val trayIcon: Painter? = picture("/octo-tray.png")
+    // The tray's icon, drawn from the vector at the size the tray asks for.
+    val trayIcon: Painter? = OctoIconPainter(FlatShape)
 
     private val notifier: Notifier? = when {
         os == DesktopOs.Linux -> LinuxNotifier(null)
@@ -438,9 +437,3 @@ private const val DISCORD_CHECK_MS = 3_000L
 
 // How long a new song's Discord status waits for its pictures at most.
 private const val PICTURE_HOLD_MS = 1_500L
-
-// A picture from the app's resources.
-fun picture(resource: String): Painter? = runCatching {
-    val bytes = SystemIntegration::class.java.getResourceAsStream(resource)!!.use { it.readBytes() }
-    BitmapPainter(org.jetbrains.skia.Image.makeFromEncoded(bytes).toComposeImageBitmap())
-}.getOrNull()

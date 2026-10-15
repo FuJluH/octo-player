@@ -27,7 +27,7 @@ class WashDriftTest {
 
     @Test
     fun aTenthOfASecondChangesThePictureOnlyALittle() {
-        val icon = javaClass.getResourceAsStream("/octo-icon.png")!!.use { Image.makeFromEncoded(it.readBytes()) }
+        val icon = app.winters.octo.desktop.system.OctopusArt.icon(512, shape = null)
         val cover = WashCovers.prepared("drift-test", icon, WashTuning())
         // The full player's own pace, faster than the sign-in's.
         val scene = ImageComposeScene(320, 200, Density(1f)) {

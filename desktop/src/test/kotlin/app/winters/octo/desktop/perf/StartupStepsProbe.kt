@@ -71,8 +71,7 @@ fun main() {
         systemReducesMotion(DesktopOs.Windows)
         systemTextScale(DesktopOs.Windows)
         step("system motion and text")
-        val bytes = AppState::class.java.getResourceAsStream("/octo-icon.png")!!.use { it.readBytes() }
-        org.jetbrains.skia.Image.makeFromEncoded(bytes)
+        app.winters.octo.desktop.system.OctopusArt.icon(32)
         step("icon (loads skia)")
         DesktopUpdates.forThisApp(settings, places.cache, DesktopOs.Windows)
         step("updates")

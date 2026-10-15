@@ -37,11 +37,10 @@ val desktopVersion = releaseVersion ?: "1.0.${octoBuild ?: 0}"
 val packageNumbers = releaseParts?.let { (major, minor, patch) -> "$major.$minor.$patch" } ?: desktopVersion
 val msiNumbers = releaseParts?.let { (major, minor, _) -> "$major.$minor.$octoBuild" } ?: desktopVersion
 
-// The phone app's icon, for the window and the taskbar, and the rounded one
-// made from it for the tray.
+// The one vector every icon and the logo are drawn from, for the app to
+// draw its octopus and its icons (window, tray, opening, About) at any size.
 val shareIcon by tasks.registering(Sync::class) {
-    from(rootProject.file("app/src/main/ic_launcher-playstore.png")) { rename { "octo-icon.png" } }
-    from(file("icons/octo.png")) { rename { "octo-tray.png" } }
+    from(rootProject.file("tools/appicon/octopus.svg")) { rename { "octo-octopus.svg" } }
     into(layout.buildDirectory.dir("generated/appIcon"))
 }
 
@@ -171,13 +170,13 @@ sourceSets.main {
     kotlin.srcDir(shareLyricsText)
 }
 
-// Writes the icon files for the window, tray and installers (icons/) from
-// the square tools/appicon/make_app_icon.py draws (icons/octo-square.png).
-// Run by hand when the icon changes; the files are kept in the repository.
+// Writes the installers' and the systems' icon files (icons/), each size
+// drawn from the vector (tools/appicon/octopus.svg). Run by hand when the
+// icon changes; the files are kept in the repository.
 val makeIcons by tasks.registering(JavaExec::class) {
     classpath = sourceSets.main.get().runtimeClasspath
     mainClass = "app.winters.octo.desktop.system.IconFilesKt"
-    args(file("icons/octo-square.png").absolutePath, file("icons").absolutePath)
+    args(file("icons").absolutePath)
 }
 
 dependencies {

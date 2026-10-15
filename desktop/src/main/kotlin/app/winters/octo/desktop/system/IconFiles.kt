@@ -12,7 +12,7 @@ import javax.imageio.ImageIO
 import kotlin.math.ceil
 import kotlin.math.floor
 
-// Makes the app's icon files from the square icon in icons/octo-square.png:
+// The app's icon files, each size drawn from the vector (OctopusArt):
 // a PNG for Linux and the window, an ICO for Windows and an ICNS for macOS.
 // Each is the art in a rounded square, the way each system draws app icons.
 //
@@ -73,7 +73,7 @@ private fun resize(image: BufferedImage, size: Int): BufferedImage {
 
 fun pngBytes(image: BufferedImage): ByteArray = ByteArrayOutputStream().also { ImageIO.write(image, "png", it) }.toByteArray()
 
-// A Windows icon file holding PNG pictures, one per size (Windows Vista and
+// A Windows icon file holding pictures (PNG, or its own bitmaps), one per size (Windows Vista and
 // later read PNG inside ICO). Sizes up to 256.
 fun icoBytes(pictures: List<Pair<Int, ByteArray>>): ByteArray {
     val header = 6 + 16 * pictures.size
@@ -113,20 +113,43 @@ val IcnsTypes = listOf(
     "ic11" to 32, "ic12" to 64, "ic13" to 256, "ic14" to 512,
 )
 
-val IcoSizes = listOf(16, 20, 24, 32, 40, 48, 64, 128, 256)
+// Every size the ICO holds: each size Windows draws an app's icon at, from
+// 100% to 400% scaling (the window's own list, WindowIconSizes).
+val IcoSizes = WindowIconSizes
 
-// Writes octo.png, octo.ico and octo.icns into `folder`.
-fun writeIconFiles(art: BufferedImage, folder: File) {
+// A picture as a Windows icon's own bitmap entry: 32-bit colour with alpha,
+// bottom row first, the height doubled for the (empty) mask that follows,
+// which Windows reads for every picture under 256.
+fun icoBitmap(image: BufferedImage): ByteArray {
+    val w = image.width
+    val h = image.height
+    val maskRow = ((w + 31) / 32) * 4
+    val out = ByteBuffer.allocate(40 + w * h * 4 + maskRow * h).order(ByteOrder.LITTLE_ENDIAN)
+    out.putInt(40).putInt(w).putInt(h * 2).putShort(1).putShort(32).putInt(0).putInt(w * h * 4 + maskRow * h).putInt(0).putInt(0).putInt(0).putInt(0)
+    for (y in h - 1 downTo 0) for (x in 0 until w) {
+        val argb = image.getRGB(x, y)
+        out.put((argb and 0xFF).toByte()).put((argb shr 8 and 0xFF).toByte()).put((argb shr 16 and 0xFF).toByte()).put((argb ushr 24).toByte())
+    }
+    repeat(maskRow * h) { out.put(0) }
+    return out.array()
+}
+
+// Writes octo.png (Linux and the installers' file types), octo.ico (Windows:
+// the installer, shortcuts, the taskbar and Start) and octo.icns (macOS)
+// into `folder`, each size drawn on its own from the vector: the 256 in the
+// ICO as PNG, the smaller ones as its own bitmaps.
+fun writeIconFiles(folder: File) {
     folder.mkdirs()
-    File(folder, "octo.png").writeBytes(pngBytes(roundedIcon(art, 512, FlatShape)))
-    File(folder, "octo.ico").writeBytes(icoBytes(IcoSizes.map { it to pngBytes(roundedIcon(art, it, FlatShape)) }))
-    val mac = IcnsTypes.map { it.second }.distinct().associateWith { pngBytes(roundedIcon(art, it, MacShape)) }
+    File(folder, "octo.png").writeBytes(OctopusArt.iconPng(512, FlatShape))
+    File(folder, "octo.ico").writeBytes(
+        icoBytes(IcoSizes.map { size -> size to if (size >= 256) OctopusArt.iconPng(size, FlatShape) else icoBitmap(OctopusArt.iconImage(size, FlatShape)) }),
+    )
+    val mac = IcnsTypes.map { it.second }.distinct().associateWith { OctopusArt.iconPng(it, MacShape) }
     File(folder, "octo.icns").writeBytes(icnsBytes(IcnsTypes.map { (type, size) -> type to mac.getValue(size) }))
 }
 
-// ./gradlew :desktop:makeIcons runs this with the store icon and the folder.
+// ./gradlew :desktop:makeIcons runs this with the folder to write.
 fun main(args: Array<String>) {
-    val art = ImageIO.read(File(args[0])) ?: error("not a picture: ${args[0]}")
-    writeIconFiles(art, File(args[1]))
-    println("Icons written to ${File(args[1]).absolutePath}")
+    writeIconFiles(File(args[0]))
+    println("Icons written to ${File(args[0]).absolutePath}")
 }
