@@ -10,6 +10,7 @@ import app.winters.octo.offline.OfflinePrefs
 import app.winters.octo.playback.CopyPreference
 import app.winters.octo.playback.FadeCurve
 import app.winters.octo.playback.StreamQuality
+import app.winters.octo.animated.AnimatedArtSetting
 import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.StreamPrefs
 import app.winters.octo.playlists.BYTE_ORDER_MARK
@@ -62,6 +63,7 @@ class BackupTest {
         listOf(
             "liveBackground", "crossfade", "crossfadeSeconds", "lyricsOnline", "speed", "keepPitch", "pitchSemitones",
             "skipSilence", "resumeWired", "resumeBluetooth", "resumeAlways", "smartTransitions", "filterSweeps", "matchTempo", "crossfadeCurve",
+            "animatedArt",
         ).forEach { assertTrue("$it is missing", text.contains("\"$it\"")) }
     }
 
@@ -83,6 +85,17 @@ class BackupTest {
         val text = encodeBackup(Backup(player = PlayerPrefs(crossfadeCurve = FadeCurve.Linear))).replace("\"Linear\"", "\"Bungee\"")
         val read = decodeBackup(text) as BackupRead.Read
         assertEquals(FadeCurve.EqualPower, read.backup.player?.crossfadeCurve)
+    }
+
+    @Test
+    fun theAnimatedArtChoiceIsKept() {
+        val text = encodeBackup(Backup(player = PlayerPrefs(animatedArt = AnimatedArtSetting.FullScreen)))
+        assertEquals(AnimatedArtSetting.FullScreen, (decodeBackup(text) as BackupRead.Read).backup.player?.animatedArt)
+        // One this app does not know reads as the default, Square.
+        val unknown = decodeBackup(text.replace("\"FullScreen\"", "\"Hologram\"")) as BackupRead.Read
+        assertEquals(AnimatedArtSetting.Square, unknown.backup.player?.animatedArt)
+        // A backup from before the setting has it at Square.
+        assertEquals(AnimatedArtSetting.Square, PlayerPrefs().animatedArt)
     }
 
     @Test

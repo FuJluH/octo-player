@@ -7,6 +7,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import app.winters.octo.animated.AnimatedArtSetting
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.player.LiveBackgroundSupported
 import app.winters.octo.player.PlayerPrefs
@@ -46,6 +47,10 @@ class PlayerBackgroundViewModel @Inject constructor(private val settings: Player
 
     fun setLiveBackground(on: Boolean) {
         viewModelScope.launch { settings.setLiveBackground(on) }
+    }
+
+    fun setAnimatedArt(setting: AnimatedArtSetting) {
+        viewModelScope.launch { settings.setAnimatedArt(setting) }
     }
 
     fun update(change: (BackgroundPrefs) -> BackgroundPrefs) {
@@ -88,6 +93,7 @@ fun PlayerBackgroundSection(vm: PlayerBackgroundViewModel = hiltViewModel()) {
                 else -> null
             },
         )
+        AnimatedArtRow(player.animatedArt, vm::setAnimatedArt)
         if (background.prepared) {
             PercentSlider(SettingsIndex.BackgroundBrightnessCap, background.brightnessCap, BrightnessCapRange, step = 5) { value ->
                 vm.update { it.copy(brightnessCap = value) }
@@ -118,6 +124,20 @@ fun PlayerBackgroundSection(vm: PlayerBackgroundViewModel = hiltViewModel()) {
             })
         }
     }
+}
+
+// Where an album's animated art plays, from Octo servers that offer it.
+@Composable
+private fun AnimatedArtRow(setting: AnimatedArtSetting, onChange: (AnimatedArtSetting) -> Unit) {
+    val sheet = LocalChoiceSheet.current
+    val options = AnimatedArtSetting.entries
+    ChoiceRow(SettingsIndex.AnimatedArt, value = setting.label, helper = AnimatedArtSetting.ABOUT, onClick = {
+        sheet.show(
+            ChoiceRequest(SettingsIndex.AnimatedArt.title, options.map { Choice(it.label, it.about) }, options.indexOf(setting)) {
+                onChange(options[it])
+            },
+        )
+    })
 }
 
 // A percentage along a range, in steps, saved only when it changes.

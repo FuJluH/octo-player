@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import app.winters.octo.ambient.AmbientArea
+import app.winters.octo.animated.AnimatedArtSetting
 import app.winters.octo.ambient.AmbientPrefs
 import app.winters.octo.ambient.AmbientStrength
 import app.winters.octo.playback.AutomixSettings
@@ -90,6 +91,9 @@ data class PlayerPrefs(
     // Only songs in the library: albums, search, artists and radio leave
     // out songs found online.
     val libraryOnly: Boolean = false,
+    // Where an album's animated art plays: in place of the cover, filling
+    // the player, or nowhere.
+    val animatedArt: AnimatedArtSetting = AnimatedArtSetting.Default,
 ) {
     // What the player uses: the longest blend, or 0 for none.
     val crossfadeMs: Long get() = if (crossfade) crossfadeSeconds * 1_000L else 0
@@ -172,10 +176,15 @@ private val REDUCE_MOTION = booleanPreferencesKey("reduce_motion")
 private val CAST_RENDERERS = booleanPreferencesKey("cast_renderers")
 private val CAST_KEEP_PLAYING = booleanPreferencesKey("cast_keep_playing")
 private val LIBRARY_ONLY = booleanPreferencesKey("library_only")
+internal val ANIMATED_ART = stringPreferencesKey(AnimatedArtSetting.PREF_KEY)
 
 // A saved choice, or the default when nothing (or something unknown) is saved.
 private inline fun <reified T : Enum<T>> choice(name: String?, default: T): T =
     enumValues<T>().firstOrNull { it.name == name } ?: default
+
+// The Animated art choice as stored, by its key; Square when nothing (or
+// something unknown) is stored.
+internal fun animatedArtOf(stored: Preferences): AnimatedArtSetting = AnimatedArtSetting.fromKey(stored[ANIMATED_ART])
 
 // The streaming choices as stored, each one not stored yet at its default.
 internal fun streamPrefsOf(stored: Preferences): StreamPrefs {
@@ -236,6 +245,7 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
             castRenderers = stored[CAST_RENDERERS] ?: defaults.castRenderers,
             castKeepPlaying = stored[CAST_KEEP_PLAYING] ?: defaults.castKeepPlaying,
             libraryOnly = stored[LIBRARY_ONLY] ?: defaults.libraryOnly,
+            animatedArt = animatedArtOf(stored),
         )
     }
 
@@ -373,6 +383,10 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
         context.playerPrefs.edit { it[LIBRARY_ONLY] = on }
     }
 
+    suspend fun setAnimatedArt(setting: AnimatedArtSetting) {
+        context.playerPrefs.edit { it[ANIMATED_ART] = setting.key }
+    }
+
     // Everything at once, for a backup.
     suspend fun snapshot(): Pair<PlayerPrefs, StreamPrefs> = prefs.first() to streamPrefs.first()
 
@@ -411,6 +425,7 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
             it[CAST_RENDERERS] = player.castRenderers
             it[CAST_KEEP_PLAYING] = player.castKeepPlaying
             it[LIBRARY_ONLY] = player.libraryOnly
+            it[ANIMATED_ART] = player.animatedArt.key
             it[COPIES] = stream.copies.name
             it[STREAM_WIFI] = stream.wifi.name
             it[STREAM_MOBILE] = stream.mobile.name

@@ -51,6 +51,16 @@ class SettingsIndexTest {
     }
 
     @Test
+    fun animatedArtIsFoundUnderItsOwnWords() {
+        assertEquals("Animated art", titles("animated art").first())
+        assertTrue("Animated art" in titles("video cover"))
+        assertEquals(SettingsPage.Appearance, SettingsIndex.AnimatedArt.page)
+        // Its words never call it moving.
+        val words = listOf(SettingsIndex.AnimatedArt.title, SettingsIndex.AnimatedArt.summary) + SettingsIndex.AnimatedArt.keywords
+        assertTrue(words.none { it.contains("moving", ignoreCase = true) || it.contains("motion", ignoreCase = true) })
+    }
+
+    @Test
     fun punctuationAndAccentsDoNotMatter() {
         assertTrue("Streaming on Wi-Fi" in titles("wifi"))
         assertTrue("What's new" in titles("whats new"))
