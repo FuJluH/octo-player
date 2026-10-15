@@ -19,7 +19,7 @@ import androidx.lifecycle.viewModelScope
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.playback.FadeCurve
-import app.winters.octo.playback.SMART_PICKS_THE_CURVE
+import app.winters.octo.playback.curveRowLook
 import app.winters.octo.playback.detail
 import app.winters.octo.playback.fadeInGain
 import app.winters.octo.playback.fadeOutGain
@@ -233,16 +233,18 @@ private fun CrossfadeLength(seconds: Int, onChange: (Int) -> Unit) {
 }
 
 // The shape of the crossfade, picked from a list that draws each one. With
-// smart transitions on, Automix picks the curve and the row only says so.
+// smart transitions on they pick the curve, and the row says so and names
+// the switch under it that frees the choice.
 @Composable
 private fun CurveRow(curve: FadeCurve, smart: Boolean, onPick: (FadeCurve) -> Unit) {
     val sheet = LocalChoiceSheet.current
     val curves = FadeCurve.entries
+    val look = curveRowLook(curve, smart)
     ChoiceRow(
         SettingsIndex.CrossfadeCurve,
-        value = if (smart) "Automix" else curve.label,
-        enabled = !smart,
-        helper = if (smart) SMART_PICKS_THE_CURVE else curve.detail,
+        value = look.value,
+        enabled = look.choosable,
+        helper = look.helper,
         onClick = {
             sheet.show(
                 ChoiceRequest(

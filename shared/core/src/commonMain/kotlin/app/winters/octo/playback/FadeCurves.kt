@@ -117,5 +117,22 @@ val FadeCurve.detail: String
         FadeCurve.MixOnly -> "Both songs play full over each other, like a DJ, a little quieter so they don't distort."
     }
 
-// What the crossfade curve row says while smart transitions pick the curves.
-const val SMART_PICKS_THE_CURVE = "Automix picks the curve for each transition."
+// What the crossfade curve row says while smart transitions pick the
+// curves: why it cannot be chosen, and the switch, just below it, that
+// makes it choosable.
+const val SMART_PICKS_THE_CURVE = "Smart transitions picks the curve for each blend. Turn off Smart transitions, just below, to choose one."
+
+// The crossfade curve row's reading while smart transitions pick the curves.
+const val SMART_CURVE_VALUE = "Picked for each blend"
+
+// How the crossfade curve row shows: whether it can be chosen, the reading
+// on its right, and the line under its title. Smart transitions shape each
+// blend themselves, so the curve is only chosen with them off.
+data class CurveRowLook(val choosable: Boolean, val value: String, val helper: String)
+
+fun curveRowLook(curve: FadeCurve, smartTransitions: Boolean): CurveRowLook =
+    if (smartTransitions) {
+        CurveRowLook(choosable = false, value = SMART_CURVE_VALUE, helper = SMART_PICKS_THE_CURVE)
+    } else {
+        CurveRowLook(choosable = true, value = curve.label, helper = curve.detail)
+    }

@@ -48,7 +48,7 @@ import app.winters.octo.desktop.sound.SHORTEST_BLEND_SECONDS
 import app.winters.octo.desktop.sound.SoundController
 import app.winters.octo.desktop.ui.windowRect
 import app.winters.octo.playback.FadeCurve
-import app.winters.octo.playback.SMART_PICKS_THE_CURVE
+import app.winters.octo.playback.curveRowLook
 import app.winters.octo.playback.detail
 import app.winters.octo.playback.fadeInGain
 import app.winters.octo.playback.fadeOutGain
@@ -532,11 +532,15 @@ private fun chooseFile(title: String, save: Boolean, suggested: String? = null):
 }
 
 // The shape of the crossfade, picked from a menu that draws each one. With
-// smart transitions on, Automix picks the curve and the row only says so.
+// smart transitions on they pick the curve, and the row says so and names
+// the switch under it that frees the choice.
 @Composable
 private fun CurveRow(app: AppState, curve: FadeCurve, smart: Boolean, onPick: (FadeCurve) -> Unit) {
-    if (smart) {
-        SettingRow("Crossfade curve", SMART_PICKS_THE_CURVE, dim = true)
+    val look = curveRowLook(curve, smart)
+    if (!look.choosable) {
+        SettingRow("Crossfade curve", look.helper, dim = true) {
+            Txt(look.value, DesktopType.meta, OctoColors.TextMuted)
+        }
         return
     }
     var anchor by remember { mutableStateOf(IntRect.Zero) }

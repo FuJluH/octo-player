@@ -119,6 +119,18 @@ class FadeCurvesTest {
     }
 
     @Test
+    fun theCurveRowSaysWhyItCannotBeChosenAndWhichSwitchFreesIt() {
+        val smart = curveRowLook(FadeCurve.Linear, smartTransitions = true)
+        assertEquals(false, smart.choosable)
+        assertEquals(SMART_CURVE_VALUE, smart.value)
+        // The reason names the switch by the title it has on the page.
+        assertTrue(smart.helper.contains("Turn off Smart transitions"))
+        assertTrue(!smart.helper.contains("Automix"))
+        val chosen = curveRowLook(FadeCurve.Linear, smartTransitions = false)
+        assertEquals(CurveRowLook(choosable = true, value = "Linear", helper = FadeCurve.Linear.detail), chosen)
+    }
+
+    @Test
     fun everyVectorMatches() {
         val target = System.getenv("OCTO_WRITE_FADE_VECTORS")
         if (!target.isNullOrBlank()) {
