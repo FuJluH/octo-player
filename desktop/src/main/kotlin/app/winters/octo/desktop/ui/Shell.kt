@@ -155,6 +155,7 @@ fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
     val focus = LocalFocusManager.current
     val connection = app.connection
     val key = rememberKeyColour(app)
+    KeepAccent(app)
     val keyboard = LocalFocusVisibility.current
     val parts = remember { FrameFocus() }
     // What had the keyboard before a pop-up opened gets it back after: the

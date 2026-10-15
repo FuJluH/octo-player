@@ -58,7 +58,7 @@ import kotlinx.coroutines.launch
 // The ring's colour: Octo's accent, whole, which reads on the glass, the
 // page and the ambience. The hairline inside it keeps it apart from a
 // light cover or a white glyph.
-val FocusRingColor = OctoColors.Accent
+val FocusRingColor: Color get() = OctoColors.Accent
 val FocusEdgeColor = Color.Black.copy(alpha = 0.55f)
 
 // Whether the keyboard is what the listener is using: set by a key, cleared

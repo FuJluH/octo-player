@@ -61,6 +61,11 @@ fun commandsFor(app: AppState): List<Command> = buildList {
     })
     radio("Song radio settings", "start radio autoplay discovery adventure artist variety favorites more often tuning similar songs")
     radio(STATIONS_ON_SERVER, "live radio internet radio stations streams add a station edit fm")
+    add(Command("Accent color", "Settings", "theme colour tint highlight palette appearance album art cover") {
+        app.fullPlayer = false
+        showSection("Settings", "look")
+        app.navigator.go(Page.Settings)
+    })
     app.liveLists.lists.value.forEach { list -> page(list.name, Page.LiveList(list.id), "live list smart playlist") }
 
     val state = app.player.state.value

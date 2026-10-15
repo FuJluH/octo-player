@@ -17,6 +17,7 @@ import app.winters.octo.server.serverName
 import app.winters.octo.server.settleServers
 import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.update.UpdatePrefs
+import app.winters.octo.theme.AccentChoice
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.SerialName
@@ -301,6 +302,8 @@ data class Appearance(
     // Home's shelves in order, a hidden one led by "-", as the phone keeps
     // them; null for the usual order, all shown.
     @SerialName(HOME_SECTIONS_KEY) val homeSections: String? = null,
+    // The accent the app is drawn in, or the playing cover's.
+    val accent: AccentChoice = AccentChoice.Octo,
 )
 
 // The window's colours: the playing cover blurred into a glow across the

@@ -241,6 +241,10 @@ object SettingsIndex {
         "playlist_covers", SettingsPage.Appearance, PLAYLIST_COVERS_SETTING, "Designed covers, or the covers of their albums",
         listOf("playlist", "cover", "artwork", "mosaic", "picture", "designed"), section = "Playlists",
     )
+    val AccentColor = add(
+        "accent_color", SettingsPage.Appearance, "Accent color", "The color of selections, sliders, switches and buttons",
+        listOf("accent", "color", "colour", "theme", "tint", "highlight", "palette", "album art", "cover", "personalize"), section = "Accent color",
+    )
     val ReduceMotion = add(
         "reduce_motion", SettingsPage.Appearance, "Reduce motion", "What moves only for show holds still",
         listOf("animation", "animations", "accessibility", "still", "calm", "motion sickness"), section = "Motion",

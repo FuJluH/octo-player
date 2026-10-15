@@ -1,5 +1,6 @@
 package app.winters.octo.player
 
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -71,10 +72,10 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
 private val RowShape = RoundedCornerShape(12.dp)
 
 // The sheet's own colour, so a row hides what is under it while it moves.
-private val RowFill = mix(OctoColors.Background, OctoColors.Accent, 0.05f)
+private val RowFill: Color get() = mix(OctoColors.Background, OctoColors.Accent, 0.05f)
 
 // The song that is on, lit a little brighter than the sheet.
-private val CurrentFill = mix(OctoColors.BackgroundTertiary, OctoColors.Accent, 0.12f)
+private val CurrentFill: Color get() = mix(OctoColors.BackgroundTertiary, OctoColors.Accent, 0.12f)
 
 // Songs already played sit above the current one, dimmed.
 private const val PLAYED_ALPHA = 0.5f
