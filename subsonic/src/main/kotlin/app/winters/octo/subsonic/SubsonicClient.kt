@@ -269,7 +269,25 @@ class SubsonicClient(
         ).album
 
     suspend fun album(id: String): AlbumWithSongs =
-        get("getAlbum", mapOf("id" to id), "album", AlbumWithSongs.serializer())
+        get("getAlbum", mapOf("id" to id), "album", AlbumWithSongs.serializer()).let { album ->
+            album.animatedArt?.let { album.copy(animatedArt = it.resolvedOn(baseUrl).takeUnless(AnimatedArt::isEmpty)) } ?: album
+        }
+
+    // An album's animated art, on a server that lists octoAnimatedArt, with
+    // whole addresses. A server that never asked Apple about the album asks
+    // now, for up to 10 seconds, so this call may take that long.
+    suspend fun animatedArt(albumId: String): AnimatedArtAnswer =
+        try {
+            val art = getOptional("getAnimatedArt", mapOf("id" to albumId), "animatedArt", AnimatedArt.serializer(), patient)
+                ?.resolvedOn(baseUrl)
+            if (art == null || art.isEmpty) AnimatedArtAnswer.None else AnimatedArtAnswer.Found(art)
+        } catch (e: SubsonicException) {
+            animatedArtAnswerFor(e)
+        }
+
+    // A whole address for one of an animated art clip's, which a server
+    // passing the clips on itself gives relative to its own address.
+    fun animatedArtUrl(address: String): HttpUrl? = resolveArtAddress(address, baseUrl)
 
     suspend fun artists(musicFolderId: String? = this.musicFolderId): List<ArtistIndex> =
         get(
@@ -670,8 +688,14 @@ class SubsonicClient(
     }
 
     // A call whose answer may leave its key out, or null: null then.
-    internal suspend fun <T> getOptional(endpoint: String, params: Map<String, String>, key: String, serializer: KSerializer<T>): T? {
-        val body = fetch(url(endpoint, params), endpoint)
+    internal suspend fun <T> getOptional(
+        endpoint: String,
+        params: Map<String, String>,
+        key: String,
+        serializer: KSerializer<T>,
+        http: OkHttpClient = this.http,
+    ): T? {
+        val body = fetch(url(endpoint, params), endpoint, http)
         return withContext(Dispatchers.Default) {
             val root = decode(body, null, kotlinx.serialization.json.JsonObject.serializer(), null)
             val payload = root[key]
