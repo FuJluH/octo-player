@@ -98,13 +98,16 @@ struct PlayerBackdrop: View {
         GeometryReader { box in
             let pixels = loopPixels(.tall, points: box.size, scale: scale)
             ZStack {
-                LoopVideo(source: file, run: loopRun(play, shown: shown, owns: stage.owner == id), poster: poster) { now in
+                LoopVideo(source: file, run: loopRun(play, shown: shown, owns: stage.owner == id), poster: poster,
+                          blurred: lyricsOpen) { now in
                     playing = now
                 }
                 shade(box.size.height)
                     .opacity(covered ? 1 : 0)
             }
-            .frame(width: box.size.width, height: box.size.height)
+            // A point past every edge, so no line of the screen shows past the loop.
+            .frame(width: box.size.width + 2, height: box.size.height + 2)
+            .position(x: box.size.width / 2, y: box.size.height / 2)
             .task(id: "\(clip.video)|\(Int(pixels.width))x\(Int(pixels.height))|\(play == .stillOnly)") {
                 file = nil
                 let fetcher = loopFetcher(for: clip, client: session.client)
@@ -134,19 +137,25 @@ struct PlayerBackdrop: View {
     /// from the bottom under the controls, and over everything while lyrics show.
     private func shade(_ height: CGFloat) -> some View {
         let tint = Color(argb: color)
-        let top = min(180 / max(height, 1), 0.3)
+        let points = max(height, 1)
         return ZStack {
+            // Along the top, under the status bar and the album's name, eased out by 140 pt.
             LinearGradient(stops: [
-                .init(color: tint.opacity(0.55), location: 0),
-                .init(color: tint.opacity(0), location: top),
+                .init(color: tint.opacity(0.70), location: 0),
+                .init(color: tint.opacity(0.35), location: 60 / points),
+                .init(color: tint.opacity(0.10), location: 105 / points),
+                .init(color: tint.opacity(0), location: 140 / points),
             ], startPoint: .top, endPoint: .bottom)
+            // Rising under the controls, eased in so the title sits on the shade, and nearly whole
+            // under the transport, where nothing of the loop should show through.
             LinearGradient(stops: [
-                .init(color: tint.opacity(0), location: 0.38),
-                .init(color: tint.opacity(0.55), location: 0.52),
-                .init(color: tint.opacity(0.86), location: 0.66),
-                .init(color: tint.opacity(0.94), location: 1),
+                .init(color: tint.opacity(0), location: 0.36),
+                .init(color: tint.opacity(0.25), location: 0.44),
+                .init(color: tint.opacity(0.70), location: 0.52),
+                .init(color: tint.opacity(0.90), location: 0.60),
+                .init(color: tint.opacity(0.92), location: 1),
             ], startPoint: .top, endPoint: .bottom)
-            tint.opacity(lyricsOpen ? 0.6 : 0)
+            tint.opacity(lyricsOpen ? 0.78 : 0)
         }
     }
 }
@@ -157,6 +166,8 @@ func backdropColors(_ base: PlayerColors, over color: UInt32) -> PlayerColors {
     var colors = base
     let ink = loopShadeInk(color)
     colors.dark = ink.dark
-    colors.quiet = quietAlpha(color, ink: ink.dark ? DarkInkArgb : 0xFFFF_FFFF, soft: PlayerTitleRow.iconAlpha)
+    let quiet = quietAlpha(color, ink: ink.dark ? DarkInkArgb : 0xFFFF_FFFF, soft: PlayerTitleRow.iconAlpha)
+    // The dark heart and More at least at 70% over the shade.
+    colors.quiet = ink.dark ? max(quiet, 0.70) : quiet
     return colors
 }

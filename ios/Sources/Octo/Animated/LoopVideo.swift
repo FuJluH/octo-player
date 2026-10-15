@@ -50,6 +50,8 @@ struct LoopVideo: UIViewRepresentable {
     var run: LoopRun
     var poster: UIImage? = nil
     var radius: CGFloat = 0
+    /// Blurred behind words that need the room, such as lyrics.
+    var blurred = false
     /// Told when the loop's frames show, and when they go.
     var showing: ((Bool) -> Void)? = nil
 
@@ -59,6 +61,7 @@ struct LoopVideo: UIViewRepresentable {
         view.showing = showing
         view.set(radius: radius)
         view.set(poster: poster)
+        view.set(blurred: blurred)
         view.update(source: run == .none ? nil : source, run: run)
     }
 
@@ -71,6 +74,8 @@ struct LoopVideo: UIViewRepresentable {
 /// fade in over the one fading out.
 final class LoopVideoView: UIView {
     private let posterLayer = CALayer()
+    private let blur = UIVisualEffectView(effect: nil)
+    private var blurred = false
     private var take: Take?
     private var posterImage: UIImage?
     var showing: ((Bool) -> Void)?
@@ -114,6 +119,8 @@ final class LoopVideoView: UIView {
         posterLayer.contentsGravity = .resizeAspectFill
         posterLayer.opacity = 0
         layer.addSublayer(posterLayer)
+        blur.isUserInteractionEnabled = false
+        addSubview(blur)
     }
 
     required init?(coder: NSCoder) { nil }
@@ -125,6 +132,7 @@ final class LoopVideoView: UIView {
         posterLayer.frame = bounds
         take?.layer.frame = bounds
         CATransaction.commit()
+        blur.frame = bounds
     }
 
     func set(radius: CGFloat) {
@@ -133,6 +141,15 @@ final class LoopVideoView: UIView {
         CATransaction.setDisableActions(true)
         layer.cornerRadius = radius
         CATransaction.commit()
+    }
+
+    /// Blurs the loop and its still, or clears them, over 0.35 s.
+    func set(blurred: Bool) {
+        guard blurred != self.blurred else { return }
+        self.blurred = blurred
+        UIView.animate(withDuration: 0.35, delay: 0, options: [.curveEaseInOut, .beginFromCurrentState]) {
+            self.blur.effect = blurred ? UIBlurEffect(style: .regular) : nil
+        }
     }
 
     /// The still under the loop, faded in once it arrives.
@@ -181,7 +198,8 @@ final class LoopVideoView: UIView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         layer.frame = bounds
-        self.layer.addSublayer(layer)
+        // Under the blur, which is a view of its own above every layer drawn here.
+        self.layer.insertSublayer(layer, below: blur.layer)
         CATransaction.commit()
         let take = Take(source: source, player: player, looper: looper, layer: layer)
         let id = ObjectIdentifier(take)

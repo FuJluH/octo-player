@@ -81,8 +81,19 @@ struct NowPlayingView: View {
         0xFF00_0000 | (clip.colorRgb ?? ((look.colors.dominant ?? look.colors.base) & 0xFF_FFFF))
     }
     private var ink: Color { colors.content }
-    private var muted: Color { mutedInk(ink, dark: colors.dark) }
-    private var accent: Color { accentInk(ink, dark: colors.dark) }
+    private var muted: Color { overShade ? ink.opacity(0.62) : mutedInk(ink, dark: colors.dark) }
+    private var accent: Color { overShade ? shadedAccent : accentInk(ink, dark: colors.dark) }
+
+    /// Dark words over a Full screen loop's shade.
+    private var overShade: Bool { backdropCovers && colors.dark }
+
+    /// The accent darkened to about a third of its brightness, so the artist keeps its tone in
+    /// dark words.
+    private var shadedAccent: Color {
+        var hue: CGFloat = 0, saturation: CGFloat = 0, brightness: CGFloat = 0, alpha: CGFloat = 0
+        UIColor(OctoColor.accent).getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
+        return Color(hue: Double(hue), saturation: Double(saturation), brightness: 0.35)
+    }
 
     var body: some View {
         GeometryReader { outer in
@@ -110,6 +121,7 @@ struct NowPlayingView: View {
                         }
                     }
                     .foregroundStyle(ink)
+                    .environment(\.playerInkScale, overShade ? .overShade : .standard)
                     .animation(.octoTween(fixed: 500), value: colors.dark)
                     // An upright drag that starts on a line pulls the player down too.
                     .environment(\.passedDrag, PassedDrag(moved: { dragMoved($0, cap: cap, onCard: false) },

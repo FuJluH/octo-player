@@ -298,6 +298,7 @@ struct PlayerProgress: View {
     @State private var settings = AppSettings.shared
     @State private var lineWidth: CGFloat = 0
     @State private var motion = PlayerMotion.shared
+    @Environment(\.playerInkScale) private var inkScale
     /// The whole second the times step from.
     @State private var wholeSeconds = wholeSecondAtOrBefore(.now)
 
@@ -311,7 +312,7 @@ struct PlayerProgress: View {
                 let length = player.duration
                 OctoSlider(value: length > 0 ? min(max(player.livePosition / length, 0), 1) : 0, onChange: { fraction in
                     player.seek(to: fraction * player.duration)
-                }, color: ink, trackColor: ink.opacity(0.24))
+                }, color: ink.opacity(inkScale.fill), trackColor: ink.opacity(inkScale.track))
                 .accessibilityHidden(true)
             }
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { lineWidth = $0 }
@@ -501,12 +502,13 @@ struct PlayerVolume: View {
     let ink: Color
     let muted: Color
     @State private var volume = SystemVolume()
+    @Environment(\.playerInkScale) private var inkScale
 
     var body: some View {
         HStack(spacing: 0) {
             IconView(.volumeDown, size: 20, color: muted)
             OctoSlider(value: Double(volume.level), onChange: { volume.set(Float($0)) }, live: true,
-                       color: ink.opacity(0.85), trackColor: ink.opacity(0.24))
+                       color: ink.opacity(0.85), trackColor: ink.opacity(inkScale.track))
                 .padding(.horizontal, 10)
                 .accessibilityLabel("Volume")
             IconView(.volumeUp, size: 20, color: muted)
@@ -556,6 +558,24 @@ private struct HiddenVolumeView: UIViewRepresentable {
 // MARK: Switches
 
 /// One of the row of switches: full and glowing while on, at 45% while off.
+/// How strongly the player's quieter parts take its ink: switches that are off, slider tracks,
+/// the progress fill and the lyrics bar's artist. Over a Full screen loop's light shade, dark
+/// ink needs more of each to read.
+struct PlayerInkScale: Equatable {
+    var switchOff = 0.45
+    var track = 0.24
+    var fill = 1.0
+    var barArtist = 0.6
+
+    static let standard = PlayerInkScale()
+    /// Dark words over a Full screen shade.
+    static let overShade = PlayerInkScale(switchOff: 0.60, track: 0.40, fill: 0.85, barArtist: 0.75)
+}
+
+extension EnvironmentValues {
+    @Entry var playerInkScale = PlayerInkScale.standard
+}
+
 struct PlayerSwitch: View {
     let icon: OctoIcon
     let label: String
@@ -563,10 +583,11 @@ struct PlayerSwitch: View {
     let ink: Color
     var state: String?
     let action: () -> Void
+    @Environment(\.playerInkScale) private var scale
 
     var body: some View {
         Button(action: action) {
-            IconView(icon, size: 22, color: lit ? ink : ink.opacity(0.45))
+            IconView(icon, size: 22, color: lit ? ink : ink.opacity(scale.switchOff))
                 .iconGlow(lit, color: ink)
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
