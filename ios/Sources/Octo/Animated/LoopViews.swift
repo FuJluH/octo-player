@@ -64,24 +64,19 @@ struct CoverLoop: View {
     }
 }
 
-/// An album's tall loop at the top of the player, at the screen's width and its own shape, under
-/// the status bar, fading out softly to end at the title. Below that the player is the loop's
-/// own colors: the same loop stretched and blurred deep, shaded into the clip's color (else the
-/// cover's) so the words read on it, and further while lyrics show. Its still shows first when
-/// it has one. `covers` hears whether the loop or its still now fills the player.
+/// An album's tall loop filling the player with the Full screen look (`LoopMelt`): at the top
+/// at the screen's width and its own shape, clean to the top edge, going out of focus toward
+/// its bottom and melting into a deep blur of itself under the title and the controls. Its still
+/// shows first, drawn the same way, when it has one. A shade and a blur come over it while
+/// lyrics show. `covers` hears whether the loop or its still now fills the player.
 struct PlayerBackdrop: View {
     let clip: AnimatedClip
     let albumId: String?
-    /// The shade, `0xFFRRGGBB`.
-    let color: UInt32
-    /// Where the title row starts, in points from the top of the player; nil until laid out.
-    var titleTop: CGFloat?
     var shown: Bool
     var held: Bool
     var lyricsOpen: Bool
     var covers: (Bool) -> Void
-    /// Hears how what is drawn looks (the still, then the loop): for the status bar's color and
-    /// the words' over the blurred loop.
+    /// Hears how the top of what is drawn looks, for the status bar's color.
     var looked: (LoopLook) -> Void = { _ in }
     @Environment(Session.self) private var session
     @Environment(\.scenePhase) private var scenePhase
@@ -92,11 +87,8 @@ struct PlayerBackdrop: View {
     @State private var file: URL?
     @State private var poster: UIImage?
     @State private var playing = false
-
-    /// The band the loop blurs over, as a share of the screen's height, and how far above the
-    /// title it is fully blurred, in points.
-    private static let fadeShare: CGFloat = 0.08
-    private static let clearOfTitle: CGFloat = 6
+    @State private var melt: LoopMelt?
+    @State private var meltKey = ""
 
     private var play: LoopPlay {
         loopPlay(seen: shown && !held && scenePhase == .active, powerSave: stage.lowPower, reduceMotion: calm)
@@ -104,43 +96,42 @@ struct PlayerBackdrop: View {
 
     private var covered: Bool { playing || poster != nil }
 
-    /// The loop's place: the width of the screen at the clip's own shape (3:4 when it names
-    /// none), sharp down to a band about 8% of the screen tall that ends just above the title (or
-    /// at its own bottom, when that is higher), over which it gives way to its blurred copy.
-    private func fit(_ size: CGSize) -> LoopBackdropFit {
-        let shape = clip.width > 0 && clip.height > 0 ? CGFloat(clip.height) / CGFloat(clip.width) : 4.0 / 3.0
-        let height = (size.width * shape).rounded()
-        let band = (size.height * Self.fadeShare).rounded()
-        let gone = max(min(height, (titleTop ?? height) - Self.clearOfTitle), band)
-        return LoopBackdropFit(height: height, fadeStart: max(gone - band, 0), fadeEnd: gone)
+    /// How tall the loop is for each point of width: its own shape, 3:4 when it names none.
+    private var shape: CGFloat {
+        clip.width > 0 && clip.height > 0 ? CGFloat(clip.height) / CGFloat(clip.width) : 4.0 / 3.0
     }
 
     var body: some View {
         let play = play
         GeometryReader { box in
             let full = CGSize(width: box.size.width + 2, height: box.size.height + 2)
-            let fit = fit(full)
-            let pixels = loopPixels(.tall, points: CGSize(width: full.width, height: fit.height), scale: scale)
+            // Drawn at twice the points at most: the loop's own version is about that sharp.
+            let drawScale = min(scale, 2)
+            let pixels = loopPixels(.tall, points: CGSize(width: full.width, height: full.width * shape), scale: scale)
+            let key = "\(Int(full.width))x\(Int(full.height))|\(shape)|\(drawScale)"
             ZStack {
-                LoopVideo(source: file, run: loopRun(play, shown: shown, owns: stage.owner == id), poster: poster,
-                          backdrop: fit, blurred: lyricsOpen) { now in
+                LoopVideo(source: melt == nil ? nil : file, run: loopRun(play, shown: shown, owns: stage.owner == id), poster: poster,
+                          melt: melt, blurred: lyricsOpen) { now in
                     playing = now
                 }
-                shade(fit, height: full.height)
-                    .opacity(covered ? 1 : 0)
+                Color.black.opacity(lyricsOpen ? 0.45 : 0)
             }
             // A point past every edge, so no line of the screen shows past the loop.
             .frame(width: full.width, height: full.height)
             .position(x: box.size.width / 2, y: box.size.height / 2)
-            .task(id: "\(clip.video)|\(Int(pixels.width))x\(Int(pixels.height))|\(play == .stillOnly)") {
+            .task(id: "\(clip.video)|\(key)|\(Int(pixels.width))|\(play == .stillOnly)") {
+                if meltKey != key {
+                    meltKey = key
+                    melt = LoopMelt(screen: full, shape: shape, scale: drawScale)
+                }
                 file = nil
                 let fetcher = loopFetcher(for: clip, client: session.client)
                 let still = await LoopSource.shared.poster(clip, albumId: albumId, shape: .tall, fetcher: fetcher)
                 guard !Task.isCancelled else { return }
-                poster = still
                 // The status bar reads on the top 50 pt.
-                let band = 50 / max(fit.height, 1)
+                let band = 50 / max(full.width * shape, 1)
                 if let still, let look = loopLook(still.cgImage, topShare: band) { looked(look) }
+                if let still, let melt { poster = await Task.detached { melt.still(still) }.value } else { poster = nil }
                 guard play != .stillOnly, !Task.isCancelled else { return }
                 file = await LoopSource.shared.file(clip, albumId: albumId, shape: .tall, pixels: pixels, fetcher: fetcher)
                 if let file, let look = await LoopSource.shared.look(file, topShare: band), !Task.isCancelled { looked(look) }
@@ -149,7 +140,6 @@ struct PlayerBackdrop: View {
         .ignoresSafeArea()
         .allowsHitTesting(false)
         .accessibilityHidden(true)
-        .animation(.easeInOut(duration: Double(loopFadeMs) / 1000), value: covered)
         .animation(.easeInOut(duration: 0.35), value: lyricsOpen)
         .onChange(of: play == .play, initial: true) { _, plays in
             if plays { stage.claim(id) }
@@ -160,42 +150,13 @@ struct PlayerBackdrop: View {
             covers(false)
         }
     }
-
-    /// The shade: a light trace of the color the words are picked for as the loop blurs, so the
-    /// blurred shapes still show under the title, and a gentle darkening toward the bottom; much
-    /// more of the color while lyrics show. The top of the loop is left clean.
-    private func shade(_ fit: LoopBackdropFit, height: CGFloat) -> some View {
-        let tint = Color(argb: color)
-        let points = max(height, 1)
-        let start = fit.fadeStart / points
-        let end = fit.fadeEnd / points
-        return ZStack {
-            // Eased in with the blur, then held light under the controls.
-            LinearGradient(stops: [
-                .init(color: tint.opacity(0), location: start),
-                .init(color: tint.opacity(0.06), location: start + (end - start) * 0.5),
-                .init(color: tint.opacity(0.16), location: end),
-                .init(color: tint.opacity(0.22), location: 1),
-            ], startPoint: .top, endPoint: .bottom)
-            // Darker toward the bottom, from the title down.
-            LinearGradient(stops: [
-                .init(color: .black.opacity(0), location: end),
-                .init(color: .black.opacity(0.12), location: end + (1 - end) * 0.5),
-                .init(color: .black.opacity(0.30), location: 1),
-            ], startPoint: .top, endPoint: .bottom)
-            tint.opacity(lyricsOpen ? 0.78 : 0)
-        }
-    }
 }
 
-/// The colors the player's words take over a full-screen loop shaded into `color`: dark words
-/// over a light shade, white ones otherwise, the quiet icons as strong as reading needs.
-func backdropColors(_ base: PlayerColors, over color: UInt32) -> PlayerColors {
+/// The colors the player's words take over the Full screen look: white, the quieter parts
+/// added onto what is under them (see `PlayerInkScale.melt`), the heart and More at 70%.
+func meltColors(_ base: PlayerColors) -> PlayerColors {
     var colors = base
-    let ink = loopShadeInk(color)
-    colors.dark = ink.dark
-    let quiet = quietAlpha(color, ink: ink.dark ? DarkInkArgb : 0xFFFF_FFFF, soft: PlayerTitleRow.iconAlpha)
-    // The dark heart and More at least at 70% over the shade.
-    colors.quiet = ink.dark ? max(quiet, 0.70) : quiet
+    colors.dark = false
+    colors.quiet = 0.70
     return colors
 }

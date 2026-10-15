@@ -27,10 +27,8 @@ struct NowPlayingView: View {
     /// The full-screen loop (or its still) fills the player: the card steps aside and the words
     /// take the loop's shade.
     @State private var backdropCovers = false
-    /// How the full-screen loop looks: its top for the status bar, its blurred colors for the words.
+    /// How the top of the full-screen loop looks, for the status bar.
     @State private var loopLooks: LoopLook?
-    /// Where the title row sits, for a full-screen loop to fade out above it.
-    @State private var backdropFit = BackdropTitle()
 
     // The way in and out.
     /// The opening and closing: read only by the parts that move with it, so the player is not
@@ -64,15 +62,13 @@ struct NowPlayingView: View {
     @State private var liveSong = LiveSongControl()
 
     private static let pullShare: CGFloat = 0.45
-    /// The player's own space, which a pull moves as a whole.
-    nonisolated private static let space = "player"
     private static let slop: CGFloat = 8
     private static let skipAt: CGFloat = 88
     /// The line at the top, holding the album's name.
     private static let topLineHeight: CGFloat = 40
 
     private var colors: PlayerColors {
-        if backdropCovers, case .backdrop(let clip) = loop { return backdropColors(look.colors, over: backdropShade(clip)) }
+        if backdropCovers, case .backdrop = loop { return meltColors(look.colors) }
         return look.colors
     }
 
@@ -82,32 +78,10 @@ struct NowPlayingView: View {
     /// Where the playing album's animated art goes, as the setting has it.
     private var loop: PlayerLoop { settings.animatedArt.inPlayer(animated.known(loopAlbumId)) }
 
-    /// The color the words over a full-screen loop are picked for: the blurred loop's own low
-    /// down, as the bottom's darkening leaves it under the title, once known; else the clip's
-    /// color, else the cover's.
-    private func backdropShade(_ clip: AnimatedClip) -> UInt32 {
-        if let under = loopLooks?.under { return OctoKit.overlay(0xFF00_0000, 0.08, under) }
-        return 0xFF00_0000 | (clip.colorRgb ?? ((look.colors.dominant ?? look.colors.base) & 0xFF_FFFF))
-    }
     private var ink: Color { colors.content }
-    private var muted: Color { overShade ? ink.opacity(0.62) : mutedInk(ink, dark: colors.dark) }
-    private var accent: Color {
-        if overShade { return shadedAccent }
-        // White words over the blurred loop: the artist in a light tint of the loop's own color.
-        if backdropCovers, let under = loopLooks?.under { return Color(argb: OctoKit.overlay(0xFFFF_FFFF, 0.72, under)) }
-        return accentInk(ink, dark: colors.dark)
-    }
+    private var muted: Color { mutedInk(ink, dark: colors.dark) }
+    private var accent: Color { accentInk(ink, dark: colors.dark) }
 
-    /// Dark words over a Full screen loop's shade.
-    private var overShade: Bool { backdropCovers && colors.dark }
-
-    /// The accent darkened to about a third of its brightness, so the artist keeps its tone in
-    /// dark words.
-    private var shadedAccent: Color {
-        var hue: CGFloat = 0, saturation: CGFloat = 0, brightness: CGFloat = 0, alpha: CGFloat = 0
-        UIColor(OctoColor.accent).getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
-        return Color(hue: Double(hue), saturation: Double(saturation), brightness: 0.35)
-    }
 
     var body: some View {
         GeometryReader { outer in
@@ -124,8 +98,8 @@ struct NowPlayingView: View {
                                      playing: player.isPlaying, bpm: facts.bpm, entrance: entrance,
                                      focused: focused, rests: loop != .none)
                     if case .backdrop(let clip) = loop {
-                        BackdropFrame(clip: clip, albumId: loopAlbumId, color: backdropShade(clip), entrance: entrance, pull: pull,
-                                      fit: backdropFit, lyricsOpen: lyrics.open, covers: { backdropCovers = $0 },
+                        BackdropFrame(clip: clip, albumId: loopAlbumId, entrance: entrance, pull: pull,
+                                      lyricsOpen: lyrics.open, covers: { backdropCovers = $0 },
                                       looked: { loopLooks = $0 })
                     }
                     Group {
@@ -136,7 +110,7 @@ struct NowPlayingView: View {
                         }
                     }
                     .foregroundStyle(ink)
-                    .environment(\.playerInkScale, overShade ? .overShade : .standard)
+                    .environment(\.playerInkScale, backdropCovers ? .melt : .standard)
                     .animation(.octoTween(fixed: 500), value: colors.dark)
                     // An upright drag that starts on a line pulls the player down too.
                     .environment(\.passedDrag, PassedDrag(moved: { dragMoved($0, cap: cap, onCard: false) },
@@ -144,7 +118,6 @@ struct NowPlayingView: View {
                                                           cancelled: dragTakenOver))
                 }
                 .frame(width: size.width, height: size.height)
-                .coordinateSpace(.named(Self.space))
                 .modifier(PulledFrame(pull: pull, cap: cap))
                 .contentShape(Rectangle())
                 .gesture(playerDrag(cap: cap, folded: lyrics.open && !sideways))
@@ -235,9 +208,6 @@ struct NowPlayingView: View {
                         .transition(swap)
                 } else {
                     controls(roomy: true)
-                        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.space)).minY } action: { top in
-                            if abs((backdropFit.top ?? -1) - top) > 0.5 { backdropFit.top = top }
-                        }
                         .padding(.bottom, 16)
                         .modifier(Rising(entrance: entrance))
                         .transition(swap)
@@ -306,7 +276,8 @@ struct NowPlayingView: View {
     /// AirPlay and Sound are in the More menu.
     private var topLine: some View {
         ZStack {
-            if let song = player.current, let name = albumLabel(song.album, song.title, facts.albumSongs) {
+            // Over the Full screen loop the art runs clean to the top, so the name stays out.
+            if !backdropCovers, let song = player.current, let name = albumLabel(song.album, song.title, facts.albumSongs) {
                 albumName(name, song: song)
             }
             HiddenRoutePicker(trigger: airPlay)
@@ -982,26 +953,16 @@ private struct CardLoop: View {
 private struct BackdropFrame: View {
     let clip: AnimatedClip
     let albumId: String?
-    let color: UInt32
     let entrance: PlayerEntrance
     let pull: PlayerPull
-    let fit: BackdropTitle
     let lyricsOpen: Bool
     let covers: (Bool) -> Void
     let looked: (LoopLook) -> Void
 
     var body: some View {
-        PlayerBackdrop(clip: clip, albumId: albumId, color: color, titleTop: fit.top, shown: !entrance.closing,
-                       held: pull.distance > 0, lyricsOpen: lyricsOpen, covers: covers, looked: looked)
+        PlayerBackdrop(clip: clip, albumId: albumId, shown: !entrance.closing, held: pull.distance > 0, lyricsOpen: lyricsOpen,
+                       covers: covers, looked: looked)
     }
-}
-
-/// Where the player's title row starts, in the player's own space. Only the full-screen loop
-/// reads it, so its layout never lays out the player again.
-@MainActor
-@Observable
-final class BackdropTitle {
-    var top: CGFloat?
 }
 
 /// The card's cover, its corners following the opening and closing. A live station shows the

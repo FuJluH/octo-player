@@ -27,7 +27,7 @@ public enum AnimatedArtSetting: String, StoredChoice, Codable {
     public var detail: String {
         switch self {
         case .square: "Plays in place of the cover on the player and on album pages."
-        case .fullScreen: "Fills the player behind the controls when the album has a tall one, and plays in place of the cover when it does not."
+        case .fullScreen: "Fills the player when the album has a tall version, otherwise plays in place of the cover."
         case .off: "Always shows the still cover."
         }
     }

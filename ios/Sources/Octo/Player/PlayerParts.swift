@@ -225,6 +225,7 @@ struct PlayerTitleBlock: View {
     let openArtist: (() -> Void)?
     @Environment(\.octoReduceMotion) private var calm
     @Environment(\.titleIcons) private var icons
+    @Environment(\.playerInkScale) private var inkScale
 
     var body: some View {
         let capMiddle = icons?.capMiddleFromTop
@@ -252,7 +253,8 @@ struct PlayerTitleBlock: View {
     }
 
     private var artist: some View {
-        PlayerMarquee(text: song.byline, font: .octoBody, color: accent, scroll: false)
+        PlayerMarquee(text: song.byline, font: .octoBody, color: inkScale.plus ? Color(white: inkScale.artist) : accent, scroll: false)
+            .addedGray(inkScale.plus)
     }
 }
 
@@ -312,7 +314,9 @@ struct PlayerProgress: View {
                 let length = player.duration
                 OctoSlider(value: length > 0 ? min(max(player.livePosition / length, 0), 1) : 0, onChange: { fraction in
                     player.seek(to: fraction * player.duration)
-                }, color: ink.opacity(inkScale.fill), trackColor: ink.opacity(inkScale.track))
+                }, color: inkScale.plus ? Color(white: inkScale.fill) : ink.opacity(inkScale.fill),
+                   trackColor: inkScale.plus ? Color(white: inkScale.track) : ink.opacity(inkScale.track))
+                .addedGray(inkScale.plus)
                 .accessibilityHidden(true)
             }
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { lineWidth = $0 }
@@ -359,7 +363,8 @@ struct PlayerProgress: View {
             Text("-" + asClock(left))
         }
         .font(.octoCaption.monospacedDigit())
-        .foregroundStyle(muted)
+        .foregroundStyle(inkScale.plus ? Color(white: inkScale.times) : muted)
+        .addedGray(inkScale.plus)
     }
 }
 
@@ -369,27 +374,31 @@ struct QualityBadge: View {
     let song: Song
     let ink: Color
     @Environment(Player.self) private var player
+    @Environment(\.playerInkScale) private var inkScale
     @State private var open = false
     @State private var closing: Task<Void, Never>?
 
     var body: some View {
         Group {
             if let quality = player.quality {
+                let plain = inkScale.plus
+                let tone = plain ? Color(white: inkScale.times) : ink
                 Button(action: toggle) {
                     HStack(spacing: 5) {
-                        if quality.lossless { IconView(.lossless, size: 13, color: ink) }
+                        if quality.lossless { IconView(.lossless, size: 13, color: tone) }
                         Text(open ? quality.full : quality.label.uppercased())
                             .font(open ? .octo(11, .regular, .caption2) : .octo(10.5, .semibold, .caption2))
                             .tracking(open ? 0 : 1)
-                            .foregroundStyle(ink)
+                            .foregroundStyle(tone)
                             .lineLimit(1)
                     }
+                    .addedGray(plain)
                     .padding(.horizontal, 10)
                     .frame(height: 24)
                     .contentShape(Capsule())
                 }
                 .buttonStyle(NoPress())
-                .octoGlass(Capsule(), film: .clear)
+                .modifier(BadgeGlass(on: !plain))
                 .animation(.octoSpring(0.8, 400), value: open)
                 .accessibilityLabel("\(quality.label), \(quality.full)")
             }
@@ -408,6 +417,15 @@ struct QualityBadge: View {
             try? await Task.sleep(for: .seconds(4))
             if !Task.isCancelled { open = false }
         }
+    }
+}
+
+/// The codec label's clear glass, left off over the Full screen look, where it is plain text.
+private struct BadgeGlass: ViewModifier {
+    let on: Bool
+
+    func body(content: Content) -> some View {
+        if on { content.octoGlass(Capsule(), film: .clear) } else { content }
     }
 }
 
@@ -506,12 +524,16 @@ struct PlayerVolume: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            IconView(.volumeDown, size: 20, color: muted)
+            IconView(.volumeDown, size: 20, color: inkScale.plus ? Color(white: inkScale.speakers) : muted)
+                .addedGray(inkScale.plus)
             OctoSlider(value: Double(volume.level), onChange: { volume.set(Float($0)) }, live: true,
-                       color: ink.opacity(0.85), trackColor: ink.opacity(inkScale.track))
+                       color: inkScale.plus ? Color(white: inkScale.fill) : ink.opacity(0.85),
+                       trackColor: inkScale.plus ? Color(white: inkScale.track) : ink.opacity(inkScale.track))
+                .addedGray(inkScale.plus)
                 .padding(.horizontal, 10)
                 .accessibilityLabel("Volume")
-            IconView(.volumeUp, size: 20, color: muted)
+            IconView(.volumeUp, size: 20, color: inkScale.plus ? Color(white: inkScale.speakers) : muted)
+                .addedGray(inkScale.plus)
         }
         .background(HiddenVolumeView(volume: volume).frame(width: 1, height: 1).opacity(0.01))
     }
@@ -559,17 +581,31 @@ private struct HiddenVolumeView: UIViewRepresentable {
 
 /// One of the row of switches: full and glowing while on, at 45% while off.
 /// How strongly the player's quieter parts take its ink: switches that are off, slider tracks,
-/// the progress fill and the lyrics bar's artist. Over a Full screen loop's light shade, dark
-/// ink needs more of each to read.
+/// the progress fill, the lyrics bar's artist, and over the Full screen look the artist, the
+/// times and the speakers. Over that look (`plus`) each is a gray added onto what is under it,
+/// as Apple Music draws them, so it glows in the art's own tone instead of laying a cool gray
+/// over it.
 struct PlayerInkScale: Equatable {
     var switchOff = 0.45
     var track = 0.24
     var fill = 1.0
     var barArtist = 0.6
+    var plus = false
+    var artist = 0.47
+    var times = 0.45
+    var speakers = 0.45
 
     static let standard = PlayerInkScale()
-    /// Dark words over a Full screen shade.
-    static let overShade = PlayerInkScale(switchOff: 0.60, track: 0.40, fill: 0.85, barArtist: 0.75)
+    /// Over the Full screen look.
+    static let melt = PlayerInkScale(switchOff: 0.45, track: 0.18, fill: 0.55, barArtist: 0.6, plus: true)
+}
+
+extension View {
+    /// Added onto what is under it (plus-lighter) while `plus`; drawn as it is otherwise.
+    @ViewBuilder
+    func addedGray(_ plus: Bool) -> some View {
+        if plus { compositingGroup().blendMode(.plusLighter) } else { self }
+    }
 }
 
 extension EnvironmentValues {
@@ -587,7 +623,8 @@ struct PlayerSwitch: View {
 
     var body: some View {
         Button(action: action) {
-            IconView(icon, size: 22, color: lit ? ink : ink.opacity(scale.switchOff))
+            IconView(icon, size: 22, color: lit ? ink : (scale.plus ? Color(white: scale.switchOff) : ink.opacity(scale.switchOff)))
+                .addedGray(scale.plus && !lit)
                 .iconGlow(lit, color: ink)
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
