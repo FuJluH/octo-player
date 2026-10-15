@@ -46,6 +46,8 @@ class BackgroundPrefsTest {
         // The wash moves playing or not, at its own limit.
         assertEquals(30, movingBackgroundFps(wash, 33, playing = true))
         assertEquals(30, movingBackgroundFps(wash, 33, playing = false))
+        // Faster limits draw at 30, all the slow drift needs.
+        assertEquals(30, movingBackgroundFps(PlayerPrefs(background = BackgroundPrefs(fps = 120)), 33, playing = true))
         // Older phones show the still artwork instead.
         assertNull(movingBackgroundFps(wash, 32, playing = true))
         assertNull(movingBackgroundFps(wash.copy(liveBackground = false), 33, playing = true))
@@ -55,6 +57,14 @@ class BackgroundPrefsTest {
         assertNull(movingBackgroundFps(mesh, 33, playing = false))
         assertNull(movingBackgroundFps(mesh, 32, playing = true))
         assertNull(movingBackgroundFps(PlayerPrefs(background = BackgroundPrefs(mode = BackgroundMode.Colour)), 33, playing = true))
+    }
+
+    @Test
+    fun theWashDrawsAtThirtyOrTheLowerLimit() {
+        assertEquals(30, washFps(30))
+        assertEquals(30, washFps(60))
+        assertEquals(30, washFps(120))
+        assertEquals(24, washFps(24))
     }
 
     @Test

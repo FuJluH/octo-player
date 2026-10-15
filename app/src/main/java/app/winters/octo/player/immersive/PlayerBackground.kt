@@ -93,12 +93,13 @@ class BackgroundViewModel @Inject constructor(
 fun drawnMode(mode: BackgroundMode, sdk: Int): BackgroundMode =
     if (mode == BackgroundMode.Default && sdk < Build.VERSION_CODES.TIRAMISU) BackgroundMode.Artwork else mode
 
-// The frame limit of the background while it moves: the live wash at its
-// own limit, playing or not, and the classic mesh at its full rate while
-// music plays (paused it slows almost to a stop). Null when it is still.
+// The frame limit of the background while it moves: the live wash at the
+// rate it draws at (`washFps`), playing or not, and the classic mesh at its
+// full rate while music plays (paused it slows almost to a stop). Null when
+// it is still.
 fun movingBackgroundFps(prefs: PlayerPrefs, sdk: Int, playing: Boolean): Int? = when {
     !prefs.liveBackground -> null
-    drawnMode(prefs.background.mode, sdk) == BackgroundMode.Default -> prefs.background.fps
+    drawnMode(prefs.background.mode, sdk) == BackgroundMode.Default -> washFps(prefs.background.fps)
     prefs.background.mode == BackgroundMode.Classic && sdk >= Build.VERSION_CODES.TIRAMISU && playing -> MESH_FULL_FPS
     else -> null
 }

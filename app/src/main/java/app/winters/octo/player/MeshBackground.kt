@@ -116,16 +116,17 @@ fun MeshBackground(colors: PlayerColors, playing: Boolean, modifier: Modifier = 
 }
 
 // How long the mesh waits before its next frame at this speed (1 while
-// music plays). At full speed a pool moves well under a pixel in a 60th of
-// a second, and slower it moves slower still, so it takes 60 frames a
-// second at full speed, fewer as it slows, and never under 10.
+// music plays). At full speed the colour under any one pixel changes by
+// about a level of brightness in a 30th of a second, which no eye picks
+// out as a step, and slower it changes slower still, so it takes 30
+// frames a second at full speed, fewer as it slows, and never under 10.
 fun meshFrameMs(speed: Float): Long {
     val fps = (MESH_FULL_FPS * speed).coerceIn(MeshSlowestFps, MESH_FULL_FPS.toFloat())
     // Less a little, so the frame after the wait still lands on time.
     return (1_000f / fps).toLong() - MeshFrameSlackMs
 }
 
-const val MESH_FULL_FPS = 60
+const val MESH_FULL_FPS = 30
 private const val MeshSlowestFps = 10f
 private const val MeshFrameSlackMs = 4L
 

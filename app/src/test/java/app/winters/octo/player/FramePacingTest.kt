@@ -30,8 +30,8 @@ class FramePacingTest {
 
     @Test
     fun theMeshTakesFewerFramesAsItSlows() {
-        assertEquals(12L, meshFrameMs(1f))
-        assertEquals(29L, meshFrameMs(0.5f))
+        assertEquals(29L, meshFrameMs(1f))
+        assertEquals(62L, meshFrameMs(0.5f))
         // Paused it slows to 0.15 of its pace: 10 frames a second.
         assertEquals(96L, meshFrameMs(0.15f))
         assertEquals(96L, meshFrameMs(0f))
