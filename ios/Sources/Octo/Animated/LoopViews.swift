@@ -134,6 +134,9 @@ struct PlayerBackdrop: View {
                 if let still, let melt { poster = await Task.detached { melt.still(still) }.value } else { poster = nil }
                 guard play != .stillOnly, !Task.isCancelled else { return }
                 file = await LoopSource.shared.file(clip, albumId: albumId, shape: .tall, pixels: pixels, fetcher: fetcher)
+                #if DEBUG
+                if let file, let melt { LoopMelt.lastShown = (melt, file) }
+                #endif
                 if let file, let look = await LoopSource.shared.look(file, topShare: band), !Task.isCancelled { looked(look) }
             }
         }

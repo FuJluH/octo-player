@@ -11,6 +11,11 @@ import os
 /// - `animated:square`, `animated:full_screen`, `animated:off` sets the Animated art setting
 /// - `animated:stream:on|off` plays each clip's HLS playlist as it is instead of its one file
 /// - `animated:forget` empties the shelf of recently shown loops, so the next shows from its still
+/// - `animated:melt:stacked|reference|off` draws the Full screen look the cheap way, the first
+///   way (one variable blur at full size), or not at all, for measuring each; a loop showing
+///   takes it from its next start
+/// - `animated:meltcheck` draws the Full screen loop's first frame both ways and writes them and
+///   their difference to the app's documents, `meltcheck/`
 /// - `animated:queue:TEXT` puts the library songs a search for TEXT in the player, paused at once,
 ///   so nothing is heard
 @MainActor
@@ -39,6 +44,12 @@ enum AnimatedDrive {
         case "standin-off": AnimatedArtStore.shared.standIn = nil
         case "square", "full_screen", "off": AppSettings.shared.setAnimatedArt(AnimatedArtSetting.from(key: what))
         case "stream": await LoopSource.shared.setStreamsDirectly(detail != "off")
+        case "melt":
+            LoopMelt.drawsReference = detail == "reference"
+            LoopMelt.skipsDrawing = detail == "off"
+        case "meltcheck":
+            let words = await LoopMelt.compare()
+            log.notice("meltcheck \(words, privacy: .public)")
         case "forget":
             let shelf = LoopSource.shared.shelf
             try? FileManager.default.removeItem(at: shelf.dir)
