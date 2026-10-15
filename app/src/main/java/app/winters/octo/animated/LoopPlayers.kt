@@ -1,6 +1,7 @@
 package app.winters.octo.animated
 
 import android.content.Context
+import android.media.MediaCodecList
 import android.os.Handler
 import androidx.annotation.OptIn
 import androidx.core.net.toUri
@@ -55,6 +56,10 @@ class LoopPlayers @Inject constructor(
 ) {
     private val fetcher = LoopFetcher(http)
 
+    // The formats picked from: HEVC too where the phone decodes it in
+    // hardware (Apple's H.264 stops short of a large screen's size).
+    val codecs: Set<LoopCodec> by lazy { playableLoopCodecs() }
+
     private val cache: SimpleCache by lazy {
         SimpleCache(
             File(context.cacheDir, "animated-loops"),
@@ -106,12 +111,22 @@ class LoopPlayers @Inject constructor(
             return ProgressiveMediaSource.Factory(DefaultDataSource.Factory(context)).createMediaSource(MediaItem.fromUri(address))
         }
         val key = "${clip.video}|${width}x$height"
-        val variant = picking.withLock { picks[key] } ?: fetcher.pick(clip, width, height)?.url?.toString()?.also { url ->
+        val variant = picking.withLock { picks[key] } ?: fetcher.pick(clip, width, height, codecs)?.url?.toString()?.also { url ->
             picking.withLock { picks[key] = url }
         } ?: return null
         val item = MediaItem.Builder().setUri(variant).setMimeType(MimeTypes.APPLICATION_M3U8).build()
         return HlsMediaSource.Factory(streamed).setAllowChunklessPreparation(true).createMediaSource(item)
     }
+}
+
+// H.264, and HEVC when a hardware decoder for it is on the phone.
+fun playableLoopCodecs(): Set<LoopCodec> {
+    val hevc = runCatching {
+        MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.any { info ->
+            !info.isEncoder && info.isHardwareAccelerated && info.supportedTypes.any { it.equals(MimeTypes.VIDEO_H265, ignoreCase = true) }
+        }
+    }.getOrDefault(false)
+    return if (hevc) setOf(LoopCodec.Avc, LoopCodec.Hevc) else setOf(LoopCodec.Avc)
 }
 
 // Renderers for a loop: the video one only, so nothing it plays can reach
