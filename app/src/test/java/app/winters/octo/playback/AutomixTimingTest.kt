@@ -195,4 +195,20 @@ class AutomixTimingTest {
         assertEquals(settings, settings.atSpeed(1f))
         assertEquals(4_000L, settings.atSpeed(0.5f).maxOverlapMs)
     }
+
+    @Test
+    fun aTapReadEarlyIsReadAgainOnceItsLevelCounts() {
+        // Read 3 s in, having heard 2 s: again once 18 more seconds have played.
+        assertFalse(tapReadsAgain(2_000, askedAtMs = 3_000, positionMs = 20_000, speed = 1f, enoughMs = 20_000))
+        assertTrue(tapReadsAgain(2_000, askedAtMs = 3_000, positionMs = 21_000, speed = 1f, enoughMs = 20_000))
+        // At 2x the song time runs ahead of what is heard.
+        assertFalse(tapReadsAgain(2_000, askedAtMs = 3_000, positionMs = 21_000, speed = 2f, enoughMs = 20_000))
+        assertTrue(tapReadsAgain(2_000, askedAtMs = 3_000, positionMs = 39_000, speed = 2f, enoughMs = 20_000))
+    }
+
+    @Test
+    fun aTapReadWithItsLevelHeardOrNotOnTheSongIsNotReadAgain() {
+        assertFalse(tapReadsAgain(20_000, askedAtMs = 21_000, positionMs = 200_000, speed = 1f, enoughMs = 20_000))
+        assertFalse(tapReadsAgain(null, askedAtMs = 3_000, positionMs = 200_000, speed = 1f, enoughMs = 20_000))
+    }
 }

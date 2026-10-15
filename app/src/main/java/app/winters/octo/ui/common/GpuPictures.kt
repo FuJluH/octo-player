@@ -57,6 +57,13 @@ class GpuPictureStream(val width: Int, val height: Int) : AutoCloseable {
     var latest: Bitmap? = null
         private set
 
+    // One bitmap for each of the reader's images, made the first time the
+    // image comes round and reused after, so the window's renderer takes
+    // each image up once rather than taking up a new bitmap every picture.
+    // The images are only ever drawn into while no bitmap of theirs is
+    // shown (`held`), so a bitmap reused shows its image's newest drawing.
+    private val bitmaps = HashMap<Long, Bitmap>()
+
     var onPicture: (() -> Unit)? = null
 
     init {
@@ -89,7 +96,13 @@ class GpuPictureStream(val width: Int, val height: Int) : AutoCloseable {
             image.close()
             return
         }
-        val bitmap = image.hardwareBuffer?.use { Bitmap.wrapHardwareBuffer(it, Srgb) }
+        val bitmap = image.hardwareBuffer?.use { buffer ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                bitmaps[buffer.id] ?: Bitmap.wrapHardwareBuffer(buffer, Srgb)?.also { bitmaps[buffer.id] = it }
+            } else {
+                Bitmap.wrapHardwareBuffer(buffer, Srgb)
+            }
+        }
         if (bitmap == null) {
             image.close()
             return
@@ -109,6 +122,7 @@ class GpuPictureStream(val width: Int, val height: Int) : AutoCloseable {
         held.forEach { it.close() }
         held.clear()
         latest = null
+        bitmaps.clear()
         reader.close()
     }
 

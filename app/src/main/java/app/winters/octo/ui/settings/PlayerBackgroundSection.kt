@@ -15,7 +15,6 @@ import app.winters.octo.player.immersive.BackgroundMode
 import app.winters.octo.player.immersive.BackgroundPrefs
 import app.winters.octo.player.immersive.BrightnessCapRange
 import app.winters.octo.player.immersive.ContrastRange
-import app.winters.octo.player.immersive.FpsChoices
 import app.winters.octo.player.immersive.SaturationRange
 import app.winters.octo.player.immersive.SpeedRange
 import app.winters.octo.ui.common.Choice
@@ -107,15 +106,6 @@ fun PlayerBackgroundSection(vm: PlayerBackgroundViewModel = hiltViewModel()) {
                 onChange = { on -> vm.update { it.copy(useBpm = on) } },
                 helper = "Drifts with the song's tempo, when it's known.",
             )
-            ChoiceRow(SettingsIndex.BackgroundFps, value = "${background.fps} fps", onClick = {
-                sheet.show(
-                    ChoiceRequest(
-                        SettingsIndex.BackgroundFps.title,
-                        FpsChoices.map { Choice("$it fps", if (it == 30) "Easiest on the battery." else null) },
-                        FpsChoices.indexOf(background.fps),
-                    ) { picked -> vm.update { it.copy(fps = FpsChoices[picked]) } },
-                )
-            })
         }
     }
 }

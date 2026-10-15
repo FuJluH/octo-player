@@ -11,6 +11,15 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.composed
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.dropShadow
@@ -102,6 +111,23 @@ private fun saturation(amount: Float) =
 
 private fun accent(alpha: Float) = OctoColors.GlassAccent.copy(alpha = alpha)
 
+// What lies behind a glass when it is a picture the glass can draw itself
+// (the player's moving background, already far softer than the glass's
+// frost): the glass draws that picture under it, deepened as the frost
+// deepens colours, instead of blurring it again on every frame.
+interface GlassBackdrop {
+    // Whether there is a picture to draw yet.
+    val ready: Boolean
+
+    // Draws, under the glass laid out at `glass`, what lies behind it,
+    // `saturation` deepening its colours as the frost would.
+    fun DrawScope.drawBehind(glass: LayoutCoordinates, saturation: Float)
+}
+
+// The backdrop the glasses over the player's background draw from, while
+// it is a picture.
+val LocalGlassBackdrop = staticCompositionLocalOf<GlassBackdrop?> { null }
+
 // The glaze: a lit glass capsule. Pass a backdrop when it floats over varied
 // content, so it frosts what is behind it. Leave it null when it sits on an
 // already-frosted or solid surface; blurring that again changes nothing.
@@ -122,6 +148,8 @@ fun Glaze(
     // Frost every source on `backdrop`, not only the one behind by default:
     // glass floating over a page that is a source of its own.
     seesAll: Boolean = false,
+    // Drawn instead of the frost while it has its picture: see GlassBackdrop.
+    picture: GlassBackdrop? = null,
     content: @Composable BoxScope.() -> Unit = {},
 ) {
     val blur = remember(frost, saturation) {
@@ -144,10 +172,10 @@ fun Glaze(
                 .matchParentSize()
                 .clip(shape)
                 .then(
-                    if (backdrop != null) {
-                        Modifier.hazeBlur(input = if (seesAll) HazeInput.Sources(backdrop, HazeSourceSelection.All) else HazeInput.Backdrop(backdrop), style = blur)
-                    } else {
-                        Modifier
+                    when {
+                        picture != null && picture.ready -> Modifier.drawsBehind(picture, saturation)
+                        backdrop != null -> Modifier.hazeBlur(input = if (seesAll) HazeInput.Sources(backdrop, HazeSourceSelection.All) else HazeInput.Backdrop(backdrop), style = blur)
+                        else -> Modifier
                     },
                 )
                 .background(film)
@@ -157,6 +185,16 @@ fun Glaze(
         // Specular: a brighter rim, masked to the middle.
         if (focused) Specular(shape, accent(light.spec), accent(light.specSoft))
         content()
+    }
+}
+
+// Draws `picture` under the glass, from where the glass is laid out.
+private fun Modifier.drawsBehind(picture: GlassBackdrop, saturation: Float): Modifier = composed {
+    var glass by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    // In a layer of its own, so a new picture redraws only the glass.
+    graphicsLayer().onGloballyPositioned { glass = it }.drawBehind {
+        val at = glass ?: return@drawBehind
+        if (at.isAttached) with(picture) { drawBehind(at, saturation) }
     }
 }
 
@@ -205,6 +243,7 @@ fun FloatingGlaze(
     saturation: Float = GlazeSaturation,
     halo: Boolean = false,
     seesAll: Boolean = false,
+    picture: GlassBackdrop? = null,
     content: @Composable BoxScope.() -> Unit,
 ) {
     Box(modifier) {
@@ -222,7 +261,7 @@ fun FloatingGlaze(
                     Shadow(radius = shadowBlur(24f), color = Color.Black.copy(alpha = 0.45f), offset = DpOffset(0.dp, 8.dp)),
                 ),
         )
-        Glaze(Modifier.matchParentSize(), shape = shape, backdrop = backdrop, film = film, frost = frost, saturation = saturation, seesAll = seesAll)
+        Glaze(Modifier.matchParentSize(), shape = shape, backdrop = backdrop, film = film, frost = frost, saturation = saturation, seesAll = seesAll, picture = picture)
         if (halo) {
             Box(Modifier.matchParentSize().innerShadow(shape, Shadow(radius = 0.dp, spread = 1.dp, color = Color.White.copy(alpha = 0.06f))))
         }
