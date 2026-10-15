@@ -1,5 +1,12 @@
 package app.winters.octo.desktop.ui
 
+import app.winters.octo.design.OctoDuration
+import app.winters.octo.design.octoTween
+import app.winters.octo.design.motionScale
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.heightIn
 import app.winters.octo.design.Focus
 import androidx.compose.ui.semantics.Role
@@ -39,6 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerIcon
@@ -46,6 +54,8 @@ import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntRect
@@ -107,24 +117,31 @@ import dev.chrisbanes.haze.HazeState
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 
-// Where the song is, for the time and the progress line: read a few times
-// a second while it plays and the window is on screen, and once at each
+// Where the song is, for the time and a progress line `lengthPx` long (0
+// for a time alone): read on each whole second for the time and, for the
+// line, each time it has moved half a pixel but at most five times a
+// second, while it plays and the window is on screen; and once at each
 // change of the player (a seek counts as one), so a paused or hidden
 // window never wakes to ask.
 @Composable
-fun rememberPosition(player: DesktopPlayer): State<Long> {
+fun rememberPosition(player: DesktopPlayer, lengthPx: Float = 0f): State<Long> {
     val position = remember { mutableLongStateOf(player.positionMs()) }
     val state by player.state.collectAsState()
     val shown = LocalWindowShown.current
+    val length by rememberUpdatedState(lengthPx)
     LaunchedEffect(player, state, shown) {
         position.longValue = player.positionMs()
         while (state.playing && shown) {
-            delay(200)
+            val line = if (length > 0f) progressStepMs(state.durationMs, length).coerceAtLeast(LINE_STEP_MS) else Long.MAX_VALUE
+            delay(minOf(line, msToNextSecond(position.longValue)))
             position.longValue = player.positionMs()
         }
     }
     return position
 }
+
+// The shortest wait between two steps of a small progress line.
+private const val LINE_STEP_MS = 200L
 
 // The player, floating in glass at the foot of the page. The cover fills
 // its height on the left (a click opens the full player). Beside it, the
@@ -160,7 +177,7 @@ fun PlayerBar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier,
                     Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) { if (live != null && song != null) LiveSongZone(app, song, live) else SongZone(app, song) }
                     if (live != null) {
                         Box(Modifier.padding(horizontal = Space.M)) {
-                            LiveTransport(app, state, live, playSize = FrameSize.PlayButton, stepSize = ControlHeight.L, stepIcon = IconSize.Transport, tint = OctoColors.TextPrimary)
+                            LiveTransport(app, state, live, playSize = PlayTarget, stepSize = ControlHeight.L, stepIcon = IconSize.Transport, tint = OctoColors.TextPrimary)
                         }
                     } else {
                         Transport(app, state)
@@ -209,7 +226,7 @@ private fun SongZone(app: AppState, song: Song?) {
                 LinkText(song.displayArtist ?: song.artist.orEmpty(), song.artistId) { app.navigator.go(Page.Artist(it, song.artist.orEmpty())) }
             }
         }
-        // A song found online can't be a favourite; its "+" adds it to the
+        // A song found online can't be a favorite; its "+" adds it to the
         // library instead.
         if (song != null && isOutside(app, song)) {
             FetchButton(app, song, ControlHeight.M, IconSize.Toolbar, tint = OctoColors.TextPrimary)
@@ -241,7 +258,7 @@ private fun Transport(app: AppState, state: PlayerState) {
     Row(Modifier.padding(horizontal = Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.Xs)) {
         IconAction(OctoIcons.Shuffle, "Shuffle", { app.player.setShuffle(!state.shuffle) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = state.shuffle, toggled = state.shuffle)
         IconAction(OctoIcons.Previous, "Previous", app.player::previous, size = ControlHeight.L, iconSize = IconSize.Transport, enabled = song != null)
-        PlayButton(state.playing, enabled = song != null, size = FrameSize.PlayButton, waiting = state.buffering) { app.player.togglePlay() }
+        PlayButton(state.playing, enabled = song != null, size = PlayTarget, glyph = IconSize.Transport * PlayScale, waiting = state.buffering) { app.player.togglePlay() }
         IconAction(OctoIcons.Next, "Next", app.player::next, size = ControlHeight.L, iconSize = IconSize.Transport, enabled = song != null)
         val repeat = state.repeat
         IconAction(
@@ -264,7 +281,8 @@ private fun Transport(app: AppState, state: PlayerState) {
 // the time left (or the song's length; a click swaps).
 @Composable
 private fun ProgressLine(app: AppState, state: PlayerState) {
-    val position by rememberPosition(app.player)
+    var lineLength by remember { mutableFloatStateOf(0f) }
+    val position by rememberPosition(app.player, lineLength)
     val settings by app.settings.state.collectAsState()
     val left = settings.frame.showTimeLeft
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M)) {
@@ -277,7 +295,7 @@ private fun ProgressLine(app: AppState, state: PlayerState) {
             fraction = { if (duration > 0) position.toFloat() / duration else 0f },
             onSeek = { app.player.seekTo((it * duration).toLong()) },
             // The arrow keys move it five seconds; a screen reader hears where it is.
-            modifier = Modifier.weight(1f).adjustable(
+            modifier = Modifier.weight(1f).onSizeChanged { lineLength = it.width.toFloat() }.adjustable(
                 "Song position",
                 { if (duration > 0) position.toFloat() / duration else 0f },
                 { app.player.seekTo((it * duration).toLong()) },
@@ -409,29 +427,70 @@ private fun ColumnScope.SleepMenu(app: AppState, sleep: SleepState, back: () -> 
     }
 }
 
-// Play and pause: the one control in the glaze, a lit glass circle. While
-// waiting for sound, a spinner turns inside it. For a live station (`stop`)
-// it is Play and Stop.
+// Play and pause in a transport: the sign alone, white like the controls
+// beside it and the size of the main action, `glyph` square (about one and
+// a half times theirs), in a round target `size` across that lifts under
+// the pointer and shrinks a touch when pressed, as theirs do. While waiting
+// for sound a spinner turns in its place. For a live station (`stop`) it is
+// Play and Stop.
 @Composable
-fun PlayButton(playing: Boolean, enabled: Boolean, size: Dp = FrameSize.PlayButtonLarge, waiting: Boolean = false, label: String? = null, stop: Boolean = false, onClick: () -> Unit) {
+fun PlayButton(
+    playing: Boolean,
+    enabled: Boolean,
+    size: Dp = FrameSize.PlayButtonLarge,
+    glyph: Dp = size * 0.68f,
+    waiting: Boolean = false,
+    label: String? = null,
+    stop: Boolean = false,
+    tint: Color = OctoColors.TextPrimary,
+    onClick: () -> Unit,
+) {
     val tip = rememberTooltipState()
     val words = if (!playing) "Play" else if (stop) "Stop" else "Pause"
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val motion = motionScale()
+    val press by animateFloatAsState(if (pressed) motion.scale(0.9f) else 1f, octoTween(motion, OctoDuration.Press), label = "press")
+    Box(
+        Modifier
+            .size(size.coerceAtLeast(Focus.MinTarget))
+            .graphicsLayer {
+                scaleX = press
+                scaleY = press
+            }
+            .alpha(if (enabled) 1f else 0.35f)
+            .hoverLift(CircleShape, clickable = enabled)
+            .tooltipTarget(tip)
+            .clickable(interactionSource = interaction, indication = FocusRing(CircleShape), enabled = enabled, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = label ?: words },
+        contentAlignment = Alignment.Center,
+    ) {
+        when {
+            waiting && playing -> Spinner(size = glyph * 0.8f, color = tint)
+            playing && stop -> StopGlyph(tint, size = glyph)
+            playing -> PauseGlyph(tint, size = glyph)
+            else -> Glyph(OctoIcons.Play, size = glyph, tint = tint)
+        }
+        TooltipPopup(tip, words)
+    }
+}
+
+// Play over a picture (a station's card): the sign in a lit glass circle,
+// so it reads on any picture.
+@Composable
+fun PlayBadge(size: Dp, label: String, onClick: () -> Unit) {
+    val tip = rememberTooltipState()
     Glaze(
         Modifier
             .size(size)
-            .hoverLift(CircleShape, clickable = enabled)
+            .hoverLift(CircleShape)
             .tooltipTarget(tip)
-            .clickable(enabled = enabled, role = Role.Button, interactionSource = null, indication = FocusRing(CircleShape), onClick = onClick)
-            .semantics { contentDescription = label ?: words },
+            .clickable(role = Role.Button, interactionSource = null, indication = FocusRing(CircleShape), onClick = onClick)
+            .semantics { contentDescription = label },
         light = GlazeLight.Lifted,
     ) {
-        when {
-            waiting && playing -> Spinner(size = size * 0.5f)
-            playing && stop -> StopGlyph(OctoColors.TextPrimary, size = size * 0.48f)
-            playing -> PauseGlyph(OctoColors.TextPrimary, size = size * 0.48f)
-            else -> Glyph(OctoIcons.Play, size = size * 0.48f)
-        }
-        TooltipPopup(tip, words)
+        Glyph(OctoIcons.Play, size = size * 0.48f)
+        TooltipPopup(tip, "Play")
     }
 }
 
@@ -523,3 +582,7 @@ fun androidx.compose.ui.layout.LayoutCoordinates.windowRect(): IntRect {
     val r = boundsInWindow()
     return IntRect(r.left.roundToInt(), r.top.roundToInt(), r.right.roundToInt(), r.bottom.roundToInt())
 }
+
+// How much bigger Play's sign is than the controls' beside it.
+val PlayTarget: Dp get() = FrameSize.PlayTarget
+const val PlayScale = 1.5f

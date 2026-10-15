@@ -1,5 +1,7 @@
 package app.winters.octo.desktop.system
 
+import app.winters.octo.desktop.window.appTextPixels
+import app.winters.octo.desktop.window.useTextPixels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -38,6 +40,9 @@ import app.winters.octo.desktop.player.LiveNow
 import app.winters.octo.desktop.ui.LiveMenuRows
 import app.winters.octo.desktop.ui.StationInfoCard
 import app.winters.octo.desktop.window.roundWindowsCorners
+import app.winters.octo.desktop.window.systemRoundsWindows
+import app.winters.octo.desktop.settings.currentOs
+import androidx.compose.ui.graphics.RectangleShape
 import java.awt.event.WindowEvent
 import java.awt.event.WindowFocusListener
 
@@ -70,11 +75,16 @@ fun MiniLiveMenu(
     val width: Dp = if (info) 400.dp else FrameSize.Menu
     val state = rememberWindowState(position = WindowPosition(anchor.left.dp, anchor.bottom.dp), size = DpSize(width, Dp.Unspecified))
     val keyboard = remember { FocusVisibility() }
+    // Windows 11 rounds the window itself; elsewhere it is see-through round
+    // the menu's rounded shape.
+    val systemRounds = remember { systemRoundsWindows(currentOs()) }
+    val shape = if (systemRounds) RectangleShape else MenuShape
     Window(
         onCloseRequest = close,
         state = state,
         title = "Octo station menu",
         undecorated = true,
+        transparent = !systemRounds,
         resizable = false,
         alwaysOnTop = onTop,
         onPreviewKeyEvent = { event ->
@@ -86,6 +96,7 @@ fun MiniLiveMenu(
             }
         },
     ) {
+        remember { useTextPixels(window, if (systemRounds) appTextPixels else null) }
         LaunchedEffect(Unit) { roundWindowsCorners(window) }
         // Opens under the More button, or over it near the bottom of the
         // screen, once its height is known.
@@ -113,9 +124,9 @@ fun MiniLiveMenu(
             Box(
                 Modifier
                     .width(width)
-                    .background(OctoColors.Background, MenuShape)
-                    .background(MenuFilm, MenuShape)
-                    .border(FrameSize.Hairline, ChromeEdge, MenuShape),
+                    .background(OctoColors.Background, shape)
+                    .background(MenuFilm, shape)
+                    .border(FrameSize.Hairline, ChromeEdge, shape),
             ) {
                 Column(Modifier.padding(vertical = Space.Xs)) {
                     if (info) {

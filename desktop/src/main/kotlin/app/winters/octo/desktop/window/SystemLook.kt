@@ -1,6 +1,8 @@
 package app.winters.octo.desktop.window
 
+import app.winters.octo.desktop.settings.DesktopOs
 import com.sun.jna.Library
+import com.sun.jna.Memory
 import com.sun.jna.Native
 import com.sun.jna.Pointer
 import com.sun.jna.ptr.IntByReference
@@ -32,3 +34,29 @@ private interface Dwm : Library {
 
 private const val DWMWA_WINDOW_CORNER_PREFERENCE = 33
 private const val DWMWCP_ROUND = 2
+
+// Whether the system rounds a frameless window's corners itself, with its
+// own edge and shadow: Windows 11 (build 22000 on) does once asked
+// (roundWindowsCorners). Elsewhere a window with round corners is drawn
+// see-through outside its rounded shape.
+fun systemRoundsWindows(os: DesktopOs, build: () -> Int? = ::windowsBuild): Boolean =
+    os == DesktopOs.Windows && (build() ?: 0) >= WINDOWS_11_BUILD
+
+// The Windows build number, as the system itself has it (the version an
+// app is told can be held back for older apps).
+private fun windowsBuild(): Int? = runCatching {
+    val info = Memory(OS_VERSION_INFO_BYTES).apply {
+        clear()
+        setInt(0, OS_VERSION_INFO_BYTES.toInt())
+    }
+    if (Native.load("ntdll", NtDll::class.java).RtlGetVersion(info) != 0) null else info.getInt(12)
+}.getOrNull()
+
+@Suppress("FunctionName")
+private interface NtDll : Library {
+    fun RtlGetVersion(info: Pointer): Int
+}
+
+// RTL_OSVERSIONINFOW: five 32-bit fields and 128 UTF-16 characters.
+private const val OS_VERSION_INFO_BYTES = 276L
+private const val WINDOWS_11_BUILD = 22_000

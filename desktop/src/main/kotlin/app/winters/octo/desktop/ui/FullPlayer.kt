@@ -34,6 +34,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import kotlinx.coroutines.delay
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
@@ -75,6 +78,8 @@ import app.winters.octo.player.immersive.FinalGain
 import app.winters.octo.player.immersive.WashInk
 import app.winters.octo.player.immersive.WashTuning
 import app.winters.octo.player.immersive.inkOver
+import app.winters.octo.player.immersive.overlay
+import app.winters.octo.player.immersive.quietAlpha
 import app.winters.octo.player.immersive.paceBpm
 import app.winters.octo.subsonic.Song
 
@@ -89,6 +94,18 @@ fun WashCover.playerInk(): WashInk = inkOver(range.scaled(FinalGain), OctoColors
 // The words' colour for that.
 fun WashInk?.color(): Color = if (this?.dark == true) DarkInk else Color.White
 
+// How strongly the icons beside the song's name show over this cover's
+// wash: TitleIconAlpha of the words' ink where that keeps 4.5:1 over the
+// wash's worst part under them (its brightest under white words, its
+// darkest under dark ones), more as far as reading needs.
+fun WashCover.titleIconAlpha(): Float {
+    val drawn = range.scaled(FinalGain)
+    val page = OctoColors.Background.toArgb()
+    val ink = inkOver(drawn, page)
+    val under = if (ink.dark) drawn.low else overlay(drawn.high, ink.show, page)
+    return quietAlpha(under, ink.color().toArgb(), TitleIconAlpha)
+}
+
 // The full player's background: the moving wash of the cover, dimmed as its
 // words need (`playerInk`), easing between covers.
 @Composable
@@ -102,17 +119,25 @@ internal fun PlayerBackdrop(cover: WashCover?, bpm: Float, fps: Int, speed: Floa
 // settling, as on the phone.
 private val DollyIn = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
 
-// Where the song is, read every frame while it plays and the window is on
-// screen, so the line glides, and once at each change of the player (a
-// seek counts as one) otherwise.
+// Where the song is, for a seek line `lengthPx` long: read on a frame each
+// time the line has moved half a pixel (every frame for a short song on a
+// long line, at most a second apart) and on each whole second, for the
+// times under it, while it plays and the window is on screen, so the line
+// still glides; and once at each change of the player (a seek counts as
+// one) otherwise.
 @Composable
-fun rememberFramePosition(player: DesktopPlayer): State<Long> {
+fun rememberFramePosition(player: DesktopPlayer, lengthPx: Float): State<Long> {
     val position = remember { mutableLongStateOf(player.positionMs()) }
     val state by player.state.collectAsState()
     val shown = LocalWindowShown.current
+    val length by rememberUpdatedState(lengthPx)
     LaunchedEffect(player, state, shown) {
         position.longValue = player.positionMs()
-        while (state.playing && shown) withFrameMillis { position.longValue = player.positionMs() }
+        while (state.playing && shown) {
+            val wait = minOf(progressStepMs(state.durationMs, length), msToNextSecond(position.longValue))
+            if (wait > 0) delay(wait)
+            withFrameMillis { position.longValue = player.positionMs() }
+        }
     }
     return position
 }
@@ -139,6 +164,8 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
         app.washCovers.follow(app.connection?.client, washId, tuning).collect { cover = it }
     }
     val ink = remember(cover) { cover?.playerInk() }.color()
+    // The icons beside the name, a step quieter than it.
+    val quiet = remember(cover) { cover?.titleIconAlpha() } ?: TitleIconAlpha
     val dolly = remember { Animatable(0f) }
     val calm = LocalReduceMotion.current
     // With motion reduced, the background is simply there.
@@ -152,7 +179,7 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
             paceBpm(song.bpm, wash.useBpm),
             wash.fps,
             wash.speed / 100f,
-            // Still while the window is minimised or in the tray.
+            // Still while the window is minimized or in the tray.
             moving = wash.moving && !LocalReduceMotion.current && LocalWindowShown.current,
             dolly = { dolly.value },
         )
@@ -168,7 +195,7 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
             }
             val artSide = minOf(440.dp, maxHeight - 290.dp, if (panel != null) maxWidth * 0.36f else maxWidth * 0.6f).coerceAtLeast(120.dp)
             Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(48.dp, Alignment.CenterHorizontally)) {
-                PlayerColumn(app, song, state, ink, artSide)
+                PlayerColumn(app, song, state, ink, quiet, artSide)
                 if (panel != null) {
                     Box(Modifier.weight(1f).fillMaxHeight()) {
                         when (panel) {
@@ -214,11 +241,13 @@ private val SeekArea = 48.dp
 // transport and the volume.
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Color, side: androidx.compose.ui.unit.Dp) {
+private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Color, quiet: Float, side: androidx.compose.ui.unit.Dp) {
     // The quieter words: most of the ink, so they keep 4.5:1 over the wash.
     val muted = ink.copy(alpha = 0.9f)
     // Never narrower than the transport, however small the cover gets on a short window.
-    Column(Modifier.width(maxOf(side, ColumnLeast)), horizontalAlignment = Alignment.CenterHorizontally) {
+    val width = maxOf(side, ColumnLeast)
+    val widthPx = with(LocalDensity.current) { width.toPx() }
+    Column(Modifier.width(width), horizontalAlignment = Alignment.CenterHorizontally) {
         // A touch smaller while paused, as on the phone.
         val scale = remember { Animatable(1f) }
         val still = LocalReduceMotion.current
@@ -238,8 +267,9 @@ private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Col
             Cover(song.coverArt, coverModifier, shape = RoundedCornerShape(14.dp), placeholder = OctoIcons.Songs, retry = true)
         }
         Spacer(Modifier.height(28.dp))
-        if (live != null) return@Column LivePlayerLines(app, song, state, live, ink, muted)
-        // The heart sits on the middle of the name's capitals, as on the phone.
+        if (live != null) return@Column LivePlayerLines(app, song, state, live, ink, muted, quiet)
+        // The heart sits on the middle of the name's capitals, a step quieter
+        // than the name until it is filled, as on the phone.
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
             Column(Modifier.weight(1f)) {
                 MarkedTitle(song, OctoType.headline, markColor = muted) { Txt(song.title, OctoType.headline, ink, it, maxLines = 2) }
@@ -256,7 +286,7 @@ private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Col
             }
             OnTitleCapitals(OctoType.headline) {
                 if (isOutside(app, song)) {
-                    FetchButton(app, song, 40.dp, 22.dp, tint = ink)
+                    FetchButton(app, song, 40.dp, 22.dp, tint = ink.copy(alpha = quiet))
                 } else {
                     val starred = app.isStarred(song)
                     IconAction(
@@ -265,13 +295,13 @@ private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Col
                         { app.setStarred(listOf(song), !starred) },
                         size = 40.dp,
                         iconSize = 22.dp,
-                        tint = ink,
+                        tint = if (starred) ink else ink.copy(alpha = quiet),
                     )
                 }
             }
         }
         Spacer(Modifier.height(14.dp))
-        val position = rememberFramePosition(app.player)
+        val position = rememberFramePosition(app.player, widthPx)
         val duration = state.durationMs
         Column(Modifier.fillMaxWidth().heightIn(min = SeekArea)) {
             LineSlider(
@@ -291,7 +321,7 @@ private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Col
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             IconAction(OctoIcons.Shuffle, "Shuffle", { app.player.setShuffle(!state.shuffle) }, size = 40.dp, iconSize = 22.dp, active = state.shuffle, tint = ink, toggled = state.shuffle)
             IconAction(OctoIcons.Previous, "Previous", app.player::previous, size = 48.dp, iconSize = 30.dp, tint = ink)
-            PlayButton(state.playing, enabled = true, size = 68.dp) { app.player.togglePlay() }
+            PlayButton(state.playing, enabled = true, size = 68.dp, glyph = 30.dp * PlayScale, tint = ink) { app.player.togglePlay() }
             IconAction(OctoIcons.Next, "Next", app.player::next, size = 48.dp, iconSize = 30.dp, tint = ink)
             val repeat = state.repeat
             IconAction(
@@ -332,7 +362,7 @@ private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Col
 // line, Back, Play or Stop and Next, and the volume.
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-private fun LivePlayerLines(app: AppState, song: Song, state: PlayerState, live: LiveNow, ink: Color, muted: Color) {
+private fun LivePlayerLines(app: AppState, song: Song, state: PlayerState, live: LiveNow, ink: Color, muted: Color, quiet: Float) {
     // The button sits on the middle of the title's capitals, where a song's
     // heart does.
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
@@ -340,7 +370,7 @@ private fun LivePlayerLines(app: AppState, song: Song, state: PlayerState, live:
             Txt(song.title, OctoType.headline, ink, maxLines = 2)
             Txt(live.shown.subtitle, OctoType.body, muted, Modifier.heightIn(min = Focus.MinTarget), maxLines = 2)
         }
-        OnTitleCapitals(OctoType.headline) { OnAirButton(app, live, 40.dp, 22.dp, ink) }
+        OnTitleCapitals(OctoType.headline) { OnAirButton(app, live, 40.dp, 22.dp, ink, quiet) }
     }
     Spacer(Modifier.height(14.dp))
     LiveLine(app, ink, muted, Modifier.fillMaxWidth().heightIn(min = SeekArea), stacked = true)

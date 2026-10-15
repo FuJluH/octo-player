@@ -1,10 +1,5 @@
 package app.winters.octo.desktop.ui
 
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -28,9 +23,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -109,7 +102,6 @@ import app.winters.octo.playback.RadioDetails
 import app.winters.octo.playback.radioDetailsOf
 import app.winters.octo.playback.radioOf
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
-import androidx.compose.animation.core.RepeatMode as Bounce
 
 // The live player: what takes the place of the seek line, the transport,
 // the heart and the queue while a live station plays.
@@ -125,15 +117,11 @@ fun StopGlyph(color: Color, modifier: Modifier = Modifier, size: Dp = 20.dp) {
 }
 
 // The LIVE pill: a red dot that breathes gently (held still when motion
-// is reduced) and LIVE, on a red tint. A screen reader hears "Live".
+// is reduced, or while it is not on screen) and LIVE, on a red tint. A
+// screen reader hears "Live".
 @Composable
 fun LivePill(modifier: Modifier = Modifier) {
-    val still = LocalReduceMotion.current
-    val glow: State<Float> = if (still) {
-        remember { mutableFloatStateOf(1f) }
-    } else {
-        rememberInfiniteTransition(label = "live").animateFloat(1f, 0.35f, infiniteRepeatable(tween(1_100, easing = FastOutSlowInEasing), Bounce.Reverse), label = "live dot")
-    }
+    val glow = rememberSteppedPulse(0.35f, 1_100, running = !LocalReduceMotion.current && LocalWindowShown.current)
     Row(
         modifier
             .clearAndSetSemantics { contentDescription = "Live" }
@@ -209,6 +197,11 @@ fun OnTitleCapitals(style: TextStyle, content: @Composable () -> Unit) {
     Box(Modifier.height(with(density) { (middle * 2).toDp() }).wrapContentHeight(unbounded = true), contentAlignment = Alignment.Center) { content() }
 }
 
+// How strongly the icons beside a song's name show: a step quieter than
+// the name, as actions beside it rather than part of it. A filled heart
+// keeps the name's full ink.
+const val TitleIconAlpha = 0.7f
+
 private val LiveTimeStyle = DesktopType.meta.copy(fontFeatureSettings = "tnum")
 
 // Back, Play or Stop, and Next for a station: Back and Next change station
@@ -219,7 +212,7 @@ fun LiveTransport(app: AppState, state: PlayerState, live: LiveNow, playSize: Dp
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(gap)) {
         val lineup = live.lineup
         if (lineup.shows) IconAction(OctoIcons.Previous, "Previous station", app.player::previous, size = stepSize, iconSize = stepIcon, enabled = lineup.hasPrevious, tint = tint)
-        PlayButton(state.playing, enabled = true, size = playSize, waiting = state.buffering, stop = true) { app.player.togglePlay() }
+        PlayButton(state.playing, enabled = true, size = playSize, glyph = stepIcon * PlayScale, waiting = state.buffering, stop = true, tint = tint) { app.player.togglePlay() }
         if (lineup.shows) IconAction(OctoIcons.Next, "Next station", app.player::next, size = stepSize, iconSize = stepIcon, enabled = lineup.hasNext, tint = tint)
     }
 }
@@ -229,8 +222,10 @@ fun LiveTransport(app: AppState, state: PlayerState, live: LiveNow, playSize: Dp
 // for one Octo found online (with how its download goes, then the heart
 // once it is in), and a plus that opens Search when Octo has no song it is
 // sure of. A press while Octo is still looking waits for its answer.
+// `quiet` is how strongly an icon shows that is not a filled heart.
 @Composable
-fun OnAirButton(app: AppState, live: LiveNow, size: Dp, iconSize: Dp, tint: Color) {
+fun OnAirButton(app: AppState, live: LiveNow, size: Dp, iconSize: Dp, tint: Color, quiet: Float = 1f) {
+    val soft = tint.copy(alpha = tint.alpha * quiet)
     val heart = app.liveHeart
     val onAir = live.shown.onAir
     LaunchedEffect(onAir) { heart.follow(onAir) }
@@ -254,7 +249,7 @@ fun OnAirButton(app: AppState, live: LiveNow, size: Dp, iconSize: Dp, tint: Colo
             { heart.press(starredNow = starred) },
             size = size,
             iconSize = iconSize,
-            tint = tint,
+            tint = if (button.starred) tint else soft,
             toggled = button.starred,
         )
         is LiveSongButton.Add -> if (button.adding) {
@@ -275,9 +270,9 @@ fun OnAirButton(app: AppState, live: LiveNow, size: Dp, iconSize: Dp, tint: Colo
                 }
             }
         } else {
-            IconAction(OctoIcons.AddToLibrary, label, { heart.press() }, size = size, iconSize = iconSize, tint = tint, tooltip = "Not in your library. Press to add it")
+            IconAction(OctoIcons.AddToLibrary, label, { heart.press() }, size = size, iconSize = iconSize, tint = soft, tooltip = "Not in your library. Press to add it")
         }
-        LiveSongButton.Search -> IconAction(OctoIcons.Add, label, { heart.press() }, size = size, iconSize = iconSize, tint = tint, tooltip = "Octo isn't sure which song this is. Press to search for it")
+        LiveSongButton.Search -> IconAction(OctoIcons.Add, label, { heart.press() }, size = size, iconSize = iconSize, tint = soft, tooltip = "Octo isn't sure which song this is. Press to search for it")
     }
 }
 
