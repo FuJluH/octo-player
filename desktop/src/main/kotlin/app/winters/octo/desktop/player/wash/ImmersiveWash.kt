@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.skiaCanvas
 import androidx.compose.ui.platform.LocalWindowInfo
 import app.winters.octo.player.immersive.CoverSwap
+import app.winters.octo.player.immersive.RestMarginNanos
 import app.winters.octo.player.immersive.WashClock
 import app.winters.octo.player.immersive.WashVisibility
 import app.winters.octo.player.immersive.dollyScale
@@ -101,7 +102,11 @@ fun ImmersiveWash(
                 if (clock.tick(now, target, tempo, pace, moving)) frames.intValue++
                 now
             }
-            restFor(clock.restNanos(now))
+            // The rest here keeps to the millisecond, so it runs right up to
+            // when the next frame is due rather than waking early for a
+            // late timer: a frame asked for before then is a whole window
+            // drawn again for nothing.
+            restFor(clock.restNanos(now) + RestMarginNanos - WakeEarlyNanos)
         }
     }
 
@@ -143,6 +148,9 @@ private suspend fun restFor(nanos: Long) {
         }
     }
 }
+
+// How much before a frame is due the rest ends, for the frame to be asked for.
+private const val WakeEarlyNanos = 1_000_000L
 
 // The longest sleep the system keeps to the millisecond.
 private const val ShortSleepMs = 9L

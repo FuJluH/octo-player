@@ -2,6 +2,8 @@ package app.winters.octo.desktop.ui
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.focusGroup
 import androidx.compose.runtime.SideEffect
@@ -193,17 +195,29 @@ fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
                     if (event.buttons.isForwardPressed) app.navigator.forward()
                 },
         ) {
-            // The colours the glass frosts. Only these: the page is not under
-            // glass, so scrolling never makes the frame blur again.
-            Box(Modifier.fillMaxSize().hazeSource(backdrop)) { AmbientGlow(app) }
+            // The full player coming in and going out. Once all the way in it
+            // covers the window's colours and the frame whole, so they are
+            // neither drawn nor moved under it; they stay composed, and are
+            // back the moment it starts to go.
+            val player = remember { MutableTransitionState(false) }
+            player.targetState = connection != null && app.fullPlayer
+            val covered = player.isIdle && player.currentState
+            val shown = LocalWindowShown.current && !covered
+            CompositionLocalProvider(LocalWindowShown provides shown) {
+                // The colours the glass frosts. Only these: the page is not under
+                // glass, so scrolling never makes the frame blur again.
+                Box(Modifier.fillMaxSize().drawnUnless(covered).hazeSource(backdrop)) { AmbientGlow(app) }
+            }
             // Everything but the pop-ups, as one group the keyboard can come back to.
             Box(Modifier.fillMaxSize().focusRequester(parts.window).focusGroup()) {
                 if (connection == null) {
                     // The sign-in card frosts the colours behind it.
                     Box(Modifier.fillMaxSize().padding(top = FrameSize.TitleBar)) { SignInPage(app, backdrop) }
                 } else {
-                    SignedInFrame(app, backdrop, parts)
-                    AnimatedVisibility(app.fullPlayer, enter = fadeIn(motionFade()), exit = fadeOut(motionFade())) {
+                    CompositionLocalProvider(LocalWindowShown provides shown) {
+                        Box(Modifier.fillMaxSize().drawnUnless(covered)) { SignedInFrame(app, backdrop, parts) }
+                    }
+                    AnimatedVisibility(player, enter = fadeIn(motionFade()), exit = fadeOut(motionFade())) {
                         FullPlayer(app, Modifier.fillMaxSize().part(parts, parts.full, app), top = FrameSize.TitleBar)
                     }
                 }
@@ -250,6 +264,9 @@ internal fun Modifier.part(parts: FrameFocus, me: FocusRequester, app: AppState)
     .focusRequester(me)
     .focusProperties { onEnter = { if (me !in parts.order(app)) cancelFocusChange() } }
     .focusGroup()
+
+// Draws nothing while `hidden`, keeping what is inside composed and laid out.
+private fun Modifier.drawnUnless(hidden: Boolean): Modifier = drawWithContent { if (!hidden) drawContent() }
 
 // The full player's fade: brief, and briefer still with motion reduced.
 @Composable

@@ -93,6 +93,7 @@ import app.winters.octo.player.LyricsLayout
 import app.winters.octo.player.LyricsSpec
 import app.winters.octo.player.WordBox
 import app.winters.octo.player.measureLine
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlin.math.ceil
 import kotlin.math.roundToLong
@@ -120,6 +121,10 @@ private const val MEASURE_SLICE_NANOS = 4_000_000L
 
 // Nothing moving and nothing playing: the loop looks again this often.
 private const val RESTING_FRAME_MS = 32L
+
+// How long nothing has to move, with nothing playing, before the loop stops
+// asking for frames: the resting lines' blurred copies are made by then.
+private const val REST_AFTER_NANOS = 600_000_000L
 
 // The time stamp a right click shows stays this long.
 private const val STAMP_SHOWN_MS = 1_500L
@@ -165,9 +170,14 @@ fun FlowingLyrics(
     val lines = remember(lyrics) { LyricMapper.map(lyrics) }
     if (lines.isEmpty()) return
     val engine = remember(lines) { LyricEngine(lines) }
+    // Wakes a resting frame loop: a press, a scroll, a new look.
+    val wake = remember(engine) { Channel<Unit>(Channel.CONFLATED) }
     SideEffect {
-        engine.look = look
-        engine.reduceMotion = calm
+        if (engine.look != look || engine.reduceMotion != calm) {
+            engine.look = look
+            engine.reduceMotion = calm
+            wake.trySend(Unit)
+        }
     }
     val position by rememberUpdatedState(positionMs)
     val rate by rememberUpdatedState(speed)
@@ -211,14 +221,22 @@ fun FlowingLyrics(
         // The lines' drawings and their blurred copies, for these lines in
         // this colour and look.
         val pictures = remember(shown, textColor, calm, look, density.density) { LinePictures(density.density) }
-        DisposableEffect(pictures) { onDispose { pictures.close() } }
+        DisposableEffect(pictures) {
+            wake.trySend(Unit)
+            onDispose { pictures.close() }
+        }
         val currentPictures by rememberUpdatedState(pictures)
 
-        // The one frame loop, while the lyrics are on screen.
+        // The one frame loop, while the lyrics are on screen. Once nothing
+        // has moved for a while (time for the resting lines' blurred copies
+        // to be made) and nothing plays, it stops asking for frames, since
+        // each one redraws the whole window, and waits for play, a seek, a
+        // new timing, a press or a scroll.
         LaunchedEffect(engine, shown) {
             engine.restart()
+            var stillSince = 0L
             while (true) {
-                withFrameNanos { nanos ->
+                val now = withFrameNanos { nanos ->
                     engine.frame(
                         nanos,
                         position(),
@@ -230,8 +248,19 @@ fun FlowingLyrics(
                         release = shown::release,
                     )
                     currentPictures.follow(engine.states, engine.shown.value, nanos)
+                    nanos
                 }
-                if (engine.settled) delay(RESTING_FRAME_MS)
+                if (!engine.settled) {
+                    stillSince = 0L
+                    continue
+                }
+                if (stillSince == 0L) stillSince = now
+                delay(RESTING_FRAME_MS)
+                if (now - stillSince < REST_AFTER_NANOS) continue
+                val at = position()
+                val timing = offset + outputOffset
+                while (!isPlaying && position() == at && offset + outputOffset == timing && wake.tryReceive().isFailure) delay(RESTING_FRAME_MS)
+                stillSince = 0L
             }
         }
         LaunchedEffect(stamp) {
@@ -256,7 +285,7 @@ fun FlowingLyrics(
                 val range = engine.shown.value
                 for (index in range) {
                     key(index) {
-                        LineNode(engine, index, shown, pictures, textColor, calm, onTap = tap, onHold = { stamp = it })
+                        LineNode(engine, index, shown, pictures, textColor, calm, onTap = tap, onHold = { stamp = it }, onPress = { wake.trySend(Unit) })
                     }
                 }
                 stamp?.let { TimeStamp(engine, it, shown, offset + outputOffset) }
@@ -269,6 +298,7 @@ fun FlowingLyrics(
                 .onPointerEvent(PointerEventType.Scroll) { event ->
                     val dy = event.changes.firstOrNull()?.scrollDelta?.y ?: 0f
                     if (dy != 0f) {
+                        wake.trySend(Unit)
                         engine.dragStart()
                         engine.dragBy(-dy * WHEEL_PX)
                         engine.dragEnd()
@@ -276,7 +306,10 @@ fun FlowingLyrics(
                 }
                 .pointerInput(engine) {
                     detectVerticalDragGestures(
-                        onDragStart = { engine.dragStart() },
+                        onDragStart = {
+                            wake.trySend(Unit)
+                            engine.dragStart()
+                        },
                         onDragEnd = { engine.dragEnd() },
                         onDragCancel = { engine.dragEnd() },
                         onVerticalDrag = { change, dy ->
@@ -311,8 +344,10 @@ private fun LineNode(
     calm: Boolean,
     onTap: (Int) -> Unit,
     onHold: (Int) -> Unit,
+    onPress: () -> Unit,
 ) {
     val st = engine.states[index]
+    val press by rememberUpdatedState(onPress)
     val line = st.line
     val box = shown.lines[index]
     val nodeHeight = ceil(if (line.isInterlude) shown.spec.interludeFull else box.height).toInt()
@@ -344,9 +379,11 @@ private fun LineNode(
                         .pointerInput(index) {
                             detectTapGestures(
                                 onPress = {
+                                    press()
                                     engine.press(index, true)
                                     tryAwaitRelease()
                                     engine.press(index, false)
+                                    press()
                                 },
                                 onTap = { tap(index) },
                                 onLongPress = { hold(index) },

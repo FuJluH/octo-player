@@ -98,8 +98,9 @@ fun OctoAmbience(app: AppState, moving: Boolean, veil: Float, modifier: Modifier
 // The key colour for a prepared cover.
 fun WashCover.keyColour(): Color = if (main == 0) OctoKey else keyColour(main)
 
-// Whether the window is on screen: not minimised, and not hidden in the
-// tray. The window's moving colours rest while it is not.
+// Whether what reads it is on screen: the window not minimized and not
+// hidden in the tray, and for the frame and its colours, not covered by
+// the full player. What moves rests while it is not.
 val LocalWindowShown = compositionLocalOf { true }
 
 // Whether the window is drawn by the processor, without the graphics card

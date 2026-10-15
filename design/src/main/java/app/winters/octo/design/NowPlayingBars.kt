@@ -1,14 +1,14 @@
 package app.winters.octo.design
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.alpha
@@ -43,12 +43,7 @@ fun NowPlayingBars(playing: Boolean, modifier: Modifier = Modifier) {
         return
     }
     if (playing) {
-        val phase = rememberInfiniteTransition(label = "now playing").animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(tween(2_400, easing = LinearEasing)),
-            label = "now playing bars",
-        )
+        val phase = rememberLoopPhase(LOOP_MS)
         Box(modifier) {
             // The glow: the same bars, blurred, behind the sharp ones.
             Canvas(Modifier.matchParentSize().blur(4.dp, BlurredEdgeTreatment.Unbounded).alpha(0.7f)) {
@@ -59,6 +54,29 @@ fun NowPlayingBars(playing: Boolean, modifier: Modifier = Modifier) {
     } else {
         Canvas(modifier) { bars(OctoColors.TextMuted, null) }
     }
+}
+
+// How long the bars take to come round to where they started.
+private const val LOOP_MS = 2_400
+
+// How many times a second the bars move: three small bars look the same at
+// this rate as on every frame of the screen, and the screen is redrawn far
+// less often.
+private const val BARS_FPS = 30
+
+// Where the bars are in their loop, from 0 to 1, moving on BARS_FPS times
+// a second.
+@Composable
+private fun rememberLoopPhase(loopMs: Int): State<Float> {
+    val phase = remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(loopMs) {
+        val start = withFrameNanos { it }
+        while (true) {
+            delay(1_000L / BARS_FPS)
+            withFrameNanos { now -> phase.floatValue = ((now - start) / 1_000_000L % loopMs).toFloat() / loopMs }
+        }
+    }
+    return phase
 }
 
 // Reads the phase while drawing, so only the drawing repeats as it moves.
