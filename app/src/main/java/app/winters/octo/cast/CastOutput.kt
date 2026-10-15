@@ -93,14 +93,21 @@ class CastOutput(
         }
     }
 
-    // Replaces whatever is queued after the current song with `next`.
-    override fun setNext(next: RemoteMedia?) {
-        val client = client ?: return
-        val status = client.mediaStatus ?: return
-        val later = status.queueItems.map { it.itemId }.dropWhile { it != status.currentItemId }.drop(1)
-        if (later.isNotEmpty()) client.queueRemoveItems(later.toIntArray(), null)
-        next?.let { client.queueAppendItem(queueItem(it), null) }
+    private val queue = object : CastQueueClient {
+        override val status: CastQueueStatus?
+            get() = client?.mediaStatus?.forQueue()
+
+        override fun removeItems(itemIds: IntArray) {
+            client?.queueRemoveItems(itemIds, null)
+        }
+
+        override fun append(media: RemoteMedia) {
+            client?.queueAppendItem(queueItem(media), null)
+        }
     }
+
+    // Replaces whatever is queued after the song the device is on with `next`.
+    override fun setNext(next: RemoteMedia?) = queue.setNext(next)
 
     override fun play() {
         client?.play()
@@ -145,20 +152,12 @@ class CastOutput(
         val listener = listener ?: return
         val client = client ?: return
         val status = client.mediaStatus ?: return
-        val state = when (status.playerState) {
-            MediaStatus.PLAYER_STATE_PLAYING -> RemoteState.Playing
-            MediaStatus.PLAYER_STATE_PAUSED -> RemoteState.Paused
-            MediaStatus.PLAYER_STATE_BUFFERING, MediaStatus.PLAYER_STATE_LOADING -> RemoteState.Loading
-            MediaStatus.PLAYER_STATE_IDLE -> when (status.idleReason) {
-                MediaStatus.IDLE_REASON_FINISHED -> RemoteState.Ended
-                MediaStatus.IDLE_REASON_ERROR -> {
-                    listener.onFailed("playback error")
-                    return
-                }
-                else -> RemoteState.Idle
-            }
-            else -> return
+        val queueStatus = status.forQueue()
+        if (queueStatus.failed) {
+            listener.onFailed("playback error")
+            return
         }
+        val state = queueStatus.state ?: return
         val info = status.mediaInfo
         listener.onStatus(
             RemoteStatus(
