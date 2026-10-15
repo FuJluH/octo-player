@@ -1,5 +1,12 @@
 import Foundation
 
+/// A library database written by a newer Octo than this one: `found` is its version, `known` the
+/// newest this build reads.
+public struct NewerCatalogFile: Error, Equatable, Sendable {
+    public let found: Int
+    public let known: Int
+}
+
 /// The library database's tables. Raise `version` and add a step to `migrations` when a table
 /// changes; a step runs once on a file made by the version before it.
 enum Schema {
@@ -134,8 +141,12 @@ enum Schema {
         1: "ALTER TABLE download ADD COLUMN fileSize INTEGER;",
     ]
 
-    static func open(_ db: SQLiteDatabase) throws {
+    /// Makes the tables, or brings a file from an older version up to `version`. A file written
+    /// by a newer Octo is left exactly as it is and `NewerCatalogFile` is thrown, so the app
+    /// opens a fresh catalog in its place, as it does for a file it cannot read.
+    static func open(_ db: SQLiteDatabase, version: Int = Schema.version, migrations: [Int: String] = Schema.migrations) throws {
         let found = db.userVersion
+        if found > version { throw NewerCatalogFile(found: found, known: version) }
         if found == 0 {
             try db.execute(create)
         } else {
