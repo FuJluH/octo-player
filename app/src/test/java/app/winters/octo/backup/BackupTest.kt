@@ -63,7 +63,7 @@ class BackupTest {
         listOf(
             "liveBackground", "crossfade", "crossfadeSeconds", "lyricsOnline", "speed", "keepPitch", "pitchSemitones",
             "skipSilence", "resumeWired", "resumeBluetooth", "resumeAlways", "smartTransitions", "filterSweeps", "matchTempo", "crossfadeCurve",
-            "accent",
+            "accent", "glassTint",
         ).forEach { assertTrue("$it is missing", text.contains("\"$it\"")) }
     }
 

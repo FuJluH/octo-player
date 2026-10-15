@@ -93,6 +93,9 @@ data class PlayerPrefs(
     val libraryOnly: Boolean = false,
     // The accent the app is drawn in, or the playing cover's.
     val accent: AccentChoice = AccentChoice.Octo,
+    // Whether the glass (the bar, glazed buttons and sheets) takes the
+    // accent too, or keeps Octo's blue gray.
+    val glassTint: Boolean = false,
 ) {
     // What the player uses: the longest blend, or 0 for none.
     val crossfadeMs: Long get() = if (crossfade) crossfadeSeconds * 1_000L else 0
@@ -176,6 +179,7 @@ private val CAST_RENDERERS = booleanPreferencesKey("cast_renderers")
 private val CAST_KEEP_PLAYING = booleanPreferencesKey("cast_keep_playing")
 private val LIBRARY_ONLY = booleanPreferencesKey("library_only")
 private val ACCENT = stringPreferencesKey("accent_color")
+private val GLASS_TINT = booleanPreferencesKey("accent_glass")
 
 // A saved choice, or the default when nothing (or something unknown) is saved.
 private inline fun <reified T : Enum<T>> choice(name: String?, default: T): T =
@@ -241,6 +245,7 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
             castKeepPlaying = stored[CAST_KEEP_PLAYING] ?: defaults.castKeepPlaying,
             libraryOnly = stored[LIBRARY_ONLY] ?: defaults.libraryOnly,
             accent = choice(stored[ACCENT], defaults.accent),
+            glassTint = stored[GLASS_TINT] ?: defaults.glassTint,
         )
     }
 
@@ -382,6 +387,10 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
         context.playerPrefs.edit { it[ACCENT] = accent.name }
     }
 
+    suspend fun setGlassTint(on: Boolean) {
+        context.playerPrefs.edit { it[GLASS_TINT] = on }
+    }
+
     // Everything at once, for a backup.
     suspend fun snapshot(): Pair<PlayerPrefs, StreamPrefs> = prefs.first() to streamPrefs.first()
 
@@ -421,6 +430,7 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
             it[CAST_KEEP_PLAYING] = player.castKeepPlaying
             it[LIBRARY_ONLY] = player.libraryOnly
             it[ACCENT] = player.accent.name
+            it[GLASS_TINT] = player.glassTint
             it[COPIES] = stream.copies.name
             it[STREAM_WIFI] = stream.wifi.name
             it[STREAM_MOBILE] = stream.mobile.name

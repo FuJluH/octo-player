@@ -142,7 +142,7 @@ private fun AppearanceGroups(app: AppState, settings: AppSettings) {
     }
     HomeSectionsGroup(app, look.homeSections)
     Group("Full player") {
-        SwitchRow("Moving background", "Off holds the colours still, easier on a battery.", look.wash.moving) { on ->
+        SwitchRow("Moving background", "Off holds the colors still, easier on a battery.", look.wash.moving) { on ->
             wash { it.copy(moving = on) }
         }
         if (look.wash.moving && !look.calmMotion) {
@@ -308,8 +308,8 @@ private fun ambienceName(style: AmbienceStyle?): String = when (style) {
 // When each ambience choice is the one to pick.
 private fun ambienceHelp(style: AmbienceStyle?): String = when (style) {
     null -> "The plain dark background."
-    AmbienceStyle.Glow -> "The song's colours glow across the top of the window."
-    AmbienceStyle.Immersive -> "The cover's colours behind the whole window."
+    AmbienceStyle.Glow -> "The song's colors glow across the top of the window."
+    AmbienceStyle.Immersive -> "The cover's colors behind the whole window."
 }
 
 private fun motionName(motion: AmbienceMotion): String = when (motion) {

@@ -50,7 +50,7 @@ import kotlinx.coroutines.launch
 private val SheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
 
 // Solid enough to read on over any background, with a little accent in it.
-val SheetFill: Color get() = mix(OctoColors.Background, OctoColors.Accent, 0.05f).copy(alpha = 0.97f)
+val SheetFill: Color get() = mix(OctoColors.Background, OctoColors.GlassAccent, 0.05f).copy(alpha = 0.97f)
 
 // A panel that rises from the bottom over a dimmed screen, at most 70% of
 // the screen tall; what does not fit scrolls. Tapping the dim area, pulling the panel down, or back

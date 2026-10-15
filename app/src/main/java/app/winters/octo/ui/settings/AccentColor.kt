@@ -27,6 +27,7 @@ import app.winters.octo.theme.FixedAccents
 import app.winters.octo.theme.accentArgb
 import app.winters.octo.theme.accentHelp
 import app.winters.octo.ui.settings.rows.RowFrame
+import app.winters.octo.ui.settings.rows.SwitchRow
 import androidx.compose.ui.graphics.toArgb
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -41,7 +42,7 @@ import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-// The accent chosen in Appearance, and the colour it means now: a fixed
+// The accent chosen in Appearance, and the color it means now: a fixed
 // one, or for From the album art the playing cover's, Octo's own while
 // there is none.
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -70,12 +71,22 @@ class AccentViewModel @Inject constructor(
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+    // Whether the glass takes the accent too.
+    val glassTint: StateFlow<Boolean?> = settings.prefs
+        .map<_, Boolean?> { it.glassTint }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
     fun setChoice(choice: AccentChoice) {
         viewModelScope.launch { settings.setAccent(choice) }
     }
+
+    fun setGlassTint(on: Boolean) {
+        viewModelScope.launch { settings.setGlassTint(on) }
+    }
 }
 
-// The cover's colour an accent grows from: its most vivid, or none for
+// The cover's color an accent grows from: its most vivid, or none for
 // music without artwork.
 private fun PlayerColors.seed(): Int? = if (this === PlayerColors.Quiet) null else mesh[1].toArgb()
 
@@ -83,12 +94,14 @@ private fun PlayerColors.seed(): Int? = if (this === PlayerColors.Quiet) null el
 @Composable
 fun KeepAccent(vm: AccentViewModel = hiltViewModel()) {
     val accent by vm.accent.collectAsStateWithLifecycle()
+    val glassTint by vm.glassTint.collectAsStateWithLifecycle()
     LaunchedEffect(accent) { accent?.let { OctoColors.useAccent(Color(it)) } }
+    LaunchedEffect(glassTint) { glassTint?.let(OctoColors::tintGlass) }
 }
 
 // Appearance's accent picker: a circle for each accent and one for the
 // playing cover's, the chosen one checked, and a line naming it and saying
-// what it colours.
+// what it colors.
 @Composable
 fun AccentPicker(vm: AccentViewModel = hiltViewModel()) {
     val chosen = vm.choice.collectAsStateWithLifecycle().value ?: AccentChoice.Octo
@@ -112,3 +125,22 @@ fun AccentPicker(vm: AccentViewModel = hiltViewModel()) {
         }
     }
 }
+
+// Whether the glass takes the accent too, under the picker. Off, the bar,
+// glazed buttons and sheets keep Octo's blue gray whatever accent is chosen.
+@Composable
+fun GlassTintRow(vm: AccentViewModel = hiltViewModel()) {
+    val chosen = vm.choice.collectAsStateWithLifecycle().value ?: AccentChoice.Octo
+    val on = vm.glassTint.collectAsStateWithLifecycle().value ?: false
+    SwitchRow(
+        SettingsIndex.GlassTint,
+        checked = on,
+        onChange = vm::setGlassTint,
+        helper = if (chosen == AccentChoice.Octo) GLASS_TINT_SAME else GLASS_TINT_HELP,
+        enabled = chosen != AccentChoice.Octo,
+    )
+}
+
+const val GLASS_TINT_HELP = "The bar, glass buttons and sheets take the accent too. Off, they stay Octo's blue gray."
+const val GLASS_TINT_SAME = "Octo's own accent is already the glass's color. Pick another accent to tint the glass with it."
+

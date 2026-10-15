@@ -219,7 +219,7 @@ fun AmbientPreview(strength: AmbientStrength, modifier: Modifier = Modifier, vm:
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                if (now.title != null) now.artist.orEmpty() else "The glow takes its colours from the song on now.",
+                if (now.title != null) now.artist.orEmpty() else "The glow takes its colors from the song on now.",
                 style = OctoType.caption,
                 color = OctoColors.TextSecondary,
                 maxLines = 1,

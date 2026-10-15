@@ -93,7 +93,7 @@ fun GlazeTabs(
             Modifier
                 .matchParentSize()
                 .innerShadow(CircleShape, Shadow(radius = shadowBlur(2f), spread = 1.6.dp, color = Color.Black.copy(alpha = 0.15f), offset = DpOffset(0.dp, 3.dp)))
-                .innerShadow(CircleShape, Shadow(radius = 0.dp, spread = 0.5.dp, color = OctoColors.Accent.copy(alpha = 0.25f))),
+                .innerShadow(CircleShape, Shadow(radius = 0.dp, spread = 0.5.dp, color = OctoColors.GlassAccent.copy(alpha = 0.25f))),
         )
         Layout(
             content = {
@@ -129,7 +129,7 @@ fun GlazeTabs(
                     // The accent light on the pill, from the side it came
                     // from, stronger while it moves.
                     val moving = (abs(at - selected) * 2f).coerceIn(0f, 1f)
-                    val lit = OctoColors.Accent.copy(alpha = 0.10f + 0.12f * moving)
+                    val lit = OctoColors.GlassAccent.copy(alpha = 0.10f + 0.12f * moving)
                     val from = if (way > 0f) left else left + cell
                     val to = if (way > 0f) left + cell * 0.7f else left + cell * 0.3f
                     drawRoundRect(
@@ -142,7 +142,7 @@ fun GlazeTabs(
                     for (index in 0 until count) {
                         val tint = if (pill.isRunning) gearShiftTint(index, at, selected) else 0f
                         if (tint > 0f) {
-                            drawRoundRect(OctoColors.Accent.copy(alpha = tint), Offset(index * cell, 0f), Size(cell, size.height), corner)
+                            drawRoundRect(OctoColors.GlassAccent.copy(alpha = tint), Offset(index * cell, 0f), Size(cell, size.height), corner)
                         }
                     }
                 },

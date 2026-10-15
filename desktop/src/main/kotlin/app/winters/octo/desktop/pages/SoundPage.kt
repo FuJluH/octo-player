@@ -411,11 +411,11 @@ private fun BalanceRows(sound: SoundController) {
     }
 }
 
-// The balance in words: "Centre", "20% left".
+// The balance in words: "Center", "20% left".
 private fun readBalance(balance: Float): String {
     val percent = (abs(balance) * 100).roundToInt()
     return when {
-        percent == 0 -> "Centre"
+        percent == 0 -> "Center"
         balance < 0 -> "$percent% left"
         else -> "$percent% right"
     }

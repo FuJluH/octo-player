@@ -486,7 +486,7 @@ private fun CorrectionCard(settings: SoundSettings, vm: SoundViewModel) {
                 Text(correction?.name ?: "None", style = OctoType.bodySmall, color = OctoColors.TextPrimary)
                 Text(
                     when {
-                        correction == null -> "Evens out how your headphones colour the sound."
+                        correction == null -> "Evens out how your headphones color the sound."
                         correction.source == ParametricEqFile.IMPORTED -> "Imported from a file"
                         else -> "Correction by AutoEq, measured by ${correction.source}"
                     },

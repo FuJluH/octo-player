@@ -13,7 +13,7 @@ class SoundReadingsTest {
         assertEquals("1k", shortHz(1_000f))
         assertEquals("16k", shortHz(16_000f))
         assertEquals("1.2 kHz", readHz(1_200f))
-        assertEquals("Centre", readBalance(0.004f))
+        assertEquals("Center", readBalance(0.004f))
         assertEquals("30% left", readBalance(-0.3f))
     }
 }
