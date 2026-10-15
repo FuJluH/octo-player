@@ -37,6 +37,7 @@ import app.winters.octo.playback.isWebPicture
 import app.winters.octo.playback.stationArtOf
 import app.winters.octo.player.ArtworkPalette
 import app.winters.octo.player.LiveBackgroundSupported
+import app.winters.octo.player.MESH_FULL_FPS
 import app.winters.octo.player.MeshBackground
 import app.winters.octo.player.PlayerColors
 import app.winters.octo.player.PlayerPrefs
@@ -92,11 +93,15 @@ class BackgroundViewModel @Inject constructor(
 fun drawnMode(mode: BackgroundMode, sdk: Int): BackgroundMode =
     if (mode == BackgroundMode.Default && sdk < Build.VERSION_CODES.TIRAMISU) BackgroundMode.Artwork else mode
 
-// The frame limit of the background while it moves even with the music
-// paused (the live wash), or null when it is still or moves only while
-// music plays.
-fun pausedBackgroundFps(prefs: PlayerPrefs, sdk: Int): Int? =
-    if (prefs.liveBackground && drawnMode(prefs.background.mode, sdk) == BackgroundMode.Default) prefs.background.fps else null
+// The frame limit of the background while it moves: the live wash at its
+// own limit, playing or not, and the classic mesh at its full rate while
+// music plays (paused it slows almost to a stop). Null when it is still.
+fun movingBackgroundFps(prefs: PlayerPrefs, sdk: Int, playing: Boolean): Int? = when {
+    !prefs.liveBackground -> null
+    drawnMode(prefs.background.mode, sdk) == BackgroundMode.Default -> prefs.background.fps
+    prefs.background.mode == BackgroundMode.Classic && sdk >= Build.VERSION_CODES.TIRAMISU && playing -> MESH_FULL_FPS
+    else -> null
+}
 
 // The full player's background, by the chosen mode. `dolly` is read only
 // while drawing, for the way in and out.

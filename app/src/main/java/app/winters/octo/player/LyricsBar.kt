@@ -37,6 +37,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntRect
@@ -75,7 +76,8 @@ fun LyricsBar(
     modifier: Modifier = Modifier,
 ) {
     val ink = LocalContentColor.current
-    val position = rememberPositionMs(now, model::positionMs)
+    // The line along the edge is never wider than the window.
+    val position = rememberPositionMs(now, model::positionMs, lengthPx = LocalWindowInfo.current.containerSize.width.toFloat())
     val duration by rememberUpdatedState(now.durationMs)
     // Where a drag along the edge has got to, while one is under way.
     var scrub by remember { mutableStateOf<Float?>(null) }

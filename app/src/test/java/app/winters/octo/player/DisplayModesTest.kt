@@ -71,17 +71,25 @@ class DisplayModesTest {
     }
 
     @Test
-    fun thePlayerAsksForTheFastestOnlyWhileThingsMove() {
-        assertEquals(fastest, playerRefreshNeed(playing = true, calm = false, powerSave = false, movingBackgroundFps = null), 0f)
-        assertEquals(fastest, playerRefreshNeed(playing = true, calm = false, powerSave = false, movingBackgroundFps = 30), 0f)
-        // Paused: only the moving background, at its own limit.
-        assertEquals(90f, playerRefreshNeed(playing = false, calm = false, powerSave = false, movingBackgroundFps = 90), 0f)
-        assertEquals(0f, playerRefreshNeed(playing = false, calm = false, powerSave = false, movingBackgroundFps = null), 0f)
+    fun thePlayerAsksForTheFastestOnlyWhileSungWordsMove() {
+        assertEquals(fastest, playerRefreshNeed(playing = true, lyricsShown = true, calm = false, powerSave = false, movingBackgroundFps = null), 0f)
+        assertEquals(fastest, playerRefreshNeed(playing = true, lyricsShown = true, calm = false, powerSave = false, movingBackgroundFps = 30), 0f)
+        // Paused lyrics hold still: only the moving background is left.
+        assertEquals(30f, playerRefreshNeed(playing = false, lyricsShown = true, calm = false, powerSave = false, movingBackgroundFps = 30), 0f)
+    }
+
+    @Test
+    fun withoutLyricsOnlyTheMovingBackgroundCounts() {
+        // Playing, the progress line alone needs no fast screen.
+        assertEquals(0f, playerRefreshNeed(playing = true, lyricsShown = false, calm = false, powerSave = false, movingBackgroundFps = null), 0f)
+        assertEquals(60f, playerRefreshNeed(playing = true, lyricsShown = false, calm = false, powerSave = false, movingBackgroundFps = 60), 0f)
+        assertEquals(90f, playerRefreshNeed(playing = false, lyricsShown = false, calm = false, powerSave = false, movingBackgroundFps = 90), 0f)
+        assertEquals(0f, playerRefreshNeed(playing = false, lyricsShown = false, calm = false, powerSave = false, movingBackgroundFps = null), 0f)
     }
 
     @Test
     fun batterySaverAndReduceMotionAskForNothing() {
-        assertEquals(0f, playerRefreshNeed(playing = true, calm = false, powerSave = true, movingBackgroundFps = 120), 0f)
-        assertEquals(0f, playerRefreshNeed(playing = true, calm = true, powerSave = false, movingBackgroundFps = 120), 0f)
+        assertEquals(0f, playerRefreshNeed(playing = true, lyricsShown = true, calm = false, powerSave = true, movingBackgroundFps = 120), 0f)
+        assertEquals(0f, playerRefreshNeed(playing = true, lyricsShown = true, calm = true, powerSave = false, movingBackgroundFps = 120), 0f)
     }
 }

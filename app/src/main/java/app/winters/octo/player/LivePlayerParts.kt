@@ -3,11 +3,6 @@ package app.winters.octo.player
 import android.content.Intent
 import android.net.Uri
 import android.os.SystemClock
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -69,6 +64,7 @@ import app.winters.octo.ui.common.Choice
 import app.winters.octo.ui.common.ChoiceRequest
 import app.winters.octo.ui.common.LocalChoiceSheet
 import app.winters.octo.ui.common.LocalHaze
+import app.winters.octo.ui.common.rememberSteppedPulse
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -105,13 +101,7 @@ internal fun LiveBar(live: LiveNow, calm: Boolean) {
 // reduced, and "LIVE".
 @Composable
 private fun LivePill(calm: Boolean, modifier: Modifier) {
-    val glow = if (calm) {
-        1f
-    } else {
-        val pulse = rememberInfiniteTransition(label = "live pulse")
-        val value by pulse.animateFloat(1f, 0.35f, infiniteRepeatable(tween(1_100), RepeatMode.Reverse), label = "live dot")
-        value
-    }
+    val glow = rememberSteppedPulse(low = 0.35f, halfMs = 1_100, running = !calm)
     Glaze(
         modifier.height(24.dp).clearAndSetSemantics { contentDescription = "Live" },
         backdrop = LocalHaze.current,
@@ -122,7 +112,7 @@ private fun LivePill(calm: Boolean, modifier: Modifier) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Box(Modifier.size(7.dp).graphicsLayer { alpha = glow }.background(LiveRed, CircleShape))
+            Box(Modifier.size(7.dp).graphicsLayer { alpha = glow.value }.background(LiveRed, CircleShape))
             Text("LIVE", style = LiveLabel, color = LocalContentColor.current, maxLines = 1)
         }
     }
