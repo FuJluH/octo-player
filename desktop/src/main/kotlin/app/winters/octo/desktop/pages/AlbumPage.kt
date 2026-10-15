@@ -4,6 +4,12 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import app.winters.octo.animated.AnimatedArtSetting
+import app.winters.octo.animated.onAlbumPage
+import app.winters.octo.desktop.animated.AnimatedCover
+import app.winters.octo.desktop.settings.animatedArtSetting
+import app.winters.octo.desktop.ui.LocalWindowShown
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -129,7 +135,7 @@ fun AlbumPage(app: AppState, visit: Visit, id: String) {
                     EntityHeader(
                         "Album",
                         album.name,
-                        picture = { Cover(album.coverArt, it, shape = Corner.ArtLShape, online = !inLibrary) },
+                        picture = { modifier -> AlbumArt(app, album, modifier, online = !inLibrary) },
                         // No line at all for an album with no artist, rather than an empty one.
                         subtitle = artistName?.takeIf(String::isNotBlank)?.let { name -> { LinkText(name, album.artistId) { app.navigator.go(Page.Artist(it, album.artist)) } } },
                         facts = albumFacts(app, album, songs.size, songs.sumOf { it.duration }, format),
@@ -159,6 +165,25 @@ fun AlbumPage(app: AppState, visit: Visit, id: String) {
             }
         }
     }
+}
+
+// The album's cover in its header, with its square animated loop over it
+// when it has one and the setting plays it, held while the page is under
+// the full player or the window is away.
+@Composable
+private fun AlbumArt(app: AppState, album: AlbumWithSongs, modifier: Modifier, online: Boolean) {
+    val settings by app.settings.state.collectAsState()
+    val setting = settings.appearance.animatedArtSetting
+    LaunchedEffect(album.id, album.animatedArt) { app.animated.note(album.id, album.animatedArt) }
+    val art = if (setting == AnimatedArtSetting.Off) null else album.animatedArt ?: app.animated.artOf(album.id).value
+    AnimatedCover(
+        app.animated,
+        album.id,
+        setting.onAlbumPage(art),
+        seen = LocalWindowShown.current && !app.fullPlayer,
+        shape = Corner.ArtLShape,
+        modifier = modifier,
+    ) { Cover(album.coverArt, it, shape = Corner.ArtLShape, online = online) }
 }
 
 // How much of an album is in the library, under its facts, with a way to

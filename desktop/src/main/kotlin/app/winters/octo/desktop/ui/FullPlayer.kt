@@ -5,6 +5,11 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.heightIn
 import app.winters.octo.design.Focus
 import app.winters.octo.desktop.nav.SEEK_STEP_MS
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -31,6 +36,7 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,6 +63,8 @@ import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.player.DesktopPlayer
 import app.winters.octo.desktop.player.LiveNow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalDensity
 import app.winters.octo.desktop.player.PlayerState
 import app.winters.octo.desktop.player.RepeatMode
 import app.winters.octo.desktop.player.wash.ImmersiveWash
@@ -77,6 +85,15 @@ import app.winters.octo.player.immersive.WashTuning
 import app.winters.octo.player.immersive.inkOver
 import app.winters.octo.player.immersive.paceBpm
 import app.winters.octo.subsonic.Song
+import app.winters.octo.animated.AnimatedArtSetting
+import app.winters.octo.animated.LOOP_FADE_MS
+import app.winters.octo.animated.PlayerLoop
+import app.winters.octo.animated.inPlayer
+import app.winters.octo.desktop.animated.AnimatedCover
+import app.winters.octo.desktop.animated.TallBackdrop
+import app.winters.octo.desktop.animated.backdropColor
+import app.winters.octo.desktop.animated.inkOn
+import app.winters.octo.desktop.settings.animatedArtSetting
 
 // The dark words used over a light background, as on the phone.
 val DarkInk = Color(DarkInkArgb)
@@ -138,7 +155,20 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
     LaunchedEffect(washId, tuning, app.connection) {
         app.washCovers.follow(app.connection?.client, washId, tuning).collect { cover = it }
     }
-    val ink = remember(cover) { cover?.playerInk() }.color()
+    // The album's animated art, as the setting has it: the square loop in
+    // place of the cover, or the tall one behind everything.
+    val setting = look.animatedArtSetting
+    val albumId = song.albumId?.takeIf { state.live == null && it.isNotBlank() }
+    val art = if (setting == AnimatedArtSetting.Off || albumId == null) null else app.animated.artOf(albumId).value
+    val loop = setting.inPlayer(art)
+    val tall = (loop as? PlayerLoop.Backdrop)?.clip
+    val seen = LocalWindowShown.current && app.fullPlayer
+    val base = tall?.let { backdropColor(it, cover?.main) }
+    // The words' color over the tall loop's fill once it shows, else over the wash.
+    var tallInk by remember(tall?.video) { mutableStateOf(tall?.let { app.animated.tallInks[it.video] }) }
+    val ink = tallInk?.takeIf { tall != null } ?: remember(cover) { cover?.playerInk() }.color()
+    // Where the title starts, for the tall loop to fade out above it.
+    var titleTop by remember { mutableStateOf<androidx.compose.ui.unit.Dp?>(null) }
     val dolly = remember { Animatable(0f) }
     val calm = LocalReduceMotion.current
     // With motion reduced, the background is simply there.
@@ -146,29 +176,58 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
 
     // It takes every click and scroll on its background, so none reach the
     // page hidden under it.
-    Box(modifier.swallowClicks().background(OctoColors.Background)) {
-        PlayerBackdrop(
-            cover,
-            paceBpm(song.bpm, wash.useBpm),
-            wash.fps,
-            wash.speed / 100f,
-            // Still while the window is minimised or in the tray.
-            moving = wash.moving && !LocalReduceMotion.current && LocalWindowShown.current,
-            dolly = { dolly.value },
-        )
+    BoxWithConstraints(modifier.swallowClicks().background(OctoColors.Background)) {
         val live = state.live
-        BoxWithConstraints(Modifier.fillMaxSize().padding(start = 56.dp, end = 40.dp, top = top + 48.dp, bottom = 32.dp)) {
-            // A station has no lyrics or song details: their place shows the
-            // stations being surfed (none for a station alone), so the cover
-            // stays where it was.
-            val panel = when {
-                live == null -> app.playerPanel
-                app.playerPanel == null || state.queue.size <= 1 -> null
-                else -> SidePanel.Queue
-            }
+        val player = this
+        // A station has no lyrics or song details: their place shows the
+        // stations being surfed (none for a station alone), so the cover
+        // stays where it was.
+        val panel = when {
+            live == null -> app.playerPanel
+            app.playerPanel == null || state.queue.size <= 1 -> null
+            else -> SidePanel.Queue
+        }
+        // The wash goes once a tall loop has faded in over it, and comes
+        // back for a song without one.
+        var covered by remember(tall?.video) { mutableStateOf(false) }
+        if (tall == null || !covered) {
+            PlayerBackdrop(
+                cover,
+                paceBpm(song.bpm, wash.useBpm),
+                wash.fps,
+                wash.speed / 100f,
+                // Still while the window is minimised or in the tray.
+                moving = wash.moving && !LocalReduceMotion.current && LocalWindowShown.current,
+                dolly = { dolly.value },
+            )
+        }
+        if (tall != null && albumId != null && base != null) {
+            // The cover's side of the player: the whole of it alone, or the
+            // column beside the lyrics or queue.
+            val inner = playerArea(player.maxWidth, player.maxHeight, top, panel != null)
+            val density = LocalDensity.current
+            var origin by remember { mutableStateOf(0f) }
+            key(albumId) { TallBackdrop(
+                app.animated,
+                albumId,
+                tall,
+                seen,
+                base,
+                areaLeft = 0.dp,
+                areaRight = if (panel != null) PlayerStart + inner.column + 24.dp else player.maxWidth,
+                center = PlayerStart + if (panel != null) inner.column / 2 else inner.width / 2,
+                titleTop = titleTop?.let { it - with(density) { origin.toDp() } },
+                modifier = Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionInRoot().y },
+                ink = { tallInk = it; app.animated.tallInks[tall.video] = it },
+                shown = { covered = true },
+                measured = { w, h -> app.animated.tallPx = w to h },
+            ) }
+        }
+        BoxWithConstraints(Modifier.fillMaxSize().padding(start = PlayerStart, end = 40.dp, top = top + 48.dp, bottom = 32.dp)) {
             val artSide = minOf(440.dp, maxHeight - 290.dp, if (panel != null) maxWidth * 0.36f else maxWidth * 0.6f).coerceAtLeast(120.dp)
             Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(48.dp, Alignment.CenterHorizontally)) {
-                PlayerColumn(app, song, state, ink, artSide)
+                // The cover stays until the tall loop's fill is there to take its place.
+                PlayerColumn(app, song, state, ink, artSide, if (tall != null && tallInk == null) art?.square?.takeIf { it.video.isNotBlank() }?.let { PlayerLoop.Cover(it) } ?: PlayerLoop.None else loop, albumId, seen, onTitleTop = { titleTop = it })
                 if (panel != null) {
                     Box(Modifier.weight(1f).fillMaxHeight()) {
                         when (panel) {
@@ -206,6 +265,20 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
 // The transport's width, with a little room either side.
 private val ColumnLeast = 340.dp
 
+// The room the player keeps on its left.
+private val PlayerStart = 56.dp
+
+// The player's inner width and its column's width, as the layout below
+// works them out, for placing what sits behind it.
+private class PlayerArea(val width: androidx.compose.ui.unit.Dp, val column: androidx.compose.ui.unit.Dp)
+
+private fun playerArea(width: androidx.compose.ui.unit.Dp, height: androidx.compose.ui.unit.Dp, top: androidx.compose.ui.unit.Dp, panel: Boolean): PlayerArea {
+    val innerWidth = width - PlayerStart - 40.dp
+    val innerHeight = height - top - 48.dp - 32.dp
+    val side = minOf(440.dp, innerHeight - 290.dp, if (panel) innerWidth * 0.36f else innerWidth * 0.6f).coerceAtLeast(120.dp)
+    return PlayerArea(innerWidth, maxOf(side, ColumnLeast))
+}
+
 // The room the seek line and its times take, the live line and its LIVE
 // pill too, so the cover stays put when a song gives way to a station.
 private val SeekArea = 48.dp
@@ -214,11 +287,30 @@ private val SeekArea = 48.dp
 // transport and the volume.
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Color, side: androidx.compose.ui.unit.Dp) {
+private fun PlayerColumn(
+    app: AppState,
+    song: Song,
+    state: PlayerState,
+    ink: Color,
+    side: androidx.compose.ui.unit.Dp,
+    loop: PlayerLoop = PlayerLoop.None,
+    albumId: String? = null,
+    seen: Boolean = true,
+    // Where the title's top is in the window, as it moves.
+    onTitleTop: (androidx.compose.ui.unit.Dp) -> Unit = {},
+) {
     // The quieter words: most of the ink, so they keep 4.5:1 over the wash.
     val muted = ink.copy(alpha = 0.9f)
+    // Over a tall loop the cover is the loop behind, and the words sit at
+    // the foot of the window, over its color.
+    val backdrop = loop is PlayerLoop.Backdrop
+    // The words glide to the foot as the cover gives way to the tall loop,
+    // and back to the middle under the cover.
+    val foot by animateFloatAsState(if (backdrop) 1f else 0f, tween(motionScale().ms(LOOP_FADE_MS)), label = "player foot")
     // Never narrower than the transport, however small the cover gets on a short window.
-    Column(Modifier.width(maxOf(side, ColumnLeast)), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(Modifier.width(maxOf(side, ColumnLeast)).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
+    Spacer(Modifier.weight(1f))
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         // A touch smaller while paused, as on the phone.
         val scale = remember { Animatable(1f) }
         val still = LocalReduceMotion.current
@@ -234,12 +326,26 @@ private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Col
         val live = state.live
         if (live != null) {
             LiveCover(app, live, coverModifier, RoundedCornerShape(14.dp))
+            Spacer(Modifier.height(28.dp))
         } else {
-            Cover(song.coverArt, coverModifier, shape = RoundedCornerShape(14.dp), placeholder = OctoIcons.Songs, retry = true)
+            AnimatedVisibility(!backdrop, enter = fadeIn(tween(motionScale().ms(LOOP_FADE_MS))) + expandVertically(tween(motionScale().ms(LOOP_FADE_MS))), exit = fadeOut(tween(motionScale().ms(LOOP_FADE_MS))) + shrinkVertically(tween(motionScale().ms(LOOP_FADE_MS)))) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    AnimatedCover(
+                        app.animated,
+                        albumId,
+                        (loop as? PlayerLoop.Cover)?.clip,
+                        seen,
+                        RoundedCornerShape(14.dp),
+                        coverModifier,
+                        measured = { app.animated.squarePx = it },
+                    ) { Cover(song.coverArt, it, shape = RoundedCornerShape(14.dp), placeholder = OctoIcons.Songs, retry = true) }
+                    Spacer(Modifier.height(28.dp))
+                }
+            }
         }
-        Spacer(Modifier.height(28.dp))
         if (live != null) return@Column LivePlayerLines(app, song, state, live, ink, muted)
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        val density = LocalDensity.current
+        Row(Modifier.fillMaxWidth().onGloballyPositioned { onTitleTop(with(density) { it.positionInRoot().y.toDp() }) }, verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 MarkedTitle(song, OctoType.headline, markColor = muted) { Txt(song.title, OctoType.headline, ink, it, maxLines = 2) }
                 val artist = song.displayArtist ?: song.artist.orEmpty()
@@ -321,6 +427,8 @@ private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Col
             LineSlider(fraction = { volume }, onSeek = app::setVolume, modifier = Modifier.weight(1f), live = true, color = ink, trackColor = ink.copy(alpha = 0.22f), label = "Volume")
             IconAction(OctoIcons.VolumeUp, "Louder", { app.setVolume(volume + 0.1f) }, size = 30.dp, iconSize = 18.dp, tint = muted)
         }
+    }
+    Spacer(Modifier.weight((1f - foot).coerceAtLeast(0.0001f)))
     }
 }
 

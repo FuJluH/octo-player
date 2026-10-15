@@ -1,5 +1,7 @@
 package app.winters.octo.desktop
 
+import app.winters.octo.animated.LoopShelf
+import app.winters.octo.desktop.animated.LOOP_SHELF_BYTES
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.CompositionLocalProvider
@@ -223,6 +225,7 @@ fun main(args: Array<String>) {
                 player.problem?.let { problem -> it.notice = problem }
             }
             app.playlistArt.folder = File(places.cache, "playlist-art")
+            app.animated.shelf = LoopShelf(File(places.cache, "loops"), LOOP_SHELF_BYTES)
             app.coverImages = { SingletonImageLoader.get(PlatformContext.INSTANCE) }
             // Kept songs carry on fetching, and play from this computer.
             app.offline.start()

@@ -701,6 +701,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_octo_audio_checksum_func_graphic_bands(
     ): Int
+    external fun uniffi_octo_audio_checksum_func_loop_video_available(
+    ): Int
     external fun uniffi_octo_audio_checksum_method_engine_current_device(
     ): Int
     external fun uniffi_octo_audio_checksum_method_engine_devices(
@@ -779,9 +781,29 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_octo_audio_checksum_method_enginelistener_on_event(
     ): Int
+    external fun uniffi_octo_audio_checksum_method_loopvideo_copy_frame(
+    ): Int
+    external fun uniffi_octo_audio_checksum_method_loopvideo_failure(
+    ): Int
+    external fun uniffi_octo_audio_checksum_method_loopvideo_frames(
+    ): Int
+    external fun uniffi_octo_audio_checksum_method_loopvideo_height(
+    ): Int
+    external fun uniffi_octo_audio_checksum_method_loopvideo_hold(
+    ): Int
+    external fun uniffi_octo_audio_checksum_method_loopvideo_play(
+    ): Int
+    external fun uniffi_octo_audio_checksum_method_loopvideo_stop(
+    ): Int
+    external fun uniffi_octo_audio_checksum_method_loopvideo_wait_frame(
+    ): Int
+    external fun uniffi_octo_audio_checksum_method_loopvideo_width(
+    ): Int
     external fun uniffi_octo_audio_checksum_constructor_engine_new(
     ): Int
     external fun uniffi_octo_audio_checksum_constructor_engine_new_silent(
+    ): Int
+    external fun uniffi_octo_audio_checksum_constructor_loopvideo_open(
     ): Int
     external fun ffi_octo_audio_uniffi_contract_version(
     ): Int
@@ -896,10 +918,36 @@ internal object UniffiLib {
     ): Unit
     external fun uniffi_octo_audio_fn_method_enginelistener_on_event(`ptr`: Long,`event`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    external fun uniffi_octo_audio_fn_clone_loopvideo(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_octo_audio_fn_free_loopvideo(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_octo_audio_fn_constructor_loopvideo_open(`path`: RustBuffer.ByValue,`width`: Int,`height`: Int,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_octo_audio_fn_method_loopvideo_copy_frame(`ptr`: Long,`address`: Long,`rowBytes`: Int,`length`: Long,`have`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_octo_audio_fn_method_loopvideo_failure(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_octo_audio_fn_method_loopvideo_frames(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_octo_audio_fn_method_loopvideo_height(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Int
+    external fun uniffi_octo_audio_fn_method_loopvideo_hold(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_octo_audio_fn_method_loopvideo_play(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_octo_audio_fn_method_loopvideo_stop(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_octo_audio_fn_method_loopvideo_wait_frame(`ptr`: Long,`have`: Long,`timeoutMs`: Int,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_octo_audio_fn_method_loopvideo_width(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Int
     external fun uniffi_octo_audio_fn_func_equalizer_presets(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_octo_audio_fn_func_graphic_bands(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_octo_audio_fn_func_loop_video_available(uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
     external fun ffi_octo_audio_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun ffi_octo_audio_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1025,6 +1073,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_octo_audio_checksum_func_graphic_bands() and 0xFFFF) != 40024) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if ((lib.uniffi_octo_audio_checksum_func_loop_video_available() and 0xFFFF) != 58253) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_octo_audio_checksum_method_engine_current_device() and 0xFFFF) != 45769) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1142,10 +1193,40 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_octo_audio_checksum_method_enginelistener_on_event() and 0xFFFF) != 5729) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if ((lib.uniffi_octo_audio_checksum_method_loopvideo_copy_frame() and 0xFFFF) != 1344) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_octo_audio_checksum_method_loopvideo_failure() and 0xFFFF) != 31111) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_octo_audio_checksum_method_loopvideo_frames() and 0xFFFF) != 61814) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_octo_audio_checksum_method_loopvideo_height() and 0xFFFF) != 11629) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_octo_audio_checksum_method_loopvideo_hold() and 0xFFFF) != 55564) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_octo_audio_checksum_method_loopvideo_play() and 0xFFFF) != 62931) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_octo_audio_checksum_method_loopvideo_stop() and 0xFFFF) != 4667) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_octo_audio_checksum_method_loopvideo_wait_frame() and 0xFFFF) != 21785) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_octo_audio_checksum_method_loopvideo_width() and 0xFFFF) != 38683) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_octo_audio_checksum_constructor_engine_new() and 0xFFFF) != 64625) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_octo_audio_checksum_constructor_engine_new_silent() and 0xFFFF) != 2833) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_octo_audio_checksum_constructor_loopvideo_open() and 0xFFFF) != 62983) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
 }
@@ -2929,6 +3010,484 @@ public object FfiConverterTypeEngineListener: FfiConverter<EngineListener, Long>
     override fun allocationSize(value: EngineListener) = 8UL
 
     override fun write(value: EngineListener, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+/**
+ * A muted, looping video, decoded on its own thread. It starts held:
+ * `play` starts it. Frames are read with `copy_frame`, into memory the
+ * app owns, so no frame crosses into the app as a new array.
+ */
+public interface LoopVideoInterface {
+    
+    /**
+     * Copies the newest frame (BGRA, alpha 255, top row first) into the
+     * memory at `address`, `length` bytes with rows `row_bytes` apart,
+     * when it is newer than frame `have`. Gives the newest frame's number,
+     * so the same number back means nothing was copied.
+     *
+     * `address` must be writable memory of at least `length` bytes that
+     * stays valid for the call, such as a bitmap's own pixels.
+     */
+    fun `copyFrame`(`address`: kotlin.ULong, `rowBytes`: kotlin.UInt, `length`: kotlin.ULong, `have`: kotlin.ULong): kotlin.ULong
+    
+    /**
+     * Why the loop stopped decoding, when it failed.
+     */
+    fun `failure`(): kotlin.String?
+    
+    /**
+     * How many frames have been shown so far; 0 until the first.
+     */
+    fun `frames`(): kotlin.ULong
+    
+    /**
+     * The frames' height in pixels.
+     */
+    fun `height`(): kotlin.UInt
+    
+    /**
+     * Holds on the frame shown; nothing is decoded until `play`.
+     */
+    fun `hold`()
+    
+    /**
+     * Plays from where it was held.
+     */
+    fun `play`()
+    
+    /**
+     * Stops for good and lets the decoder go.
+     */
+    fun `stop`()
+    
+    /**
+     * Waits up to `timeout_ms` for a frame newer than `have`; returns
+     * sooner when the loop is held, stopped or fails. Gives the newest
+     * frame's number.
+     */
+    fun `waitFrame`(`have`: kotlin.ULong, `timeoutMs`: kotlin.UInt): kotlin.ULong
+    
+    /**
+     * The frames' width in pixels.
+     */
+    fun `width`(): kotlin.UInt
+    
+    companion object
+}
+
+/**
+ * A muted, looping video, decoded on its own thread. It starts held:
+ * `play` starts it. Frames are read with `copy_frame`, into memory the
+ * app owns, so no frame crosses into the app as a new array.
+ */
+open class LoopVideo: Disposable, AutoCloseable, LoopVideoInterface
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    /**
+     * Whether the current object has been destroyed and its reference is gone in the Rust side.
+     */
+    val uniffiIsDestroyed: Boolean get() = wasDestroyed.get()
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_octo_audio_fn_free_loopvideo(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_octo_audio_fn_clone_loopvideo(handle, status)
+        }
+    }
+
+    
+    /**
+     * Copies the newest frame (BGRA, alpha 255, top row first) into the
+     * memory at `address`, `length` bytes with rows `row_bytes` apart,
+     * when it is newer than frame `have`. Gives the newest frame's number,
+     * so the same number back means nothing was copied.
+     *
+     * `address` must be writable memory of at least `length` bytes that
+     * stays valid for the call, such as a bitmap's own pixels.
+     */
+    @Throws(EngineException::class)override fun `copyFrame`(`address`: kotlin.ULong, `rowBytes`: kotlin.UInt, `length`: kotlin.ULong, `have`: kotlin.ULong): kotlin.ULong {
+            return FfiConverterULong.lift(
+    callWithHandle {
+    uniffiRustCallWithError(EngineException) { _status ->
+    UniffiLib.uniffi_octo_audio_fn_method_loopvideo_copy_frame(
+        it,
+        
+        FfiConverterULong.lower(`address`),
+        FfiConverterUInt.lower(`rowBytes`),
+        FfiConverterULong.lower(`length`),
+        FfiConverterULong.lower(`have`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Why the loop stopped decoding, when it failed.
+     */override fun `failure`(): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_octo_audio_fn_method_loopvideo_failure(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * How many frames have been shown so far; 0 until the first.
+     */override fun `frames`(): kotlin.ULong {
+            return FfiConverterULong.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_octo_audio_fn_method_loopvideo_frames(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The frames' height in pixels.
+     */override fun `height`(): kotlin.UInt {
+            return FfiConverterUInt.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_octo_audio_fn_method_loopvideo_height(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Holds on the frame shown; nothing is decoded until `play`.
+     */override fun `hold`()
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_octo_audio_fn_method_loopvideo_hold(
+        it,
+        _status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Plays from where it was held.
+     */override fun `play`()
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_octo_audio_fn_method_loopvideo_play(
+        it,
+        _status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Stops for good and lets the decoder go.
+     */override fun `stop`()
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_octo_audio_fn_method_loopvideo_stop(
+        it,
+        _status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Waits up to `timeout_ms` for a frame newer than `have`; returns
+     * sooner when the loop is held, stopped or fails. Gives the newest
+     * frame's number.
+     */override fun `waitFrame`(`have`: kotlin.ULong, `timeoutMs`: kotlin.UInt): kotlin.ULong {
+            return FfiConverterULong.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_octo_audio_fn_method_loopvideo_wait_frame(
+        it,
+        
+        FfiConverterULong.lower(`have`),
+        FfiConverterUInt.lower(`timeoutMs`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The frames' width in pixels.
+     */override fun `width`(): kotlin.UInt {
+            return FfiConverterUInt.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_octo_audio_fn_method_loopvideo_width(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+
+    
+
+
+    
+    companion object {
+        
+    /**
+     * Opens the video file at `path` through the system's decoder, scaled
+     * down to cover `width` by `height` pixels where the decoder can (0
+     * for the file's own size). Fails with `Unsupported` where the system
+     * has no decoder for it (Linux without GStreamer, say).
+     */
+    @Throws(EngineException::class) fun `open`(`path`: kotlin.String, `width`: kotlin.UInt, `height`: kotlin.UInt): LoopVideo {
+            return FfiConverterTypeLoopVideo.lift(
+    uniffiRustCallWithError(EngineException) { _status ->
+    UniffiLib.uniffi_octo_audio_fn_constructor_loopvideo_open(
+    
+        
+        FfiConverterString.lower(`path`),
+        FfiConverterUInt.lower(`width`),
+        FfiConverterUInt.lower(`height`),_status)
+}
+    )
+    }
+    
+
+        
+    }
+    
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeLoopVideo: FfiConverter<LoopVideo, Long> {
+    override fun lower(value: LoopVideo): Long {
+        return value.uniffiCloneHandle()
+    }
+
+    override fun lift(value: Long): LoopVideo {
+        return LoopVideo(UniffiWithHandle, value)
+    }
+
+    override fun read(buf: ByteBuffer): LoopVideo {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: LoopVideo) = 8UL
+
+    override fun write(value: LoopVideo, buf: ByteBuffer) {
         buf.putLong(lower(value))
     }
 }
@@ -5755,6 +6314,20 @@ public object FfiConverterSequenceTypeTrustedCertificate: FfiConverterRustBuffer
             return FfiConverterSequenceFloat.lift(
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_octo_audio_fn_func_graphic_bands(
+    
+        _status)
+}
+    )
+    }
+    
+
+        /**
+         * Whether this computer can decode loops at all: false on Linux without
+         * GStreamer, for one.
+         */ fun `loopVideoAvailable`(): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_octo_audio_fn_func_loop_video_available(
     
         _status)
 }
