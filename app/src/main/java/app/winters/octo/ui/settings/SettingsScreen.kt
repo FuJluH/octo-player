@@ -305,6 +305,7 @@ private fun Categories(onOpen: (NavKey) -> Unit, vm: SettingsViewModel) {
     SettingsGroup(title = "Listening", separatorInset = IconRowInset) {
         CategoryRow(OctoIcons.Playback, SettingsPage.Playback.title, playbackSummary(player)) { open(SettingsPage.Playback) }
         CategoryRow(OctoIcons.Sound, SettingsPage.Sound.title, soundSummary(sound)) { open(SettingsPage.Sound) }
+        CategoryRow(OctoIcons.Radio, SettingsPage.Radio.title, radioSummary(player)) { open(SettingsPage.Radio) }
         CategoryRow(
             OctoIcons.Appearance,
             SettingsPage.Appearance.title,
@@ -338,6 +339,7 @@ fun SettingsPageScreen(page: SettingsPage, highlight: String?, onOpen: (NavKey) 
         SettingsPage.Playback -> PlaybackPage(onBack, highlight)
         // Sound opens its own page; this stands in should a stored route name it.
         SettingsPage.Sound -> SoundScreen(onBack)
+        SettingsPage.Radio -> RadioPage(onOpen, onBack, highlight)
         SettingsPage.Appearance -> AppearancePage(onOpen, onBack, highlight)
         SettingsPage.Library -> LibraryPage(onBack, highlight)
         SettingsPage.Server -> ServerPage(onOpen, onBack, highlight)

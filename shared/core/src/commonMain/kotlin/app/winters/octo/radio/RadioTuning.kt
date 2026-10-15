@@ -1,5 +1,7 @@
 package app.winters.octo.radio
 
+import app.winters.octo.discovery.LIBRARY_ONLY_SETTING
+
 // How a listener tunes Octo's radio: how much of it is music from outside
 // the library, how far it strays from the seeds, how soon an artist or an
 // album comes back, and whether favorites come around more often. Each app
@@ -42,3 +44,30 @@ enum class RadioVariety(val scale: Double, val label: String, val detail: String
     Normal(1.0, "Normal", "Spaced to suit your library's size"),
     Wide(1.6, "Wide", "Artists and albums come back much later"),
 }
+
+// How the Discovery row shows: whether it can be chosen, the reading on its
+// right, and the line under its title. With Library songs only on, no song
+// from outside the library plays anywhere, radio included, so Discovery has
+// no say; the line names that setting and `where` it is (the page or part of
+// Settings that holds it in this app).
+data class DiscoveryRowLook(val choosable: Boolean, val value: String, val helper: String)
+
+fun discoveryRowLook(discovery: RadioDiscovery, libraryOnly: Boolean, where: String): DiscoveryRowLook =
+    if (libraryOnly) {
+        DiscoveryRowLook(
+            choosable = false,
+            value = RadioDiscovery.LibraryOnly.label,
+            helper = "$LIBRARY_ONLY_SETTING is on in $where, so radio keeps to your library. Turn it off there to choose.",
+        )
+    } else {
+        DiscoveryRowLook(choosable = true, value = discovery.label, helper = discovery.detail)
+    }
+
+// Radio mixed from your music, as Settings names it.
+const val SONG_RADIO = "Song radio"
+
+// What the Song radio part of Settings is, in a line.
+const val SONG_RADIO_ABOUT = "Radio started from a song, album or artist, and Autoplay when the queue ends, mixed from your music."
+
+// What the Live radio part of Settings is, in a line.
+const val LIVE_RADIO_ABOUT = "Stations on the air: the ones your server keeps, and ones near you."

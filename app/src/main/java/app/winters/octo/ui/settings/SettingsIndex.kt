@@ -2,6 +2,7 @@ package app.winters.octo.ui.settings
 
 import app.winters.octo.discovery.LIBRARY_ONLY_SETTING
 import app.winters.octo.playback.START_AFTER_SETTING
+import app.winters.octo.radio.SONG_RADIO
 
 import app.winters.octo.covers.PLAYLIST_COVERS_SETTING
 import app.winters.octo.catalog.searchKey
@@ -12,6 +13,7 @@ import kotlinx.serialization.Serializable
 enum class SettingsPage(val title: String) {
     Playback("Playback"),
     Sound("Sound"),
+    Radio("Radio"),
     Appearance("Appearance"),
     Library("Library"),
     Server("Server and sync"),
@@ -37,6 +39,9 @@ data class SettingEntry(
     // Where it lives, for a search result: "Appearance · Where it shows".
     val place: String get() = listOfNotNull(page.title, section).joinToString(" · ")
 }
+
+// The Radio page's part for the stations on the air; the other is SONG_RADIO.
+const val LIVE_RADIO = "Live radio"
 
 // Every setting, written down once. The rows take their titles from here,
 // so what search finds is always what the page shows.
@@ -89,22 +94,6 @@ object SettingsIndex {
         "autoplay", SettingsPage.Playback, "Autoplay", "Similar songs keep playing when the queue ends",
         listOf("similar", "continue", "endless", "radio", "queue"),
     )
-    val RadioDiscovery = add(
-        "radio_discovery", SettingsPage.Playback, "Discovery", "How much of a radio comes from outside your library",
-        listOf("radio", "new music", "outside", "library only", "discover"), section = "Radio",
-    )
-    val RadioAdventure = add(
-        "radio_adventure", SettingsPage.Playback, "Adventure", "How far a radio strays from the song it started from",
-        listOf("radio", "focused", "wander", "deep cuts", "similar"), section = "Radio",
-    )
-    val RadioVariety = add(
-        "radio_variety", SettingsPage.Playback, "Artist variety", "How soon an artist or album comes back",
-        listOf("radio", "repeat", "spacing", "artist", "album"), section = "Radio",
-    )
-    val RadioFavorites = add(
-        "radio_favorites", SettingsPage.Playback, "Favorites more often", "Hearted and 4 or 5 star songs come around more",
-        listOf("radio", "favorite", "hearted", "rating", "stars"), section = "Radio",
-    )
     val ResumeWired = add(
         "resume_wired", SettingsPage.Playback, "Resume when headphones connect", "Plays again when a cable goes back in",
         listOf("headphones", "cable", "wired", "usb", "plug"), section = "Headphones",
@@ -125,6 +114,34 @@ object SettingsIndex {
     val CastKeepPlaying = add(
         "cast_keep_playing", SettingsPage.Playback, "Keep playing on the phone when casting ends", "Otherwise the music pauses",
         listOf("cast", "casting", "chromecast", "tv", "speaker", "disconnect", "resume", "phone"), section = "Casting",
+    )
+
+    // Radio: Octo's song radio, made from your music, and live radio, the
+    // stations on the air
+    val RadioDiscovery = add(
+        "radio_discovery", SettingsPage.Radio, "Discovery", "How much of a song radio comes from outside your library",
+        listOf("radio", "song radio", "start radio", "autoplay", "new music", "outside", "library only", "discover"), section = SONG_RADIO,
+    )
+    val RadioAdventure = add(
+        "radio_adventure", SettingsPage.Radio, "Adventure", "How far a song radio strays from the song it started from",
+        listOf("radio", "song radio", "start radio", "autoplay", "focused", "wander", "deep cuts", "similar"), section = SONG_RADIO,
+    )
+    val RadioVariety = add(
+        "radio_variety", SettingsPage.Radio, "Artist variety", "How soon an artist or album comes back",
+        listOf("radio", "song radio", "autoplay", "repeat", "spacing", "artist", "album"), section = SONG_RADIO,
+    )
+    val RadioFavorites = add(
+        "radio_favorites", SettingsPage.Radio, "Favorites more often", "Hearted and 4 or 5 star songs come around more",
+        listOf("radio", "song radio", "autoplay", "favorite", "hearted", "rating", "stars"), section = SONG_RADIO,
+    )
+    val LiveRadioNear = add(
+        "live_radio_near", SettingsPage.Radio, "Find stations near you", "Live stations on the air around a place, to play or keep",
+        listOf("live radio", "radio", "stations", "fm", "am", "local", "near me", "nearby", "internet radio", "location", "place", "kept"),
+        section = LIVE_RADIO,
+    )
+    val RadioStations = add(
+        "radio_stations", SettingsPage.Radio, "Stations on your server", "The live stations your server keeps, for everyone on it",
+        listOf("live radio", "radio", "radio stations", "internet radio", "streams", "add a station", "server"), section = LIVE_RADIO,
     )
 
     // Sound, which has a page of its own
@@ -341,10 +358,6 @@ object SettingsIndex {
     val Shares = add(
         "shares", SettingsPage.Server, "Shared links", "Links to songs and albums you shared",
         listOf("share", "links"), section = "On the server",
-    )
-    val RadioStations = add(
-        "radio_stations", SettingsPage.Server, "Radio stations", "The server's internet radio stations",
-        listOf("radio", "internet radio", "streams"), section = "On the server",
     )
     val ScanServer = add(
         "scan_server", SettingsPage.Server, "Scan library now", "Ask the server to look for new music",

@@ -82,6 +82,20 @@ class SettingsIndexTest {
     }
 
     @Test
+    fun songRadioAndLiveRadioAreFoundApartByTheirWords() {
+        // Song radio, mixed from your music.
+        assertEquals(listOf("Discovery", "Adventure", "Artist variety", "Favorites more often"), titles("song radio").take(4))
+        assertEquals("Radio · Song radio", SettingsIndex.RadioDiscovery.place)
+        // Live radio, the stations on the air.
+        assertEquals(listOf("Find stations near you", "Stations on your server"), titles("live radio").take(2))
+        assertEquals("Radio · Live radio", SettingsIndex.RadioStations.place)
+        assertTrue("Find stations near you" in titles("fm"))
+        assertTrue("Stations on your server" in titles("internet radio"))
+        // Radio alone finds both parts.
+        assertTrue(titles("radio").containsAll(listOf("Discovery", "Find stations near you", "Stations on your server")))
+    }
+
+    @Test
     fun aResultSaysWhereItLives() {
         assertEquals("Appearance · Where it shows", SettingsIndex.AmbientHome.place)
         assertEquals("Lyrics", SettingsIndex.LyricsOnline.place)

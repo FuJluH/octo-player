@@ -12,6 +12,7 @@ import app.winters.octo.playback.StreamQuality
 import app.winters.octo.playback.speedLabel
 import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.StreamPrefs
+import app.winters.octo.radio.RadioDiscovery
 
 // The one line under each category on the front page, saying how it is set
 // now. Parts are joined with a middle dot, and the most telling come first.
@@ -39,6 +40,12 @@ fun playbackSummary(prefs: PlayerPrefs): String = line(
     speedLabel(prefs.speed).takeIf { !prefs.paceIsDefault },
     "Autoplay".takeIf { prefs.autoplay },
     "Skip silence".takeIf { prefs.skipSilence },
+)
+
+// Radio's two parts, with how song radio is tuned when it is not as it came.
+fun radioSummary(prefs: PlayerPrefs): String = line(
+    if (prefs.libraryOnly || prefs.radioDiscovery == RadioDiscovery.LibraryOnly) "Song radio from your library" else "Song radio ${prefs.radioDiscovery.label.lowercase()}",
+    "Live radio",
 )
 
 fun appearanceSummary(ambient: AmbientPrefs, liveBackground: Boolean): String = line(

@@ -161,7 +161,7 @@ class LiveRadioShotsTest {
             }
             shot("live-page-most-played")
             SwingUtilities.invokeAndWait {
-                showSection("Settings", "stations")
+                showSection("Settings", "radio")
                 app.navigator.go(Page.Settings)
             }
             shot("live-settings-stations")

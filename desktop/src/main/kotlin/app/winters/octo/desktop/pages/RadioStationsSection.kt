@@ -36,6 +36,15 @@ import app.winters.octo.design.TextAction
 import app.winters.octo.design.Txt
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.liveradio.FIND_STATIONS_NEAR
+import app.winters.octo.desktop.liveradio.LIVE_RADIO
+import app.winters.octo.desktop.settings.AppSettings
+import app.winters.octo.radio.LIVE_RADIO_ABOUT
+import app.winters.octo.radio.RadioAdventure
+import app.winters.octo.radio.RadioDiscovery
+import app.winters.octo.radio.RadioVariety
+import app.winters.octo.radio.SONG_RADIO
+import app.winters.octo.radio.SONG_RADIO_ABOUT
+import app.winters.octo.radio.discoveryRowLook
 import app.winters.octo.desktop.liveradio.isOctoStation
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.playServerStation
@@ -54,14 +63,59 @@ data class StationDraft(val id: String?, val name: String, val streamUrl: String
     val ready: Boolean get() = name.isNotBlank() && isStreamAddress(streamUrl) && (homepage.isBlank() || isStreamAddress(homepage))
 }
 
-// Settings > Radio stations: the internet radio stations on the server in
-// use. A click on Play plays one; an admin can add stations and change or
-// delete them, except the ones Octo makes itself. Finding stations near
-// you is one click away.
+// Settings > Radio, in two parts that say which is which: song radio, which
+// Octo mixes from your music, and live radio, the stations on the air.
 @Composable
-internal fun RadioStationRows(app: AppState) {
+internal fun RadioRows(app: AppState, settings: AppSettings) {
+    SongRadioRows(app, settings)
+    Group(LIVE_RADIO, footer = LIVE_RADIO_ABOUT) {
+        ActionRow(FIND_STATIONS_NEAR, "Stations on the air around a place, to play or keep.", "Open", { app.navigator.go(Page.LiveRadio) })
+    }
+    RadioStationRows(app)
+}
+
+// How song radio picks its songs, for a radio started from a song, album or
+// artist and for Autoplay. With Library songs only on, Discovery has no say
+// and says so.
+@Composable
+private fun SongRadioRows(app: AppState, settings: AppSettings) {
+    val playback = settings.playback
+    Group(SONG_RADIO, footer = SONG_RADIO_ABOUT) {
+        val discovery = discoveryRowLook(playback.radioDiscovery, settings.libraryOnly, where = "Playback")
+        if (discovery.choosable) {
+            ChoiceRow("Discovery", discovery.helper, RadioDiscovery.entries, playback.radioDiscovery, { it.label }) { d ->
+                app.settings.update { it.copy(playback = it.playback.copy(radioDiscovery = d)) }
+            }
+        } else {
+            SettingRow("Discovery", discovery.helper, dim = true) {
+                Txt(discovery.value, DesktopType.meta, OctoColors.TextMuted)
+            }
+        }
+        ChoiceRow("Adventure", playback.radioAdventure.detail, RadioAdventure.entries, playback.radioAdventure, { it.label }) { a ->
+            app.settings.update { it.copy(playback = it.playback.copy(radioAdventure = a)) }
+        }
+        ChoiceRow("Artist variety", playback.radioVariety.detail, RadioVariety.entries, playback.radioVariety, { it.label }) { v ->
+            app.settings.update { it.copy(playback = it.playback.copy(radioVariety = v)) }
+        }
+        SwitchRow("Favorites more often", "Songs you hearted or rated 4 or 5 stars come around more often.", playback.radioFavorites) { on ->
+            app.settings.update { it.copy(playback = it.playback.copy(radioFavorites = on)) }
+        }
+    }
+}
+
+// The internet radio stations on the server in use. A click on Play plays
+// one; an admin can add stations and change or delete them, except the ones
+// Octo makes itself. Without a server, the group says so.
+@Composable
+private fun RadioStationRows(app: AppState) {
     val model = app.liveRadio
-    val connection = app.connection ?: return
+    val connection = app.connection
+    if (connection == null) {
+        Group(STATIONS_ON_SERVER) {
+            SettingRow("No server connected", "Connect a server to see the stations it keeps.", dim = true)
+        }
+        return
+    }
     // Read again each time the section opens, and after every change.
     var round by remember { mutableIntStateOf(0) }
     var failed by remember { mutableStateOf(false) }
@@ -71,7 +125,7 @@ internal fun RadioStationRows(app: AppState) {
     }
     val admin = model.admin == true
     val stations = model.serverStations
-    Group("On your server") {
+    Group(STATIONS_ON_SERVER) {
         when {
             stations == null && failed -> SettingRow("Couldn't read the stations", "Your server didn't answer just now.") { RowAction("Try again", { round++ }) }
             stations == null -> SettingRow("Reading the stations", null) { Spinner(size = IconSize.Table) }
@@ -87,10 +141,10 @@ internal fun RadioStationRows(app: AppState) {
             SettingRow("Adding and changing stations", "Only an admin of your server can do this.", dim = true)
         }
     }
-    Group("Live radio") {
-        ActionRow(FIND_STATIONS_NEAR, "Stations on the air around you, to play or keep.", "Open", { app.navigator.go(Page.LiveRadio) })
-    }
 }
+
+// The part of Settings > Radio that lists the server's stations.
+const val STATIONS_ON_SERVER = "Stations on your server"
 
 private fun RadioStationDetails.basic() = app.winters.octo.subsonic.RadioStation(id, name, streamUrl, coverArt)
 

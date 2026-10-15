@@ -46,9 +46,6 @@ import app.winters.octo.server.serverOffers
 import app.winters.octo.desktop.setAutoplay
 import app.winters.octo.desktop.settings.AmbienceMotion
 import app.winters.octo.covers.PLAYLIST_COVERS_SETTING
-import app.winters.octo.radio.RadioAdventure
-import app.winters.octo.radio.RadioDiscovery
-import app.winters.octo.radio.RadioVariety
 import app.winters.octo.covers.PlaylistCoverStyle
 import app.winters.octo.covers.playlistCoverStyleHelp
 import app.winters.octo.covers.playlistCoverStyleName
@@ -68,10 +65,13 @@ import app.winters.octo.desktop.ui.LocalSoftwareDrawing
 import app.winters.octo.ui.family.AUDIO_QUALITY
 import kotlin.math.roundToInt
 
-// Settings: the servers, how Octo looks, playback, listening, lyrics,
+// Settings: the servers, how Octo looks, playback, listening, lyrics, radio,
 // Discord, how it fits into the system, the keyboard shortcuts and the
 // version, each a section of its own in the list beside the page. Every
 // change is saved at once.
+
+// The Radio section's key, for a link straight to it.
+const val RADIO_SECTION = "radio"
 @Composable
 fun SettingsPage(app: AppState, visit: Visit) {
     val settings by app.settings.state.collectAsState()
@@ -88,7 +88,7 @@ fun SettingsPage(app: AppState, visit: Visit) {
             PageSection("offline", "Offline", OctoIcons.Download, detail = "Songs kept here to play without a connection.") { OfflineRows(app, settings) },
             PageSection("listening", "Listening", OctoIcons.Headphones) { ListeningRows(app, settings) },
             PageSection("lyrics", "Lyrics", OctoIcons.Lyrics) { LyricsRows(app, settings) },
-            PageSection("stations", "Radio stations", OctoIcons.Radio, detail = "Live stations on your server, and near you.") { RadioStationRows(app) },
+            PageSection(RADIO_SECTION, "Radio", OctoIcons.Radio, detail = "Song radio from your music, and live radio on the air.") { RadioRows(app, settings) },
             if (discord) PageSection("discord", "Discord", DiscordMark, detail = "Show what you're playing to your friends.", brand = true) { DiscordRows(app) } else null,
             PageSection("system", "System", OctoIcons.System) {
                 SystemRows(app)
@@ -190,7 +190,7 @@ internal fun withAmbience(look: Appearance, style: AmbienceStyle?): Appearance =
 @Composable
 private fun PlaybackRows(app: AppState, settings: AppSettings) {
     Rows {
-        SwitchRow("Autoplay", "When the queue ends, similar songs keep playing.", settings.playback.autoplay) { on ->
+        SwitchRow("Autoplay", "When the queue ends, similar songs keep playing, picked as Radio settings say.", settings.playback.autoplay) { on ->
             app.setAutoplay(on)
         }
         ChoiceRow(START_AFTER_SETTING, START_AFTER_HELP, StartAfter.entries, settings.playback.startAfter, { it.label }) { wait ->
@@ -198,21 +198,6 @@ private fun PlaybackRows(app: AppState, settings: AppSettings) {
         }
         SwitchRow(LIBRARY_ONLY_SETTING, LIBRARY_ONLY_HELP, settings.libraryOnly) { on -> app.setLibraryOnly(on) }
         ActionRow("Equalizer, loudness, crossfade and speed", null, "Open Sound", { app.navigator.go(Page.Sound) })
-    }
-    val playback = settings.playback
-    Group("Radio") {
-        ChoiceRow("Discovery", playback.radioDiscovery.detail, RadioDiscovery.entries, playback.radioDiscovery, { it.label }) { d ->
-            app.settings.update { it.copy(playback = it.playback.copy(radioDiscovery = d)) }
-        }
-        ChoiceRow("Adventure", playback.radioAdventure.detail, RadioAdventure.entries, playback.radioAdventure, { it.label }) { a ->
-            app.settings.update { it.copy(playback = it.playback.copy(radioAdventure = a)) }
-        }
-        ChoiceRow("Artist variety", playback.radioVariety.detail, RadioVariety.entries, playback.radioVariety, { it.label }) { v ->
-            app.settings.update { it.copy(playback = it.playback.copy(radioVariety = v)) }
-        }
-        SwitchRow("Favorites more often", "Songs you hearted or rated 4 or 5 stars come around more often.", playback.radioFavorites) { on ->
-            app.settings.update { it.copy(playback = it.playback.copy(radioFavorites = on)) }
-        }
     }
 }
 

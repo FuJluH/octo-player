@@ -16,7 +16,6 @@ import app.winters.octo.server.ScanState
 import app.winters.octo.server.ServerControls
 import app.winters.octo.subsonic.NowPlayingEntry
 import app.winters.octo.subsonic.SubsonicException
-import app.winters.octo.ui.nav.RadioStationsRoute
 import app.winters.octo.ui.nav.SharesRoute
 import app.winters.octo.ui.server.minutesAgo
 import app.winters.octo.ui.server.scanLabel
@@ -85,8 +84,8 @@ internal fun ServerQueueRow(vm: ServerExtrasViewModel = hiltViewModel()) {
     )
 }
 
-// What else the server offers: shared links, radio stations, a library scan
-// for admins, and who is listening now.
+// What else the server offers: shared links, a library scan for admins, and
+// who is listening now. Its radio stations are under Settings, Radio.
 @Composable
 internal fun ServerExtras(onOpen: (NavKey) -> Unit, vm: ServerExtrasViewModel = hiltViewModel()) {
     val admin by vm.admin.collectAsStateWithLifecycle()
@@ -100,10 +99,11 @@ internal fun ServerExtras(onOpen: (NavKey) -> Unit, vm: ServerExtrasViewModel = 
         }
     }
 
-    SettingsGroup(title = "On the server", icon = OctoIcons.Cloud) {
-        if (sharing) ActionRow(SettingsIndex.Shares, onClick = { onOpen(SharesRoute) })
-        ActionRow(SettingsIndex.RadioStations, onClick = { onOpen(RadioStationsRoute) })
-        if (admin) ScanRow(scan, vm::scanNow)
+    if (sharing || admin) {
+        SettingsGroup(title = "On the server", icon = OctoIcons.Cloud) {
+            if (sharing) ActionRow(SettingsIndex.Shares, onClick = { onOpen(SharesRoute) })
+            if (admin) ScanRow(scan, vm::scanNow)
+        }
     }
     if (vm.listening.isNotEmpty()) {
         SettingsGroup(title = SettingsIndex.ListeningNow.title, icon = OctoIcons.Listeners) {

@@ -134,7 +134,7 @@ fun FindNearRow(onClick: () -> Unit, modifier: Modifier = Modifier) {
             Icon(painterResource(OctoIcons.Radio), contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(24.dp))
         }
         Column(Modifier.weight(1f)) {
-            Text(LIVE_NEAR_TITLE, style = OctoType.bodySmall, color = OctoColors.TextPrimary)
+            Text(FIND_NEAR_TITLE, style = OctoType.bodySmall, color = OctoColors.TextPrimary)
             Text("Stations on the air around you", style = OctoType.caption, color = OctoColors.TextMuted)
         }
         Icon(painterResource(OctoIcons.Chevron), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.size(20.dp))

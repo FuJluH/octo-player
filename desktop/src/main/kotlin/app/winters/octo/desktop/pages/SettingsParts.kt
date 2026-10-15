@@ -263,9 +263,10 @@ private fun ColumnScope.Section(section: PageSection) {
     }
 }
 
-// A group of rows, in a card, with its name above when it has one.
+// A group of rows, in a card, with its name above when it has one, and a
+// line on what the group is under it when it has one.
 @Composable
-internal fun Group(name: String? = null, content: @Composable () -> Unit) {
+internal fun Group(name: String? = null, footer: String? = null, content: @Composable () -> Unit) {
     Column(Modifier.fillMaxWidth()) {
         if (name != null) {
             Txt(
@@ -279,6 +280,7 @@ internal fun Group(name: String? = null, content: @Composable () -> Unit) {
             )
         }
         Rows(content)
+        if (footer != null) Txt(footer, DesktopType.meta, OctoColors.TextMuted, Modifier.padding(start = RowInset, end = RowInset, top = Space.S), maxLines = 3)
     }
 }
 

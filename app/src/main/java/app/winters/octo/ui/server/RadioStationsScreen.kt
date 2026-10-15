@@ -64,6 +64,7 @@ import app.winters.octo.ui.common.rememberLast
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.screenPadding
 import app.winters.octo.ui.liveradio.FindNearRow
+import app.winters.octo.ui.settings.SettingsIndex
 import app.winters.octo.ui.nav.LiveRadioNearRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
@@ -224,7 +225,7 @@ fun RadioStationsScreen(onBack: () -> Unit, onOpen: (NavKey) -> Unit, vm: RadioS
     val readOnly by vm.readOnly.collectAsStateWithLifecycle()
     Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = screenPadding(extraTop = DetailTopGap)) {
-            item(key = "title") { ScreenTitle("Radio stations") }
+            item(key = "title") { ScreenTitle(SettingsIndex.RadioStations.title) }
             item(key = "near") { FindNearRow(onClick = { onOpen(LiveRadioNearRoute) }, modifier = Modifier.padding(bottom = 8.dp)) }
             if (admin) {
                 item(key = "add") {
@@ -241,6 +242,8 @@ fun RadioStationsScreen(onBack: () -> Unit, onOpen: (NavKey) -> Unit, vm: RadioS
                 }
                 is LoadState.Ready -> {
                     if (state.data.isEmpty()) item(key = "none") { Note("No stations on this server yet.") }
+                    // Why there is no Add or Edit.
+                    if (!admin) item(key = "not-admin") { Note("Only an admin of your server can add or change stations.") }
                     items(state.data, key = { it.id }) { station ->
                         val kept = station.id in readOnly
                         StationRow(
