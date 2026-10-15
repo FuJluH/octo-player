@@ -2,6 +2,7 @@ package app.winters.octo.animated
 
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.view.TextureView
 import androidx.annotation.OptIn
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
@@ -62,6 +63,10 @@ fun LoopVideo(
     clip: AnimatedClip?,
     play: LoopPlay,
     modifier: Modifier = Modifier,
+    // Drawn as part of the app's window rather than on a surface of its
+    // own, so it can be faded and masked like anything else there; each of
+    // its frames then draws a frame of the window, so only for small loops.
+    inWindow: Boolean = false,
     still: @Composable () -> Unit,
 ) {
     // Let go of after a while out of sight.
@@ -99,7 +104,7 @@ fun LoopVideo(
         val width = constraints.maxWidth
         val height = constraints.maxHeight
         playing?.let { loop ->
-            key(loop) { LoopSurface(loop, width, height, play, onDrawn = { drawn = it }) }
+            key(loop) { LoopSurface(loop, width, height, play, inWindow, onDrawn = { drawn = it }) }
         }
         Box(Modifier.matchParentSize().graphicsLayer { alpha = 1f - shown.value }) { still() }
     }
@@ -110,7 +115,7 @@ fun LoopVideo(
 // surface goes (the app put away, say) until a frame is drawn again.
 @OptIn(UnstableApi::class)
 @Composable
-private fun LoopSurface(clip: AnimatedClip, width: Int, height: Int, play: LoopPlay, onDrawn: (Boolean) -> Unit) {
+private fun LoopSurface(clip: AnimatedClip, width: Int, height: Int, play: LoopPlay, inWindow: Boolean, onDrawn: (Boolean) -> Unit) {
     val context = LocalContext.current
     val players = remember(context) { EntryPointAccessors.fromApplication(context.applicationContext, LoopPlayersEntry::class.java).loopPlayers() }
     val player = remember(clip) { players.create() }
@@ -148,6 +153,14 @@ private fun LoopSurface(clip: AnimatedClip, width: Int, height: Int, play: LoopP
         player.prepare()
     }
     LaunchedEffect(player, play) { player.playWhenReady = play == LoopPlay.Play }
+    if (inWindow) {
+        AndroidView(
+            factory = { viewContext -> TextureView(viewContext).also(player::setVideoTextureView) },
+            modifier = Modifier.covering(aspect),
+            onRelease = { view -> player.clearVideoTextureView(view) },
+        )
+        return
+    }
     // A surface of its own: the loop's frames go straight to the screen,
     // with no frame of the app's window drawn for them. Its hole in the
     // window follows the clip above it, so rounded corners hold.

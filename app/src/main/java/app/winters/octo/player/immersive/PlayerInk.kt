@@ -11,6 +11,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import app.winters.octo.design.OctoColors
@@ -23,15 +24,35 @@ import app.winters.octo.design.OctoColors
 // Whether the words are dark, over a light background.
 val Color.isDarkInk: Boolean get() = luminance() < 0.5f
 
+// Whether the quieter words are shades of the ink even when it is white
+// (over a tall loop, whose colors Octo's blue gray would clash with).
+val LocalShadedInk = staticCompositionLocalOf { false }
+
 // Secondary words: times, the album's name.
 val mutedInk: Color
     @Composable @ReadOnlyComposable
-    get() = LocalContentColor.current.let { if (it.isDarkInk) it.copy(alpha = 0.6f) else OctoColors.TextMuted }
+    get() = LocalContentColor.current.let {
+        when {
+            it.isDarkInk -> it.copy(alpha = 0.6f)
+            LocalShadedInk.current -> it.copy(alpha = SHADED_MUTED)
+            else -> OctoColors.TextMuted
+        }
+    }
 
 // The artist's name under the title.
 val accentInk: Color
     @Composable @ReadOnlyComposable
-    get() = LocalContentColor.current.let { if (it.isDarkInk) it.copy(alpha = 0.75f) else OctoColors.Accent }
+    get() = LocalContentColor.current.let {
+        when {
+            it.isDarkInk -> it.copy(alpha = 0.75f)
+            LocalShadedInk.current -> it.copy(alpha = SHADED_ACCENT)
+            else -> OctoColors.Accent
+        }
+    }
+
+// How strong the quieter white words are over a tall loop.
+const val SHADED_MUTED = 0.7f
+const val SHADED_ACCENT = 0.82f
 
 // The way in and out: the background dollies in over 0.8 s after 0.02 s,
 // quick then settling, and out over 0.5 s, slow then quick. 1 is fully in.

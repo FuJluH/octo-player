@@ -114,7 +114,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.Player
 import app.winters.octo.ui.common.SongTitle
 import app.winters.octo.animated.BackdropFill
-import app.winters.octo.animated.BackdropFillLayer
+import app.winters.octo.player.immersive.LocalShadedInk
 import app.winters.octo.animated.BackdropFills
 import app.winters.octo.animated.dimmed
 import app.winters.octo.animated.shape
@@ -255,8 +255,10 @@ fun AnimatedVisibilityScope.PlayerOverlay(
         words = words,
         topInk = topInk,
     )
-    // Lyrics cover the tall loop with its fill, so it holds meanwhile.
+    // Lyrics cover the sharp tall loop with its blurred copy, so it holds
+    // meanwhile; the blurred copy plays on behind them.
     val tallPlay = rememberLoopPlay(open && !lyricsOpen)
+    val blurPlay = rememberLoopPlay(open)
     var showQueue by remember { mutableStateOf(false) }
     // The sleep timer and the speed share one glass card: speed opens from
     // the timer as its next page, or on its own from the speed mark.
@@ -339,17 +341,23 @@ fun AnimatedVisibilityScope.PlayerOverlay(
             if (tall != null) {
                 // The tall loop in place of the background, melting into a
                 // still fill of its colors above the song's name.
-                LoopBackdrop(tall, tallPlay, fill = base, cover = { CoverFill(now.artwork) })
-                Box(Modifier.fillMaxSize().onPlaced { words.boxTop = it.positionInRoot().y }.hazeSource(backdrop)) {
-                    tallFill?.let { fill -> BackdropFillLayer(fill, tall.shape(), wordsTop = words::top, veil = { veil }) }
-                }
+                LoopBackdrop(
+                    tall,
+                    play = tallPlay,
+                    blurPlay = blurPlay,
+                    base = base,
+                    wordsTop = words::top,
+                    veil = { veil },
+                    cover = { CoverFill(now.artwork) },
+                    modifier = Modifier.onPlaced { words.boxTop = it.positionInRoot().y },
+                )
             } else {
                 Box(Modifier.fillMaxSize().hazeSource(backdrop)) {
                     PlayerBackground(prefs, colors, now, dolly = { dolly.value })
                 }
             }
             // The words and icons take the colour the background asks for.
-            CompositionLocalProvider(LocalHaze provides backdrop, LocalContentColor provides ink, LocalPlayerLoop provides loopState) {
+            CompositionLocalProvider(LocalHaze provides backdrop, LocalContentColor provides ink, LocalPlayerLoop provides loopState, LocalShadedInk provides (tall != null)) {
                 PlayerContent(
                     now,
                     model,

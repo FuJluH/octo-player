@@ -26,6 +26,15 @@ val PlayerInkNeeds = listOf(
     InkNeed(alpha = 0.45f, contrast = 3.0),
 )
 
+// The same over a tall loop, where the quieter words are shades of the
+// words' own ink (white at 82% for the artist, 70% for the small words).
+val LoopInkNeeds = listOf(
+    InkNeed(alpha = 1f, contrast = 7.0),
+    InkNeed(alpha = 0.82f, contrast = 4.5),
+    InkNeed(alpha = 0.7f, contrast = 4.5),
+    InkNeed(alpha = 0.45f, contrast = 3.0),
+)
+
 // The words' ink over the still fill a tall loop fades into, and how far
 // the fill is dimmed for it (`gain`, 1 for not at all).
 data class FillInk(val dark: Boolean, val gain: Float)
