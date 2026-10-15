@@ -327,14 +327,25 @@ private fun LineupRow(app: AppState, entry: QueueEntry, current: Boolean, textCo
 
 // The More menu's rows for a station: its details, keeping it here, adding
 // it to the server (for an admin), and the song on air: found in Octo, or
-// its name copied.
+// its name copied. `info` shows Station info, `find` searches Octo for the
+// song; the mini player shows them its own way.
 @Composable
-fun ColumnScope.LiveMenuRows(app: AppState, live: LiveNow, stationId: String, close: () -> Unit) {
-    val shown = live.shown
-    MenuRow("Station info", {
+fun ColumnScope.LiveMenuRows(
+    app: AppState,
+    live: LiveNow,
+    stationId: String,
+    close: () -> Unit,
+    info: () -> Unit = {
         close()
         showStationInfo(app, live)
-    }, OctoIcons.Info)
+    },
+    find: (String) -> Unit = { query ->
+        close()
+        app.searchFor(query)
+    },
+) {
+    val shown = live.shown
+    MenuRow("Station info", info, OctoIcons.Info)
     val catalog = remember(stationId) { liveStationOf(stationId) }
     if (catalog != null) {
         val kept = app.isKept(catalog)
@@ -350,10 +361,7 @@ fun ColumnScope.LiveMenuRows(app: AppState, live: LiveNow, stationId: String, cl
         }, OctoIcons.Servers)
     }
     MenuSeparator()
-    MenuRow("Find this song in Octo", {
-        close()
-        app.searchFor(heartQuery(shown.onAir))
-    }, OctoIcons.Search, enabled = live.named)
+    MenuRow("Find this song in Octo", { find(heartQuery(shown.onAir)) }, OctoIcons.Search, enabled = live.named)
     MenuRow("Copy song name", {
         app.copyWords(live.songName, "Copied ${live.songName}.")
         close()
@@ -363,11 +371,11 @@ fun ColumnScope.LiveMenuRows(app: AppState, live: LiveNow, stationId: String, cl
 // The station's details in a small dialog that fits without scrolling:
 // its name, how it streams, where it is, what it plays and its website.
 fun showStationInfo(app: AppState, live: LiveNow) {
-    app.popups.showCentred(width = 400.dp, scrim = true) { close -> StationInfo(app, live, close) }
+    app.popups.showCentred(width = 400.dp, scrim = true) { close -> StationInfoCard(app, live, close) }
 }
 
 @Composable
-private fun ColumnScope.StationInfo(app: AppState, live: LiveNow, close: () -> Unit) {
+fun ColumnScope.StationInfoCard(app: AppState, live: LiveNow, close: () -> Unit) {
     val shown = live.shown
     val details = shown.details
     // A server station's website comes from the server's list.

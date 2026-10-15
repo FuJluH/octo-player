@@ -33,12 +33,18 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
+import app.winters.octo.desktop.searchFor
+import app.winters.octo.desktop.ui.windowRect
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -127,6 +133,9 @@ class MiniActions(
     val showPanel: (MiniPanel?) -> Unit,
     // Close it and go back to Octo's window.
     val close: () -> Unit,
+    // A station's More menu, under the button whose bounds in this window
+    // are given, in pixels.
+    val more: (IntRect) -> Unit = {},
 )
 
 // A small window of its own that stays above the others (unless Settings
@@ -161,13 +170,30 @@ fun MiniPlayerWindow(
         windowState.size = DpSize(to.width.dp, to.height.dp)
     }
     // A word on what the pin did, for a moment, since pinning changes
-    // nothing to be seen until the listener tries to move it.
+    // nothing to be seen until the listener tries to move it, or on what a
+    // row of the station menu did.
     var pinNote by remember { mutableStateOf<String?>(null) }
+    // A station's More menu, open under its button, in screen units.
+    var liveMenu by remember { mutableStateOf<MiniMenuAnchor?>(null) }
+    var density by remember { mutableStateOf(1f) }
     var pinClicks by remember { mutableIntStateOf(0) }
     LaunchedEffect(pinClicks) {
         if (pinClicks == 0) return@LaunchedEffect
         delay(PIN_NOTE_MS)
         pinNote = null
+    }
+    // Octo's own window is hidden behind the mini player, so what the
+    // station menu's rows did (kept, removed, copied, added to the server,
+    // or why not) is said here: any notice that comes while the menu is
+    // open or soon after it closes.
+    var echoUntil by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(Unit) {
+        snapshotFlow { app.notice }.collect { line ->
+            if (line != null && (liveMenu != null || System.currentTimeMillis() < echoUntil)) {
+                pinNote = line
+                pinClicks++
+            }
+        }
     }
     val actions = MiniActions(
         pin = {
@@ -182,7 +208,37 @@ fun MiniPlayerWindow(
             if (panel != null) miniSizeForPanel(here()).let { (w, h) -> if (w != windowState.size.width.value || h != windowState.size.height.value) jumpTo(w, h) }
         },
         close = onClose,
+        more = { rect ->
+            val at = windowState.position
+            if (at is WindowPosition.Absolute) {
+                liveMenu = MiniMenuAnchor(at.x.value + rect.left / density, at.y.value + rect.top / density, at.y.value + rect.bottom / density)
+            }
+        },
     )
+    val playing by app.player.state.collectAsState()
+    val menuFor = liveMenu
+    val live = playing.live
+    if (menuFor != null && live != null) {
+        MiniLiveMenu(
+            app,
+            live,
+            playing.current?.song?.id.orEmpty(),
+            menuFor,
+            onTop = prefs.miniPlayerOnTop,
+            reduceMotion = reduceMotion,
+            find = { query ->
+                liveMenu = null
+                onClose()
+                app.searchFor(query)
+            },
+            close = {
+                liveMenu = null
+                echoUntil = System.currentTimeMillis() + MENU_ECHO_MS
+            },
+        )
+    }
+    // The station went: so does its menu.
+    LaunchedEffect(live == null) { if (live == null) liveMenu = null }
     Window(
         onCloseRequest = onClose,
         state = windowState,
@@ -215,6 +271,7 @@ fun MiniPlayerWindow(
         },
     ) {
         val frame = remember { Frame(window, windowState) }
+        density = LocalDensity.current.density
         LaunchedEffect(Unit) {
             window.minimumSize = Dimension(MINI_MIN_WIDTH.toInt(), MINI_MIN_HEIGHT.toInt())
             window.maximumSize = Dimension(MINI_MAX_WIDTH.toInt(), MINI_MAX_HEIGHT.toInt())
@@ -281,6 +338,10 @@ fun MiniPlayerView(
 // How long the pin's word stays.
 private const val PIN_NOTE_MS = 2_400L
 
+// How long after the station menu closes its rows' notices still show here:
+// adding a station to the server answers once the server has.
+private const val MENU_ECHO_MS = 15_000L
+
 // What the pin did, in words.
 fun pinNoteFor(pinned: Boolean): String = if (pinned) "Pinned in place" else "Unpinned. Drag it anywhere"
 
@@ -340,6 +401,7 @@ private fun MiniBar(app: AppState, state: PlayerState, pinned: Boolean, actions:
                 Transport(app, state)
                 Progress(app, state, Modifier.weight(1f).padding(horizontal = Space.Xs), times = wide)
                 Heart(app, state)
+                LiveMore(state, actions)
                 VolumeButton(app, state.volume)
             }
         }
@@ -365,6 +427,7 @@ private fun MiniCover(app: AppState, state: PlayerState, panel: MiniPanel?, pinn
         Row(verticalAlignment = Alignment.CenterVertically) {
             SongWords(state, Modifier.weight(1f))
             Heart(app, state)
+            LiveMore(state, actions)
         }
         Progress(app, state, Modifier.fillMaxWidth(), times = true)
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -394,6 +457,7 @@ private fun MiniWithPanel(app: AppState, state: PlayerState, panel: MiniPanel, p
         Row(Modifier.fillMaxWidth().padding(vertical = Space.Xs), verticalAlignment = Alignment.CenterVertically) {
             if (state.live == null) PanelButton(MiniPanel.Lyrics, panel, actions)
             Heart(app, state)
+            LiveMore(state, actions)
             Spacer(Modifier.weight(1f))
             Transport(app, state)
             Spacer(Modifier.weight(1f))
@@ -488,6 +552,16 @@ private fun Progress(app: AppState, state: PlayerState, modifier: Modifier, time
 
 private val TimeStyle = DesktopType.meta.copy(fontFeatureSettings = "tnum")
 private val TimeWidth: Dp = Space.Wide
+
+// A station's More button: its menu opens in a window of its own.
+@Composable
+private fun LiveMore(state: PlayerState, actions: MiniActions) {
+    if (state.live == null) return
+    var anchor by remember { mutableStateOf(IntRect.Zero) }
+    Box(Modifier.onGloballyPositioned { anchor = it.windowRect() }) {
+        IconAction(OctoIcons.More, "More", { actions.more(anchor) }, size = ControlHeight.S, iconSize = IconSize.Toolbar)
+    }
+}
 
 // The heart, for a song in the library.
 @Composable
