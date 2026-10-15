@@ -113,13 +113,18 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.Player
 import app.winters.octo.ui.common.SongTitle
-import app.winters.octo.animated.BackdropFade
+import app.winters.octo.animated.BackdropFill
+import app.winters.octo.animated.BackdropFillLayer
+import app.winters.octo.animated.BackdropFills
+import app.winters.octo.animated.dimmed
+import app.winters.octo.animated.shape
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.platform.LocalContext
 import app.winters.octo.animated.LOOP_FADE_MS
 import app.winters.octo.animated.LoopBackdrop
 import app.winters.octo.animated.LoopPlay
 import app.winters.octo.animated.LoopVideo
 import app.winters.octo.animated.PlayerLoop
-import app.winters.octo.animated.backdropInk
 import app.winters.octo.animated.playerLoop
 import app.winters.octo.animated.rememberLoopPlay
 import app.winters.octo.subsonic.AnimatedClip
@@ -207,15 +212,22 @@ fun AnimatedVisibilityScope.PlayerOverlay(
     val upright = configuration.screenHeightDp >= configuration.screenWidthDp
     val loop = playerLoop(prefs.animatedArt, animated, upright, live = now.live != null)
     val tall = (loop as? PlayerLoop.Backdrop)?.clip
-    // Over the tall loop, the words take the ink its color asks for.
+    // Under the tall loop, a still fill of its own colors, and the ink the
+    // fill asks for (white until it is made).
+    val context = LocalContext.current
     val tallColor = tall?.let { it.colorRgb ?: colors.dominant?.toArgb() ?: colors.base.toArgb() }
-    val tallInk = remember(tallColor) { tallColor?.let(::backdropInk) }
+    val tallFill by produceState<BackdropFill?>(null, tall, tallColor) {
+        value = if (tall != null && tallColor != null) BackdropFills.fillFor(context, tall, tallColor) else null
+    }
     val inkWanted = when {
-        tallInk == null -> colors.content
-        tallInk.dark -> DarkInk
+        tall == null -> colors.content
+        tallFill?.ink?.dark == true -> DarkInk
         else -> Color.White
     }
-    val base by animateColorAsState(tallInk?.let { Color(it.color) } ?: colors.base, tween(600), label = "player base")
+    // Over the tall loop's top, the status icons follow its brightness.
+    val topInk = tall?.let { if (tallFill?.lightTop == true) DarkInk else Color.White }
+    val tallBase = tallFill?.base ?: tallColor?.let { Color(dimmed(it, 0.4f)) }
+    val base by animateColorAsState(tallBase ?: colors.base, tween(600), label = "player base")
     val ink by animateColorAsState(inkWanted, tween(CoverFadeMs.toInt()), label = "player ink")
     val dolly = backgroundDolly()
     val close by rememberUpdatedState(onClose)
@@ -241,8 +253,10 @@ fun AnimatedVisibilityScope.PlayerOverlay(
         play = rememberLoopPlay(open && (!lyricsOpen || !upright)),
         coverAway = { coverAway },
         words = words,
+        topInk = topInk,
     )
-    val tallPlay = rememberLoopPlay(open)
+    // Lyrics cover the tall loop with its fill, so it holds meanwhile.
+    val tallPlay = rememberLoopPlay(open && !lyricsOpen)
     var showQueue by remember { mutableStateOf(false) }
     // The sleep timer and the speed share one glass card: speed opens from
     // the timer as its next page, or on its own from the speed mark.
@@ -251,7 +265,7 @@ fun AnimatedVisibilityScope.PlayerOverlay(
     var showLyricsChooser by remember { mutableStateOf(false) }
 
     BackHandler(onBack = onClose)
-    LightOnDarkBars(darkIcons = inkWanted.isDarkInk)
+    LightOnDarkBars(darkIcons = inkWanted.isDarkInk, darkStatus = (topInk ?: inkWanted).isDarkInk)
     // The display's fastest rate while things move, handed back on close.
     val phoneCalm = rememberSystemReduceMotion()
     val powerSave = rememberPowerSave()
@@ -322,12 +336,12 @@ fun AnimatedVisibilityScope.PlayerOverlay(
         ) {
             // The background is what the player's glass frosts, the way the
             // bar frosts the page.
-            if (tall != null && tallInk != null) {
-                // The tall loop in place of the background, fading into its
-                // color under the words.
-                LoopBackdrop(tall, tallPlay, fill = Color(tallInk.color), cover = { CoverFill(now.artwork) })
+            if (tall != null) {
+                // The tall loop in place of the background, melting into a
+                // still fill of its colors above the song's name.
+                LoopBackdrop(tall, tallPlay, fill = base, cover = { CoverFill(now.artwork) })
                 Box(Modifier.fillMaxSize().onPlaced { words.boxTop = it.positionInRoot().y }.hazeSource(backdrop)) {
-                    BackdropFade(tallInk, wordsTop = words::top, veil = { veil })
+                    tallFill?.let { fill -> BackdropFillLayer(fill, tall.shape(), wordsTop = words::top, veil = { veil }) }
                 }
             } else {
                 Box(Modifier.fillMaxSize().hazeSource(backdrop)) {
@@ -406,7 +420,10 @@ private fun AnimatedVisibilityScope.PlayerContent(
     // The player's own scope, so the controls still rise in as the player
     // opens wherever they are placed.
     val player = this
-    val header: @Composable () -> Unit = { TopLine(now, model, onClose, onOpenAlbum) }
+    val topInk = LocalPlayerLoop.current.topInk
+    val header: @Composable () -> Unit = {
+        CompositionLocalProvider(LocalContentColor provides (topInk ?: LocalContentColor.current)) { TopLine(now, model, onClose, onOpenAlbum) }
+    }
     val controls: @Composable (Boolean) -> Unit = { roomy ->
         with(player) { Controls(now, model, lyricsOpen, onClose, onOpenArtist, onOpenQueue, onOpenSleep, onOpenSpeed, roomy) }
     }
@@ -507,6 +524,10 @@ private val LyricsBarBleed = 12.dp
 // and leaves the room to the artwork.
 private val TopLineHeight = 40.dp
 
+// The album's name's shadow over a tall loop, the other way from its ink.
+private fun loopCaptionShadow(ink: Color) =
+    androidx.compose.ui.graphics.Shadow((if (ink.isDarkInk) Color.White else Color.Black).copy(alpha = 0.45f), blurRadius = 10f)
+
 // How long the controls take to fold away as lyrics mode opens.
 private const val LYRICS_FOLD_MS = 360
 
@@ -562,10 +583,13 @@ private fun TopLine(
             // The name shows only for an album in the library, so there is
             // always a page to open.
             val albumId = now.albumId?.takeIf { id -> id.isNotEmpty() && now.trackId?.let(::isFind) != true }
+            // Over a tall loop's top, in full ink with a soft shadow, as
+            // nothing shades the loop there.
+            val overLoop = LocalPlayerLoop.current.topInk != null
             Text(
                 it,
-                style = OctoType.caption,
-                color = mutedInk,
+                style = if (overLoop) OctoType.caption.copy(shadow = loopCaptionShadow(LocalContentColor.current)) else OctoType.caption,
+                color = if (overLoop) LocalContentColor.current else mutedInk,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
@@ -972,6 +996,8 @@ private class PlayerLoopState(
     val play: LoopPlay,
     val coverAway: () -> Float,
     val words: WordsLine,
+    // The album's name's ink over the tall loop's top, when it shows.
+    val topInk: Color? = null,
 )
 
 private val LocalPlayerLoop = compositionLocalOf { PlayerLoopState(null, LoopPlay.StillOnly, { 0f }, WordsLine()) }
@@ -1389,9 +1415,10 @@ private fun SleepCircle(model: PlayerViewModel, onClick: () -> Unit) {
 
 // Light status and navigation icons while the player is open (dark ones
 // over a light background), whatever the rest of the app uses, put back
-// as they were when it closes.
+// as they were when it closes. The status icons can follow something else
+// at the top (`darkStatus`, a tall loop's top).
 @Composable
-private fun LightOnDarkBars(darkIcons: Boolean) {
+private fun LightOnDarkBars(darkIcons: Boolean, darkStatus: Boolean = darkIcons) {
     val view = LocalView.current
     DisposableEffect(view) {
         val window = view.context.findActivity()?.window ?: return@DisposableEffect onDispose { }
@@ -1403,10 +1430,10 @@ private fun LightOnDarkBars(darkIcons: Boolean) {
             bars.isAppearanceLightNavigationBars = navigation
         }
     }
-    LaunchedEffect(view, darkIcons) {
+    LaunchedEffect(view, darkIcons, darkStatus) {
         val window = view.context.findActivity()?.window ?: return@LaunchedEffect
         val bars = WindowCompat.getInsetsController(window, view)
-        bars.isAppearanceLightStatusBars = darkIcons
+        bars.isAppearanceLightStatusBars = darkStatus
         bars.isAppearanceLightNavigationBars = darkIcons
     }
 }
