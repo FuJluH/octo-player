@@ -259,12 +259,13 @@ class ServerControls @Inject constructor(
     suspend fun deleteStation(id: String) = refusing(id) { session()?.client?.deleteRadioStation(id) }
 
     // A station the server will not change (Octo's own answer error 70,
-    // "read-only") is marked so, and its edit actions go away.
+    // "read-only") is marked so, and its edit actions go away. Any other
+    // refusal leaves the station as it was.
     private suspend fun refusing(id: String, call: suspend () -> Unit) {
         try {
             call()
         } catch (e: SubsonicException) {
-            if (e is SubsonicException.NotFound || (e is SubsonicException.Server && e.code == 50)) session()?.let { markReadOnly(it.id, listOf(id)) }
+            if (refusedAsReadOnly(e)) session()?.let { markReadOnly(it.id, listOf(id)) }
             throw e
         }
     }
@@ -273,3 +274,8 @@ class ServerControls @Inject constructor(
         const val SCAN_POLL_MS = 2_000L
     }
 }
+
+// Whether a refused change to a station says the station is read-only:
+// error 70, which Octo answers for its own stations. "Not authorized"
+// (error 50) is about the account, not the station.
+fun refusedAsReadOnly(e: SubsonicException): Boolean = e is SubsonicException.NotFound
