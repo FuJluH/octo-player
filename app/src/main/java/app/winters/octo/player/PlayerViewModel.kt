@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.winters.octo.animated.AnimatedArtSetting
 import app.winters.octo.animated.AnimatedArts
+import app.winters.octo.animated.FULL_SCREEN_BACKGROUND_GAIN
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.OnlineDao
 import app.winters.octo.catalog.TrackEntity
@@ -49,6 +50,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.launch
@@ -119,7 +121,10 @@ class PlayerViewModel @Inject constructor(
     // player's words and icons, decided from what the chosen background
     // draws (the prepared cover, shared with the background), and `show`
     // how far the background dims for them.
-    val colors: StateFlow<PlayerColors> = combine(
+    // Under a tall loop in Full screen the background is drawn brighter
+    // (FULL_SCREEN_BACKGROUND_GAIN), so `brightColors` decides the words'
+    // color and dimming for that, the same way.
+    private val drawn = combine(
         playback.now.map { it.artwork }.distinctUntilChanged(),
         settings.prefs.map { it.background to it.liveBackground }.distinctUntilChanged(),
     ) { ref, prefs -> ref to prefs }
@@ -132,8 +137,16 @@ class PlayerViewModel @Inject constructor(
             } else {
                 null
             }
-            colors.over(drawnRange(mode, colors, background, cover, live && LiveBackgroundSupported))
+            colors to drawnRange(mode, colors, background, cover, live && LiveBackgroundSupported)
         }
+        .shareIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), replay = 1)
+
+    val colors: StateFlow<PlayerColors> = drawn
+        .map { (colors, range) -> colors.over(range) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlayerColors.Quiet)
+
+    val brightColors: StateFlow<PlayerColors> = drawn
+        .map { (colors, range) -> colors.over(range?.scaled(FULL_SCREEN_BACKGROUND_GAIN)) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlayerColors.Quiet)
 
     // The animated art of the song's album, from its server, while the

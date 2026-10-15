@@ -201,7 +201,8 @@ fun AnimatedVisibilityScope.PlayerOverlay(
     model: PlayerViewModel = hiltViewModel(),
 ) {
     val now by model.now.collectAsStateWithLifecycle()
-    val colors by model.colors.collectAsStateWithLifecycle()
+    val plainColors by model.colors.collectAsStateWithLifecycle()
+    val brightColors by model.brightColors.collectAsStateWithLifecycle()
     val prefs by model.prefs.collectAsStateWithLifecycle()
     val animated by model.animatedArt.collectAsStateWithLifecycle()
     val lyricsWanted by model.lyricsOpen.collectAsStateWithLifecycle()
@@ -209,6 +210,9 @@ fun AnimatedVisibilityScope.PlayerOverlay(
     val upright = configuration.screenHeightDp >= configuration.screenWidthDp
     val loop = playerLoop(prefs.animatedArt, animated, upright, live = now.live != null)
     val tall = (loop as? PlayerLoop.Backdrop)?.clip
+    // Under a tall loop the background is drawn brighter, and the words'
+    // color and its dimming follow that.
+    val colors = if (tall != null) brightColors else plainColors
     // The tall loop melts into the player's own background, so the words
     // keep the ink it asks for; over the loop's top, the status icons and
     // the album's name follow the loop's brightness there.
