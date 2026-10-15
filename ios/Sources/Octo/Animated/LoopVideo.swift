@@ -52,7 +52,7 @@ struct LoopVideo: UIViewRepresentable {
     var poster: UIImage? = nil
     var radius: CGFloat = 0
     /// Where the loop dissolves, in points from its top: whole down to the first, gone at the
-    /// second, eased (smootherstep) between.
+    /// second, eased by `FullScreenLook.melt` between.
     var fade: ClosedRange<CGFloat>? = nil
     /// Blurred behind words that need the room, such as lyrics.
     var blurred = false
@@ -140,7 +140,7 @@ final class LoopVideoView: UIView {
         posterLayer.frame = bounds
         take?.layer.frame = bounds
         if let fade, bounds.height > 0 {
-            // Smootherstep from whole to nothing, sampled finely enough that no step shows.
+            // The melt from whole to nothing, sampled finely enough that no step shows.
             let steps = 16
             let start = fade.lowerBound / bounds.height
             let end = fade.upperBound / bounds.height
@@ -148,9 +148,9 @@ final class LoopVideoView: UIView {
             var colors: [CGColor] = [UIColor.black.cgColor]
             for i in 0...steps {
                 let t = CGFloat(i) / CGFloat(steps)
-                let eased = t * t * t * (t * (t * 6 - 15) + 10)
+                let gone = CGFloat(FullScreenLook.melt(Double(t)))
                 locations.append(NSNumber(value: Double(start + (end - start) * t)))
-                colors.append(UIColor.black.withAlphaComponent(1 - eased).cgColor)
+                colors.append(UIColor.black.withAlphaComponent(1 - gone).cgColor)
             }
             locations.append(1)
             colors.append(UIColor.clear.cgColor)

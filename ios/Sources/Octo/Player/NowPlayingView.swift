@@ -72,7 +72,15 @@ struct NowPlayingView: View {
     private static let topLineHeight: CGFloat = 40
 
     private var colors: PlayerColors {
-        look.colors
+        // Under a Full screen loop the background is drawn brighter; the words are picked for
+        // that, so small text keeps 4.5:1 (the background is dimmed further if it must be).
+        guard backdropCovers, case .backdrop = loop else { return look.colors }
+        let gain = Float(FullScreenLook.backgroundGain)
+        switch settings.player.background.mode {
+        case .immersive: return look.colors.over(look.cover?.range.scaled(FinalGain * gain))
+        case .artwork: return look.colors.over(look.cover?.range.scaled(gain))
+        default: return look.colors
+        }
     }
 
     /// The album whose animated art the player shows: the playing song's, on the server.
@@ -82,6 +90,11 @@ struct NowPlayingView: View {
     /// dissolves into the background, which keeps moving as chosen.
     private var isCoverLoop: Bool {
         if case .cover = loop { return true }
+        return false
+    }
+
+    private var isBackdropLoop: Bool {
+        if case .backdrop = loop { return backdropCovers }
         return false
     }
 
@@ -106,7 +119,8 @@ struct NowPlayingView: View {
                     PlayerBackground(prefs: settings.player.background, colors: colors, cover: look.cover,
                                      coverId: player.current?.coverArt, live: settings.player.liveBackground, calm: calm,
                                      playing: player.isPlaying, bpm: facts.bpm, entrance: entrance,
-                                     focused: focused, rests: isCoverLoop)
+                                     focused: focused, rests: isCoverLoop,
+                                     gain: isBackdropLoop ? FullScreenLook.backgroundGain : 1)
                     if case .backdrop(let clip) = loop {
                         BackdropFrame(clip: clip, albumId: loopAlbumId, entrance: entrance, pull: pull, fit: backdropFit,
                                       darkInk: colors.dark, base: colors.base,

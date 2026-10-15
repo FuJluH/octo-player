@@ -64,9 +64,9 @@ struct CoverLoop: View {
     }
 }
 
-/// An album's tall loop filling the top two thirds of the player: 1.1 times the screen's width at
-/// its own shape (a twentieth cropped at each side), clean to the top edge, its lower part
-/// dissolving with a long soft fade into the player's own background (the wash, or whichever
+/// An album's tall loop filling the top two thirds of the player as `FullScreenLook` places it:
+/// wider than the screen at its own shape, centered, from just above the top edge, its lower part
+/// dissolving with a long soft melt into the player's own background (the wash, or whichever
 /// background is chosen), so the title and the upper controls sit on the melting art. Where the
 /// art under the words would leave them under 4.5:1, a soft band of the background's base color
 /// comes in behind them, just enough. Its still shows first when it has one. While lyrics show,
@@ -98,10 +98,6 @@ struct PlayerBackdrop: View {
     /// A small copy of the loop's first frame (else its still), for the words' contrast.
     @State private var sample: CGImage?
 
-    /// How much wider than the screen the loop is drawn, and where on the screen it dissolves.
-    private static let zoom: CGFloat = 1.1
-    private static let fadeFrom: CGFloat = 0.50
-    private static let fadeTo: CGFloat = 0.67
     /// The block of words over the art: from the title row's top, this far down (the title, the
     /// artist, the progress line and its times).
     private static let wordsHeight: CGFloat = 110
@@ -117,33 +113,25 @@ struct PlayerBackdrop: View {
         clip.width > 0 && clip.height > 0 ? CGFloat(clip.height) / CGFloat(clip.width) : 4.0 / 3.0
     }
 
-    /// Where the loop dissolves, from 50% to 67% of the screen's height, eased; never past the
-    /// loop's own bottom.
-    private func fade(loopHeight: CGFloat, screen: CGFloat) -> ClosedRange<CGFloat> {
-        let end = min(loopHeight - 1, Self.fadeTo * screen)
-        let start = min(Self.fadeFrom * screen, end - 1)
-        return start...end
-    }
-
-    /// How much of the loop shows at `y` (points from the top), as its fade has it.
-    private static func shown(_ y: CGFloat, fade: ClosedRange<CGFloat>) -> CGFloat {
-        if y <= fade.lowerBound { return 1 }
-        if y >= fade.upperBound { return 0 }
-        let t = (y - fade.lowerBound) / (fade.upperBound - fade.lowerBound)
-        return 1 - t * t * t * (t * (t * 6 - 15) + 10)
+    /// How much of the loop shows at `y` (points from the screen's top), as its melt has it.
+    private static func shown(_ y: CGFloat, melt: ClosedRange<CGFloat>) -> CGFloat {
+        if y <= melt.lowerBound { return 1 }
+        if y >= melt.upperBound { return 0 }
+        return 1 - CGFloat(FullScreenLook.melt(Double((y - melt.lowerBound) / (melt.upperBound - melt.lowerBound))))
     }
 
     /// How strong a band of the base color behind the words must be for them to read at 4.5:1
     /// over the melting art: 0 when they already do.
-    private func scrim(loopHeight: CGFloat, fade: ClosedRange<CGFloat>) -> Double {
+    private func scrim(loopTop: CGFloat, loopHeight: CGFloat, melt: ClosedRange<CGFloat>) -> Double {
         guard let sample, let top = titleTop else { return 0 }
         let ink: UInt32 = darkInk ? DarkInkArgb : 0xFFFF_FFFF
         var needed = 0.0
         // Each row of the block, as the art over the background leaves it.
         for step in 0...10 {
             let y = top + Self.wordsHeight * CGFloat(step) / 10
-            let alpha = Self.shown(y, fade: fade)
-            guard alpha > 0.02, y < loopHeight, let art = loopRowColor(sample, share: y / loopHeight) else { continue }
+            let alpha = Self.shown(y, melt: melt)
+            guard alpha > 0.02, y < loopTop + loopHeight,
+                  let art = loopRowColor(sample, share: (y - loopTop) / loopHeight) else { continue }
             let under = OctoKit.overlay(art, Float(alpha), base)
             if contrastRatio(ink, under) >= PlayerContrast { continue }
             var low = 0.0, high = 1.0
@@ -159,19 +147,22 @@ struct PlayerBackdrop: View {
     var body: some View {
         let play = play
         GeometryReader { box in
-            let loopWidth = (box.size.width * Self.zoom).rounded()
-            let loopHeight = (loopWidth * shape).rounded()
-            let fade = fade(loopHeight: loopHeight, screen: box.size.height)
+            let place = FullScreenLook.place(width: Double(box.size.width), height: Double(box.size.height), shape: Double(shape))
+            let loopWidth = CGFloat(place.width)
+            let loopHeight = CGFloat(place.height)
+            let loopTop = CGFloat(place.top)
+            let melt = CGFloat(place.meltFrom)...CGFloat(place.meltTo)
             let pixels = loopPixels(.tall, points: CGSize(width: loopWidth, height: loopHeight), scale: scale)
-            let scrim = scrim(loopHeight: loopHeight, fade: fade)
+            let scrim = scrim(loopTop: loopTop, loopHeight: loopHeight, melt: melt)
             ZStack(alignment: .top) {
                 LoopVideo(source: file, run: loopRun(play, shown: shown, owns: stage.owner == id), poster: poster,
-                          fade: fade) { now in
+                          fade: (melt.lowerBound - loopTop)...(melt.upperBound - loopTop)) { now in
                     playing = now
                 }
-                // 1.1 times the screen's width, centered, from the top edge.
+                // Wider than the screen, centered, its top where the look puts it.
                 .frame(width: loopWidth, height: loopHeight)
                 .frame(width: box.size.width, alignment: .center)
+                .offset(y: loopTop)
                 if scrim > 0, let top = titleTop {
                     LinearGradient(stops: [
                         .init(color: Color(argb: base).opacity(0), location: 0),

@@ -249,10 +249,12 @@ struct WashInputs: Equatable {
     var moving: Bool
     var focused: Bool
     var closing: Bool
+    /// How much brighter than usual the wash is drawn.
+    var gain: Float = 1
 
     static func == (a: WashInputs, b: WashInputs) -> Bool {
         a.cover === b.cover && a.bpm == b.bpm && a.fpsLimit == b.fpsLimit && a.speed == b.speed && a.moving == b.moving
-            && a.focused == b.focused && a.closing == b.closing
+            && a.focused == b.focused && a.closing == b.closing && a.gain == b.gain
     }
 }
 
@@ -328,6 +330,8 @@ final class WashView: UIView {
         inputs = next
         if clock == nil { clock = WashClock(targetFps(next.focused ? .focused : .unfocused, next.fpsLimit, powerSave: lowPower)) }
         if next.closing, closingAt == nil { closingAt = CACurrentMediaTime() }
+        // A new brightness is drawn at once, even with the wash at rest.
+        if next.gain != before?.gain { wake() }
         if let cover = next.cover, cover !== shownCover, let clock, let gpu {
             shownCover = cover
             let nowMs = Int(CACurrentMediaTime() * 1000)
@@ -430,7 +434,7 @@ final class WashView: UIView {
         pass(buffer, gpu.blurAcross, into: blurred) { $0.setFragmentTexture(square, index: 0) }
         pass(buffer, gpu.blurDown, into: square) { $0.setFragmentTexture(blurred, index: 0) }
         let size = canvas.metal.drawableSize
-        let screen: [Float] = [Float(size.width), Float(size.height), motion.turn, 2 * b * dollyScale(dolly(now)), FinalGain,
+        let screen: [Float] = [Float(size.width), Float(size.height), motion.turn, 2 * b * dollyScale(dolly(now)), FinalGain * (inputs?.gain ?? 1),
                                Float.random(in: 0..<64), 0, 0]
         pass(buffer, gpu.finalPass, into: drawable.texture) { encoder in
             encoder.setFragmentTexture(square, index: 0)
