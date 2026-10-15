@@ -53,6 +53,7 @@ import app.winters.octo.liveradio.LiveStation
 import app.winters.octo.liveradio.countryChoices
 import app.winters.octo.liveradio.hiddenLine
 import app.winters.octo.liveradio.noStationsLine
+import app.winters.octo.liveradio.PlaceSource
 import app.winters.octo.liveradio.placeSourceLine
 import app.winters.octo.liveradio.radiusChoices
 import app.winters.octo.liveradio.radiusLabel
@@ -227,17 +228,23 @@ private fun PlaceChooser(
         )
         vm.placeSource?.let { Text(placeSourceLine(it), style = OctoType.caption, color = OctoColors.TextMuted) }
         AccentButton("Use my location", onClick = onUseLocation, loading = vm.locating, enabled = !vm.locating)
-        Text("Or type a ZIP, postal code or town", style = OctoType.caption, color = OctoColors.TextMuted, modifier = Modifier.padding(top = 4.dp))
-        GlassInput(
-            value = typed,
-            onValueChange = { typed = it },
-            placeholder = "ZIP, postal code or town",
-            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { onFind(typed) }),
-        )
+        // With nothing to look a typed place up, only the location is offered.
+        val canType = vm.placeSource != PlaceSource.None
+        if (canType) {
+            Text("Or type a ZIP, postal code or town", style = OctoType.caption, color = OctoColors.TextMuted, modifier = Modifier.padding(top = 4.dp))
+            GlassInput(
+                value = typed,
+                onValueChange = { typed = it },
+                placeholder = "ZIP, postal code or town",
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { onFind(typed) }),
+            )
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            GlazeButton(countryName, onClick = onPickCountry, size = ButtonSize.Small, modifier = Modifier.choiceAnchor(sheet))
-            GlazeButton("Find", onClick = { onFind(typed) }, size = ButtonSize.Small, enabled = typed.isNotBlank() && !vm.locating)
+            if (canType) {
+                GlazeButton(countryName, onClick = onPickCountry, size = ButtonSize.Small, modifier = Modifier.choiceAnchor(sheet))
+                GlazeButton("Find", onClick = { onFind(typed) }, size = ButtonSize.Small, enabled = typed.isNotBlank() && !vm.locating)
+            }
             if (canCancel || vm.locating) GlazeButton("Cancel", onClick = { vm.choose(false) }, size = ButtonSize.Small)
         }
         vm.placeProblem?.let { Text(it, style = OctoType.caption, color = OctoColors.TextSecondary) }
