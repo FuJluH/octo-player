@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.delay
 
 // Four soft pools of colour that drift around the corners. Each pixel takes
 // a blend of the four, the nearer pools counting for more, so the colours
@@ -77,13 +78,15 @@ fun MeshBackground(colors: PlayerColors, playing: Boolean, modifier: Modifier = 
     val speed by rememberUpdatedState(motion)
 
     // Time only moves forward at the current speed, so easing the speed
-    // never makes the pools jump.
+    // never makes the pools jump. New frames come as often as the speed
+    // needs (`meshFrameMs`), not on every frame of the screen.
     val time = remember { mutableFloatStateOf(0f) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(lifecycle) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             var last = withFrameNanos { it }
             while (true) {
+                delay(meshFrameMs(speed))
                 withFrameNanos { now ->
                     time.floatValue += (now - last) / 1_000_000_000f * speed
                     last = now
@@ -111,6 +114,20 @@ fun MeshBackground(colors: PlayerColors, playing: Boolean, modifier: Modifier = 
             },
     )
 }
+
+// How long the mesh waits before its next frame at this speed (1 while
+// music plays). At full speed a pool moves well under a pixel in a 60th of
+// a second, and slower it moves slower still, so it takes 60 frames a
+// second at full speed, fewer as it slows, and never under 10.
+fun meshFrameMs(speed: Float): Long {
+    val fps = (MESH_FULL_FPS * speed).coerceIn(MeshSlowestFps, MESH_FULL_FPS.toFloat())
+    // Less a little, so the frame after the wait still lands on time.
+    return (1_000f / fps).toLong() - MeshFrameSlackMs
+}
+
+const val MESH_FULL_FPS = 60
+private const val MeshSlowestFps = 10f
+private const val MeshFrameSlackMs = 4L
 
 // Whether this phone can draw the live background.
 val LiveBackgroundSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU

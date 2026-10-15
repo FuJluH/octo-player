@@ -44,6 +44,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -77,6 +78,7 @@ import app.winters.octo.ui.common.swipeSkip
 import app.winters.octo.ui.common.swipeUp
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.launch
+import kotlin.math.PI
 import kotlin.math.abs
 
 // A tab: its icon, the filled icon it shows while selected, and its name.
@@ -127,7 +129,9 @@ fun BottomBar(
     marks: Map<Int, String> = emptyMap(),
 ) {
     val grown by animateFloatAsState(if (playerShown) 1f else 0f, spring(0.75f, 200f), label = "bar shape")
-    val position = rememberPositionMs(now, positionMs)
+    // The ring round the button is the longest line drawn here.
+    val ringPx = with(LocalDensity.current) { BarHeight.toPx() } * PI.toFloat()
+    val position = rememberPositionMs(now, positionMs, lengthPx = ringPx)
     val progress = { now.fractionAt(position.longValue) }
     val swipe = rememberBarSwipe(hasSong = now.trackId != null, actions)
 

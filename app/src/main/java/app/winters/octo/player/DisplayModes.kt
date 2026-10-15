@@ -10,13 +10,14 @@ private const val SameRateHz = 0.5f
 // What the full player asks of the display, in Hz: 0 for nothing (the
 // phone decides), infinity for the fastest it has.
 //
-// Nothing with battery saver or Reduce motion on. The fastest while music
-// plays, as the lyrics, the progress line and the background all move.
-// Paused, only a moving background is left, so the background's own frame
-// limit is enough; with a still background, nothing.
-fun playerRefreshNeed(playing: Boolean, calm: Boolean, powerSave: Boolean, movingBackgroundFps: Int?): Float = when {
+// Nothing with battery saver or Reduce motion on. The fastest while lyrics
+// show and music plays, as the words being sung move on every frame.
+// Otherwise only a moving background moves that often (the progress line
+// moves half a pixel at a time, far less often), so the background's own
+// frame limit is enough; with a still background, nothing.
+fun playerRefreshNeed(playing: Boolean, lyricsShown: Boolean, calm: Boolean, powerSave: Boolean, movingBackgroundFps: Int?): Float = when {
     powerSave || calm -> 0f
-    playing -> Float.POSITIVE_INFINITY
+    playing && lyricsShown -> Float.POSITIVE_INFINITY
     movingBackgroundFps != null -> movingBackgroundFps.toFloat()
     else -> 0f
 }

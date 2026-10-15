@@ -68,6 +68,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -91,6 +92,7 @@ import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
@@ -135,7 +137,7 @@ import app.winters.octo.playback.sleepSummary
 import app.winters.octo.playback.speedLabel
 import app.winters.octo.player.immersive.CoverFadeMs
 import app.winters.octo.player.immersive.PlayerBackground
-import app.winters.octo.player.immersive.pausedBackgroundFps
+import app.winters.octo.player.immersive.movingBackgroundFps
 import app.winters.octo.player.immersive.accentInk
 import app.winters.octo.player.immersive.backgroundDolly
 import app.winters.octo.player.immersive.isDarkInk
@@ -169,7 +171,9 @@ import kotlin.math.abs
 // finds Close player as an action on the song's name, wherever it shows,
 // and on the album's. Turned sideways, the artwork sits beside the controls.
 // `backdrop` is what its glass frosts, given from outside so the menus that
-// open over it can frost it too.
+// open over it can frost it too. `onCovers` hears whether the player hides
+// everything under it (fully open and not pulled down), so what is under
+// it can stop drawing.
 @Composable
 fun AnimatedVisibilityScope.PlayerOverlay(
     artModifier: Modifier,
@@ -177,6 +181,7 @@ fun AnimatedVisibilityScope.PlayerOverlay(
     onOpenArtist: (String) -> Unit,
     onOpenAlbum: (String) -> Unit,
     backdrop: HazeState = rememberHazeState(),
+    onCovers: (Boolean) -> Unit = {},
     model: PlayerViewModel = hiltViewModel(),
 ) {
     val now by model.now.collectAsStateWithLifecycle()
@@ -198,20 +203,30 @@ fun AnimatedVisibilityScope.PlayerOverlay(
 
     BackHandler(onBack = onClose)
     LightOnDarkBars(darkIcons = colors.content.isDarkInk)
-    // The display's fastest rate while things move, handed back on close.
+    // The display rate what moves needs, handed back on close.
     val phoneCalm = rememberSystemReduceMotion()
     val powerSave = rememberPowerSave()
+    val lyricsWanted by model.lyricsOpen.collectAsStateWithLifecycle()
     val refreshNeed = playerRefreshNeed(
         playing = now.isPlaying,
+        lyricsShown = lyricsWanted && now.live == null,
         calm = prefs.reduceMotion || phoneCalm,
         powerSave = powerSave,
-        movingBackgroundFps = pausedBackgroundFps(prefs, Build.VERSION.SDK_INT),
+        movingBackgroundFps = movingBackgroundFps(prefs, Build.VERSION.SDK_INT, now.isPlaying),
     )
     RequestDisplayRate(refreshNeed)
 
     BoxWithConstraints(Modifier.fillMaxSize().displayRateModifier(refreshNeed)) {
         val cap = constraints.maxHeight * 0.45f
         val pulled = (pull / cap).coerceIn(0f, 1f)
+        // Told as part of this frame, so a pull shows the page under it on
+        // the frame the player first moves.
+        val covers = pull == 0f &&
+            transition.currentState == EnterExitState.Visible &&
+            transition.targetState == EnterExitState.Visible
+        val report by rememberUpdatedState(onCovers)
+        SideEffect { report(covers) }
+        DisposableEffect(Unit) { onDispose { report(false) } }
         // Fully rounded a fifth of the way down.
         val corner = 28.dp * (pulled * 5f).coerceAtMost(1f)
         Box(
@@ -984,10 +999,11 @@ private fun LikeButton(model: PlayerViewModel) {
 @Composable
 private fun Progress(now: NowPlaying, model: PlayerViewModel, onOpenSpeed: () -> Unit) {
     val prefs by model.prefs.collectAsStateWithLifecycle()
-    val position = rememberPositionMs(now, model::positionMs)
+    // The line is never wider than the window.
+    val position = rememberPositionMs(now, model::positionMs, lengthPx = LocalWindowInfo.current.containerSize.width.toFloat())
     val duration = now.durationMs.coerceAtLeast(0)
-    // The line moves every frame, but the times only change once a second,
-    // so only they recompose, and only then.
+    // The line moves on each half pixel, but the times only change once a
+    // second, so only they recompose, and only then.
     val playedSeconds by remember(duration) {
         derivedStateOf { (position.longValue.coerceIn(0, duration) / 1000).toInt() }
     }

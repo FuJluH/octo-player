@@ -29,6 +29,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import app.winters.octo.player.rememberPowerSave
+import kotlinx.coroutines.delay
 
 // How long the wash takes to fade in once its first frame is drawn, and
 // how long it waits for that frame before fading in regardless.
@@ -100,9 +101,13 @@ private fun WashCanvas(cover: WashCover?, bpm: Float, fpsLimit: Int, speed: Floa
             clock.start(withFrameNanos { it })
             frames.intValue++
             while (clock.busy(moving)) {
-                withFrameNanos { now ->
+                // Between drawn frames the clock rests rather than waking on
+                // every frame of a faster screen.
+                val rest = withFrameNanos { now ->
                     if (clock.tick(now, target, tempo, pace, moving)) frames.intValue++
+                    clock.restNanos(now)
                 }
+                if (rest > 0) delay(rest / 1_000_000)
             }
         }
     }
