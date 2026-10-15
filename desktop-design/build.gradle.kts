@@ -25,6 +25,7 @@ kotlin { jvmToolchain(17) }
 // type names at its own sizes, in DesktopMetrics.kt.
 val sharedDesignFiles = listOf(
     "AccentButton.kt",
+    "AccentSwatches.kt",
     "Artwork.kt",
     "Blur.kt",
     "Buttons.kt",

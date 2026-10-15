@@ -26,6 +26,7 @@ import app.winters.octo.radio.RadioAdventure
 import app.winters.octo.radio.RadioDiscovery
 import app.winters.octo.radio.RadioTuning
 import app.winters.octo.radio.RadioVariety
+import app.winters.octo.theme.AccentChoice
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -90,6 +91,8 @@ data class PlayerPrefs(
     // Only songs in the library: albums, search, artists and radio leave
     // out songs found online.
     val libraryOnly: Boolean = false,
+    // The accent the app is drawn in, or the playing cover's.
+    val accent: AccentChoice = AccentChoice.Octo,
 ) {
     // What the player uses: the longest blend, or 0 for none.
     val crossfadeMs: Long get() = if (crossfade) crossfadeSeconds * 1_000L else 0
@@ -172,6 +175,7 @@ private val REDUCE_MOTION = booleanPreferencesKey("reduce_motion")
 private val CAST_RENDERERS = booleanPreferencesKey("cast_renderers")
 private val CAST_KEEP_PLAYING = booleanPreferencesKey("cast_keep_playing")
 private val LIBRARY_ONLY = booleanPreferencesKey("library_only")
+private val ACCENT = stringPreferencesKey("accent_color")
 
 // A saved choice, or the default when nothing (or something unknown) is saved.
 private inline fun <reified T : Enum<T>> choice(name: String?, default: T): T =
@@ -236,6 +240,7 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
             castRenderers = stored[CAST_RENDERERS] ?: defaults.castRenderers,
             castKeepPlaying = stored[CAST_KEEP_PLAYING] ?: defaults.castKeepPlaying,
             libraryOnly = stored[LIBRARY_ONLY] ?: defaults.libraryOnly,
+            accent = choice(stored[ACCENT], defaults.accent),
         )
     }
 
@@ -373,6 +378,10 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
         context.playerPrefs.edit { it[LIBRARY_ONLY] = on }
     }
 
+    suspend fun setAccent(accent: AccentChoice) {
+        context.playerPrefs.edit { it[ACCENT] = accent.name }
+    }
+
     // Everything at once, for a backup.
     suspend fun snapshot(): Pair<PlayerPrefs, StreamPrefs> = prefs.first() to streamPrefs.first()
 
@@ -411,6 +420,7 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
             it[CAST_RENDERERS] = player.castRenderers
             it[CAST_KEEP_PLAYING] = player.castKeepPlaying
             it[LIBRARY_ONLY] = player.libraryOnly
+            it[ACCENT] = player.accent.name
             it[COPIES] = stream.copies.name
             it[STREAM_WIFI] = stream.wifi.name
             it[STREAM_MOBILE] = stream.mobile.name

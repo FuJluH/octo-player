@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.ui
 
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -164,7 +165,7 @@ fun DragLabel(drag: DragState) {
 }
 
 // A place lit while songs are held over it: a wash of the accent.
-val DropLit = OctoColors.Accent.copy(alpha = 0.14f)
+val DropLit: Color get() = OctoColors.Accent.copy(alpha = 0.14f)
 
 // Where songs held over the row `id` would land: a line along its top, or
 // its foot when the pointer is in its lower half.

@@ -71,7 +71,7 @@ private const val RecentDownloads = 30
 // Status dots: calm, never lit.
 private val DotOk = Color(0xFF8FBFA0)
 private val DotWarning = Color(0xFFE3B35B)
-private val DotNotSetUp = OctoColors.Accent.copy(alpha = 0.3f)
+private val DotNotSetUp: Color get() = OctoColors.Accent.copy(alpha = 0.3f)
 
 // What Octo is doing: its services, stations, recent downloads and where
 // they land. Only reachable on the home network.

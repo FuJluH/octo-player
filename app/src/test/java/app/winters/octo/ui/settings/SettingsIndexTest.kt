@@ -51,6 +51,14 @@ class SettingsIndexTest {
     }
 
     @Test
+    fun searchFindsTheAccentColor() {
+        assertEquals("Accent color", titles("accent").first())
+        assertTrue("Accent color" in titles("theme"))
+        assertTrue("Accent color" in titles("colour"))
+        assertEquals(SettingsPage.Appearance, SettingsIndex.AccentColor.page)
+    }
+
+    @Test
     fun punctuationAndAccentsDoNotMatter() {
         assertTrue("Streaming on Wi-Fi" in titles("wifi"))
         assertTrue("What's new" in titles("whats new"))

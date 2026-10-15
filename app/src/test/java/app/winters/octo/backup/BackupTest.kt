@@ -17,6 +17,7 @@ import app.winters.octo.sound.Crossfeed
 import app.winters.octo.sound.CrossfeedPreset
 import app.winters.octo.sound.EqMode
 import app.winters.octo.sound.SoundSettings
+import app.winters.octo.theme.AccentChoice
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -31,7 +32,7 @@ class BackupTest {
 
     private val full = Backup(
         createdAt = 1_758_000_000_000,
-        player = PlayerPrefs(crossfade = true, crossfadeSeconds = 4, crossfadeCurve = FadeCurve.SCurve, speed = 1.25f, keepPitch = false, skipSilence = true, resumeBluetooth = true),
+        player = PlayerPrefs(crossfade = true, crossfadeSeconds = 4, crossfadeCurve = FadeCurve.SCurve, speed = 1.25f, keepPitch = false, skipSilence = true, resumeBluetooth = true, accent = AccentChoice.Coral),
         streaming = StreamPrefs(CopyPreference.BestQuality, StreamQuality.Kbps320, StreamQuality.Kbps128),
         sound = SoundBackup(
             perOutput = true,
@@ -62,6 +63,7 @@ class BackupTest {
         listOf(
             "liveBackground", "crossfade", "crossfadeSeconds", "lyricsOnline", "speed", "keepPitch", "pitchSemitones",
             "skipSilence", "resumeWired", "resumeBluetooth", "resumeAlways", "smartTransitions", "filterSweeps", "matchTempo", "crossfadeCurve",
+            "accent",
         ).forEach { assertTrue("$it is missing", text.contains("\"$it\"")) }
     }
 
@@ -83,6 +85,20 @@ class BackupTest {
         val text = encodeBackup(Backup(player = PlayerPrefs(crossfadeCurve = FadeCurve.Linear))).replace("\"Linear\"", "\"Bungee\"")
         val read = decodeBackup(text) as BackupRead.Read
         assertEquals(FadeCurve.EqualPower, read.backup.player?.crossfadeCurve)
+    }
+
+    @Test
+    fun theAccentColorIsKept() {
+        for (accent in AccentChoice.entries) {
+            val read = decodeBackup(encodeBackup(Backup(player = PlayerPrefs(accent = accent)))) as BackupRead.Read
+            assertEquals(accent, read.backup.player?.accent)
+        }
+        assertTrue(encodeBackup(Backup(player = PlayerPrefs(accent = AccentChoice.FromArt))).contains("\"accent\": \"FromArt\""))
+        // One this app does not know, from a newer Octo, reads as Octo's own.
+        val newer = encodeBackup(Backup(player = PlayerPrefs(accent = AccentChoice.Mint))).replace("\"Mint\"", "\"Chartreuse\"")
+        assertEquals(AccentChoice.Octo, (decodeBackup(newer) as BackupRead.Read).backup.player?.accent)
+        // A backup from before accents leaves Octo's own.
+        assertEquals(AccentChoice.Octo, (decodeBackup("{\"kind\": \"octo-settings\", \"player\": {}}") as BackupRead.Read).backup.player?.accent)
     }
 
     @Test

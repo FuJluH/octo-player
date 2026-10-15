@@ -4,6 +4,7 @@ import app.winters.octo.subsonic.parseFamilyLink
 import app.winters.octo.family.FamilyOpen
 import app.winters.octo.family.FamilyNotifier
 import app.winters.octo.family.FamilyHub
+import app.winters.octo.ui.settings.KeepAccent
 import app.winters.octo.ui.imports.ImportInbox
 import app.winters.octo.ui.imports.fromHistory
 import app.winters.octo.ui.imports.sharedImport
@@ -55,7 +56,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         // The app opens on the library; servers are an optional add-on.
-        setContent { OctoTheme { ProvideOfflineMarks { ProvideAdoptedFinds { ProvideLearnedLengths { MainShell(library, playback, feedback, openPlayer) } } } } }
+        setContent { OctoTheme { KeepAccent(); ProvideOfflineMarks { ProvideAdoptedFinds { ProvideLearnedLengths { MainShell(library, playback, feedback, openPlayer) } } } } }
         publishShortcuts(this)
         // Opened by a voice request or a widget; not again when the screen turns.
         if (savedInstanceState == null) {

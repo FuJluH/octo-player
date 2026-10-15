@@ -83,6 +83,26 @@ class TokensTest {
     }
 
     @Test
+    fun everyAccentKeepsTheSameWordsAndOnlyTheAccentFamilyMoves() {
+        try {
+            for (choice in app.winters.octo.theme.FixedAccents) {
+                OctoColors.useAccent(Color(choice.argb!!))
+                assertEquals(choice.label, Color(choice.argb!!), OctoColors.Accent)
+                assertEquals(choice.label, Color.Black, contentColorFor(OctoColors.Accent))
+                assertEquals(choice.label, Color.White, contentColorFor(AccentFill))
+                assertEquals(choice.label, Color.White, contentColorFor(OctoColors.AccentTonal))
+                assertEquals(choice.label, Color.White, contentColorFor(OctoColors.AccentSelected))
+                // The words stay in Octo's blue grey whatever the accent.
+                assertEquals(OctoAccent, OctoColors.TextSecondary)
+                assertEquals(OctoAccent.copy(alpha = 0.8f), OctoColors.TextMuted)
+            }
+        } finally {
+            OctoColors.useAccent(OctoAccent)
+        }
+        assertEquals(Color(0xFFADC4CC), OctoColors.AccentHover)
+    }
+
+    @Test
     fun theSwitchFromWhiteToBlackWordsIsAtAbout58Percent() {
         // Greys either side of the threshold.
         val below = (0..255).map { Color(it, it, it) }.last { perceivedLightness(it) <= LightFillThreshold }

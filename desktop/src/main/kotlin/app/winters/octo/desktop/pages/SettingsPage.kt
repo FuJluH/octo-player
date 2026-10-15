@@ -108,8 +108,8 @@ fun SettingsPage(app: AppState, visit: Visit) {
 internal fun serverOffers(connection: Connection): String? =
     serverOffers(lyrics = connection.lyricsByIdOn || connection.supports(OCTO_LYRICS), adds = connection.acquires)
 
-// The window's background, Home's sections, the full player's background,
-// then how much moves.
+// The accent, the window's background, Home's sections, the full player's
+// background, then how much moves.
 // Each tuning line shows only while it has something to change.
 @Composable
 private fun AppearanceGroups(app: AppState, settings: AppSettings) {
@@ -117,6 +117,9 @@ private fun AppearanceGroups(app: AppState, settings: AppSettings) {
     fun appearance(edit: (Appearance) -> Appearance) = app.settings.update { it.copy(appearance = edit(it.appearance)) }
     fun wash(edit: (WashPrefs) -> WashPrefs) = appearance { it.copy(wash = edit(it.wash)) }
     val chosen = ambienceOf(look)
+    Group {
+        AccentRow(look.accent) { accent -> appearance { it.copy(accent = accent) } }
+    }
     Group("Window background") {
         ChoiceRow("Ambience", ambienceHelp(chosen), listOf(null, AmbienceStyle.Glow, AmbienceStyle.Immersive), chosen, ::ambienceName) { style ->
             appearance { withAmbience(it, style) }

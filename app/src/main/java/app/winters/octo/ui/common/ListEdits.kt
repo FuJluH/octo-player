@@ -1,5 +1,6 @@
 package app.winters.octo.ui.common
 
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -44,7 +45,7 @@ fun DragHandle(modifier: Modifier) {
 }
 
 // What is behind a song as it is swiped right, to play it next.
-private val PlayNextFill = OctoColors.Accent.copy(alpha = 0.22f)
+private val PlayNextFill: Color get() = OctoColors.Accent.copy(alpha = 0.22f)
 
 // Shown behind a row being swiped right: a wash of the accent, and what the
 // swipe does at the start.

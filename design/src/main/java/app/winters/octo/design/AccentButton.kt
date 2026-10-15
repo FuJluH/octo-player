@@ -16,7 +16,7 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.semantics.Role
 
 // The accent mixed into black, so white text stays readable on it.
-val AccentFill = mix(OctoColors.Accent, Color.Black, 0.45f)
+val AccentFill: Color get() = mix(OctoColors.Accent, Color.Black, 0.45f)
 
 // The one filled button on a surface. Its words are black or white,
 // whichever reads on `fill`; pass `OctoColors.AccentTonal` for the quieter

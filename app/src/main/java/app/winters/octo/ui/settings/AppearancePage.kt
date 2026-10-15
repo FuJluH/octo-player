@@ -66,8 +66,8 @@ class MotionViewModel @Inject constructor(private val settings: PlayerSettings) 
     }
 }
 
-// How the app looks: the artwork's colours glowing behind the pages, how
-// strongly and where, Home's sections, the player's background, and how
+// How the app looks: the accent, the artwork's colours glowing behind the
+// pages, how strongly and where, Home's sections, the player's background, and how
 // much moves.
 @Composable
 fun AppearancePage(
@@ -86,6 +86,9 @@ fun AppearancePage(
     val sheet = LocalChoiceSheet.current
 
     SettingsPageFrame("Appearance", onBack, highlight) {
+        SettingsGroup {
+            AccentPicker()
+        }
         AmbientPreview(prefs.strength, Modifier.padding(horizontal = 16.dp))
         SettingsGroup {
             ChoiceRow(SettingsIndex.Ambient, value = StrengthChoices.getValue(prefs.strength).label, onClick = {
