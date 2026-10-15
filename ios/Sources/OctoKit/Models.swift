@@ -179,10 +179,13 @@ public struct Album: Codable, Sendable, Hashable, Identifiable {
     public var ownedCount: Int?
     /// Only on `getAlbum`.
     public var song: [Song]
+    /// Octo, only on `getAlbum`: the album's animated art, when the server already knows it.
+    /// Missing says nothing either way; getAnimatedArt asks.
+    public var animatedArt: AnimatedArt?
 
     enum CodingKeys: String, CodingKey {
         case id, name, artist, artistId, displayArtist, coverArt, songCount, duration, year, genre, starred
-        case isCompilation, explicitStatus, isExternal, ownedCount, song
+        case isCompilation, explicitStatus, isExternal, ownedCount, song, animatedArt
     }
 
     public init(from decoder: Decoder) throws {
@@ -203,6 +206,7 @@ public struct Album: Codable, Sendable, Hashable, Identifiable {
         isExternal = c.bool(.isExternal) ?? false
         ownedCount = c.int(.ownedCount)
         song = (try? c.decodeIfPresent([Song].self, forKey: .song)) ?? []
+        animatedArt = (try? c.decodeIfPresent(AnimatedArt.self, forKey: .animatedArt)) ?? nil
     }
 
     /// An album known only by what a song says of it, enough to open its page.

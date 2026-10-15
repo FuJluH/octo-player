@@ -133,6 +133,10 @@ public enum SettingsIndex {
                                                   section: "Home")
     public static let playerBackground = SettingEntry("immersive_background", .appearance, "Player background", "What fills the player behind the lyrics",
                                                       ["immersive", "wash", "artwork", "cover", "colour", "color", "blur", "classic", "mesh"], section: "Player")
+    public static let animatedArt = SettingEntry(AnimatedArtSetting.prefKey, .appearance, AnimatedArtSetting.title,
+                                                 "Apple Music's animated album covers, on the player and album pages",
+                                                 ["animated", "album art", "cover", "video", "loop", "apple music", "full screen", "canvas"],
+                                                 section: "Player")
     public static let liveBackground = SettingEntry("live_background", .appearance, "Live background", "The player's background drifting slowly",
                                                     ["player", "animated", "moving", "motion", "colours", "blur"], section: "Player")
     public static let backgroundBrightnessCap = SettingEntry("immersive_bg_brightness_cap", .appearance, "Brightness cap",
@@ -328,7 +332,7 @@ public enum SettingsIndex {
         radioDiscovery, radioAdventure, radioVariety, radioFavorites, liveRadioNear, radioStations,
     ] + sound + [
         ambient, ambientHome, ambientLibrary, ambientSearch, ambientSettings, ambientBar, ambientPageArtwork, homeSections,
-        playerBackground, liveBackground, backgroundBrightnessCap, backgroundSaturation, backgroundContrast, backgroundUseBpm,
+        playerBackground, animatedArt, liveBackground, backgroundBrightnessCap, backgroundSaturation, backgroundContrast, backgroundUseBpm,
         backgroundSpeed, backgroundFps, playlistCovers, accentColor, glassTint, reduceMotion,
         phoneAccess, phoneSongs, rescan, libraryOnly, musicFolders,
         connectServer, yourServers, addServer, serverAddress, serverConnection, serverUser, serverMusicFolder, editConnection,

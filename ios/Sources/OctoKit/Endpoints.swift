@@ -58,7 +58,12 @@ extension SubsonicClient {
     }
 
     public func album(_ id: String) async throws -> Album {
-        try await get("getAlbum", [("id", id)], key: "album")
+        var album: Album = try await get("getAlbum", [("id", id)], key: "album")
+        // Octo's animated art comes with whole addresses, or not at all when it holds none.
+        if let art = album.animatedArt?.resolved(on: baseURL) {
+            album.animatedArt = art.isEmpty ? nil : art
+        }
+        return album
     }
 
     public func artists() async throws -> [Artist] {
