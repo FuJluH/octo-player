@@ -118,7 +118,7 @@ class FamilyModelTest {
     fun cancellingAndRemovingADeviceFromTheList() = runBlocking {
         server.answer("cancelFamilyRequest") { """"familyRequest":${request("r1", "Cancelled")}""" }
         model.cancel("r1")
-        until("cancelled") { model.said == "Request cancelled" }
+        until("cancelled") { model.said == "Request canceled" }
 
         server.answer("forgetFamilyDevice") { "" }
         model.forget(app.winters.octo.subsonic.FamilyDevice(id = "d_2", name = "Symfonium"))

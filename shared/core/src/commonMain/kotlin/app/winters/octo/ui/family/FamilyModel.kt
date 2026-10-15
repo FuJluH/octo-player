@@ -255,7 +255,7 @@ class FamilyModel(
         scope.launch { request(id, quality) }
     }
 
-    fun cancel(id: String) = act { cancelFamilyRequest(id).let { "Request cancelled" } }
+    fun cancel(id: String) = act { cancelFamilyRequest(id).let { "Request canceled" } }
 
     fun approve(id: String, note: String? = null) = act { decideFamilyRequest(id, approve = true, note = note).let { "Approved ${requestTitle(it)}" } }
 
