@@ -784,11 +784,13 @@ private fun TitleRow(now: NowPlaying, model: PlayerViewModel, onClose: () -> Uni
         // The buttons sit on the middle of the name's capitals, the same for a
         // song and a station, their icons sized from those capitals.
         val capHeight = rememberCapHeightPx(TitleStyle)
+        val titleBaseline = rememberBaselinePx(TitleStyle)
         val density = LocalDensity.current
         val icons = remember(capHeight, density) { TitleIcons(with(density) { capHeight.toDp() }) }
         CompositionLocalProvider(LocalTitleIcons provides icons) {
             TitleWithButtons(
                 capHeight = capHeight,
+                titleBaseline = titleBaseline,
                 icons = icons,
                 sideMargin = PlayerSideMargin,
                 title = { TitleBlock(now, calm, onOpenArtist, onClose) },

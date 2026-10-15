@@ -12,12 +12,11 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.PathParser
-import androidx.compose.ui.layout.AlignmentLine
-import androidx.compose.ui.layout.FirstBaseline
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFontFamilyResolver
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontSynthesis
 import androidx.compose.ui.text.font.FontWeight
@@ -101,6 +100,13 @@ class TitleIcons(capHeight: Dp) {
 
 val LocalTitleIcons = staticCompositionLocalOf<TitleIcons?> { null }
 
+// Where a line of `style` has its baseline, in pixels from its top.
+@Composable
+fun rememberBaselinePx(style: TextStyle): Float {
+    val measurer = rememberTextMeasurer()
+    return remember(measurer, style) { measurer.measure("Ag", style, maxLines = 1).firstBaseline }
+}
+
 // The height of a capital letter in `style`, in pixels, from its font.
 @Composable
 fun rememberCapHeightPx(style: TextStyle): Float {
@@ -124,13 +130,18 @@ fun rememberCapHeightPx(style: TextStyle): Float {
 }
 
 // The song's name and artist (`title`) with its buttons, which sit on the
-// middle of the name's capitals (`capHeight`, in pixels, on its first
-// line): the same place for a song and a station, so switching never moves
-// them. The row's right edge is `sideMargin` in from the screen's. The
-// name and artist end at the heart's target, fading out before it.
+// middle of the name's capitals: `capHeight` tall, standing on
+// `titleBaseline`, both in pixels from the top of the name's line. Both
+// come from the name's font rather than from the laid out name, so the
+// buttons stay put whatever the name is doing (scrolling, fading in a new
+// song, or a short one). The same place for a song and a station, so
+// switching never moves them. The row's right edge is `sideMargin` in from
+// the screen's. The name and artist end at the heart's target, fading out
+// before it.
 @Composable
 fun TitleWithButtons(
     capHeight: Float,
+    titleBaseline: Float,
     icons: TitleIcons,
     sideMargin: Dp,
     modifier: Modifier = Modifier,
@@ -155,8 +166,7 @@ fun TitleWithButtons(
         )
         val buttonsLeft = (place.buttonsRight - buttons.width).roundToInt()
         val name = measurables[0].measure(constraints.copy(minWidth = 0, maxWidth = place.titleWidth.roundToInt().coerceIn(0, width)))
-        val first = name[FirstBaseline].takeIf { it != AlignmentLine.Unspecified }?.toFloat()
-        val center = capMiddle(first, capHeight, name.height.toFloat())
+        val center = capMiddle(titleBaseline, capHeight)
         val buttonsTop = (center - buttons.height / 2f).roundToInt()
         // The buttons may reach past the name's lines, so the row grows to
         // hold them.
@@ -182,7 +192,5 @@ internal fun titleButtonsPlace(rowWidth: Float, sideMargin: Float, buttonSize: F
     return TitleButtonsPlace(buttonsRight, (buttonsRight - 2 * buttonSize).coerceAtLeast(0f))
 }
 
-// The middle of the capitals on a line whose baseline is `first`, or the
-// middle of `height` with no baseline.
-internal fun capMiddle(first: Float?, capHeight: Float, height: Float): Float =
-    if (first == null) height / 2 else first - capHeight / 2
+// The middle of `capHeight` capitals standing on `baseline`.
+internal fun capMiddle(baseline: Float, capHeight: Float): Float = baseline - capHeight / 2

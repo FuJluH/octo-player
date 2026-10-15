@@ -28,8 +28,7 @@ class TitleButtonsTest {
 
     @Test
     fun theButtonsSitOnTheMiddleOfTheCapitals() {
-        assertEquals(30f - 17.5f / 2, capMiddle(first = 30f, capHeight = 17.5f, height = 60f), 1e-4f)
-        assertEquals(30f, capMiddle(first = null, capHeight = 17.5f, height = 60f), 1e-4f)
+        assertEquals(30f - 17.5f / 2, capMiddle(baseline = 30f, capHeight = 17.5f), 1e-4f)
     }
 
     @Test
