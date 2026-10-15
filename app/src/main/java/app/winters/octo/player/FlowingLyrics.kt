@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -29,19 +30,25 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Canvas as ComposeCanvas
 import androidx.compose.ui.graphics.GraphicsLayerScope
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.RenderEffect
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layout
@@ -56,6 +63,7 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -88,7 +96,6 @@ import app.winters.octo.lyrics.engine.liftEm
 import app.winters.octo.lyrics.engine.maskLeft
 import app.winters.octo.lyrics.engine.maskShape
 import app.winters.octo.lyrics.engine.onScreen
-import app.winters.octo.lyrics.engine.shownBlur
 import app.winters.octo.lyrics.heardAt
 import app.winters.octo.lyrics.totalOffset
 import app.winters.octo.playback.NowPlaying
@@ -206,6 +213,13 @@ fun FlowingLyrics(
             fade.animateTo(1f, tween(FADE_IN_MS))
         }
         val shown = laidOut ?: return@BoxWithConstraints
+        // The lines' blurred copies, for these lines in this colour and look.
+        val copies = remember(shown, textColor, calm, look, density.density) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) LyricCopies(density.density) else null
+        }
+        DisposableEffect(copies) { onDispose { copies?.close() } }
+        val currentCopies by rememberUpdatedState(copies)
+        val drawDensity by rememberUpdatedState(density)
 
         // The one frame loop. It stops while the app is in the background
         // and starts fresh when it comes back.
@@ -224,6 +238,21 @@ fun FlowingLyrics(
                             prepare = { shown.prepare(it, lines[it], measurer, look.bloomFast) },
                             release = shown::release,
                         )
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            currentCopies?.follow(
+                                engine.states,
+                                engine.shown.value,
+                                nanos,
+                                size = { index -> shown.width to lineNodeHeight(engine.states[index].line, shown.lines[index], shown) },
+                                record = { index, canvas ->
+                                    val st = engine.states[index]
+                                    val area = Size(shown.width.toFloat(), lineNodeHeight(st.line, shown.lines[index], shown).toFloat())
+                                    copyScope.draw(drawDensity, LayoutDirection.Ltr, ComposeCanvas(canvas), area) {
+                                        drawLyricLine(engine, st, shown.lines[index], shown, textColor, calm)
+                                    }
+                                },
+                            )
+                        }
                     }
                     if (engine.settled) delay(RESTING_FRAME_MS)
                 }
@@ -255,7 +284,7 @@ fun FlowingLyrics(
                 val range = engine.shown.value
                 for (index in range) {
                     key(index) {
-                        LineNode(engine, index, shown, textColor, calm, onTap = tap, onLongPress = { stamp = it })
+                        LineNode(engine, index, shown, copies, textColor, calm, onTap = tap, onLongPress = { stamp = it })
                     }
                 }
                 stamp?.let { TimeStamp(engine, it, shown, totalOffset(offset, outputOffset)) }
@@ -295,12 +324,15 @@ fun FlowingLyrics(
 
 // One line: its layer moves, scales, fades and blurs it from the engine's
 // numbers, and its drawing fills its words. Both read only the line's own
-// counters, so a line that did not change is left alone.
+// counters, so a line that did not change is left alone. A line resting at
+// a blur draws a copy already blurred (LyricCopies) and its layer adds
+// none; otherwise it draws itself and its layer blurs it.
 @Composable
 private fun LineNode(
     engine: LyricEngine,
     index: Int,
     shown: LyricsLayout,
+    copies: LyricCopies?,
     color: Color,
     calm: Boolean,
     onTap: (Int) -> Unit,
@@ -309,7 +341,8 @@ private fun LineNode(
     val st = engine.states[index]
     val line = st.line
     val box = shown.lines[index]
-    val nodeHeight = ceil(if (line.isInterlude) shown.spec.interludeFull else box.height).toInt()
+    val nodeHeight = lineNodeHeight(line, box, shown)
+    val copy = remember(copies, index) { copies?.line(index)?.copy }
     val tap by rememberUpdatedState(onTap)
     val hold by rememberUpdatedState(onLongPress)
     val stampLabel = remember(line) { "Play from ${clockText((line.start * 1000).roundToLong())}" }
@@ -319,7 +352,7 @@ private fun LineNode(
                 val placeable = measurable.measure(Constraints.fixed(shown.width, nodeHeight))
                 layout(shown.width, nodeHeight) { placeable.place(0, 0) }
             }
-            .graphicsLayer { placeLine(engine, st, box, shown) }
+            .graphicsLayer { placeLine(engine, st, box, shown, copy?.value) }
             .semantics {
                 contentDescription = describe(line)
                 if (!line.isCredit) {
@@ -348,10 +381,22 @@ private fun LineNode(
             )
             .drawBehind {
                 st.drawVersion.intValue
-                drawLyricLine(engine, st, box, shown, color, calm)
+                val blurred = copy?.value
+                if (blurred != null) {
+                    drawIntoCanvas { blurred.draw(it.nativeCanvas) }
+                } else {
+                    drawLyricLine(engine, st, box, shown, color, calm)
+                }
             },
     )
 }
+
+// A line's height as laid out: an interlude's has room for its dots open.
+private fun lineNodeHeight(line: SyncLine, box: LineBox, shown: LyricsLayout): Int =
+    ceil(if (line.isInterlude) shown.spec.interludeFull else box.height).toInt()
+
+// Draws lines for their copies, away from the window.
+private val copyScope = CanvasDrawScope()
 
 // What a line reads as, aloud.
 private fun describe(line: SyncLine): String = when {
@@ -364,8 +409,10 @@ private val blurs = HashMap<Float, RenderEffect>()
 
 private fun blurOf(radius: Float): RenderEffect = blurs.getOrPut(radius) { BlurEffect(radius, radius, TileMode.Decal) }
 
-// A line's place, size, opacity and blur for this frame.
-private fun GraphicsLayerScope.placeLine(engine: LyricEngine, st: LineState, box: LineBox, shown: LyricsLayout) {
+// A line's place, size, opacity and blur for this frame. A line drawn from
+// a blurred copy is not blurred again, and its opacity goes on the copy
+// itself, so nothing cuts the blur off at the line's edges.
+private fun GraphicsLayerScope.placeLine(engine: LyricEngine, st: LineState, box: LineBox, shown: LyricsLayout, copy: BlurCopy?) {
     st.layerVersion.intValue
     val look = engine.look
     val inactive = look.fraction(LookDial.InactiveScale).toFloat()
@@ -374,8 +421,9 @@ private fun GraphicsLayerScope.placeLine(engine: LyricEngine, st: LineState, box
     val y = st.y.value() + engine.scrollOffset
     translationY = y.toFloat()
     alpha = st.opacity.toFloat().coerceIn(0f, 1f)
-    val blur = shownBlur(st.blur).toFloat() * density
-    renderEffect = if (blur > 0f && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) blurOf(blur) else null
+    val blur = blurPx(st, density)
+    renderEffect = if (blur > 0f && copy == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) blurOf(blur) else null
+    compositingStrategy = if (copy != null) CompositingStrategy.ModulateAlpha else CompositingStrategy.Auto
     transformOrigin = TransformOrigin(if (shown.width > 0) box.pivotX / shown.width else 0f, 0.5f)
     if (look.arc && onScreen(y, st.height, engine.viewHeight)) {
         val pose = arcPose(
