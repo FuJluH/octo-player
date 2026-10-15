@@ -64,15 +64,18 @@ struct CoverLoop: View {
     }
 }
 
-/// An album's tall loop filling the player behind the controls, scaled to cover the screen, its
-/// still first when it has one. Shaded into the clip's color (else the cover's) under the
-/// controls and along the top so the words read, and further while lyrics show. `covers` hears
-/// whether the loop or its still now fills the player.
+/// An album's tall loop at the top of the player, at the screen's width and its own shape, under
+/// the status bar, fading out softly just above the title. Below that the player is the loop's
+/// own colors: the same loop stretched and blurred deep, shaded into the clip's color (else the
+/// cover's) so the words read on it, and further while lyrics show. Its still shows first when
+/// it has one. `covers` hears whether the loop or its still now fills the player.
 struct PlayerBackdrop: View {
     let clip: AnimatedClip
     let albumId: String?
     /// The shade, `0xFFRRGGBB`.
     let color: UInt32
+    /// Where the title row starts, in points from the top of the player; nil until laid out.
+    var titleTop: CGFloat?
     var shown: Bool
     var held: Bool
     var lyricsOpen: Bool
@@ -87,26 +90,42 @@ struct PlayerBackdrop: View {
     @State private var poster: UIImage?
     @State private var playing = false
 
+    /// How long the loop takes to fade out, and how far above the title it is gone, in points.
+    private static let fadeLength: CGFloat = 170
+    private static let clearOfTitle: CGFloat = 14
+
     private var play: LoopPlay {
         loopPlay(seen: shown && !held && scenePhase == .active, powerSave: stage.lowPower, reduceMotion: calm)
     }
 
     private var covered: Bool { playing || poster != nil }
 
+    /// The loop's place: the width of the screen at the clip's own shape (3:4 when it names
+    /// none), fading so it is gone just above the title, or at its own bottom when the screen is
+    /// taller than that.
+    private func fit(_ size: CGSize) -> LoopBackdropFit {
+        let shape = clip.width > 0 && clip.height > 0 ? CGFloat(clip.height) / CGFloat(clip.width) : 4.0 / 3.0
+        let height = (size.width * shape).rounded()
+        let gone = max(min(height, (titleTop ?? height) - Self.clearOfTitle), Self.fadeLength)
+        return LoopBackdropFit(height: height, fadeStart: max(gone - Self.fadeLength, 0), fadeEnd: gone)
+    }
+
     var body: some View {
         let play = play
         GeometryReader { box in
-            let pixels = loopPixels(.tall, points: box.size, scale: scale)
+            let full = CGSize(width: box.size.width + 2, height: box.size.height + 2)
+            let fit = fit(full)
+            let pixels = loopPixels(.tall, points: CGSize(width: full.width, height: fit.height), scale: scale)
             ZStack {
                 LoopVideo(source: file, run: loopRun(play, shown: shown, owns: stage.owner == id), poster: poster,
-                          blurred: lyricsOpen) { now in
+                          backdrop: fit, blurred: lyricsOpen) { now in
                     playing = now
                 }
-                shade(box.size.height)
+                shade(fit, height: full.height)
                     .opacity(covered ? 1 : 0)
             }
             // A point past every edge, so no line of the screen shows past the loop.
-            .frame(width: box.size.width + 2, height: box.size.height + 2)
+            .frame(width: full.width, height: full.height)
             .position(x: box.size.width / 2, y: box.size.height / 2)
             .task(id: "\(clip.video)|\(Int(pixels.width))x\(Int(pixels.height))|\(play == .stillOnly)") {
                 file = nil
@@ -122,7 +141,7 @@ struct PlayerBackdrop: View {
         .allowsHitTesting(false)
         .accessibilityHidden(true)
         .animation(.easeInOut(duration: Double(loopFadeMs) / 1000), value: covered)
-        .animation(.easeInOut(duration: 0.36), value: lyricsOpen)
+        .animation(.easeInOut(duration: 0.35), value: lyricsOpen)
         .onChange(of: play == .play, initial: true) { _, plays in
             if plays { stage.claim(id) }
         }
@@ -133,27 +152,29 @@ struct PlayerBackdrop: View {
         }
     }
 
-    /// The shade over the loop: the clip's color along the top under the album's name, rising
-    /// from the bottom under the controls, and over everything while lyrics show.
-    private func shade(_ height: CGFloat) -> some View {
+    /// The shade: the clip's color along the top under the status bar and the album's name,
+    /// coming in as the loop fades out so the blurred color under the controls is mostly the
+    /// shade, and over everything while lyrics show.
+    private func shade(_ fit: LoopBackdropFit, height: CGFloat) -> some View {
         let tint = Color(argb: color)
         let points = max(height, 1)
+        let start = fit.fadeStart / points
+        let end = fit.fadeEnd / points
         return ZStack {
-            // Along the top, under the status bar and the album's name, eased out by 140 pt.
+            // Along the top, eased out by 140 pt.
             LinearGradient(stops: [
                 .init(color: tint.opacity(0.70), location: 0),
                 .init(color: tint.opacity(0.35), location: 60 / points),
                 .init(color: tint.opacity(0.10), location: 105 / points),
                 .init(color: tint.opacity(0), location: 140 / points),
             ], startPoint: .top, endPoint: .bottom)
-            // Rising under the controls, eased in so the title sits on the shade, and nearly whole
-            // under the transport, where nothing of the loop should show through.
+            // Eased in with the loop's fade, then steady under the controls.
             LinearGradient(stops: [
-                .init(color: tint.opacity(0), location: 0.36),
-                .init(color: tint.opacity(0.25), location: 0.44),
-                .init(color: tint.opacity(0.70), location: 0.52),
-                .init(color: tint.opacity(0.90), location: 0.60),
-                .init(color: tint.opacity(0.92), location: 1),
+                .init(color: tint.opacity(0), location: start),
+                .init(color: tint.opacity(0.12), location: start + (end - start) * 0.4),
+                .init(color: tint.opacity(0.42), location: start + (end - start) * 0.75),
+                .init(color: tint.opacity(0.62), location: end),
+                .init(color: tint.opacity(0.66), location: 1),
             ], startPoint: .top, endPoint: .bottom)
             tint.opacity(lyricsOpen ? 0.78 : 0)
         }

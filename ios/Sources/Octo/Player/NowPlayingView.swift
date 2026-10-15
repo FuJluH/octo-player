@@ -27,6 +27,8 @@ struct NowPlayingView: View {
     /// The full-screen loop (or its still) fills the player: the card steps aside and the words
     /// take the loop's shade.
     @State private var backdropCovers = false
+    /// Where the title row sits, for a full-screen loop to fade out above it.
+    @State private var backdropFit = BackdropTitle()
 
     // The way in and out.
     /// The opening and closing: read only by the parts that move with it, so the player is not
@@ -60,6 +62,8 @@ struct NowPlayingView: View {
     @State private var liveSong = LiveSongControl()
 
     private static let pullShare: CGFloat = 0.45
+    /// The player's own space, which a pull moves as a whole.
+    nonisolated private static let space = "player"
     private static let slop: CGFloat = 8
     private static let skipAt: CGFloat = 88
     /// The line at the top, holding the album's name.
@@ -111,7 +115,7 @@ struct NowPlayingView: View {
                                      focused: focused)
                     if case .backdrop(let clip) = loop {
                         BackdropFrame(clip: clip, albumId: loopAlbumId, color: backdropShade(clip), entrance: entrance, pull: pull,
-                                      lyricsOpen: lyrics.open) { backdropCovers = $0 }
+                                      fit: backdropFit, lyricsOpen: lyrics.open) { backdropCovers = $0 }
                     }
                     Group {
                         if sideways {
@@ -129,6 +133,7 @@ struct NowPlayingView: View {
                                                           cancelled: dragTakenOver))
                 }
                 .frame(width: size.width, height: size.height)
+                .coordinateSpace(.named(Self.space))
                 .modifier(PulledFrame(pull: pull, cap: cap))
                 .contentShape(Rectangle())
                 .gesture(playerDrag(cap: cap, folded: lyrics.open && !sideways))
@@ -219,6 +224,9 @@ struct NowPlayingView: View {
                         .transition(swap)
                 } else {
                     controls(roomy: true)
+                        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.space)).minY } action: { top in
+                            if abs((backdropFit.top ?? -1) - top) > 0.5 { backdropFit.top = top }
+                        }
                         .padding(.bottom, 16)
                         .modifier(Rising(entrance: entrance))
                         .transition(swap)
@@ -966,13 +974,22 @@ private struct BackdropFrame: View {
     let color: UInt32
     let entrance: PlayerEntrance
     let pull: PlayerPull
+    let fit: BackdropTitle
     let lyricsOpen: Bool
     let covers: (Bool) -> Void
 
     var body: some View {
-        PlayerBackdrop(clip: clip, albumId: albumId, color: color, shown: !entrance.closing, held: pull.distance > 0,
-                       lyricsOpen: lyricsOpen, covers: covers)
+        PlayerBackdrop(clip: clip, albumId: albumId, color: color, titleTop: fit.top, shown: !entrance.closing,
+                       held: pull.distance > 0, lyricsOpen: lyricsOpen, covers: covers)
     }
+}
+
+/// Where the player's title row starts, in the player's own space. Only the full-screen loop
+/// reads it, so its layout never lays out the player again.
+@MainActor
+@Observable
+final class BackdropTitle {
+    var top: CGFloat?
 }
 
 /// The card's cover, its corners following the opening and closing. A live station shows the
