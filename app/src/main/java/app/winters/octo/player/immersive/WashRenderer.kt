@@ -56,6 +56,7 @@ class WashRenderer {
     private val pictureMatrix = Matrix()
     private var shownPicture: Bitmap? = null
     private var pictureShader: BitmapShader? = null
+    private val pictureShaders = HashMap<Bitmap, BitmapShader>()
     private var pictureZoom = 1f
     private var pendingZoom = 1f
 
@@ -133,8 +134,9 @@ class WashRenderer {
         if (bitmap === shownPicture) return
         shownPicture = bitmap
         pictureZoom = pendingZoom
-        pictureShader = BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply {
-            filterMode = BitmapShader.FILTER_MODE_LINEAR
+        // The stream hands its few bitmaps round again; each keeps its shader.
+        pictureShader = pictureShaders.getOrPut(bitmap) {
+            BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply { filterMode = BitmapShader.FILTER_MODE_LINEAR }
         }
         final.setFloatUniform("seed", Random.nextFloat() * 64f)
     }
@@ -181,6 +183,7 @@ class WashRenderer {
         screen.discardDisplayList()
         shownPicture = null
         pictureShader = null
+        pictureShaders.clear()
     }
 
     private fun coverShader(bitmap: Bitmap) = BitmapShader(bitmap, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT).apply {
