@@ -60,11 +60,11 @@ class BackgroundPrefsTest {
     }
 
     @Test
-    fun theWashDrawsAtThirtyOrTheLowerLimit() {
-        assertEquals(30, washFps(30))
-        assertEquals(30, washFps(60))
-        assertEquals(30, washFps(120))
-        assertEquals(24, washFps(24))
+    fun theWashDrawsAtThirtyWhateverAnOldSettingSays() {
+        assertEquals(30, WashMaxFps)
+        assertEquals(30, movingBackgroundFps(PlayerPrefs(background = BackgroundPrefs(fps = 90)), 33, playing = true))
+        // An old saved rate still reads back.
+        assertEquals(90, BackgroundPrefs(fps = 90).sane().fps)
     }
 
     @Test

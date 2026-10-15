@@ -211,10 +211,6 @@ object SettingsIndex {
         "immersive_bg_speed", SettingsPage.Appearance, "Drift speed", "How fast the background moves",
         listOf("background", "slow", "fast", "motion", "speed", "ambience"), section = "Player",
     )
-    val BackgroundFps = add(
-        "immersive_bg_fps", SettingsPage.Appearance, "Frame rate", "How smoothly the background moves",
-        listOf("fps", "battery", "smooth", "background"), section = "Player",
-    )
     val HomeSections = add(
         "home_sections", SettingsPage.Appearance, "Home sections", "The order of Home's shelves, and which ones show",
         listOf("home", "shelves", "sections", "order", "rearrange", "reorder", "move", "hide", "show", "layout", "customize", "edit home"),

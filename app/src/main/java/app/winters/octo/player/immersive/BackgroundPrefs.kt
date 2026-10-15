@@ -31,6 +31,9 @@ data class BackgroundPrefs(
     val saturation: Int = 180,
     val contrast: Float = 1.3f,
     val useBpm: Boolean = true,
+    // The frame rate the background once offered as a setting. It always
+    // draws at WashMaxFps now; the value is still read from settings and
+    // backups made before, and otherwise left alone.
     val fps: Int = 60,
     // How fast it drifts, as a share of the full pace. Low by default, so it
     // reads as a slow ambience rather than an animation.
