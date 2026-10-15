@@ -31,7 +31,7 @@ enum AccountHooks {
         #if DEBUG
         Drive.steps.append { name, value in
             guard name == "account" else { return false }
-            await AccountDrive.run(value, session: session)
+            await AccountDrive.run(value, session: session, serverSwitch: data.serverSwitch)
             return true
         }
         #endif
@@ -58,16 +58,29 @@ enum AccountHooks {
 /// - `account:open:URL` opens the app with an address, as another app would
 /// - `account:shared:TEXT` leaves TEXT in the share inbox, as "Share to Octo" does, and takes it
 ///   into Import
+/// - `account:use:TEXT` makes the kept server whose id or address holds TEXT the one in use, as
+///   tapping it in Servers does (one needing its password again is left as it is)
+/// - `account:remove:TEXT` takes the kept server whose id or address holds TEXT off the list,
+///   deleting what the phone keeps for it, as Remove and delete does
 @MainActor
 enum AccountDrive {
-    static func run(_ value: String, session: Session) async {
+    static func run(_ value: String, session: Session, serverSwitch: ServerSwitch) async {
         guard let entries = SystemEntries.shared else { return }
         let router = entries.router
         let accounts = entries.accounts
         let parts = value.split(separator: ":", maxSplits: 1).map(String.init)
         let what = parts.first ?? ""
         let rest = parts.count > 1 ? parts[1] : ""
+        let named = session.servers.first { $0.id == rest || $0.address.absoluteString.contains(rest) }
         switch what {
+        case "use":
+            guard let named, !named.signedOut else { return }
+            switch await serverSwitch.switchTo(named.id) {
+            case .done(let notice): if let notice { router.done(notice) }
+            case .needsPassword, .failed: break
+            }
+        case "remove":
+            if let named { serverSwitch.remove(named.id, forgetHere: true) }
         case "server": await SettingsNavigator.shared.drive("settings", "server", router: router)
         case "shares": router.openInSettings(.shares)
         case "radio": router.openInSettings(.radioStations)
