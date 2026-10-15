@@ -1,7 +1,6 @@
 package app.winters.octo.player
 
 import androidx.annotation.DrawableRes
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -20,6 +19,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.MutableLongState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -27,17 +28,15 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntRect
@@ -51,8 +50,12 @@ import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.playback.NowPlaying
 import app.winters.octo.ui.common.Artwork
+import app.winters.octo.ui.common.asClock
 import app.winters.octo.ui.common.LocalHaze
 import app.winters.octo.ui.common.isOutsideLibrary
+import app.winters.octo.ui.nav.ProgressRing
+import app.winters.octo.ui.nav.RingStepMs
+import app.winters.octo.ui.nav.isPaused
 
 // How tall the small player under the lyrics is, and the room kept below it.
 val LyricsBarHeight = 64.dp
@@ -63,10 +66,11 @@ private val ScrubEdge = 22.dp
 
 // The small player in lyrics mode, one glass capsule like the app's bar:
 // the artwork, the song, back, play and next, the lyrics switch, lit (a tap
-// leaves lyrics), and the lyrics menu. A thin line along the bottom edge
-// shows how far the song has played; a drag along that edge moves through
-// it. A tap on the song leaves lyrics too, and a screen reader finds Close
-// player on it.
+// leaves lyrics), and the lyrics menu. A thin ring round the artwork shows
+// how far the song has played, as the bar's round button does; a drag
+// along the bottom edge moves through the song, the ring following the
+// finger. A tap on the song leaves lyrics too, and a screen reader finds
+// Close player on it.
 @Composable
 fun LyricsBar(
     now: NowPlaying,
@@ -76,8 +80,8 @@ fun LyricsBar(
     modifier: Modifier = Modifier,
 ) {
     val ink = LocalContentColor.current
-    // The line along the edge is never wider than the window.
-    val position = rememberPositionMs(now, model::positionMs, lengthPx = LocalWindowInfo.current.containerSize.width.toFloat())
+    // The ring round the artwork is short, so it steps once a second.
+    val position = rememberPositionMs(now, model::positionMs, everyMs = RingStepMs)
     val duration by rememberUpdatedState(now.durationMs)
     // Where a drag along the edge has got to, while one is under way.
     var scrub by remember { mutableStateOf<Float?>(null) }
@@ -116,10 +120,11 @@ fun LyricsBar(
             },
     ) {
         Row(
-            Modifier.fillMaxSize().padding(start = 12.dp, end = 6.dp),
+            // The artwork sits 12dp in; its ring takes the room around it.
+            Modifier.fillMaxSize().padding(start = 12.dp - RingRoom, end = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Artwork(now.artwork, 40.dp, shape = RoundedCornerShape(10.dp), outside = isOutsideLibrary(now.trackId))
+            ArtWithRing(now, position, progress = { scrub ?: now.fractionAt(position.longValue) })
             Column(
                 Modifier
                     .weight(1f)
@@ -131,7 +136,7 @@ fun LyricsBar(
                         onClick = model::toggleLyrics,
                     )
                     .closesPlayer(onClose)
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                    .padding(start = 10.dp - RingRoom, end = 10.dp, top = 8.dp, bottom = 8.dp),
             ) {
                 Text(now.title.orEmpty(), style = OctoType.label, color = ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
@@ -168,30 +173,6 @@ fun LyricsBar(
                 Icon(painterResource(OctoIcons.More), contentDescription = null, tint = ink.copy(alpha = 0.7f), modifier = Modifier.size(22.dp))
             }
         }
-        // The song's progress along the straight part of the bottom edge,
-        // brighter and thicker while it is dragged.
-        Canvas(
-            Modifier
-                .align(Alignment.BottomCenter)
-                .padding(start = LyricsBarHeight / 2, end = LyricsBarHeight / 2, bottom = 4.dp)
-                .fillMaxWidth()
-                .height(3.dp),
-        ) {
-            val dragging = scrub != null
-            val fraction = scrub ?: now.fractionAt(position.longValue)
-            val weight = if (dragging) size.height else size.height * 2 / 3
-            val y = size.height - weight / 2
-            drawLine(ink.copy(alpha = 0.18f), Offset(0f, y), Offset(size.width, y), strokeWidth = weight, cap = StrokeCap.Round)
-            if (fraction > 0f) {
-                drawLine(
-                    ink.copy(alpha = if (dragging) 0.95f else 0.7f),
-                    Offset(0f, y),
-                    Offset(size.width * fraction, y),
-                    strokeWidth = weight,
-                    cap = StrokeCap.Round,
-                )
-            }
-        }
     }
     LyricsMenu(
         visible = menuOpen,
@@ -216,3 +197,38 @@ private fun BarButton(@DrawableRes icon: Int, description: String, iconSize: Dp,
         Icon(painterResource(icon), contentDescription = null, tint = LocalContentColor.current, modifier = Modifier.size(iconSize))
     }
 }
+
+// The artwork, the room between it and its ring, and its corners.
+private val ArtSize = 40.dp
+private val RingRoom = 3.dp
+private val ArtCorner = 10.dp
+
+// The song's artwork with a ring round it for how far the song has played
+// (`progress`, read while drawing), the same ring as the bar's round
+// button: still and full for a station, breathing while paused. A screen
+// reader hears the song and how much of it has played.
+@Composable
+private fun ArtWithRing(now: NowPlaying, position: MutableLongState, progress: () -> Float) {
+    val playedSeconds by remember { derivedStateOf { (position.longValue / 1000).toInt() } }
+    val song = listOfNotNull(now.title?.takeIf(String::isNotBlank), now.artist?.takeIf(String::isNotBlank)).joinToString(", ")
+    val played = playedWords(playedSeconds, (now.durationMs / 1000).toInt(), live = now.live != null)
+    Box(
+        Modifier
+            .size(ArtSize + RingRoom * 2)
+            .clearAndSetSemantics {
+                if (song.isNotEmpty()) contentDescription = song
+                if (played.isNotEmpty()) stateDescription = played
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Artwork(now.artwork, ArtSize, shape = RoundedCornerShape(ArtCorner), outside = isOutsideLibrary(now.trackId))
+        if (now.trackId != null) {
+            ProgressRing(progress, paused = isPaused(now), modifier = Modifier.matchParentSize(), whole = now.live != null, corner = ArtCorner + RingRoom)
+        }
+    }
+}
+
+// How much of the song has played, as a screen reader says it: "1:05 of
+// 3:20 played". Nothing for a station or a song of no known length.
+internal fun playedWords(playedSeconds: Int, lengthSeconds: Int, live: Boolean): String =
+    if (live || lengthSeconds <= 0) "" else "${playedSeconds.coerceIn(0, lengthSeconds).asClock()} of ${lengthSeconds.asClock()} played"

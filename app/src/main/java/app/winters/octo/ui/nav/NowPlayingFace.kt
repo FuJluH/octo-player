@@ -1,7 +1,7 @@
 package app.winters.octo.ui.nav
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -14,8 +14,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
@@ -76,26 +80,46 @@ fun nowPlayingState(now: NowPlaying): String = when {
 // arc can move every frame without recomposing. Paused, a faint track
 // shows the full circle and the arc breathes in brightness and width; with
 // motion reduced it holds still, dimmed, instead. The ring draws in its own
-// layer, so a breath redraws only the ring.
+// layer, so a breath redraws only the ring. With `corner` it follows a
+// rounded square with corners that round instead, for square artwork.
 @Composable
-fun ProgressRing(progress: () -> Float, paused: Boolean, modifier: Modifier, whole: Boolean = false) {
+fun ProgressRing(progress: () -> Float, paused: Boolean, modifier: Modifier, whole: Boolean = false, corner: Dp? = null) {
     val still = LocalReduceMotion.current
     val breath = rememberPauseBreath(paused && !still)
     val accent = OctoColors.Accent
-    Canvas(modifier.graphicsLayer()) {
-        val thin = 2.dp.toPx()
-        val sweep = if (whole) 360f else 360f * progress()
-        if (!paused) {
-            drawArc(accent, -90f, sweep, useCenter = false, style = Stroke(thin, cap = StrokeCap.Round))
-            return@Canvas
-        }
-        drawArc(accent.copy(alpha = PausedTrackAlpha), 0f, 360f, useCenter = false, style = Stroke(thin))
-        val calm = still || breath.floatValue == BreathRested
-        val b = if (calm) 0f else breath.floatValue
-        val alpha = if (calm) PausedStillAlpha else PausedLowAlpha + (1f - PausedLowAlpha) * b
-        val width = thin + (PausedWideDp - 2f).dp.toPx() * b
-        drawArc(accent.copy(alpha = alpha), -90f, sweep, useCenter = false, style = Stroke(width, cap = StrokeCap.Round))
-    }
+    Spacer(
+        modifier.graphicsLayer().drawWithCache {
+            val thin = 2.dp.toPx()
+            val outline = corner?.let { RingOutline(size.width, size.height, it.toPx()) }
+            val track = outline?.pathTo(1f)
+            val arc = Path()
+            // The arc from the top, `fraction` of the way round.
+            fun DrawScope.ring(fraction: Float, color: Color, stroke: Stroke) {
+                if (outline == null) {
+                    drawArc(color, -90f, 360f * fraction, useCenter = false, style = stroke)
+                } else {
+                    drawPath(outline.pathTo(fraction, into = arc), color, style = stroke)
+                }
+            }
+            onDrawBehind {
+                val fraction = if (whole) 1f else progress()
+                if (!paused) {
+                    ring(fraction, accent, Stroke(thin, cap = StrokeCap.Round))
+                    return@onDrawBehind
+                }
+                if (track != null) {
+                    drawPath(track, accent.copy(alpha = PausedTrackAlpha), style = Stroke(thin))
+                } else {
+                    drawArc(accent.copy(alpha = PausedTrackAlpha), 0f, 360f, useCenter = false, style = Stroke(thin))
+                }
+                val calm = still || breath.floatValue == BreathRested
+                val b = if (calm) 0f else breath.floatValue
+                val alpha = if (calm) PausedStillAlpha else PausedLowAlpha + (1f - PausedLowAlpha) * b
+                val width = thin + (PausedWideDp - 2f).dp.toPx() * b
+                ring(fraction, accent.copy(alpha = alpha), Stroke(width, cap = StrokeCap.Round))
+            }
+        },
+    )
 }
 
 // The paused ring: its faint full track, the arc's dimmest point in a
