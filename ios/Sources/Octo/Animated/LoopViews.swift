@@ -65,7 +65,7 @@ struct CoverLoop: View {
 }
 
 /// An album's tall loop at the top of the player, at the screen's width and its own shape, under
-/// the status bar, fading out softly just above the title. Below that the player is the loop's
+/// the status bar, fading out softly to end at the title. Below that the player is the loop's
 /// own colors: the same loop stretched and blurred deep, shaded into the clip's color (else the
 /// cover's) so the words read on it, and further while lyrics show. Its still shows first when
 /// it has one. `covers` hears whether the loop or its still now fills the player.
@@ -93,9 +93,8 @@ struct PlayerBackdrop: View {
     @State private var poster: UIImage?
     @State private var playing = false
 
-    /// How long the loop takes to fade out, and how far above the title it is gone, in points.
-    private static let fadeLength: CGFloat = 125
-    private static let clearOfTitle: CGFloat = 14
+    /// How long the loop takes to fade out, in points: a short, soft band ending at the title.
+    private static let fadeLength: CGFloat = 70
 
     private var play: LoopPlay {
         loopPlay(seen: shown && !held && scenePhase == .active, powerSave: stage.lowPower, reduceMotion: calm)
@@ -104,12 +103,12 @@ struct PlayerBackdrop: View {
     private var covered: Bool { playing || poster != nil }
 
     /// The loop's place: the width of the screen at the clip's own shape (3:4 when it names
-    /// none), fading so it is gone just above the title, or at its own bottom when the screen is
-    /// taller than that.
+    /// none), clear down to the title's top or its own bottom, whichever is higher, and gone
+    /// there after a short fade.
     private func fit(_ size: CGSize) -> LoopBackdropFit {
         let shape = clip.width > 0 && clip.height > 0 ? CGFloat(clip.height) / CGFloat(clip.width) : 4.0 / 3.0
         let height = (size.width * shape).rounded()
-        let gone = max(min(height, (titleTop ?? height) - Self.clearOfTitle), Self.fadeLength)
+        let gone = max(min(height, titleTop ?? height), Self.fadeLength)
         return LoopBackdropFit(height: height, fadeStart: max(gone - Self.fadeLength, 0), fadeEnd: gone)
     }
 
