@@ -23,6 +23,10 @@ struct AlbumView: View {
     @State private var online: Album?
     /// The server album the page shares, once the look-up finds one.
     @State private var shareAlbumId: String?
+    @State private var animated = AnimatedArtStore.shared
+    /// The header's cover is on screen.
+    @State private var coverShown = false
+    @Environment(\.shellAwake) private var awake
 
     /// The songs the page lists: the whole album with its finds, unless only the library's are
     /// wanted.
@@ -63,6 +67,7 @@ struct AlbumView: View {
         .libraryRefreshable {}
         .task(id: "\(album.id)|\(library.stamp(.library, .ratings, .finds))") { await read() }
         .task(id: "\(shown?.id ?? "")|\(state.canShare)") { await lookUpShareAlbum() }
+        .task(id: loopAlbumId) { _ = await animated.want(loopAlbumId) }
         .onChange(of: downloads.arrived) { _, _ in
             guard !finds.isEmpty else { return }
             Task {
@@ -84,7 +89,10 @@ struct AlbumView: View {
     private func read() async {
         guard let found = await library.resolveAlbum(album.id) else {
             shown = nil
-            if online == nil, let client = session.client, let full = try? await client.album(album.id) { online = full }
+            if online == nil, let client = session.client, let full = try? await client.album(album.id) {
+                animated.note(full.id, full.animatedArt)
+                online = full
+            }
             return
         }
         shown = found
@@ -140,10 +148,27 @@ struct AlbumView: View {
         return [album.year.map(String.init), songsCount(count), asLength(length)].compactMap { $0 }.joined(separator: " • ")
     }
 
+    /// The album on the server in use whose animated art the header plays: the page's own when it
+    /// is the server's, else the album its songs' server copies name.
+    private var loopAlbumId: String? {
+        let here = session.inUse?.sourceId
+        if let shown, isServerSource(shown.sourceId), shown.sourceId == here { return shown.nativeId }
+        return tracks.lazy.compactMap { track in
+            track.sourceId == here ? serverId(of: track.albumId, sourceId: track.sourceId) : nil
+        }.first ?? (online?.id)
+    }
+
     @ViewBuilder
     private func header(_ album: LibraryAlbum) -> some View {
         VStack(spacing: 0) {
             ArtCover(artwork: album.artwork, size: 240, radius: 10)
+                .overlay {
+                    if let clip = AppSettings.shared.animatedArt.onAlbumPage(animated.known(loopAlbumId)) {
+                        CoverLoop(clip: clip, albumId: loopAlbumId, side: 240, radius: 10, shown: coverShown && awake)
+                    }
+                }
+                .onAppear { coverShown = true }
+                .onDisappear { coverShown = false }
                 .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
                 .frame(maxWidth: .infinity)
             Text(album.title)
@@ -315,10 +340,20 @@ private enum TopSongsKept {
 private struct OnlineAlbum: View {
     let album: Album
     @Environment(Player.self) private var player
+    @Environment(\.shellAwake) private var awake
+    @State private var animated = AnimatedArtStore.shared
+    @State private var coverShown = false
 
     var body: some View {
         VStack(spacing: 0) {
             BadgedCover(id: album.coverArt, size: 240, radius: 10, external: album.isExternal)
+                .overlay {
+                    if let clip = AppSettings.shared.animatedArt.onAlbumPage(animated.known(album.id)) {
+                        CoverLoop(clip: clip, albumId: album.id, side: 240, radius: 10, shown: coverShown && awake)
+                    }
+                }
+                .onAppear { coverShown = true }
+                .onDisappear { coverShown = false }
                 .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
             Text(album.name).font(.octoTitle).multilineTextAlignment(.center).padding(.top, 20).bigTitle()
             Text(album.byline).font(.octoBody).foregroundStyle(OctoColor.textSecondary).padding(.top, 4)

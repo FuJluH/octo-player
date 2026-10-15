@@ -51,8 +51,8 @@ struct AppearanceSettingsPage: View {
         }
     }
 
-    /// The full player's background: what it is, whether it moves, and how the artwork is
-    /// prepared for it.
+    /// The full player's background: what it is, whether it moves, how the artwork is prepared
+    /// for it, and how an album's animated art shows.
     private func playerBackground(_ prefs: PlayerPrefs) -> some View {
         let background = prefs.background
         let moves = background.mode.canMove
@@ -60,6 +60,9 @@ struct AppearanceSettingsPage: View {
             ChoiceRow(SettingsIndex.playerBackground, value: background.mode.label, question: SettingsQuestion(
                 SettingsIndex.playerBackground.title, BackgroundMode.allCases, current: background.mode,
                 answer: { SettingsAnswer($0.label, $0.detail) }, pick: { mode in settings.setBackground { $0.mode = mode } }))
+            ChoiceRow(SettingsIndex.animatedArt, value: settings.animatedArt.label, question: SettingsQuestion(
+                SettingsIndex.animatedArt.title, AnimatedArtSetting.allCases, current: settings.animatedArt,
+                answer: { SettingsAnswer($0.label, $0.detail) }, pick: settings.setAnimatedArt))
             ToggleRow(SettingsIndex.liveBackground, isOn: prefs.liveBackground && moves,
                       helper: moves ? nil : "This background stays still.", enabled: moves, onChange: settings.setLiveBackground)
             if background.prepared {

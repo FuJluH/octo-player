@@ -40,6 +40,7 @@ final class OfflineDownloads {
     @ObservationIgnored private var watches: [AnyObject] = []
     @ObservationIgnored private var started = false
     @ObservationIgnored private let pumping = SerialWork()
+    @ObservationIgnored private var loopsFollowed = false
 
     private struct Running {
         var row: KeptDownload
@@ -342,7 +343,13 @@ final class OfflineDownloads {
     private func reload() async {
         let all = (try? await library.store.allDownloads()) ?? []
         byTrack = downloadsByTrack(all)
+        let before = done
         done = downloadedTrackIds(all)
+        // Downloaded albums keep their animated art; albums let go lose it.
+        if done != before || !loopsFollowed {
+            loopsFollowed = true
+            OfflineLoops.shared.follow(library: library, session: session)
+        }
         let source = session.inUse?.sourceId
         rows = ((try? await library.store.downloadRows()) ?? []).filter { $0.sourceId == source }
     }

@@ -23,6 +23,10 @@ struct NowPlayingView: View {
     @State private var facts = PlayerSongFacts()
     @State private var drive = PlayerDrive.shared
     @State private var flight = CoverFlight.shared
+    @State private var animated = AnimatedArtStore.shared
+    /// The full-screen loop (or its still) fills the player: the card steps aside and the words
+    /// take the loop's shade.
+    @State private var backdropCovers = false
 
     // The way in and out.
     /// The opening and closing: read only by the parts that move with it, so the player is not
@@ -61,7 +65,21 @@ struct NowPlayingView: View {
     /// The line at the top, holding the album's name.
     private static let topLineHeight: CGFloat = 40
 
-    private var colors: PlayerColors { look.colors }
+    private var colors: PlayerColors {
+        if backdropCovers, case .backdrop(let clip) = loop { return backdropColors(look.colors, over: backdropShade(clip)) }
+        return look.colors
+    }
+
+    /// The album whose animated art the player shows: the playing song's, on the server.
+    private var loopAlbumId: String? { AnimatedArtStore.serverAlbumId(player.current) }
+
+    /// Where the playing album's animated art goes, as the setting has it.
+    private var loop: PlayerLoop { settings.animatedArt.inPlayer(animated.known(loopAlbumId)) }
+
+    /// The shade a full-screen loop sits on: its own color, else the cover's.
+    private func backdropShade(_ clip: AnimatedClip) -> UInt32 {
+        0xFF00_0000 | (clip.colorRgb ?? ((look.colors.dominant ?? look.colors.base) & 0xFF_FFFF))
+    }
     private var ink: Color { colors.content }
     private var muted: Color { mutedInk(ink, dark: colors.dark) }
     private var accent: Color { accentInk(ink, dark: colors.dark) }
@@ -80,6 +98,10 @@ struct NowPlayingView: View {
                                      coverId: player.current?.coverArt, live: settings.player.liveBackground, calm: calm,
                                      playing: player.isPlaying, bpm: facts.bpm, entrance: entrance,
                                      focused: focused)
+                    if case .backdrop(let clip) = loop {
+                        BackdropFrame(clip: clip, albumId: loopAlbumId, color: backdropShade(clip), entrance: entrance, pull: pull,
+                                      lyricsOpen: lyrics.open) { backdropCovers = $0 }
+                    }
                     Group {
                         if sideways {
                             sidewaysLayout(insets, roomy: roomy)
@@ -135,6 +157,7 @@ struct NowPlayingView: View {
             drive.taken()
             take(request)
         }
+        .task(id: loopAlbumId) { _ = await animated.want(loopAlbumId) }
         .onAppear(perform: arrive)
         .accessibilityAction(.escape) { close() }
         .sheet(isPresented: $showsChooser) {
@@ -293,12 +316,21 @@ struct NowPlayingView: View {
             let folded = folds ? fold : 0
             PlayerCardCover(entrance: entrance, coverId: player.current?.coverArt, live: player.live, side: side,
                             online: player.current?.isExternal ?? false)
+                .overlay {
+                    if case .cover(let clip) = loop {
+                        CardLoop(clip: clip, albumId: loopAlbumId, side: side, entrance: entrance, pull: pull, flight: flight,
+                                 folded: folds && lyrics.open)
+                    }
+                }
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
                     flight.cardPlaced(frame)
                     places.card = frame
                 }
                 .elevation3()
                 .opacity(flight.hidesCard ? 0 : 1)
+                // A full-screen loop takes the card's place, as the cover it was.
+                .opacity(backdropCovers ? 0 : 1)
+                .animation(.easeInOut(duration: Double(loopFadeMs) / 1000), value: backdropCovers)
                 .scaleEffect(player.isPlaying ? 1 : 0.84)
                 .animation(.octoSpring(0.6, 300), value: player.isPlaying)
                 .scaleEffect(1 - 0.08 * folded)
@@ -892,6 +924,42 @@ private struct Rising: ViewModifier {
         content
             .offset(y: entrance.rise)
             .opacity(entrance.riseAlpha)
+    }
+}
+
+/// The square loop over the card, its corners following the card's. It plays once the cover has
+/// landed and the player is still, holds while the player is pulled, and goes as the player
+/// closes or lyrics fold the card away. Only this reads the pull and the flight, so neither lays
+/// the player out again.
+private struct CardLoop: View {
+    let clip: AnimatedClip
+    let albumId: String?
+    let side: CGFloat
+    let entrance: PlayerEntrance
+    let pull: PlayerPull
+    let flight: CoverFlight
+    let folded: Bool
+
+    var body: some View {
+        CoverLoop(clip: clip, albumId: albumId, side: side, radius: side * entrance.corner / 100,
+                  shown: !entrance.closing && !folded, held: pull.distance > 0 || flight.hidesCard)
+    }
+}
+
+/// The full-screen loop behind the player, holding while the player is pulled and going as it
+/// closes.
+private struct BackdropFrame: View {
+    let clip: AnimatedClip
+    let albumId: String?
+    let color: UInt32
+    let entrance: PlayerEntrance
+    let pull: PlayerPull
+    let lyricsOpen: Bool
+    let covers: (Bool) -> Void
+
+    var body: some View {
+        PlayerBackdrop(clip: clip, albumId: albumId, color: color, shown: !entrance.closing, held: pull.distance > 0,
+                       lyricsOpen: lyricsOpen, covers: covers)
     }
 }
 

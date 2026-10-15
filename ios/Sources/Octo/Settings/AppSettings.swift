@@ -24,6 +24,8 @@ final class AppSettings {
     private(set) var outputTimings: [String: Int]
     private(set) var listenBrainz: ListenBrainzPrefs
     private(set) var playlistCovers: PlaylistCoverStyle
+    /// How an album's animated art shows: in place of the cover, filling the player, or not at all.
+    private(set) var animatedArt: AnimatedArtSetting
     /// Phone music folders left out of the library, by name.
     private(set) var excludedFolders: Set<String>
     private(set) var checkUpdatesAutomatically: Bool
@@ -57,6 +59,7 @@ final class AppSettings {
         outputTimings = Self.readOutputTimings(lyricsStore)
         listenBrainz = ListenBrainzPrefs()
         playlistCovers = PlaylistCoverStyle.stored(playlistArtStore.string(forKey: Keys.playlistCovers), or: .designed)
+        animatedArt = AnimatedArtSetting.from(key: playerStore.string(forKey: AnimatedArtSetting.prefKey))
         excludedFolders = Set(libraryStore.stringArray(forKey: Keys.excludedFolders) ?? [])
         checkUpdatesAutomatically = updatesStore.object(forKey: Keys.checkAutomatically) as? Bool ?? true
         earlyVersions = updatesStore.object(forKey: Keys.earlyVersions) as? Bool ?? false
@@ -360,6 +363,11 @@ final class AppSettings {
     }
 
     // MARK: Appearance, library, updates
+
+    func setAnimatedArt(_ setting: AnimatedArtSetting) {
+        playerStore.set(setting.key, forKey: AnimatedArtSetting.prefKey)
+        animatedArt = setting
+    }
 
     func setPlaylistCovers(_ style: PlaylistCoverStyle) {
         playlistArtStore.set(style.storedName, forKey: Keys.playlistCovers)
