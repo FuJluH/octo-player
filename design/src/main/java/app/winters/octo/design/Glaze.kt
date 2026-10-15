@@ -100,7 +100,7 @@ private val GlazeBlur by lazy { glazeBlur(GlazeFrost, GlazeSaturation) }
 private fun saturation(amount: Float) =
     ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(amount) })
 
-private fun accent(alpha: Float) = OctoColors.Accent.copy(alpha = alpha)
+private fun accent(alpha: Float) = OctoColors.GlassAccent.copy(alpha = alpha)
 
 // The glaze: a lit glass capsule. Pass a backdrop when it floats over varied
 // content, so it frosts what is behind it. Leave it null when it sits on an

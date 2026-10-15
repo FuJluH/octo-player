@@ -257,7 +257,7 @@ internal fun BalanceSlider(value: Float, onChange: (Float) -> Unit, modifier: Mo
                     customActions = listOf(
                         CustomAccessibilityAction("More to the left") { change((current - 0.1f).coerceAtLeast(-1f)); true },
                         CustomAccessibilityAction("More to the right") { change((current + 0.1f).coerceAtMost(1f)); true },
-                        CustomAccessibilityAction("Centre") { change(0f); true },
+                        CustomAccessibilityAction("Center") { change(0f); true },
                     )
                 }
                 .pointerInput(Unit) {
@@ -306,7 +306,7 @@ internal fun BalanceSlider(value: Float, onChange: (Float) -> Unit, modifier: Mo
 internal fun readBalance(value: Float): String {
     val percent = (abs(value) * 100).roundToInt()
     return when {
-        percent == 0 -> "Centre"
+        percent == 0 -> "Center"
         value < 0 -> "$percent% left"
         else -> "$percent% right"
     }

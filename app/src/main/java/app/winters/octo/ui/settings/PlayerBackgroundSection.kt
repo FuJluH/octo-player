@@ -34,10 +34,10 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 private val ModeChoices = mapOf(
-    BackgroundMode.Default to Choice("Immersive", "The artwork torn into drifting layers, blurred into a slow wash of its colours."),
+    BackgroundMode.Default to Choice("Immersive", "The artwork torn into drifting layers, blurred into a slow wash of its colors."),
     BackgroundMode.Artwork to Choice("Artwork", "The artwork, blurred and still."),
-    BackgroundMode.Colour to Choice("Colour", "A flat fill of the artwork's main colour."),
-    BackgroundMode.Classic to Choice("Classic", "Four of the artwork's colours, flowing into each other."),
+    BackgroundMode.Colour to Choice("Color", "A flat fill of the artwork's main color."),
+    BackgroundMode.Classic to Choice("Classic", "Four of the artwork's colors, flowing into each other."),
 )
 
 @HiltViewModel

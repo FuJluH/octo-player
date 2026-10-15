@@ -172,7 +172,7 @@ object SettingsIndex {
 
     // Appearance
     val Ambient = add(
-        "ambient", SettingsPage.Appearance, "Ambient colour from the artwork", "The artwork's colours glowing behind the pages",
+        "ambient", SettingsPage.Appearance, "Ambient color from the artwork", "The artwork's colors glowing behind the pages",
         listOf("glow", "background", "colours", "colors", "theme", "strength"),
     )
     val AmbientHome = add(
@@ -192,7 +192,7 @@ object SettingsIndex {
         listOf("glow"), section = "Where it shows",
     )
     val AmbientBar = add(
-        "ambient_bar", SettingsPage.Appearance, "Mini player and bar", "A trace of the song's colour in the bar",
+        "ambient_bar", SettingsPage.Appearance, "Mini player and bar", "A trace of the song's color in the bar",
         listOf("glow", "bar", "tint"), section = "Where it shows",
     )
     val AmbientPageArtwork = add(
@@ -213,7 +213,7 @@ object SettingsIndex {
         listOf("background", "dim", "white", "readable"), section = "Player",
     )
     val BackgroundSaturation = add(
-        "immersive_bg_saturation", SettingsPage.Appearance, "Saturation", "How vivid the background's colours are",
+        "immersive_bg_saturation", SettingsPage.Appearance, "Saturation", "How vivid the background's colors are",
         listOf("background", "vivid", "colours", "color"), section = "Player",
     )
     val BackgroundContrast = add(
@@ -244,6 +244,10 @@ object SettingsIndex {
     val AccentColor = add(
         "accent_color", SettingsPage.Appearance, "Accent color", "The color of selections, sliders, switches and buttons",
         listOf("accent", "color", "colour", "theme", "tint", "highlight", "palette", "album art", "cover", "personalize"), section = "Accent color",
+    )
+    val GlassTint = add(
+        "accent_glass", SettingsPage.Appearance, "Color the glass", "The bar, glass buttons and sheets take the accent too",
+        listOf("glass", "glaze", "frosted", "bar", "tint", "accent", "color", "colour", "theme"), section = "Accent color",
     )
     val ReduceMotion = add(
         "reduce_motion", SettingsPage.Appearance, "Reduce motion", "What moves only for show holds still",
