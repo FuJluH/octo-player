@@ -1,5 +1,6 @@
 package app.winters.octo.discovery
 
+import app.winters.octo.animated.AnimatedArts
 import app.winters.octo.catalog.ArtworkRef
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.FIND_PREFIX
@@ -134,6 +135,7 @@ class Discovery @Inject constructor(
     private val online: OnlineDao,
     // Taken lazily: ServerSync needs PlaylistSync, which needs this.
     private val sync: Lazy<ServerSync>,
+    private val animatedArts: AnimatedArts,
 ) {
     // Lists the server no longer has, found out on their own page, by id.
     private val _gone = MutableSharedFlow<String>(extraBufferCapacity = 8)
@@ -254,6 +256,7 @@ class Discovery @Inject constructor(
     suspend fun album(id: String): OnlineAlbumPage? {
         val (client, sourceId) = server() ?: return null
         val album = client.album(id)
+        animatedArts.note(client, album.id, album.animatedArt)
         val info = OnlineAlbum(
             album.id, album.name, album.artist, album.artistId, album.year, album.songCount,
             onlineArtwork(sourceId, album.coverArt),
@@ -273,7 +276,9 @@ class Discovery @Inject constructor(
         val copies = trackIds.chunked(900).flatMap { sources.copiesOf(it) }.filter { it.sourceId == sourceId }
         val albumRow = copies.groupingBy { it.albumId }.eachCount().maxByOrNull { it.value }?.key ?: return null
         val native = sources.albumNativeId(albumRow) ?: return null
-        val sent = client.album(native).song
+        val album = client.album(native)
+        animatedArts.note(client, native, album.animatedArt)
+        val sent = album.song
         return outsideAlbumSongs(sent, resolve(client, sourceId, sent))
     }
 

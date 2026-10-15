@@ -113,6 +113,25 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.Player
 import app.winters.octo.ui.common.SongTitle
+import app.winters.octo.animated.BackdropFade
+import app.winters.octo.animated.LOOP_FADE_MS
+import app.winters.octo.animated.LoopBackdrop
+import app.winters.octo.animated.LoopPlay
+import app.winters.octo.animated.LoopVideo
+import app.winters.octo.animated.PlayerLoop
+import app.winters.octo.animated.backdropInk
+import app.winters.octo.animated.playerLoop
+import app.winters.octo.animated.rememberLoopPlay
+import app.winters.octo.subsonic.AnimatedClip
+import app.winters.octo.player.immersive.DarkInk
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalConfiguration
+import coil3.compose.AsyncImage
 import app.winters.octo.catalog.isFind
 import app.winters.octo.design.AccentFill
 import app.winters.octo.design.GlassPopup
@@ -182,13 +201,48 @@ fun AnimatedVisibilityScope.PlayerOverlay(
     val now by model.now.collectAsStateWithLifecycle()
     val colors by model.colors.collectAsStateWithLifecycle()
     val prefs by model.prefs.collectAsStateWithLifecycle()
-    val base by animateColorAsState(colors.base, tween(600), label = "player base")
-    val ink by animateColorAsState(colors.content, tween(CoverFadeMs.toInt()), label = "player ink")
+    val animated by model.animatedArt.collectAsStateWithLifecycle()
+    val lyricsWanted by model.lyricsOpen.collectAsStateWithLifecycle()
+    val configuration = LocalConfiguration.current
+    val upright = configuration.screenHeightDp >= configuration.screenWidthDp
+    val loop = playerLoop(prefs.animatedArt, animated, upright, live = now.live != null)
+    val tall = (loop as? PlayerLoop.Backdrop)?.clip
+    // Over the tall loop, the words take the ink its color asks for.
+    val tallColor = tall?.let { it.colorRgb ?: colors.dominant?.toArgb() ?: colors.base.toArgb() }
+    val tallInk = remember(tallColor) { tallColor?.let(::backdropInk) }
+    val inkWanted = when {
+        tallInk == null -> colors.content
+        tallInk.dark -> DarkInk
+        else -> Color.White
+    }
+    val base by animateColorAsState(tallInk?.let { Color(it.color) } ?: colors.base, tween(600), label = "player base")
+    val ink by animateColorAsState(inkWanted, tween(CoverFadeMs.toInt()), label = "player ink")
     val dolly = backgroundDolly()
     val close by rememberUpdatedState(onClose)
     val scope = rememberCoroutineScope()
     // How far the player has been pulled down, in pixels.
     var pull by remember { mutableFloatStateOf(0f) }
+    // Loops play only while the player is fully open and not pulled.
+    val resting by remember { derivedStateOf { pull == 0f } }
+    val open = resting && transition.currentState == EnterExitState.Visible && transition.targetState == EnterExitState.Visible
+    val lyricsOpen = lyricsWanted && now.live == null
+    // Where the song's name starts, for the tall loop's fade under the words.
+    val words = remember { WordsLine() }
+    // With the tall loop showing, the cover's place stays empty once the
+    // player is open; the cover comes back to fly to the bar as it closes.
+    val coverAway by animateFloatAsState(
+        if (tall != null && transition.targetState == EnterExitState.Visible) 1f else 0f,
+        tween(LOOP_FADE_MS),
+        label = "cover away",
+    )
+    val veil by animateFloatAsState(if (lyricsOpen) 1f else 0f, tween(LYRICS_FOLD_MS), label = "lyrics veil")
+    val loopState = PlayerLoopState(
+        square = (loop as? PlayerLoop.Cover)?.clip,
+        play = rememberLoopPlay(open && (!lyricsOpen || !upright)),
+        coverAway = { coverAway },
+        words = words,
+    )
+    val tallPlay = rememberLoopPlay(open)
     var showQueue by remember { mutableStateOf(false) }
     // The sleep timer and the speed share one glass card: speed opens from
     // the timer as its next page, or on its own from the speed mark.
@@ -197,7 +251,7 @@ fun AnimatedVisibilityScope.PlayerOverlay(
     var showLyricsChooser by remember { mutableStateOf(false) }
 
     BackHandler(onBack = onClose)
-    LightOnDarkBars(darkIcons = colors.content.isDarkInk)
+    LightOnDarkBars(darkIcons = inkWanted.isDarkInk)
     // The display's fastest rate while things move, handed back on close.
     val phoneCalm = rememberSystemReduceMotion()
     val powerSave = rememberPowerSave()
@@ -268,11 +322,20 @@ fun AnimatedVisibilityScope.PlayerOverlay(
         ) {
             // The background is what the player's glass frosts, the way the
             // bar frosts the page.
-            Box(Modifier.fillMaxSize().hazeSource(backdrop)) {
-                PlayerBackground(prefs, colors, now, dolly = { dolly.value })
+            if (tall != null && tallInk != null) {
+                // The tall loop in place of the background, fading into its
+                // color under the words.
+                LoopBackdrop(tall, tallPlay, fill = Color(tallInk.color), cover = { CoverFill(now.artwork) })
+                Box(Modifier.fillMaxSize().onPlaced { words.boxTop = it.positionInRoot().y }.hazeSource(backdrop)) {
+                    BackdropFade(tallInk, wordsTop = words::top, veil = { veil })
+                }
+            } else {
+                Box(Modifier.fillMaxSize().hazeSource(backdrop)) {
+                    PlayerBackground(prefs, colors, now, dolly = { dolly.value })
+                }
             }
             // The words and icons take the colour the background asks for.
-            CompositionLocalProvider(LocalHaze provides backdrop, LocalContentColor provides ink) {
+            CompositionLocalProvider(LocalHaze provides backdrop, LocalContentColor provides ink, LocalPlayerLoop provides loopState) {
                 PlayerContent(
                     now,
                     model,
@@ -542,6 +605,7 @@ private fun AnimatedVisibilityScope.ArtStage(
     // How far the artwork has been swiped, in pixels.
     var swipe by remember { mutableFloatStateOf(0f) }
     val liveLineupNow by rememberUpdatedState(now.live?.lineup)
+    val loop = LocalPlayerLoop.current
     BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
         val side = min(maxSide, min(maxWidth, maxHeight))
         val width = constraints.maxWidth.toFloat()
@@ -589,12 +653,12 @@ private fun AnimatedVisibilityScope.ArtStage(
                 // the screen rather than on the moving artwork.
                 .graphicsLayer {
                     translationX = swipe
-                    alpha = (1f - fold) * (1f - 0.5f * (abs(swipe) / (width * 0.5f)).coerceAtMost(1f))
+                    alpha = (1f - fold) * (1f - 0.5f * (abs(swipe) / (width * 0.5f)).coerceAtMost(1f)) * (1f - loop.coverAway())
                     scaleX = 1f - 0.08f * fold
                     scaleY = 1f - 0.08f * fold
                 },
         ) {
-            PlayerArt(now.artwork, side, now.isPlaying, artModifier)
+            PlayerArt(now.artwork, side, now.isPlaying, artModifier, loop.square, loop.play)
         }
     }
 }
@@ -679,7 +743,8 @@ private fun AnimatedVisibilityScope.UprightPlayer(
     RhythmColumn(Modifier.fillMaxSize()) {
         header()
         ArtStage(now, model, folded = folded, calm = calm, maxSide = Dp.Infinity, modifier = Modifier, artModifier = artModifier)
-        Box(look) { TitleRow(now, model, onClose, onOpenArtist) }
+        val words = LocalPlayerLoop.current.words
+        Box(look.onPlaced { words.titleTop = it.positionInRoot().y }) { TitleRow(now, model, onClose, onOpenArtist) }
         Box(look) { BarBlock(now, model, onOpenSpeed) }
         Box(look) { Transport(now, model) }
         Box(look) { Volume(model) }
@@ -862,7 +927,14 @@ const val PlayerArtCorner = 3
 // to a soft square as it lands. It sits full size while music plays and
 // settles back smaller when paused.
 @Composable
-private fun AnimatedVisibilityScope.PlayerArt(ref: String?, side: Dp, playing: Boolean, artModifier: Modifier) {
+private fun AnimatedVisibilityScope.PlayerArt(
+    ref: String?,
+    side: Dp,
+    playing: Boolean,
+    artModifier: Modifier,
+    loop: AnimatedClip? = null,
+    loopPlay: LoopPlay = LoopPlay.StillOnly,
+) {
     val corner by transition.animateInt(label = "art corners") {
         if (it == EnterExitState.Visible) PlayerArtCorner else 50
     }
@@ -881,8 +953,43 @@ private fun AnimatedVisibilityScope.PlayerArt(ref: String?, side: Dp, playing: B
                 }
                 .elevation3(shape),
         ) {
-            Artwork(ref, side, shape = shape, keptFirst = true)
+            // The square loop plays in place of the cover, its still first.
+            LoopVideo(loop, loopPlay, Modifier.size(side).clip(shape)) {
+                Artwork(ref, side, shape = shape, keptFirst = true)
+                loop?.poster?.let { poster ->
+                    AsyncImage(model = poster, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(side))
+                }
+            }
         }
+    }
+}
+
+// What the player's loops need further down: the square loop for the
+// cover's place and what it does now, how far the cover has gone for the
+// tall loop (read while drawing), and where the song's name starts.
+private class PlayerLoopState(
+    val square: AnimatedClip?,
+    val play: LoopPlay,
+    val coverAway: () -> Float,
+    val words: WordsLine,
+)
+
+private val LocalPlayerLoop = compositionLocalOf { PlayerLoopState(null, LoopPlay.StillOnly, { 0f }, WordsLine()) }
+
+// Where the song's name starts below the top of the player's background,
+// in pixels; 0 until both are laid out.
+private class WordsLine {
+    var boxTop by mutableFloatStateOf(0f)
+    var titleTop by mutableFloatStateOf(0f)
+
+    fun top(): Float = if (titleTop > 0f) titleTop - boxTop else 0f
+}
+
+// The song's cover filling the player, for a tall loop with no still.
+@Composable
+private fun CoverFill(ref: String?) {
+    BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Artwork(ref, maxOf(maxWidth, maxHeight), shape = RectangleShape)
     }
 }
 

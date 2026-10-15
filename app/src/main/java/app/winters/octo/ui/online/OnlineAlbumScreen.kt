@@ -59,7 +59,10 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import app.winters.octo.animated.AnimatedArts
+import app.winters.octo.subsonic.AnimatedClip
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -70,7 +73,12 @@ class OnlineAlbumViewModel @AssistedInject constructor(
     private val downloads: Downloads,
     private val playback: PlaybackConnection,
     private val topSongs: TopSongsSource,
+    animatedArts: AnimatedArts,
 ) : ViewModel() {
+    // The album's square loop, in place of its cover.
+    val loop: StateFlow<AnimatedClip?> = animatedArts.pageLoop(flowOf(id))
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
     private val _page = MutableStateFlow<LoadState<OnlineAlbumPage>>(LoadState.Loading)
     val page: StateFlow<LoadState<OnlineAlbumPage>> = _page.asStateFlow()
 
@@ -161,8 +169,10 @@ fun OnlineAlbumScreen(
                 ?.let { songs -> (songs.sumOf { it.durationMs } / 1000).toInt().asLength() }
             LazyColumn(Modifier.fillMaxSize(), contentPadding = screenPadding(extraTop = DetailTopGap)) {
                 item(key = "header") {
+                    val loop by vm.loop.collectAsStateWithLifecycle()
                     AlbumHeader(
                         artwork = album.artwork,
+                        loop = loop,
                         title = album.title,
                         artist = album.artist,
                         details = listOfNotNull(album.year?.toString(), songs(album.songCount), length).joinToString(" • "),

@@ -2,6 +2,7 @@ package app.winters.octo
 
 import android.app.Application
 import app.winters.octo.admin.ServerUpdates
+import app.winters.octo.animated.AnimatedArts
 import app.winters.octo.data.ServerDownloads
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.LibraryFiles
@@ -48,6 +49,7 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
     @Inject lateinit var libraryFiles: LibraryFiles
     @Inject lateinit var family: FamilyHub
     @Inject lateinit var serverUpdates: ServerUpdates
+    @Inject lateinit var animatedArts: AnimatedArts
 
     override fun onCreate() {
         super.onCreate()
@@ -73,6 +75,8 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
         family.start()
         // A newer Octo for the server in use, for its admin.
         serverUpdates.start()
+        // Albums' animated art, asked for as songs start.
+        animatedArts.start()
     }
 
     override fun newImageLoader(context: PlatformContext): ImageLoader {
