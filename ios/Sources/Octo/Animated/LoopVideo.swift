@@ -43,7 +43,7 @@ final class LoopStage {
 
 /// A loop drawn by the system's video layer: muted, no controls, scaled to fill its frame, its
 /// still (when it has one) under it until the first frame is ready, then crossfading in over
-/// `loopFadeMs`. With a melt, each frame is drawn with the Full screen look first. It never
+/// `loopFadeMs`. With a fade, its lower part dissolves into whatever is under it. It never
 /// touches the music's audio session.
 struct LoopVideo: UIViewRepresentable {
     /// The file (or stream) to play; nil for none.
@@ -51,8 +51,9 @@ struct LoopVideo: UIViewRepresentable {
     var run: LoopRun
     var poster: UIImage? = nil
     var radius: CGFloat = 0
-    /// The Full screen look drawn into every frame.
-    var melt: LoopMelt? = nil
+    /// Where the loop dissolves, in points from its top: whole down to the first, gone at the
+    /// second, eased (smootherstep) between.
+    var fade: ClosedRange<CGFloat>? = nil
     /// Blurred behind words that need the room, such as lyrics.
     var blurred = false
     /// Told when the loop's frames show, and when they go.
@@ -62,8 +63,8 @@ struct LoopVideo: UIViewRepresentable {
 
     func updateUIView(_ view: LoopVideoView, context: Context) {
         view.showing = showing
-        view.melt = melt
         view.set(radius: radius)
+        view.set(fade: fade)
         view.set(poster: poster)
         view.set(blurred: blurred)
         view.update(source: run == .none ? nil : source, run: run)
@@ -82,10 +83,9 @@ final class LoopVideoView: UIView {
     private let blur = UIVisualEffectView(effect: nil)
     private var blurred = false
     private var take: Take?
-    /// The loop being made ready to play (its look is prepared first), if any.
-    private var starting: URL?
     private var posterImage: UIImage?
-    var melt: LoopMelt?
+    private var fade: ClosedRange<CGFloat>?
+    private let fadeMask = CAGradientLayer()
     var showing: ((Bool) -> Void)?
 
     /// One loop: its player, the looper that keeps it going, and the layer it is drawn in.
@@ -139,8 +139,36 @@ final class LoopVideoView: UIView {
         CATransaction.setDisableActions(true)
         posterLayer.frame = bounds
         take?.layer.frame = bounds
+        if let fade, bounds.height > 0 {
+            // Smootherstep from whole to nothing, sampled finely enough that no step shows.
+            let steps = 16
+            let start = fade.lowerBound / bounds.height
+            let end = fade.upperBound / bounds.height
+            var locations: [NSNumber] = [0]
+            var colors: [CGColor] = [UIColor.black.cgColor]
+            for i in 0...steps {
+                let t = CGFloat(i) / CGFloat(steps)
+                let eased = t * t * t * (t * (t * 6 - 15) + 10)
+                locations.append(NSNumber(value: Double(start + (end - start) * t)))
+                colors.append(UIColor.black.withAlphaComponent(1 - eased).cgColor)
+            }
+            locations.append(1)
+            colors.append(UIColor.clear.cgColor)
+            fadeMask.locations = locations
+            fadeMask.colors = colors
+            fadeMask.frame = bounds
+            layer.mask = fadeMask
+        } else {
+            layer.mask = nil
+        }
         CATransaction.commit()
         blur.frame = bounds
+    }
+
+    func set(fade: ClosedRange<CGFloat>?) {
+        guard fade != self.fade else { return }
+        self.fade = fade
+        setNeedsLayout()
     }
 
     func set(radius: CGFloat) {
@@ -175,11 +203,10 @@ final class LoopVideoView: UIView {
         if let take, take.source != source || run == .none {
             letGo(fade: fade)
         }
-        if starting != nil, starting != source || run == .none { starting = nil }
         guard let source, run != .none else { return }
         if take == nil {
             // Held with nothing on screen yet: the still stays, nothing is loaded.
-            guard run == .playing, starting == nil else { return }
+            guard run == .playing else { return }
             start(source)
             return
         }
@@ -193,20 +220,6 @@ final class LoopVideoView: UIView {
 
     private func start(_ source: URL) {
         let asset = AVURLAsset(url: source)
-        guard let melt else {
-            begin(source, asset, composition: nil)
-            return
-        }
-        starting = source
-        Task { @MainActor [weak self] in
-            let composition = await melt.composition(for: asset)
-            guard let self, self.starting == source else { return }
-            self.starting = nil
-            self.begin(source, asset, composition: composition)
-        }
-    }
-
-    private func begin(_ source: URL, _ asset: AVURLAsset, composition: AVVideoComposition?) {
         let player = AVQueuePlayer()
         // A silent picture: never heard, never on another screen, never keeping the phone awake,
         // and it leaves the audio session alone.
@@ -215,7 +228,6 @@ final class LoopVideoView: UIView {
         player.allowsExternalPlayback = false
         player.audiovisualBackgroundPlaybackPolicy = .pauses
         let item = AVPlayerItem(asset: asset)
-        item.videoComposition = composition
         let looper = AVPlayerLooper(player: player, templateItem: item)
         let layer = AVPlayerLayer(player: player)
         layer.videoGravity = .resizeAspectFill

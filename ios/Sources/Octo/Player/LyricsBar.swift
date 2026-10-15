@@ -9,7 +9,6 @@ import SwiftUI
 /// one is the player's pull.
 struct LyricsBar: View {
     let ink: Color
-    @Environment(\.playerInkScale) private var inkScale
     let close: () -> Void
     @Binding var timing: Bool
     let chooseOther: () -> Void
@@ -49,7 +48,7 @@ struct LyricsBar: View {
                         .lineLimit(1)
                     Text(player.current?.byline ?? "")
                         .font(.octo(11, .regular, .caption1))
-                        .foregroundStyle(ink.opacity(inkScale.barArtist))
+                        .foregroundStyle(ink.opacity(0.6))
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

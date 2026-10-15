@@ -29,6 +29,8 @@ struct NowPlayingView: View {
     @State private var backdropCovers = false
     /// How the top of the full-screen loop looks, for the status bar.
     @State private var loopLooks: LoopLook?
+    /// Where the title row sits, for the full-screen loop to be gone just above it.
+    @State private var backdropFit = BackdropTitle()
 
     // The way in and out.
     /// The opening and closing: read only by the parts that move with it, so the player is not
@@ -62,18 +64,26 @@ struct NowPlayingView: View {
     @State private var liveSong = LiveSongControl()
 
     private static let pullShare: CGFloat = 0.45
+    /// The player's own space, which a pull moves as a whole.
+    nonisolated private static let space = "player"
     private static let slop: CGFloat = 8
     private static let skipAt: CGFloat = 88
     /// The line at the top, holding the album's name.
     private static let topLineHeight: CGFloat = 40
 
     private var colors: PlayerColors {
-        if backdropCovers, case .backdrop = loop { return meltColors(look.colors) }
-        return look.colors
+        look.colors
     }
 
     /// The album whose animated art the player shows: the playing song's, on the server.
     private var loopAlbumId: String? { animated.albumId(of: player.current) }
+
+    /// The square loop plays in the card: the background holds still under it. A full-screen loop
+    /// dissolves into the background, which keeps moving as chosen.
+    private var isCoverLoop: Bool {
+        if case .cover = loop { return true }
+        return false
+    }
 
     /// Where the playing album's animated art goes, as the setting has it.
     private var loop: PlayerLoop { settings.animatedArt.inPlayer(animated.known(loopAlbumId)) }
@@ -96,9 +106,9 @@ struct NowPlayingView: View {
                     PlayerBackground(prefs: settings.player.background, colors: colors, cover: look.cover,
                                      coverId: player.current?.coverArt, live: settings.player.liveBackground, calm: calm,
                                      playing: player.isPlaying, bpm: facts.bpm, entrance: entrance,
-                                     focused: focused, rests: loop != .none)
+                                     focused: focused, rests: isCoverLoop)
                     if case .backdrop(let clip) = loop {
-                        BackdropFrame(clip: clip, albumId: loopAlbumId, entrance: entrance, pull: pull,
+                        BackdropFrame(clip: clip, albumId: loopAlbumId, entrance: entrance, pull: pull, fit: backdropFit,
                                       lyricsOpen: lyrics.open, covers: { backdropCovers = $0 },
                                       looked: { loopLooks = $0 })
                     }
@@ -110,7 +120,6 @@ struct NowPlayingView: View {
                         }
                     }
                     .foregroundStyle(ink)
-                    .environment(\.playerInkScale, backdropCovers ? .melt : .standard)
                     .animation(.octoTween(fixed: 500), value: colors.dark)
                     // An upright drag that starts on a line pulls the player down too.
                     .environment(\.passedDrag, PassedDrag(moved: { dragMoved($0, cap: cap, onCard: false) },
@@ -118,6 +127,7 @@ struct NowPlayingView: View {
                                                           cancelled: dragTakenOver))
                 }
                 .frame(width: size.width, height: size.height)
+                .coordinateSpace(.named(Self.space))
                 .modifier(PulledFrame(pull: pull, cap: cap))
                 .contentShape(Rectangle())
                 .gesture(playerDrag(cap: cap, folded: lyrics.open && !sideways))
@@ -208,6 +218,9 @@ struct NowPlayingView: View {
                         .transition(swap)
                 } else {
                     controls(roomy: true)
+                        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.space)).minY } action: { top in
+                            if abs((backdropFit.top ?? -1) - top) > 0.5 { backdropFit.top = top }
+                        }
                         .padding(.bottom, 16)
                         .modifier(Rising(entrance: entrance))
                         .transition(swap)
@@ -955,14 +968,23 @@ private struct BackdropFrame: View {
     let albumId: String?
     let entrance: PlayerEntrance
     let pull: PlayerPull
+    let fit: BackdropTitle
     let lyricsOpen: Bool
     let covers: (Bool) -> Void
     let looked: (LoopLook) -> Void
 
     var body: some View {
-        PlayerBackdrop(clip: clip, albumId: albumId, shown: !entrance.closing, held: pull.distance > 0, lyricsOpen: lyricsOpen,
-                       covers: covers, looked: looked)
+        PlayerBackdrop(clip: clip, albumId: albumId, titleTop: fit.top, shown: !entrance.closing, held: pull.distance > 0,
+                       lyricsOpen: lyricsOpen, covers: covers, looked: looked)
     }
+}
+
+/// Where the player's title row starts, in the player's own space. Only the full-screen loop
+/// reads it, so its layout never lays out the player again.
+@MainActor
+@Observable
+final class BackdropTitle {
+    var top: CGFloat?
 }
 
 /// The card's cover, its corners following the opening and closing. A live station shows the
