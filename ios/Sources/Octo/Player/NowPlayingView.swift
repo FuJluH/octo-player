@@ -109,6 +109,7 @@ struct NowPlayingView: View {
                                      focused: focused, rests: isCoverLoop)
                     if case .backdrop(let clip) = loop {
                         BackdropFrame(clip: clip, albumId: loopAlbumId, entrance: entrance, pull: pull, fit: backdropFit,
+                                      darkInk: colors.dark, base: colors.base,
                                       lyricsOpen: lyrics.open, covers: { backdropCovers = $0 },
                                       looked: { loopLooks = $0 })
                     }
@@ -969,13 +970,15 @@ private struct BackdropFrame: View {
     let entrance: PlayerEntrance
     let pull: PlayerPull
     let fit: BackdropTitle
+    let darkInk: Bool
+    let base: UInt32
     let lyricsOpen: Bool
     let covers: (Bool) -> Void
     let looked: (LoopLook) -> Void
 
     var body: some View {
-        PlayerBackdrop(clip: clip, albumId: albumId, titleTop: fit.top, shown: !entrance.closing, held: pull.distance > 0,
-                       lyricsOpen: lyricsOpen, covers: covers, looked: looked)
+        PlayerBackdrop(clip: clip, albumId: albumId, titleTop: fit.top, darkInk: darkInk, base: base, shown: !entrance.closing,
+                       held: pull.distance > 0, lyricsOpen: lyricsOpen, covers: covers, looked: looked)
     }
 }
 

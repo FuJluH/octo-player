@@ -64,16 +64,22 @@ struct CoverLoop: View {
     }
 }
 
-/// An album's tall loop at the top of the player, at the screen's width and its own shape, clean
-/// to the top edge, its lower part dissolving softly into the player's own background (the wash,
-/// or whichever background is chosen) so it is gone just above the title. Its still shows first
-/// when it has one. While lyrics show, the loop fades away and holds, leaving the background the
-/// lyrics are drawn for. `covers` hears whether the loop or its still now shows.
+/// An album's tall loop filling the top two thirds of the player: 1.1 times the screen's width at
+/// its own shape (a twentieth cropped at each side), clean to the top edge, its lower part
+/// dissolving with a long soft fade into the player's own background (the wash, or whichever
+/// background is chosen), so the title and the upper controls sit on the melting art. Where the
+/// art under the words would leave them under 4.5:1, a soft band of the background's base color
+/// comes in behind them, just enough. Its still shows first when it has one. While lyrics show,
+/// the loop fades away and holds, leaving the background the lyrics are drawn for. `covers`
+/// hears whether the loop or its still now shows.
 struct PlayerBackdrop: View {
     let clip: AnimatedClip
     let albumId: String?
     /// Where the title row starts, in points from the top of the player; nil until laid out.
     var titleTop: CGFloat?
+    /// The words' color (dark or white) and the background's base color under the loop.
+    var darkInk = false
+    var base: UInt32 = 0xFF00_0000
     var shown: Bool
     var held: Bool
     var lyricsOpen: Bool
@@ -89,11 +95,16 @@ struct PlayerBackdrop: View {
     @State private var file: URL?
     @State private var poster: UIImage?
     @State private var playing = false
+    /// A small copy of the loop's first frame (else its still), for the words' contrast.
+    @State private var sample: CGImage?
 
-    /// How much of the screen's height the loop dissolves over, and how far above the title it
-    /// is gone, in points.
-    private static let fadeShare: CGFloat = 0.18
-    private static let clearOfTitle: CGFloat = 6
+    /// How much wider than the screen the loop is drawn, and where on the screen it dissolves.
+    private static let zoom: CGFloat = 1.1
+    private static let fadeFrom: CGFloat = 0.50
+    private static let fadeTo: CGFloat = 0.67
+    /// The block of words over the art: from the title row's top, this far down (the title, the
+    /// artist, the progress line and its times).
+    private static let wordsHeight: CGFloat = 110
 
     private var play: LoopPlay {
         loopPlay(seen: shown && !held && !lyricsOpen && scenePhase == .active, powerSave: stage.lowPower, reduceMotion: calm)
@@ -106,27 +117,74 @@ struct PlayerBackdrop: View {
         clip.width > 0 && clip.height > 0 ? CGFloat(clip.height) / CGFloat(clip.width) : 4.0 / 3.0
     }
 
-    /// Where the loop dissolves: over about 18% of the screen, gone just above the title (about
-    /// 58% of the screen before the title is laid out), never past the loop's own bottom.
-    private func fade(width: CGFloat, height: CGFloat) -> ClosedRange<CGFloat> {
-        let loop = (width * shape).rounded()
-        let end = min(loop, (titleTop ?? 0.58 * height) - Self.clearOfTitle)
-        let start = max(end - Self.fadeShare * height, 0)
-        return start...max(end, start + 1)
+    /// Where the loop dissolves, from 50% to 67% of the screen's height, eased; never past the
+    /// loop's own bottom.
+    private func fade(loopHeight: CGFloat, screen: CGFloat) -> ClosedRange<CGFloat> {
+        let end = min(loopHeight - 1, Self.fadeTo * screen)
+        let start = min(Self.fadeFrom * screen, end - 1)
+        return start...end
+    }
+
+    /// How much of the loop shows at `y` (points from the top), as its fade has it.
+    private static func shown(_ y: CGFloat, fade: ClosedRange<CGFloat>) -> CGFloat {
+        if y <= fade.lowerBound { return 1 }
+        if y >= fade.upperBound { return 0 }
+        let t = (y - fade.lowerBound) / (fade.upperBound - fade.lowerBound)
+        return 1 - t * t * t * (t * (t * 6 - 15) + 10)
+    }
+
+    /// How strong a band of the base color behind the words must be for them to read at 4.5:1
+    /// over the melting art: 0 when they already do.
+    private func scrim(loopHeight: CGFloat, fade: ClosedRange<CGFloat>) -> Double {
+        guard let sample, let top = titleTop else { return 0 }
+        let ink: UInt32 = darkInk ? DarkInkArgb : 0xFFFF_FFFF
+        var needed = 0.0
+        // Each row of the block, as the art over the background leaves it.
+        for step in 0...10 {
+            let y = top + Self.wordsHeight * CGFloat(step) / 10
+            let alpha = Self.shown(y, fade: fade)
+            guard alpha > 0.02, y < loopHeight, let art = loopRowColor(sample, share: y / loopHeight) else { continue }
+            let under = OctoKit.overlay(art, Float(alpha), base)
+            if contrastRatio(ink, under) >= PlayerContrast { continue }
+            var low = 0.0, high = 1.0
+            for _ in 0..<16 {
+                let mid = (low + high) / 2
+                if contrastRatio(ink, OctoKit.overlay(base, Float(mid), under)) >= PlayerContrast { high = mid } else { low = mid }
+            }
+            needed = max(needed, high)
+        }
+        return needed
     }
 
     var body: some View {
         let play = play
         GeometryReader { box in
-            let loopHeight = (box.size.width * shape).rounded()
-            let pixels = loopPixels(.tall, points: CGSize(width: box.size.width, height: loopHeight), scale: scale)
-            LoopVideo(source: file, run: loopRun(play, shown: shown, owns: stage.owner == id), poster: poster,
-                      fade: fade(width: box.size.width, height: box.size.height)) { now in
-                playing = now
+            let loopWidth = (box.size.width * Self.zoom).rounded()
+            let loopHeight = (loopWidth * shape).rounded()
+            let fade = fade(loopHeight: loopHeight, screen: box.size.height)
+            let pixels = loopPixels(.tall, points: CGSize(width: loopWidth, height: loopHeight), scale: scale)
+            let scrim = scrim(loopHeight: loopHeight, fade: fade)
+            ZStack(alignment: .top) {
+                LoopVideo(source: file, run: loopRun(play, shown: shown, owns: stage.owner == id), poster: poster,
+                          fade: fade) { now in
+                    playing = now
+                }
+                // 1.1 times the screen's width, centered, from the top edge.
+                .frame(width: loopWidth, height: loopHeight)
+                .frame(width: box.size.width, alignment: .center)
+                if scrim > 0, let top = titleTop {
+                    LinearGradient(stops: [
+                        .init(color: Color(argb: base).opacity(0), location: 0),
+                        .init(color: Color(argb: base).opacity(scrim), location: 0.3),
+                        .init(color: Color(argb: base).opacity(scrim), location: 0.75),
+                        .init(color: Color(argb: base).opacity(0), location: 1),
+                    ], startPoint: .top, endPoint: .bottom)
+                    .frame(height: Self.wordsHeight + 80)
+                    .offset(y: top - 40)
+                }
             }
-            // The screen's width exactly, the loop's own shape, from the top edge.
-            .frame(width: box.size.width, height: loopHeight)
-            .frame(maxHeight: .infinity, alignment: .top)
+            .frame(width: box.size.width, height: box.size.height, alignment: .top)
+            .clipped()
             .opacity(lyricsOpen ? 0 : 1)
             .task(id: "\(clip.video)|\(Int(pixels.width))x\(Int(pixels.height))|\(play == .stillOnly)") {
                 file = nil
@@ -134,12 +192,14 @@ struct PlayerBackdrop: View {
                 let still = await LoopSource.shared.poster(clip, albumId: albumId, shape: .tall, fetcher: fetcher)
                 guard !Task.isCancelled else { return }
                 poster = still
+                sample = still.flatMap { loopSample($0.cgImage) }
                 // The status bar reads on the top 50 pt.
                 let band = 50 / max(loopHeight, 1)
                 if let still, let look = loopLook(still.cgImage, topShare: band) { looked(look) }
                 guard play != .stillOnly, !Task.isCancelled else { return }
                 file = await LoopSource.shared.file(clip, albumId: albumId, shape: .tall, pixels: pixels, fetcher: fetcher)
                 if let file, let look = await LoopSource.shared.look(file, topShare: band), !Task.isCancelled { looked(look) }
+                if let file, let frame = await LoopSource.shared.firstFrame(file), !Task.isCancelled { sample = frame }
             }
         }
         .ignoresSafeArea()
