@@ -75,6 +75,10 @@ import app.winters.octo.desktop.window.MIN_WIDTH
 import app.winters.octo.desktop.window.keepsSpot
 import app.winters.octo.desktop.window.placeWindow
 import app.winters.octo.desktop.window.roundWindowsCorners
+import app.winters.octo.desktop.window.appTextPixels
+import app.winters.octo.desktop.window.systemTextPixels
+import app.winters.octo.desktop.window.useTextPixels
+import app.winters.octo.design.TextLook
 import app.winters.octo.desktop.window.screenAreas
 import app.winters.octo.desktop.window.seeThroughMacTitleBar
 import app.winters.octo.subsonic.OCTO_TRANSITIONS
@@ -135,6 +139,10 @@ fun main(args: Array<String>) {
     val instance = (claim as? SingleInstance.Claim.First)?.instance
     val settings = SettingsStore(File(places.config, SettingsStore.FILE_NAME), SettingsStore.APP_WRITE_DELAY_MS)
     val os = currentOs()
+    // Text smoothed as the system smooths its own, decided before any text
+    // style is first read.
+    appTextPixels = systemTextPixels(os)
+    TextLook.colour = appTextPixels != null
     // The slow part (the HTTP client, the password store, the audio engine
     // and the rest) starts now on threads of its own; the window shows
     // while it runs, and the app is made once it is in.
@@ -277,6 +285,8 @@ fun main(args: Array<String>) {
                 app.perform(shortcut)
             },
         ) {
+            // Before the window first draws, so its surfaces know their pixels.
+            remember { useTextPixels(window, appTextPixels) }
             val own = remember { if (custom) Frame(window, windowState) else null }
             LaunchedEffect(Unit) {
                 frame = own

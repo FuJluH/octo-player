@@ -8,6 +8,7 @@ import androidx.compose.ui.text.FontSmoothing
 import androidx.compose.ui.text.PlatformParagraphStyle
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -107,6 +108,9 @@ object FrameSize {
     val CardMax = 640.dp
     val PlayButton = 36.dp
     val PlayButtonLarge = 44.dp
+    // Play's target in the player bar and the mini player: the sign alone, a
+    // touch bigger than the controls' targets beside it.
+    val PlayTarget = 40.dp
     // A menu opened from a button.
     val Menu = 280.dp
     // A short text field beside a setting, such as a Discord status line.
@@ -130,23 +134,35 @@ object FrameSize {
     val FilterWidth = 260.dp
 }
 
-// How the desktop draws text: grey smoothing, glyphs fitted to the pixel
-// grid, and placed between pixels so words keep their spacing. On Windows
-// this is what renders sharpest. Colour (subpixel) smoothing is not used:
-// the window never says how its screen's pixels are laid out, so it falls
-// back to a softer grey, and on glass it would fringe. Fitting to the grid
-// is what makes small text crisp; turned off, it blurs.
+// How the desktop's words are drawn, set once at start before any text
+// style is first read. `colour`: smoothed in colour (subpixel), as the
+// system's own text is where it uses ClearType, set together with the
+// windows' pixel layout (a surface that does not know its pixels' layout
+// draws such text grey). `family`: the face, or null for the system's own
+// interface face (Segoe UI on Windows).
+object TextLook {
+    @Volatile var colour: Boolean = false
+    @Volatile var family: FontFamily? = null
+}
+
+// How the desktop draws text: glyphs fitted to the pixel grid and placed
+// between pixels so words keep their spacing, smoothed in colour where the
+// system smooths its own text that way (TextLook), else grey. Text over
+// see-through glass, drawn into a layer of its own, stays grey either way.
+// Fitting to the grid is what makes small text crisp; turned off, it blurs.
 @OptIn(ExperimentalTextApi::class)
-val TextDrawing = FontRasterizationSettings(
-    smoothing = FontSmoothing.AntiAlias,
-    hinting = FontHinting.Normal,
-    subpixelPositioning = true,
-    autoHintingForced = false,
-)
+val TextDrawing: FontRasterizationSettings by lazy {
+    FontRasterizationSettings(
+        smoothing = if (TextLook.colour) FontSmoothing.SubpixelAntiAlias else FontSmoothing.AntiAlias,
+        hinting = FontHinting.Normal,
+        subpixelPositioning = true,
+        autoHintingForced = false,
+    )
+}
 
 // Every desktop text style starts here, so all of it is drawn the same way.
 @OptIn(ExperimentalTextApi::class)
-private val DesktopText = TextStyle(platformStyle = PlatformTextStyle(null, PlatformParagraphStyle(TextDrawing)))
+private val DesktopText = TextStyle(fontFamily = TextLook.family, platformStyle = PlatformTextStyle(null, PlatformParagraphStyle(TextDrawing)))
 
 // Type on the desktop: denser than the phone's, with page titles that
 // orient rather than announce. Whole pixel sizes, which the grid fitting
