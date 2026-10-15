@@ -27,6 +27,7 @@ struct ServerPage: View {
 
     var body: some View {
         SettingsPageFrame(title: SettingsPage.server.title, highlight: highlight) {
+            ServerUpdateSection()
             if !session.servers.isEmpty { ServersSection(changePassword: { changingPassword = true }) }
             if let server = session.active, session.client != nil {
                 connection(server)
@@ -62,6 +63,8 @@ struct ServerPage: View {
         .task(id: session.client == nil ? nil : session.generation) { await lookAgain() }
         .task(id: session.client == nil ? nil : session.generation) { await readFolders(quietly: true) }
         .task(id: session.client == nil ? nil : session.activeId) { await watchListening() }
+        // Whether the server has an update is asked each time the page opens.
+        .task(id: session.client == nil ? nil : session.activeId) { ServerUpdates.shared.pageOpened(session) }
         .task(id: session.activeId) {
             // Sharing is asked about once for each server the page shows.
             guard sharingProbedFor != session.activeId else { return }

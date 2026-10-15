@@ -394,6 +394,22 @@ final class Session {
         return (ms, try? await client.serverScanStatus())
     }
 
+    /// A session of its own for the server in use: the same addresses, trusted certificates and
+    /// client certificate, no connection kept from earlier calls, and at most `seconds` for each
+    /// call. For asking a server that may be restarting, where a connection kept alive can point at
+    /// what is no longer there. The caller ends it with `finishTasksAndInvalidate()`.
+    func freshSession(seconds: TimeInterval) -> URLSession? {
+        guard client != nil, let server = active else { return nil }
+        return try? ownSession(for: [server.address, Self.homeAddress(of: server)], saved: server, seconds: seconds)
+    }
+
+    /// Reads the server in use's kind, version and extensions again, as after it was updated.
+    func readServerAgain() async {
+        guard let client, let id = activeId, let read = try? await client.profile(), activeId == id else { return }
+        profile = read
+        refreshDetails(read, for: id)
+    }
+
     /// The music folder the library is limited to on a kept server, when one is chosen.
     func folder(for id: String) -> (id: String, name: String)? {
         guard let saved = prefs.array(forKey: Self.folderKey(id)) as? [String], saved.count == 2 else { return nil }

@@ -586,12 +586,15 @@ struct CategoryRow: View {
     let summary: String
     var route: CategoryDestination?
     var action: (() -> Void)?
+    /// Marks a server update waiting on the page the row opens.
+    var badged = false
 
-    init(icon: String, title: String, summary: String, to route: SettingsRoute) {
+    init(icon: String, title: String, summary: String, to route: SettingsRoute, badged: Bool = false) {
         self.icon = icon
         self.title = title
         self.summary = summary
         self.route = .settings(route)
+        self.badged = badged
     }
 
     init(icon: String, title: String, summary: String, to route: Route) {
@@ -630,6 +633,7 @@ struct CategoryRow: View {
                 }
                 .padding(.leading, 4)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                if badged { ServerUpdateBadge() }
                 Image(systemName: SettingsIcon.chevron)
                     .font(.system(size: 14, weight: .semibold))
                     .frame(width: 20, height: 20)
