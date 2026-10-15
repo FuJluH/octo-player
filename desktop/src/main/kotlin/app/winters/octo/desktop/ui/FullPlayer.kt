@@ -239,7 +239,8 @@ private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Col
         }
         Spacer(Modifier.height(28.dp))
         if (live != null) return@Column LivePlayerLines(app, song, state, live, ink, muted)
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        // The heart sits on the middle of the name's capitals, as on the phone.
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
             Column(Modifier.weight(1f)) {
                 MarkedTitle(song, OctoType.headline, markColor = muted) { Txt(song.title, OctoType.headline, ink, it, maxLines = 2) }
                 val artist = song.displayArtist ?: song.artist.orEmpty()
@@ -253,18 +254,20 @@ private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Col
                     },
                 )
             }
-            if (isOutside(app, song)) {
-                FetchButton(app, song, 40.dp, 22.dp, tint = ink)
-            } else {
-                val starred = app.isStarred(song)
-                IconAction(
-                    if (starred) OctoIcons.Liked else OctoIcons.Like,
-                    if (starred) "Remove from favorites" else "Add to favorites",
-                    { app.setStarred(listOf(song), !starred) },
-                    size = 40.dp,
-                    iconSize = 22.dp,
-                    tint = ink,
-                )
+            OnTitleCapitals(OctoType.headline) {
+                if (isOutside(app, song)) {
+                    FetchButton(app, song, 40.dp, 22.dp, tint = ink)
+                } else {
+                    val starred = app.isStarred(song)
+                    IconAction(
+                        if (starred) OctoIcons.Liked else OctoIcons.Like,
+                        if (starred) "Remove from favorites" else "Add to favorites",
+                        { app.setStarred(listOf(song), !starred) },
+                        size = 40.dp,
+                        iconSize = 22.dp,
+                        tint = ink,
+                    )
+                }
             }
         }
         Spacer(Modifier.height(14.dp))
@@ -330,13 +333,14 @@ private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Col
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun LivePlayerLines(app: AppState, song: Song, state: PlayerState, live: LiveNow, ink: Color, muted: Color) {
-    // The button sits on the title's line.
+    // The button sits on the middle of the title's capitals, where a song's
+    // heart does.
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
         Column(Modifier.weight(1f)) {
             Txt(song.title, OctoType.headline, ink, maxLines = 2)
             Txt(live.shown.subtitle, OctoType.body, muted, Modifier.heightIn(min = Focus.MinTarget), maxLines = 2)
         }
-        OnTitleLine(OctoType.headline) { OnAirButton(app, live, 40.dp, 22.dp, ink) }
+        OnTitleCapitals(OctoType.headline) { OnAirButton(app, live, 40.dp, 22.dp, ink) }
     }
     Spacer(Modifier.height(14.dp))
     LiveLine(app, ink, muted, Modifier.fillMaxWidth().heightIn(min = SeekArea), stacked = true)

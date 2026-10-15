@@ -48,6 +48,11 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
+import org.jetbrains.skia.Font
+import org.jetbrains.skia.FontMgr
+import org.jetbrains.skia.FontStyle
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.ui.unit.dp
@@ -183,6 +188,25 @@ fun LiveLine(app: AppState, color: Color, muted: Color, modifier: Modifier = Mod
 fun OnTitleLine(style: TextStyle, content: @Composable () -> Unit) {
     val line = with(LocalDensity.current) { (if (style.lineHeight.isSp) style.lineHeight else style.fontSize * 1.3f).toDp() }
     Box(Modifier.height(line).wrapContentHeight(unbounded = true), contentAlignment = Alignment.Center) { content() }
+}
+
+// Holds a button with its middle on the middle of the capitals of a title's
+// first line in this style (its baseline less half its capital height,
+// from the font), with the button free to reach past it: the title's big
+// capitals are what the eye lines it up with, not its line's box.
+@Composable
+fun OnTitleCapitals(style: TextStyle, content: @Composable () -> Unit) {
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val middle = remember(measurer, style, density) {
+        val baseline = measurer.measure("H", style, maxLines = 1).firstBaseline
+        val size = with(density) { style.fontSize.toPx() }
+        val bold = (style.fontWeight ?: FontWeight.Normal) >= FontWeight.SemiBold
+        val typeface = FontMgr.default.matchFamilyStyle(null, if (bold) FontStyle.BOLD else FontStyle.NORMAL)
+        val cap = typeface?.let { Font(it, size).metrics.capHeight } ?: (size * 0.7f)
+        baseline - cap / 2
+    }
+    Box(Modifier.height(with(density) { (middle * 2).toDp() }).wrapContentHeight(unbounded = true), contentAlignment = Alignment.Center) { content() }
 }
 
 private val LiveTimeStyle = DesktopType.meta.copy(fontFeatureSettings = "tnum")
