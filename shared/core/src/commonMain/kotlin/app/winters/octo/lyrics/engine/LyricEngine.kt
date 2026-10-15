@@ -212,13 +212,28 @@ class LyricEngine(val lines: List<SyncLine>) {
         for (i in lines.indices) {
             val st = states[i]
             val line = lines[i]
+            val grownTarget = if (st.status == LineStatus.Active) 1.0 else 0.0
+            val opacityTarget = opacityTarget(st.status, showPassed)
+            val blurTarget = blurTarget(st.status, abs(i - a))
+            val pressTarget = if (st.pressed || nanos < st.pressHeldUntil) 1.0 else 0.0
+            // A line already resting where everything sends it, with no words
+            // or dots moving, would come out of the steps below unchanged:
+            // it is left as it is.
+            val resting = !snap && !scrollMoved && !delaysPending(delays) &&
+                st.y.atRest && !st.y.hasQueued && st.y.target == targets[i] &&
+                st.grown.atRest && !st.grown.hasQueued && st.grown.target == grownTarget &&
+                st.opacity == opacityTarget && st.blur == blurTarget &&
+                st.press == 0.0 && pressTarget == 0.0 && st.drawnBrightness != null &&
+                !(timeMoved && t >= st.motionFrom && t <= st.motionUntil) &&
+                !(line.isInterlude && (st.status == LineStatus.Active || st.height != baseHeights[i]))
+            if (resting) continue
+
             val yBefore = st.y.value()
             val grownBefore = st.grown.value()
             val opacityBefore = st.opacity
             val blurBefore = shownBlur(st.blur)
             val pressBefore = st.press
 
-            val grownTarget = if (st.status == LineStatus.Active) 1.0 else 0.0
             if (jump) st.grown.jump(grownTarget) else if (st.grown.target != grownTarget) st.grown.setTarget(grownTarget)
 
             val target = targets[i]
@@ -242,17 +257,14 @@ class LyricEngine(val lines: List<SyncLine>) {
             st.y.update(dt)
             st.grown.update(dt)
 
-            val opacityTarget = opacityTarget(st.status, showPassed)
-            val blurTarget = blurTarget(st.status, abs(i - a))
             if (snap) {
                 st.opacity = opacityTarget
                 st.blur = blurTarget
             } else {
-                st.opacity = settle(st.opacity, opacityTarget, dt, OPACITY_SNAP)
-                st.blur = settle(st.blur, blurTarget, dt, BLUR_SNAP)
+                if (st.opacity != opacityTarget) st.opacity = settle(st.opacity, opacityTarget, dt, OPACITY_SNAP)
+                if (st.blur != blurTarget) st.blur = settle(st.blur, blurTarget, dt, BLUR_SNAP)
             }
 
-            val pressTarget = if (st.pressed || nanos < st.pressHeldUntil) 1.0 else 0.0
             st.press = if (pressTarget > st.press) min(pressTarget, st.press + dt / PRESS_S) else max(pressTarget, st.press - dt / PRESS_S)
 
             // Nothing is written for a line whose springs, fades and press
@@ -283,6 +295,10 @@ class LyricEngine(val lines: List<SyncLine>) {
         settled = !anythingMoved && !playing && !scrolling
         frames.intValue++
     }
+
+    // Whether a ripple has just set lines waiting: then every line takes its
+    // new target this frame.
+    private fun delaysPending(delays: DoubleArray?): Boolean = delays != null
 
     // Gets word animation ready near the focus, the focus line first, then
     // the lines ahead, then those behind, within the frame's budget; lets it
