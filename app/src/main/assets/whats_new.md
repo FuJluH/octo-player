@@ -1,49 +1,44 @@
-**Live radio near you**, stations that keep going, Octo's mixes in Playlists, crossfade curves, headphone crossfeed and server updates from the app.
+**Animated art** for albums that have it, accent colors, Settings > Radio and a player that keeps your phone cooler.
 
 ## Sound
 
-- **Crossfade curve** picks how songs fade into each other: Equal power, Linear, S-curve, Even in loudness or Mix only.
-- **Crossfeed** for headphones lets each ear hear a little of the other side, for a more relaxed, natural sound. Choose Natural, Chu Moy, Jan Meier or your own in Sound. It is off until you turn it on.
+- The crossfade curve says why it is grayed out: Smart transitions picks the curve while it is on, and the row says to turn it off to choose your own.
+- Casting to a speaker no longer stops or skips when the speaker goes on to the next song by itself.
 
 ## Library
 
-- **From Octo** in Playlists: the mixes, charts, stations and Made for you lists your Octo server makes for you, grouped by kind.
-- Home has new shelves of Year, Genre, Artist and Country mixes. Move or hide them in Edit Home.
-- Octo's stations are on a shelf named **Radio**, and internet radio stations added to your server get their own **Live radio** shelf.
-- Get my music no longer signs in to Spotify: its tile opens TuneMyMusic like the other services. Public links, files and pasted lists work as before.
+- **Animated art**: albums with animated artwork on Apple Music play it in the player and on the album page, served by your Octo server. Choose Square, Full screen or Off in Settings > Appearance.
+- **Full screen** shows the album's tall artwork at the top of the player, blending into the background behind the controls.
+- Library health no longer calls two songs copies when their albums are different versions, like an original and its remix album.
 
 ## Playback
 
-- **Live radio near you**: find radio stations around a ZIP code, postal code, town or your location, choose how far to look, and keep the ones you like. Open it from Home, Search or your server's stations.
-- **A player made for live radio**: a LIVE pill instead of the scrub bar, Stop and Play that always rejoin what is on air, and Back and Next to change station.
-- Live radio shows the song the station is playing with its cover. Tap **+** to add that song to your library, or the heart if you already have it.
-- Live radio plays more kinds of station streams and reconnects when the connection drops.
-- The player's cover sits higher and fills more of the screen.
-- **Stations keep going**: a tap on a station or a Made for you list shows its songs, with a play button on the cover. A station adds more songs as you near the end, even after the app restarts.
-- Internet radio stations added to your server play from Home.
+- The round now playing button shows just the cover. While music is paused its ring breathes softly, and a tap still opens the small player.
+- The player and lyrics use far less power, so your phone stays cooler and the battery lasts longer. Everything looks the same.
+- A live station's notification and media keys show Stop. Play rejoins what is on air.
 
 ## Server
 
-- **Server updates**: when a newer Octo is out, your server's page says so and shows what's new. If you are the server's admin, Update now updates it from the app. Later hides it until the next release.
-- Add a live radio station to your server's stations with Add to your server, if you are its admin.
-- Places you type, and your town from your location, are looked up on your Octo server when it can.
+- Animated art needs your Octo server on the 2026.10.15 update or newer, with Animated art left on.
+- A song you heart that Octo downloads for you stays hearted once it is in your library.
 
 ## Lyrics
 
-- **Bloom fast singing**: a word a singer drags out swells and glows like a held note. It is on by default in Settings > Lyrics.
+- The lyrics bar shows the song's round cover, with a ring for how much has played.
+- Lyrics rest while the song is paused, which saves battery.
 
 ## Offline
 
-- A song whose file was replaced on your server, by Better quality or Find songs, plays and downloads the new file instead of the old one.
+- Animated art plays only while you are looking at it. With Reduce motion or battery saver on, the still cover shows instead.
 
 ## Everyday touches
 
-- An added station with nothing to play stays off Home.
-- A list that is gone from your server leaves Playlists.
-- A station's play button says which station it plays.
+- The heart and More beside a song's name line up with its capital letters, a step quieter than the name.
+- A song or artist name too long for its space fades out at the end instead of being cut off.
 
 ## Settings
 
-- Crossfade curve and Crossfeed can be found in Settings search.
-- Backups keep your crossfade curve and the live radio stations you kept.
-- Live radio can use your location, or you can type a place instead.
+- **Accent color** in Appearance: Octo's own blue gray, eight more colors, or From the album art. Color the glass tints the bar and buttons to match.
+- **Settings > Radio** brings together Song radio (Discovery, Adventure, Artist variety, Favorites) and Live radio (stations near you and the stations on your server).
+- The Frame rate setting is gone. The player picks the right rate by itself.
+- Backups keep your accent color and your Animated art choice.
