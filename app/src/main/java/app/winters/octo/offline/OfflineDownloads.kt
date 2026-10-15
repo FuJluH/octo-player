@@ -102,6 +102,8 @@ class OfflineDownloads @Inject constructor(
     // that server; files already on the phone stay.
     private val family: FamilyHub,
     private val feedback: Feedback,
+    // The animated art of albums downloaded whole, kept beside their songs.
+    private val loops: LoopKeeper,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lock = Mutex()
@@ -161,6 +163,7 @@ class OfflineDownloads @Inject constructor(
             }
         }
         scope.launch { sessions.state.collect { poke() } }
+        loops.start()
     }
 
     // Downloads these library songs, the ones that can be: on a server and
@@ -206,6 +209,7 @@ class OfflineDownloads @Inject constructor(
                 delay(UNDO_KEEP_MS)
                 lock.withLock { aside.forEach { it.file?.delete() } }
             }
+            loops.poke()
             if (canRestore(aside.map { it.row.state to (it.file != null) })) gone { restore(aside) }
         }
     }
@@ -319,6 +323,7 @@ class OfflineDownloads @Inject constructor(
 
     private fun poke() {
         wake.trySend(Unit)
+        loops.poke()
     }
 
     // Rules
@@ -413,6 +418,7 @@ class OfflineDownloads @Inject constructor(
         running?.let { (key, job) -> if (key == key(row)) job.cancel() }
         dao.delete(row.sourceId, row.serverId)
         if (row.path.isNotEmpty()) File(row.path).delete()
+        loops.poke()
     }
 
     // The queue
@@ -464,6 +470,7 @@ class OfflineDownloads @Inject constructor(
             // A song downloaded again under a new name lets its old file go.
             if (row.path.isNotEmpty() && row.path != target.absolutePath) File(row.path).delete()
             tries.remove(key)
+            loops.poke()
         } catch (e: CancellationException) {
             part.delete()
             throw e
