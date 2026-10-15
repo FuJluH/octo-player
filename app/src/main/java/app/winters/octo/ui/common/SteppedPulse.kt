@@ -7,6 +7,9 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
+import app.winters.octo.player.LocalFrameTicker
+import app.winters.octo.player.immersive.WashMaxFps
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 
 // A value easing from 1 down to `low` and back, over and over, `halfMs` each
@@ -14,14 +17,26 @@ import kotlinx.coroutines.delay
 // `fps` times a second instead of on every frame of the screen. A small
 // soft pulse looks the same either way, and the screen is redrawn a
 // quarter as often on a 120 Hz phone. Not running, it rests at 1. Read it
-// while drawing, so a new value only redraws.
+// while drawing, so a new value only redraws. While the player's moving
+// background draws its own frames (`LocalFrameTicker`), as often as this
+// would, the pulse steps on those instead of waking frames of its own.
 @Composable
 fun rememberSteppedPulse(low: Float, halfMs: Int, running: Boolean, fps: Int = PULSE_FPS): State<Float> {
     val value = remember { mutableFloatStateOf(1f) }
-    LaunchedEffect(running, low, halfMs, fps) {
+    val ticker = LocalFrameTicker.current
+    val shared = ticker != null && ticker.running && fps <= WashMaxFps
+    LaunchedEffect(running, low, halfMs, fps, shared) {
         value.floatValue = 1f
         if (!running) return@LaunchedEffect
         val start = withFrameNanos { it }
+        if (shared && ticker != null) {
+            val stop = ticker.listen { now -> value.floatValue = pulseAt((now - start) / 1_000_000, low, halfMs) }
+            try {
+                awaitCancellation()
+            } finally {
+                stop()
+            }
+        }
         val stepMs = 1_000L / fps.coerceAtLeast(1)
         while (true) {
             delay(stepMs)
