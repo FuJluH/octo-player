@@ -32,6 +32,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import app.winters.octo.player.rememberPowerSave
+import app.winters.octo.player.LocalFrameTicker
 import app.winters.octo.ui.common.GpuPictureStream
 import kotlinx.coroutines.delay
 import kotlin.math.ceil
@@ -140,6 +141,8 @@ private fun WashCanvas(cover: WashCover?, bpm: Float, fpsLimit: Int, speed: Floa
     }
 
     val lifecycle = LocalLifecycleOwner.current.lifecycle
+    // The wash's frames, offered to the player's slower movers.
+    val ticker = LocalFrameTicker.current
 
     // The one clock. It runs while the player is in view (hidden or with
     // the screen off it stops, as the app is no longer started) and while
@@ -149,6 +152,7 @@ private fun WashCanvas(cover: WashCover?, bpm: Float, fpsLimit: Int, speed: Floa
             clock.start(withFrameNanos { it })
             render()
             handoff.ticking = true
+            if (moving) ticker?.running = true
             try {
                 while (clock.busy(moving)) {
                     // Between drawn frames the clock rests rather than waking on
@@ -161,12 +165,14 @@ private fun WashCanvas(cover: WashCover?, bpm: Float, fpsLimit: Int, speed: Floa
                                 landed.intValue++
                             }
                             render()
+                            ticker?.tick(now)
                         }
                         clock.restNanos(now)
                     }
                     if (rest > 0) delay(rest / 1_000_000)
                 }
             } finally {
+                ticker?.running = false
                 handoff.ticking = false
                 if (handoff.waiting && pictures != null) {
                     handoff.waiting = false

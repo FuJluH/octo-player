@@ -188,6 +188,8 @@ fun AnimatedVisibilityScope.PlayerOverlay(
     val base by animateColorAsState(colors.base, tween(600), label = "player base")
     val ink by animateColorAsState(colors.content, tween(CoverFadeMs.toInt()), label = "player ink")
     val dolly = backgroundDolly()
+    // The moving background's frames, which the progress line steps on.
+    val ticker = remember { FrameTicker() }
     val close by rememberUpdatedState(onClose)
     val scope = rememberCoroutineScope()
     // How far the player has been pulled down, in pixels.
@@ -281,11 +283,13 @@ fun AnimatedVisibilityScope.PlayerOverlay(
         ) {
             // The background is what the player's glass frosts, the way the
             // bar frosts the page.
-            Box(Modifier.fillMaxSize().hazeSource(backdrop)) {
-                PlayerBackground(prefs, colors, now, dolly = { dolly.value })
+            CompositionLocalProvider(LocalFrameTicker provides ticker) {
+                Box(Modifier.fillMaxSize().hazeSource(backdrop)) {
+                    PlayerBackground(prefs, colors, now, dolly = { dolly.value })
+                }
             }
             // The words and icons take the colour the background asks for.
-            CompositionLocalProvider(LocalHaze provides backdrop, LocalContentColor provides ink) {
+            CompositionLocalProvider(LocalHaze provides backdrop, LocalContentColor provides ink, LocalFrameTicker provides ticker) {
                 PlayerContent(
                     now,
                     model,
