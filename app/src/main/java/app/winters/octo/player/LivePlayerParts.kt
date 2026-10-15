@@ -151,7 +151,7 @@ internal fun LiveSongButtons(live: LiveNow, vm: LivePlayerViewModel, calm: Boole
         val label = liveSongButtonLabel(button, air)
         Box(
             Modifier
-                .size(44.dp)
+                .size(TitleButtonSize)
                 .clickable(interactionSource = null, indication = null, role = Role.Button) {
                     if (button == LiveSongButton.Heart(starred = false)) pulse.play()
                     vm.tapSong()
@@ -160,39 +160,22 @@ internal fun LiveSongButtons(live: LiveNow, vm: LivePlayerViewModel, calm: Boole
             contentAlignment = Alignment.Center,
         ) {
             when (val shown = button) {
-                is LiveSongButton.Heart -> GlowIcon(
-                    painterResource(if (shown.starred) OctoIcons.Liked else OctoIcons.Like),
-                    tint = if (shown.starred) LocalContentColor.current else LocalContentColor.current.copy(alpha = 0.6f),
-                    lit = shown.starred,
-                    modifier = Modifier.size(24.dp),
-                    accent = pulse,
-                )
+                is LiveSongButton.Heart -> TitleHeart(shown.starred, pulse)
                 // On its way into the library: the ring the app's other add
                 // buttons show.
                 is LiveSongButton.Add -> if (shown.adding) {
-                    DownloadRing(if (phase == DownloadPhase.None) DownloadPhase.Queued else phase, calm, Modifier.size(24.dp))
+                    DownloadRing(if (phase == DownloadPhase.None) DownloadPhase.Queued else phase, calm, Modifier.size(titleIcons().size))
                 } else {
-                    PlusIcon()
+                    TitlePlus()
                 }
-                LiveSongButton.Search -> PlusIcon()
+                LiveSongButton.Search -> TitlePlus()
                 LiveSongButton.None -> Unit
             }
         }
     } else {
-        Spacer(Modifier.size(44.dp))
+        Spacer(Modifier.size(TitleButtonSize))
     }
     LiveMoreButton(live, vm)
-}
-
-// The plus the app's outside songs show where a heart would be.
-@Composable
-private fun PlusIcon() {
-    GlowIcon(
-        painterResource(OctoIcons.AddToLibrary),
-        tint = LocalContentColor.current.copy(alpha = 0.6f),
-        lit = false,
-        modifier = Modifier.size(24.dp),
-    )
 }
 
 // What the station's menu offers, in order.
@@ -226,7 +209,7 @@ private fun LiveMoreButton(live: LiveNow, vm: LivePlayerViewModel) {
     val id = live.lineup.ids[live.lineup.index]
     Box(
         Modifier
-            .size(44.dp)
+            .size(TitleButtonSize)
             .clickable(interactionSource = null, indication = null, role = Role.Button) {
                 vm.menuOpened()
                 val details = live.shown.details
@@ -254,7 +237,7 @@ private fun LiveMoreButton(live: LiveNow, vm: LivePlayerViewModel) {
             .semantics { contentDescription = "More" },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(painterResource(OctoIcons.More), contentDescription = null, tint = LocalContentColor.current.copy(alpha = 0.6f), modifier = Modifier.size(24.dp))
+        TitleMoreIcon()
     }
 }
 

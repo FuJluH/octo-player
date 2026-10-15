@@ -61,6 +61,7 @@ import app.winters.octo.player.MESH
 import app.winters.octo.player.PlayerColors
 import app.winters.octo.player.PlayerSettings
 import app.winters.octo.ui.common.rememberSystemReduceMotion
+import app.winters.octo.ui.common.delayToNextTick
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
@@ -74,11 +75,14 @@ import javax.inject.Inject
 // How long one song's colours take to become the next's.
 private const val CrossfadeMs = 800
 
-// The glow drifts at a fifth of the player's pace, and only redraws ten
-// times a second: at this speed a pool moves a few pixels between frames,
-// which a field this soft never shows.
+// The glow drifts at a fifth of the player's pace. A field this faint and
+// soft changes under any one pixel by about a level of brightness a second
+// at the subtle strength (twice that at the rich one), so it redraws once a
+// second, or twice when rich: a step that small never shows. It steps on
+// whole seconds of the clock, with the bar's ring, so the two share frames.
 private const val DriftSpeed = 0.2f
-private const val DriftFrameMs = 100L
+
+fun driftFrameMs(alpha: Float): Long = if (alpha > ambientAlpha(AmbientStrength.Subtle)) 500L else 1_000L
 
 // Toward the bottom the glow fades to 60%, so the lists and the bar sit on
 // the quietest part.
@@ -245,11 +249,12 @@ private fun AmbientField(colors: PlayerColors?, strength: Float, moving: Boolean
     val time = remember { mutableFloatStateOf(0f) }
     if (moving && strength > 0f && painter.moves) {
         val lifecycle = LocalLifecycleOwner.current.lifecycle
-        LaunchedEffect(lifecycle) {
+        val stepMs = driftFrameMs(strength)
+        LaunchedEffect(lifecycle, stepMs) {
             lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 var last = withFrameNanos { it }
                 while (true) {
-                    delay(DriftFrameMs)
+                    delayToNextTick(stepMs)
                     withFrameNanos { now ->
                         time.floatValue += (now - last) / 1_000_000_000f * DriftSpeed
                         last = now

@@ -96,4 +96,28 @@ class LiveTapFeedTest {
         assertEquals(60.0, feed.reading("q:1", tagBpm = 61.0)!!.tempoPrior!!, 1.0)
         assertEquals(120.0, feed.reading("q:1")!!.tempoPrior!!, 1.0)
     }
+
+    @Test
+    fun onceASongIsReadTheRestOfItIsLeftOut() {
+        val feed = LiveTapFeed(worker)
+        feed.begin("q:1", rate, 2)
+        feed.pushAll(sine(2.0))
+        assertEquals(2_000L, feed.reading("q:1")!!.heardMs)
+        feed.pushAll(sine(3.0))
+        assertEquals(2_000L, feed.reading("q:1")!!.heardMs)
+        // The next song is fed from its start.
+        feed.begin("q:2", rate, 2)
+        feed.pushAll(sine(1.0))
+        assertEquals(1_000L, feed.reading("q:2")!!.heardMs)
+    }
+
+    @Test
+    fun aSongReadForAnotherEntryKeepsBeingFed() {
+        val feed = LiveTapFeed(worker)
+        feed.begin("q:1", rate, 2)
+        feed.pushAll(sine(1.0))
+        assertNull(feed.reading("q:9"))
+        feed.pushAll(sine(1.0))
+        assertEquals(2_000L, feed.reading("q:1")!!.heardMs)
+    }
 }

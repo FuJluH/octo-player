@@ -228,4 +228,10 @@ class AmbienceTest {
         val read = decodeBackup(text) as BackupRead.Read
         assertEquals(AmbientStrength.Subtle, read.backup.player?.ambient?.strength)
     }
+
+    @Test
+    fun theGlowStepsOnceASecondSubtleAndTwiceRich() {
+        assertEquals(1_000L, driftFrameMs(ambientAlpha(AmbientStrength.Subtle)))
+        assertEquals(500L, driftFrameMs(ambientAlpha(AmbientStrength.Rich)))
+    }
 }

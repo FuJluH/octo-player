@@ -24,6 +24,9 @@ data class PlayerColors(
     // How much of the background shows over `base` so the words in
     // `content` read on every part of it: 1 for all of it.
     val show: Float = 1f,
+    // How strongly the icons beside the song's name show in `content`, a
+    // step quieter than the words while they still read.
+    val quiet: Float = 0.7f,
 ) {
     companion object {
         // Before artwork loads, or for music without any: quiet shades of the

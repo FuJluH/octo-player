@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
@@ -71,7 +72,8 @@ fun LineSlider(
     val followed = if (look == SliderLook.Jewel) rememberFollowedFraction(fraction, dragging) else null
     val measurer = if (valueLabel != null) rememberTextMeasurer() else null
 
-    val glowPaint = remember { android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { strokeCap = android.graphics.Paint.Cap.ROUND } }
+    val glowPaint = remember { android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG) }
+    val glowFilters = remember { GlowFilters() }
 
     Box(
         modifier
@@ -101,6 +103,9 @@ fun LineSlider(
                     if (live) seek(dragFraction)
                 }
             }
+            // Its own layer, so a moving value redraws the line and nothing
+            // around it.
+            .graphicsLayer()
             .drawBehind {
                 val y = size.height / 2
                 if (jewel != null) {
@@ -114,13 +119,15 @@ fun LineSlider(
                 drawLine(trackColor, Offset(0f, y), Offset(size.width, y), stroke, StrokeCap.Round)
                 if (end > 0f) {
                     // Three soft passes of the same line make the glow: wide and
-                    // faint, then medium, then a tight bright core.
+                    // faint, then medium, then a tight bright core. Each is the
+                    // line's own shape, a rounded bar, which the GPU blurs
+                    // itself; a blurred line is blurred on the processor.
                     drawIntoCanvas { canvas ->
-                        for (spread in floatArrayOf(2.5f, 1f, 0.3f)) {
+                        val half = stroke / 2
+                        glows.forEachIndexed { i, spread ->
                             glowPaint.color = color.copy(alpha = glowAlpha / 3f).toArgb()
-                            glowPaint.strokeWidth = stroke
-                            glowPaint.maskFilter = BlurMaskFilter(glowBlur * spread, BlurMaskFilter.Blur.NORMAL)
-                            canvas.nativeCanvas.drawLine(0f, y, end, y, glowPaint)
+                            glowPaint.maskFilter = glowFilters.of(i, glowBlur * spread)
+                            canvas.nativeCanvas.drawRoundRect(-half, y - half, end + half, y + half, half, half, glowPaint)
                         }
                     }
                     drawLine(color, Offset(0f, y), Offset(end, y), stroke, StrokeCap.Round)
@@ -128,4 +135,22 @@ fun LineSlider(
                 if (thumb > 0.dp) drawCircle(color, thumb.toPx(), Offset(end, y))
             },
     )
+}
+
+// How wide each of the glow's three passes spreads, as a share of its blur.
+private val glows = floatArrayOf(2.5f, 1f, 0.3f)
+
+// The glow's three blurs, made again only when their size changes.
+private class GlowFilters {
+    private val sizes = FloatArray(glows.size) { -1f }
+    private val filters = arrayOfNulls<BlurMaskFilter>(glows.size)
+
+    fun of(pass: Int, radius: Float): BlurMaskFilter {
+        val kept = filters[pass]
+        if (kept != null && sizes[pass] == radius) return kept
+        return BlurMaskFilter(radius, BlurMaskFilter.Blur.NORMAL).also {
+            filters[pass] = it
+            sizes[pass] = radius
+        }
+    }
 }

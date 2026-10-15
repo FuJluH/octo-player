@@ -33,7 +33,6 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -58,7 +57,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -86,6 +84,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
@@ -102,7 +101,6 @@ import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -158,6 +156,7 @@ import app.winters.octo.ui.menu.LocalSongMenu
 import app.winters.octo.ui.menu.SongMenuContext
 import app.winters.octo.ui.common.asClock
 import app.winters.octo.ui.common.rememberSystemReduceMotion
+import app.winters.octo.ui.common.fadingMarquee
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
@@ -190,6 +189,8 @@ fun AnimatedVisibilityScope.PlayerOverlay(
     val base by animateColorAsState(colors.base, tween(600), label = "player base")
     val ink by animateColorAsState(colors.content, tween(CoverFadeMs.toInt()), label = "player ink")
     val dolly = backgroundDolly()
+    // The moving background's frames, which the progress line steps on.
+    val ticker = remember { FrameTicker() }
     val close by rememberUpdatedState(onClose)
     val scope = rememberCoroutineScope()
     // How far the player has been pulled down, in pixels.
@@ -283,11 +284,18 @@ fun AnimatedVisibilityScope.PlayerOverlay(
         ) {
             // The background is what the player's glass frosts, the way the
             // bar frosts the page.
-            Box(Modifier.fillMaxSize().hazeSource(backdrop)) {
-                PlayerBackground(prefs, colors, now, dolly = { dolly.value })
+            CompositionLocalProvider(LocalFrameTicker provides ticker) {
+                Box(Modifier.fillMaxSize().hazeSource(backdrop)) {
+                    PlayerBackground(prefs, colors, now, dolly = { dolly.value })
+                }
             }
             // The words and icons take the colour the background asks for.
-            CompositionLocalProvider(LocalHaze provides backdrop, LocalContentColor provides ink) {
+            CompositionLocalProvider(
+                LocalHaze provides backdrop,
+                LocalContentColor provides ink,
+                LocalFrameTicker provides ticker,
+                LocalTitleIconAlpha provides colors.quiet,
+            ) {
                 PlayerContent(
                     now,
                     model,
@@ -377,7 +385,7 @@ private fun AnimatedVisibilityScope.PlayerContent(
             // own buttons still set it. In lyrics mode the lyrics take the
             // right side, over the small player, and the artwork stays.
             Row(
-                Modifier.fillMaxSize().padding(horizontal = 24.dp),
+                Modifier.fillMaxSize().padding(horizontal = PlayerSideMargin),
                 horizontalArrangement = Arrangement.spacedBy(32.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -418,7 +426,7 @@ private fun AnimatedVisibilityScope.PlayerContent(
             // player that takes the controls' place.
             // The artwork and the blocks keep their places either way, so
             // closing lyrics mode brings them back where they were.
-            Box(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
+            Box(Modifier.fillMaxSize().padding(horizontal = PlayerSideMargin)) {
                 val shown by animateFloatAsState(
                     if (lyricsOpen) 0f else 1f,
                     if (calm) snap() else tween(if (lyricsOpen) 160 else 240, delayMillis = if (lyricsOpen) 0 else 120),
@@ -694,7 +702,9 @@ private fun AnimatedVisibilityScope.UprightPlayer(
     RhythmColumn(Modifier.fillMaxSize()) {
         header()
         ArtStage(now, model, folded = folded, calm = calm, maxSide = Dp.Infinity, modifier = Modifier, artModifier = artModifier)
-        Box(look) { TitleRow(now, model, onClose, onOpenArtist) }
+        // Folded away under the lyrics, a long name rests rather than
+        // scrolling unseen.
+        Box(look) { TitleRow(now, model, onClose, onOpenArtist, scrolls = !folded) }
         Box(look) { BarBlock(now, model, onOpenSpeed) }
         Box(look) { Transport(now, model) }
         Box(look) { Volume(model) }
@@ -768,22 +778,30 @@ private fun AnimatedVisibilityScope.risesIn(): Modifier {
 // kept the same height whether it has one or not (and for a station), so
 // the player's blocks keep their places from song to song.
 @Composable
-private fun TitleRow(now: NowPlaying, model: PlayerViewModel, onClose: () -> Unit, onOpenArtist: (String) -> Unit) {
+private fun TitleRow(now: NowPlaying, model: PlayerViewModel, onClose: () -> Unit, onOpenArtist: (String) -> Unit, scrolls: Boolean = true) {
     Column(Modifier.fillMaxWidth()) {
         val live = now.live
         val liveModel: LivePlayerViewModel? = if (live != null) hiltViewModel() else null
-        // A station's heart and menu sit on the title's own line, centered
-        // on it, their touch room reaching past it.
-        val measurer = rememberTextMeasurer()
-        val titleLine = with(LocalDensity.current) { remember(measurer, this) { measurer.measure("Ag", TitleStyle).size.height.toDp() } }
-        Row(verticalAlignment = if (live != null) Alignment.Top else Alignment.CenterVertically) {
-            Box(Modifier.weight(1f)) { TitleBlock(now, onOpenArtist, onClose) }
-            if (live != null && liveModel != null) {
-                Row(Modifier.height(titleLine).wrapContentHeight(unbounded = true), verticalAlignment = Alignment.CenterVertically) {
-                    LiveSongButtons(live, liveModel, calm = model.prefs.collectAsStateWithLifecycle().value.reduceMotion || rememberSystemReduceMotion())
+        val calm = model.prefs.collectAsStateWithLifecycle().value.reduceMotion || rememberSystemReduceMotion()
+        // The buttons sit on the middle of the name's capitals, the same for a
+        // song and a station, their icons sized from those capitals.
+        val capHeight = rememberCapHeightPx(TitleStyle)
+        val titleBaseline = rememberBaselinePx(TitleStyle)
+        val density = LocalDensity.current
+        val icons = remember(capHeight, density) { TitleIcons(with(density) { capHeight.toDp() }) }
+        CompositionLocalProvider(LocalTitleIcons provides icons) {
+            TitleWithButtons(
+                capHeight = capHeight,
+                titleBaseline = titleBaseline,
+                icons = icons,
+                sideMargin = PlayerSideMargin,
+                title = { TitleBlock(now, calm || !scrolls, onOpenArtist, onClose) },
+            ) {
+                if (live != null && liveModel != null) {
+                    LiveSongButtons(live, liveModel, calm = calm)
+                } else {
+                    SongButtons(now, model)
                 }
-            } else {
-                SongButtons(now, model)
             }
         }
         Box(Modifier.padding(top = 2.dp).height(RatingLine)) {
@@ -901,10 +919,12 @@ private fun AnimatedVisibilityScope.PlayerArt(ref: String?, side: Dp, playing: B
     }
 }
 
-// The song's name and artist. The name also carries Close player for a
-// screen reader.
+// The song's name and artist, close together so they read as one. A name
+// too long for its room scrolls through (unless motion is `calm`), and
+// either line too long fades out at its end. The name also carries Close
+// player for a screen reader.
 @Composable
-private fun TitleBlock(now: NowPlaying, onOpenArtist: (String) -> Unit, onClose: () -> Unit) {
+private fun TitleBlock(now: NowPlaying, calm: Boolean, onOpenArtist: (String) -> Unit, onClose: () -> Unit) {
     AnimatedContent(
         targetState = now,
         contentKey = { it.trackId },
@@ -919,7 +939,7 @@ private fun TitleBlock(now: NowPlaying, onOpenArtist: (String) -> Unit, onClose:
                 style = TitleStyle,
                 color = LocalContentColor.current,
                 markColor = accentInk,
-                titleModifier = Modifier.basicMarquee().closesPlayer(onClose),
+                titleModifier = Modifier.fadingMarquee(song.trackId, scroll = !calm).closesPlayer(onClose),
                 overflow = TextOverflow.Clip,
             )
             Text(
@@ -927,9 +947,10 @@ private fun TitleBlock(now: NowPlaying, onOpenArtist: (String) -> Unit, onClose:
                 style = OctoType.body,
                 color = accentInk,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                softWrap = false,
+                overflow = TextOverflow.Clip,
                 // A song found online has no artist in the library to open.
-                modifier = Modifier.clickable(
+                modifier = Modifier.raised(ArtistRaise).fadingMarquee(song.trackId, scroll = false).clickable(
                     enabled = !song.artistId.isNullOrEmpty(),
                     interactionSource = null,
                     indication = null,
@@ -948,14 +969,14 @@ private fun SongButtons(now: NowPlaying, model: PlayerViewModel) {
     if (now.trackId != null && isFind(now.trackId)) {
         val find by model.find.collectAsStateWithLifecycle()
         // Held back until the find for this song has loaded, not the last one.
-        find?.takeIf { it.id == now.trackId }?.let { AddToLibraryButton(it, size = 44.dp, iconSize = 24.dp) }
-            ?: Spacer(Modifier.size(44.dp))
+        find?.takeIf { it.id == now.trackId }?.let { AddToLibraryButton(it, size = TitleButtonSize, iconSize = titleIcons().size) }
+            ?: Spacer(Modifier.size(TitleButtonSize))
     } else {
         LikeButton(model)
     }
     Box(
         Modifier
-            .size(44.dp)
+            .size(TitleButtonSize)
             // The song's menu floats beside this button.
             .pressSpot(LocalPressSpot.current)
             .clickable(interactionSource = null, indication = null, role = Role.Button) {
@@ -964,7 +985,7 @@ private fun SongButtons(now: NowPlaying, model: PlayerViewModel) {
             .semantics { contentDescription = "More" },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(painterResource(OctoIcons.More), contentDescription = null, tint = LocalContentColor.current.copy(alpha = 0.6f), modifier = Modifier.size(24.dp))
+        TitleMoreIcon()
     }
 }
 
@@ -975,7 +996,7 @@ private fun LikeButton(model: PlayerViewModel) {
     val pulse = rememberIconAccent(IconAccent.Pulse)
     Box(
         Modifier
-            .size(44.dp)
+            .size(TitleButtonSize)
             .clickable(interactionSource = null, indication = null, role = Role.Button) {
                 if (!liked) pulse.play()
                 model.toggleLike()
@@ -986,13 +1007,7 @@ private fun LikeButton(model: PlayerViewModel) {
             },
         contentAlignment = Alignment.Center,
     ) {
-        GlowIcon(
-            painterResource(if (liked) OctoIcons.Liked else OctoIcons.Like),
-            tint = if (liked) LocalContentColor.current else LocalContentColor.current.copy(alpha = 0.6f),
-            lit = liked,
-            modifier = Modifier.size(24.dp),
-            accent = pulse,
-        )
+        TitleHeart(liked, pulse)
     }
 }
 
@@ -1328,3 +1343,17 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
 
 // The song's name in the player.
 private val TitleStyle = OctoType.title.copy(fontWeight = FontWeight.Bold)
+
+// The room between the player's content and the screen's sides.
+private val PlayerSideMargin = 24.dp
+
+// How far the artist line sits up into the room under the name, so the two
+// read as one: inside the name's line spacing, clear of its descenders.
+private val ArtistRaise = 3.dp
+
+// Draws the line `by` higher and takes that much less room below.
+private fun Modifier.raised(by: Dp): Modifier = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints)
+    val up = by.roundToPx()
+    layout(placeable.width, (placeable.height - up).coerceAtLeast(0)) { placeable.place(0, -up) }
+}

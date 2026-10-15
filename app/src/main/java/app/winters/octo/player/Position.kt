@@ -9,7 +9,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.withFrameMillis
 import app.winters.octo.playback.NowPlaying
+import app.winters.octo.ui.common.delayToNextTick
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.awaitCancellation
 
 // How far into the song playback is. While music plays it is read on a
 // frame, so progress glides instead of stepping, even on a short song.
@@ -21,13 +23,44 @@ import kotlinx.coroutines.delay
 // only needs a new frame each time it moves half a pixel, so the position
 // is read that often instead of on every frame; 0 reads it on every frame,
 // for what moves faster than any line (the words being sung).
+//
+// `everyMs`, when set, reads it once each whole `everyMs` of the clock
+// instead (`delayToNextTick`), for a small line that moves a pixel or two
+// a second and so shares its frames with the other slow things on screen.
+//
+// While a `LocalFrameTicker` has frames coming (the player's moving
+// background), the line steps on those frames, as often as it needs, so it
+// adds no frames of its own.
 @Composable
-fun rememberPositionMs(now: NowPlaying, positionMs: () -> Long, lengthPx: Float = 0f): MutableLongState {
+fun rememberPositionMs(now: NowPlaying, positionMs: () -> Long, lengthPx: Float = 0f, everyMs: Long = 0): MutableLongState {
     val position = remember { mutableLongStateOf(positionMs()) }
     val length by rememberUpdatedState(lengthPx)
-    LaunchedEffect(now.trackId, now.isPlaying, now.durationMs) {
+    val ticker = LocalFrameTicker.current
+    val shared = ticker != null && ticker.running && everyMs == 0L
+    LaunchedEffect(now.trackId, now.isPlaying, now.durationMs, everyMs, shared) {
         position.longValue = positionMs()
+        if (shared && now.isPlaying && ticker != null) {
+            var last = 0L
+            val stop = ticker.listen { nanos ->
+                val stepNanos = progressStepMs(now.durationMs, length) * 1_000_000
+                // A twentieth short, so a frame landing a hair early still counts.
+                if (nanos - last >= stepNanos - stepNanos / 20) {
+                    last = nanos
+                    position.longValue = positionMs()
+                }
+            }
+            try {
+                awaitCancellation()
+            } finally {
+                stop()
+            }
+        }
         while (now.isPlaying) {
+            if (everyMs > 0) {
+                delayToNextTick(everyMs)
+                withFrameMillis { position.longValue = positionMs() }
+                continue
+            }
             withFrameMillis { position.longValue = positionMs() }
             val step = progressStepMs(now.durationMs, length)
             if (step > 0) delay(step)
