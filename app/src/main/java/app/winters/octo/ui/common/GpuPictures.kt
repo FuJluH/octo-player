@@ -36,7 +36,7 @@ private const val PictureUsage = HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE or Hardw
 @RequiresApi(Build.VERSION_CODES.Q)
 class GpuPictureStream(val width: Int, val height: Int) : AutoCloseable {
     private val reader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, MaxImages, PictureUsage.toLong())
-    private val root = RenderNode("gpu picture").apply { setPosition(0, 0, width, height) }
+    private val root = RenderNode("gpu picture").apply { setPosition(0, 0, this@GpuPictureStream.width, this@GpuPictureStream.height) }
     private val renderer = HardwareRenderer().apply {
         isOpaque = false
         setContentRoot(root)
@@ -77,7 +77,7 @@ class GpuPictureStream(val width: Int, val height: Int) : AutoCloseable {
         }
         waiting = true
         askedAt = now
-        val result = renderer.createRenderRequest().setWaitForPresent(false).syncAndDraw()
+        val result = renderer.createRenderRequest().setVsyncTime(System.nanoTime()).setWaitForPresent(false).syncAndDraw()
         if (result != HardwareRenderer.SYNC_OK) waiting = false
         return waiting
     }
@@ -183,7 +183,7 @@ class GpuPictureMaker : AutoCloseable {
             root.endRecording()
         }
         renderer.setSurface(reader.surface)
-        val result = renderer.createRenderRequest().setWaitForPresent(false).syncAndDraw()
+        val result = renderer.createRenderRequest().setVsyncTime(System.nanoTime()).setWaitForPresent(false).syncAndDraw()
         if (result != HardwareRenderer.SYNC_OK) finish(request, reader, null)
     }
 

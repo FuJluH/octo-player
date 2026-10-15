@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
@@ -65,7 +65,7 @@ val LyricsBarGap = 12.dp
 private val ScrubEdge = 22.dp
 
 // The small player in lyrics mode, one glass capsule like the app's bar:
-// the artwork, the song, back, play and next, the lyrics switch, lit (a tap
+// the round artwork, the song, back, play and next, the lyrics switch, lit (a tap
 // leaves lyrics), and the lyrics menu. A thin ring round the artwork shows
 // how far the song has played, as the bar's round button does; a drag
 // along the bottom edge moves through the song, the ring following the
@@ -198,15 +198,14 @@ private fun BarButton(@DrawableRes icon: Int, description: String, iconSize: Dp,
     }
 }
 
-// The artwork, the room between it and its ring, and its corners.
+// The artwork, and the room between it and its ring.
 private val ArtSize = 40.dp
 private val RingRoom = 3.dp
-private val ArtCorner = 10.dp
 
-// The song's artwork with a ring round it for how far the song has played
-// (`progress`, read while drawing), the same ring as the bar's round
-// button: still and full for a station, breathing while paused. A screen
-// reader hears the song and how much of it has played.
+// The song's artwork, round, with a ring round it for how far the song has
+// played (`progress`, read while drawing): the bar's round button, full
+// for a station, breathing while paused. A screen reader hears the song
+// and how much of it has played.
 @Composable
 private fun ArtWithRing(now: NowPlaying, position: MutableLongState, progress: () -> Float) {
     val playedSeconds by remember { derivedStateOf { (position.longValue / 1000).toInt() } }
@@ -221,9 +220,9 @@ private fun ArtWithRing(now: NowPlaying, position: MutableLongState, progress: (
             },
         contentAlignment = Alignment.Center,
     ) {
-        Artwork(now.artwork, ArtSize, shape = RoundedCornerShape(ArtCorner), outside = isOutsideLibrary(now.trackId))
+        Artwork(now.artwork, ArtSize, shape = CircleShape, outside = isOutsideLibrary(now.trackId))
         if (now.trackId != null) {
-            ProgressRing(progress, paused = isPaused(now), modifier = Modifier.matchParentSize(), whole = now.live != null, corner = ArtCorner + RingRoom)
+            ProgressRing(progress, paused = isPaused(now), modifier = Modifier.matchParentSize(), whole = now.live != null)
         }
     }
 }
