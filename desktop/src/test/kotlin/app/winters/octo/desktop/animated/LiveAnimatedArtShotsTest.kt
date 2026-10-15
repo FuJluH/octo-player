@@ -22,6 +22,7 @@ import app.winters.octo.desktop.server.Accounts
 import app.winters.octo.desktop.server.SignInOutcome
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SettingsStore
+import app.winters.octo.desktop.ui.LocalWindowShown
 import app.winters.octo.desktop.ui.Shell
 import app.winters.octo.lyrics.OnlineLyrics
 import kotlinx.coroutines.CoroutineScope
@@ -96,9 +97,14 @@ class LiveAnimatedArtShotsTest {
             )
             app.animated.shelf = LoopShelf(File(folder.root, "loops"), LOOP_SHELF_BYTES)
         }
+        val shown = androidx.compose.runtime.mutableStateOf(true)
         val scene = ImageComposeScene(1440, 900, Density(1f)) {
             ProvideWindowLook(reduceMotion = false, focus = FocusVisibility(keyboard = false), arrows = ArrowKeys()) {
-                CompositionLocalProvider(LocalTyping provides TypingState(), LocalDensity provides Density(1f, 1f)) { Shell(app, null) {} }
+                CompositionLocalProvider(
+                    LocalTyping provides TypingState(),
+                    LocalDensity provides Density(1f, 1f),
+                    LocalWindowShown provides shown.value,
+                ) { Shell(app, null) {} }
             }
         }
         fun render(ms: Long): Image {
@@ -193,7 +199,25 @@ class LiveAnimatedArtShotsTest {
             val tallMoves = change(560, 80, 320)
             println("player tall change: $tallMoves")
             check(tallMoves > 1.0) { "the tall loop does not move: $tallMoves" }
-            // Held when the player closes: the window's loop stops.
+            // Held when the window is away: nothing decodes or reads frames.
+            fun busy(ms: Long): Double {
+                val threads = java.lang.management.ManagementFactory.getThreadMXBean()
+                fun loopThreads() = threads.allThreadIds.filter { id ->
+                    val name = threads.getThreadInfo(id)?.threadName.orEmpty()
+                    name.startsWith("octo-video") || name.startsWith("DefaultDispatcher")
+                }.sumOf { threads.getThreadCpuTime(it).coerceAtLeast(0) }
+                val before = loopThreads()
+                Thread.sleep(ms)
+                return (loopThreads() - before) / (ms * 1e4)
+            }
+            SwingUtilities.invokeAndWait { shown.value = false }
+            render(300).close()
+            val held = busy(5_000)
+            SwingUtilities.invokeAndWait { shown.value = true }
+            render(1_500).close()
+            val playing = busy(5_000)
+            println("loop threads: held $held%, playing $playing% of one core")
+            check(held < 1.0) { "a held loop still works: $held%" }
             SwingUtilities.invokeAndWait { app.fullPlayer = false }
             render(800).close()
             SwingUtilities.invokeAndWait { app.fullPlayer = true }
