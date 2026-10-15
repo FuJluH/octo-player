@@ -11,6 +11,7 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import app.winters.octo.sound.TAP_LEVEL_HEARD_MS
 import app.winters.octo.sound.DeckSound
 import app.winters.octo.sound.DeckTransition
 import app.winters.octo.sound.TapReading
@@ -29,7 +30,10 @@ private const val SCOUT_AFTER_MS = 1_000L
 
 // The song's body level from what has been heard counts once this much
 // has been heard.
-private const val LEVEL_HEARD_MS = 20_000L
+private const val LEVEL_HEARD_MS = TAP_LEVEL_HEARD_MS
+
+// A little past that, so the second reading surely has it.
+private const val REREAD_MARGIN_MS = 500L
 
 // A tempo-matched song eases back to its own speed in steps this small.
 private const val RATE_STEP = 0.0025
@@ -114,9 +118,17 @@ internal class Crossfader(
         var profile: TransitionProfile? = null
     }
 
-    private class Reading(val entryId: String, val job: Scout.Job?) {
+    private class Reading(val entryId: String, val job: Scout.Job?, val askedAtMs: Long) {
         var done = false
         var value: TapReading? = null
+
+        // Read before its level counts, it is read again once the song has
+        // played far enough for it to (`positionMs` in song time, at
+        // `speed`), so the level gets used.
+        fun wantsMore(positionMs: Long, speed: Float): Boolean =
+            done && tapReadsAgain(value?.heardMs, askedAtMs, positionMs, speed, LEVEL_HEARD_MS + REREAD_MARGIN_MS)
+
+        val levelHeard: Boolean get() = (value?.heardMs ?: 0L) >= LEVEL_HEARD_MS
     }
 
     private class Easing(val deck: ExoPlayer, val plan: TransitionPlan, val enteredAt: Long, var rate: Float, val after: PlaybackParameters)
@@ -135,6 +147,7 @@ internal class Crossfader(
         val tail: Boolean,
         val head: Boolean,
         val reading: Boolean,
+        val levelHeard: Boolean,
     )
 
     override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -373,8 +386,10 @@ internal class Crossfader(
                 }
             }
         }
-        // Once both are in, what the deck has heard of this song.
-        if (reading?.entryId != currentEntry && tail?.done == true && head?.done == true) {
+        // Once both are in, what the deck has heard of this song; again
+        // once its level has been heard long enough to count.
+        val again = reading?.entryId == currentEntry && reading?.wantsMore(position, deck.playbackParameters.speed) == true
+        if ((reading?.entryId != currentEntry || again) && tail?.done == true && head?.done == true) {
             val sound = soundOf(deck)
             val tagBpm = current.mediaMetadata.tagBpm()
             reading?.job?.cancel()
@@ -386,7 +401,7 @@ internal class Crossfader(
                     schedule(0)
                 }
             }
-            reading = Reading(currentEntry, job)
+            reading = Reading(currentEntry, job, position)
         }
     }
 
@@ -437,6 +452,7 @@ internal class Crossfader(
             tail = tail?.entryId == currentEntry && tail?.done == true,
             head = head?.entryId == nextEntry && head?.done == true,
             reading = reading?.entryId == currentEntry && reading?.done == true,
+            levelHeard = reading?.entryId == currentEntry && reading?.levelHeard == true,
         )
     }
 

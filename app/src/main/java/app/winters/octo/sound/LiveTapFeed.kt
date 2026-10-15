@@ -14,6 +14,10 @@ const val TAP_RING_SAMPLES = 1 shl 18
 // How often the worker takes what the audio thread left for it.
 const val TAP_DRAIN_MS = 100L
 
+// How much of a song the tap must hear before its level counts, and after
+// which, once read, the tap has what it needs from the song.
+const val TAP_LEVEL_HEARD_MS = 20_000L
+
 // What a deck's LiveTap knows about the song it is playing: how much of it
 // has been heard, its body level, and its tempo when that is trusted.
 data class TapReading(val heardMs: Long, val bodyLevelDb: Double?, val tempoPrior: Double?)
@@ -24,9 +28,11 @@ data class TapReading(val heardMs: Long, val bodyLevelDb: Double?, val tempoPrio
 // song (or a new format) starts a new tap exactly where its first sample
 // is in the ring.
 //
-// The crossfade reads each song's tap once, a few seconds in, to plan its
-// blend. Once a song's tap has been read, the rest of that song is not
-// fed to it (its analysis would go unread); the next song is.
+// The crossfade reads each song's tap a few seconds in, to plan its blend,
+// and again once the tap has heard enough for its level to count
+// (TAP_LEVEL_HEARD_MS). Once read with that much heard, the rest of the
+// song is not fed to the tap (its analysis would go unread); the next song
+// is.
 class LiveTapFeed(private val worker: ScheduledExecutorService = sharedWorker) {
     private val ring = FloatArray(TAP_RING_SAMPLES)
 
@@ -123,9 +129,9 @@ class LiveTapFeed(private val worker: ScheduledExecutorService = sharedWorker) {
         drain()
         val current = tap ?: return null
         if (tapEntry != entryId) return null
-        // Read: no more of this song is fed in, unless another has begun
-        // in the meantime.
-        if (starts.isEmpty()) readAt = songs
+        // Read with enough heard: no more of this song is fed in, unless
+        // another has begun in the meantime.
+        if (starts.isEmpty() && current.heardMs() >= TAP_LEVEL_HEARD_MS) readAt = songs
         TapReading(current.heardMs(), current.bodyLevelDb(), current.tempoPrior(tagBpm))
     }
 

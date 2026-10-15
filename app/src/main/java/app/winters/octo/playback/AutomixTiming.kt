@@ -54,6 +54,15 @@ fun AutomixSettings.atSpeed(speed: Float): AutomixSettings =
 fun heardFor(profile: TransitionProfile?, heardLevelDb: Double?, heardTempo: Double?): Pair<Double?, Double?> =
     if (profile == null) heardLevelDb to heardTempo else null to (profile.tempoPrior ?: heardTempo)
 
+// Whether a tap reading taken at song time `askedAtMs`, having heard
+// `heardMs` then (null when the tap was not on the song), is worth taking
+// again at `positionMs` (song time, played at `speed`): only when it had
+// heard less than `enoughMs` then and would have heard that much by now.
+fun tapReadsAgain(heardMs: Long?, askedAtMs: Long, positionMs: Long, speed: Float, enoughMs: Long): Boolean {
+    if (heardMs == null || heardMs >= enoughMs || speed <= 0f) return false
+    return heardMs + ((positionMs - askedAtMs) / speed).toLong() >= enoughMs
+}
+
 // The incoming song's playback rate through the blend.
 fun TransitionPlan.incomingRate(): Double = beatMatchRate ?: 1.0
 
