@@ -27,6 +27,15 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation3.runtime.NavKey
 import app.winters.octo.ambient.PageArtwork
+import app.winters.octo.animated.AnimatedArts
+import app.winters.octo.animated.LocalPlayerCovers
+import app.winters.octo.animated.LoopVideo
+import app.winters.octo.animated.rememberLoopPlay
+import app.winters.octo.subsonic.AnimatedClip
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import coil3.compose.AsyncImage
 import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.TrackEntity
@@ -36,6 +45,7 @@ import app.winters.octo.player.PlayerSettings
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
+import app.winters.octo.design.artworkRim
 import app.winters.octo.design.elevation3
 import app.winters.octo.data.ServerDownloads
 import app.winters.octo.discovery.Discovery
@@ -87,7 +97,9 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -101,6 +113,7 @@ class AlbumViewModel @AssistedInject constructor(
     private val topSongs: TopSongsSource,
     private val serverDownloads: ServerDownloads,
     player: PlayerSettings,
+    animatedArts: AnimatedArts,
 ) : ViewModel() {
     val album: StateFlow<AlbumEntity?> =
         dao.album(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -108,6 +121,15 @@ class AlbumViewModel @AssistedInject constructor(
     // The album's songs in the library.
     val library: StateFlow<List<TrackEntity>> =
         dao.albumTracks(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    // The album's square loop from its server, in place of its cover.
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val loop: StateFlow<AnimatedClip?> = animatedArts.pageLoop(
+        library.map { songs -> songs.map(TrackEntity::id) }
+            .filter { it.isNotEmpty() }
+            .distinctUntilChanged()
+            .mapLatest { animatedArts.serverAlbumOf(it) },
+    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     // The album as the server lists it, once asked: an Octo server lists the
     // songs the library lacks too. Empty until then, or when it cannot say.
@@ -211,6 +233,7 @@ class AlbumViewModel @AssistedInject constructor(
 }
 
 private val CoverShape = RoundedCornerShape(10.dp)
+private val CoverSide = 240.dp
 
 @Composable
 fun AlbumScreen(
@@ -232,6 +255,7 @@ fun AlbumScreen(
     val missing = whole.any { isFind(it.id) }
     val moreByArtist by vm.moreByArtist.collectAsStateWithLifecycle()
     val highlight by vm.highlight.collectAsStateWithLifecycle()
+    val loop by vm.loop.collectAsStateWithLifecycle()
     PageArtwork(AlbumRoute(id), album?.artwork)
 
     val pickable = remember(tracks) { tracks.map { Pickable(it.id, it) } }
@@ -245,6 +269,7 @@ fun AlbumScreen(
                     item(key = "header") {
                         AlbumHeader(
                             artwork = a.artwork,
+                            loop = loop,
                             title = a.title,
                             artist = a.artist,
                             details = listOfNotNull(
@@ -367,6 +392,8 @@ private fun MissingSongs(
 // the details on the left and the heart on the right, and Play and Shuffle
 // under it. The artist opens only when there is somewhere to go. `heart`
 // sits on the details line and `more` under the buttons, for quieter actions.
+// An album with animated art plays its square `loop` in place of the cover
+// while the page is in front.
 @Composable
 fun AlbumHeader(
     artwork: String?,
@@ -378,13 +405,24 @@ fun AlbumHeader(
     onShuffle: () -> Unit,
     heart: (@Composable () -> Unit)? = null,
     more: (@Composable () -> Unit)? = null,
+    loop: AnimatedClip? = null,
 ) {
     Column(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
         Column(
             Modifier.fillMaxWidth().padding(horizontal = 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Artwork(artwork, 240.dp, Modifier.elevation3(CoverShape), shape = CoverShape)
+            val play = rememberLoopPlay(inView = !LocalPlayerCovers.current)
+            Box {
+                LoopVideo(loop, play, Modifier.elevation3(CoverShape).size(CoverSide).clip(CoverShape)) {
+                    Artwork(artwork, CoverSide, shape = CoverShape, rim = loop == null)
+                    loop?.poster?.let { poster ->
+                        AsyncImage(model = poster, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(CoverSide))
+                    }
+                }
+                // One rim over the still and the loop alike.
+                if (loop != null) Box(Modifier.size(CoverSide).artworkRim(CoverShape))
+            }
             Spacer(Modifier.height(20.dp))
             Text(title, style = OctoType.title, color = OctoColors.TextPrimary, textAlign = TextAlign.Center)
             Text(

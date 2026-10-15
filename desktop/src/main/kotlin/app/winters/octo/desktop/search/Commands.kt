@@ -6,6 +6,7 @@ import app.winters.octo.desktop.liveradio.LIVE_RADIO_NEAR
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.pages.RADIO_SECTION
 import app.winters.octo.desktop.pages.STATIONS_ON_SERVER
+import app.winters.octo.animated.AnimatedArtSetting
 import app.winters.octo.desktop.pages.addServer
 import app.winters.octo.desktop.pages.showSection
 import app.winters.octo.desktop.pages.switchServer
@@ -62,6 +63,11 @@ fun commandsFor(app: AppState): List<Command> = buildList {
     radio("Song radio settings", "start radio autoplay discovery adventure artist variety favorites more often tuning similar songs")
     radio(STATIONS_ON_SERVER, "live radio internet radio stations streams add a station edit fm")
     add(Command("Accent color", "Settings", "theme colour tint highlight palette appearance album art cover") {
+        app.fullPlayer = false
+        showSection("Settings", "look")
+        app.navigator.go(Page.Settings)
+    })
+    add(Command(AnimatedArtSetting.TITLE, go, "settings animated covers album art loops apple music full screen square still") {
         app.fullPlayer = false
         showSection("Settings", "look")
         app.navigator.go(Page.Settings)

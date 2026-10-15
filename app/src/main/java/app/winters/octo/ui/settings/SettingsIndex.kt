@@ -5,6 +5,7 @@ import app.winters.octo.playback.START_AFTER_SETTING
 import app.winters.octo.radio.SONG_RADIO
 
 import app.winters.octo.covers.PLAYLIST_COVERS_SETTING
+import app.winters.octo.animated.AnimatedArtSetting
 import app.winters.octo.catalog.searchKey
 import kotlinx.serialization.Serializable
 
@@ -207,6 +208,10 @@ object SettingsIndex {
     val LiveBackground = add(
         "live_background", SettingsPage.Appearance, "Live background", "The player's background drifting slowly",
         listOf("player", "animated", "moving", "motion", "colours", "blur"), section = "Player",
+    )
+    val AnimatedArt = add(
+        AnimatedArtSetting.PREF_KEY, SettingsPage.Appearance, AnimatedArtSetting.TITLE, AnimatedArtSetting.ABOUT,
+        listOf("animated", "cover", "artwork", "video", "loop", "apple music", "album art", "full screen", "square"), section = "Player",
     )
     val BackgroundBrightnessCap = add(
         "immersive_bg_brightness_cap", SettingsPage.Appearance, "Brightness cap", "How bright the background may get, so words stay readable",

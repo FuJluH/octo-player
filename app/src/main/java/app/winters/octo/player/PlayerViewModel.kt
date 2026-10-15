@@ -3,6 +3,9 @@ package app.winters.octo.player
 import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.winters.octo.animated.AnimatedArtSetting
+import app.winters.octo.animated.AnimatedArts
+import app.winters.octo.animated.FULL_SCREEN_BACKGROUND_GAIN
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.OnlineDao
 import app.winters.octo.catalog.TrackEntity
@@ -29,6 +32,7 @@ import app.winters.octo.player.immersive.WashArtwork
 import app.winters.octo.player.immersive.drawnMode
 import app.winters.octo.player.immersive.drawnRange
 import app.winters.octo.player.immersive.over
+import app.winters.octo.subsonic.AnimatedArt
 import app.winters.octo.ui.common.Feedback
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -46,6 +50,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.launch
@@ -70,6 +75,7 @@ class PlayerViewModel @Inject constructor(
     private val playlists: PlaylistStore,
     private val feedback: Feedback,
     private val artwork: WashArtwork,
+    animatedArts: AnimatedArts,
 ) : ViewModel() {
     val now: StateFlow<NowPlaying> = playback.now
     val upNext: StateFlow<List<QueueEntry>> = playback.upNext
@@ -115,7 +121,10 @@ class PlayerViewModel @Inject constructor(
     // player's words and icons, decided from what the chosen background
     // draws (the prepared cover, shared with the background), and `show`
     // how far the background dims for them.
-    val colors: StateFlow<PlayerColors> = combine(
+    // Under a tall loop in Full screen the background is drawn brighter
+    // (FULL_SCREEN_BACKGROUND_GAIN), so `brightColors` decides the words'
+    // color and dimming for that, the same way.
+    private val drawn = combine(
         playback.now.map { it.artwork }.distinctUntilChanged(),
         settings.prefs.map { it.background to it.liveBackground }.distinctUntilChanged(),
     ) { ref, prefs -> ref to prefs }
@@ -128,9 +137,37 @@ class PlayerViewModel @Inject constructor(
             } else {
                 null
             }
-            colors.over(drawnRange(mode, colors, background, cover, live && LiveBackgroundSupported))
+            colors to drawnRange(mode, colors, background, cover, live && LiveBackgroundSupported)
         }
+        .shareIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), replay = 1)
+
+    val colors: StateFlow<PlayerColors> = drawn
+        .map { (colors, range) -> colors.over(range) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlayerColors.Quiet)
+
+    val brightColors: StateFlow<PlayerColors> = drawn
+        .map { (colors, range) -> colors.over(range?.scaled(FULL_SCREEN_BACKGROUND_GAIN)) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlayerColors.Quiet)
+
+    // The animated art of the song's album, from its server, while the
+    // setting has it on; none for a live station.
+    val animatedArt: StateFlow<AnimatedArt?> = settings.prefs
+        .map { it.animatedArt != AnimatedArtSetting.Off }
+        .distinctUntilChanged()
+        .flatMapLatest { on ->
+            if (!on) {
+                flowOf(null)
+            } else {
+                playback.now
+                    .map { now -> now.trackId.takeIf { now.live == null } }
+                    .distinctUntilChanged()
+                    // The song's album, or null with no song on.
+                    .mapLatest { id -> id?.let { AlbumOnServer(animatedArts.serverAlbumOf(it)) } }
+                    .distinctUntilChanged()
+                    .flatMapLatest { album -> if (album == null) flowOf(null) else animatedArts.artOf(album.id) }
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     fun positionMs() = playback.positionMs()
     fun seekTo(positionMs: Long) = playback.seekTo(positionMs)
@@ -279,6 +316,9 @@ class PlayerViewModel @Inject constructor(
         }
     }
 }
+
+// A song's album by its id on the server; null when the server has none.
+private data class AlbumOnServer(val id: String?)
 
 // How long the lyrics view may be gone before it counts as off screen.
 private const val LYRICS_LEAVE_AFTER_MS = 5_000L

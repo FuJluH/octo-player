@@ -10,6 +10,7 @@ import app.winters.octo.offline.OfflinePrefs
 import app.winters.octo.playback.CopyPreference
 import app.winters.octo.playback.FadeCurve
 import app.winters.octo.playback.StreamQuality
+import app.winters.octo.animated.AnimatedArtSetting
 import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.StreamPrefs
 import app.winters.octo.playlists.BYTE_ORDER_MARK
@@ -64,6 +65,7 @@ class BackupTest {
             "liveBackground", "crossfade", "crossfadeSeconds", "lyricsOnline", "speed", "keepPitch", "pitchSemitones",
             "skipSilence", "resumeWired", "resumeBluetooth", "resumeAlways", "smartTransitions", "filterSweeps", "matchTempo", "crossfadeCurve",
             "accent", "glassTint",
+            "animatedArt",
         ).forEach { assertTrue("$it is missing", text.contains("\"$it\"")) }
     }
 
@@ -99,6 +101,21 @@ class BackupTest {
         assertEquals(AccentChoice.Octo, (decodeBackup(newer) as BackupRead.Read).backup.player?.accent)
         // A backup from before accents leaves Octo's own.
         assertEquals(AccentChoice.Octo, (decodeBackup("{\"kind\": \"octo-settings\", \"player\": {}}") as BackupRead.Read).backup.player?.accent)
+    }
+
+    @Test
+    fun theAnimatedArtChoiceIsKept() {
+        val text = encodeBackup(Backup(player = PlayerPrefs(animatedArt = AnimatedArtSetting.FullScreen)))
+        // By the setting's key, as the other apps write it.
+        assertTrue(text.contains("\"animatedArt\": \"full_screen\""))
+        assertEquals(AnimatedArtSetting.FullScreen, (decodeBackup(text) as BackupRead.Read).backup.player?.animatedArt)
+        val off = decodeBackup("{\"kind\": \"octo-settings\", \"player\": {\"animatedArt\": \"off\"}}") as BackupRead.Read
+        assertEquals(AnimatedArtSetting.Off, off.backup.player?.animatedArt)
+        // One this app does not know reads as the default, Square.
+        val unknown = decodeBackup(text.replace("\"full_screen\"", "\"hologram\"")) as BackupRead.Read
+        assertEquals(AnimatedArtSetting.Square, unknown.backup.player?.animatedArt)
+        // A backup from before the setting has it at Square.
+        assertEquals(AnimatedArtSetting.Square, PlayerPrefs().animatedArt)
     }
 
     @Test

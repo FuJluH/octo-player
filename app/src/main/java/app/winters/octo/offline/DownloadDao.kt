@@ -185,4 +185,26 @@ interface DownloadDao {
         """,
     )
     suspend fun downloadable(trackIds: List<String>): List<String>
+
+    // The server albums downloaded whole: every song of the album that is
+    // only on the server has its download finished, and at least one has.
+    @Query(
+        """
+        SELECT a.sourceId AS sourceId, a.nativeId AS albumId FROM source_album a
+        WHERE a.sourceId LIKE 'server:%'
+        AND EXISTS (
+            SELECT 1 FROM source_track s JOIN download d ON d.sourceId = s.sourceId AND d.serverId = s.nativeId
+            WHERE s.albumId = a.id AND d.state = 'Done'
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM source_track s JOIN track t ON t.id = s.mergedId
+            WHERE s.albumId = a.id AND t.onPhone = 0
+            AND NOT EXISTS (SELECT 1 FROM download d WHERE d.sourceId = s.sourceId AND d.serverId = s.nativeId AND d.state = 'Done')
+        )
+        """,
+    )
+    suspend fun downloadedAlbums(): List<DownloadedAlbum>
 }
+
+// A server album downloaded whole, by its id on the server.
+data class DownloadedAlbum(val sourceId: String, val albumId: String)

@@ -190,6 +190,9 @@ data class AlbumWithSongs(
     @Serializable(with = GenreNames::class) val genres: List<String> = emptyList(),
     val releaseDate: ItemDate? = null,
     val originalReleaseDate: ItemDate? = null,
+    // Octo: the album's animated art, when the server already knows it.
+    // Missing says nothing either way; getAnimatedArt asks.
+    val animatedArt: AnimatedArt? = null,
 )
 
 @Serializable

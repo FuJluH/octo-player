@@ -59,6 +59,7 @@ import app.winters.octo.device.DeviceLibrary
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.player.PlayerArtCorner
 import app.winters.octo.player.PlayerOverlay
+import app.winters.octo.animated.LocalPlayerCovers
 import app.winters.octo.ui.admin.OctoAdminScreen
 import app.winters.octo.ui.imports.ImportScreen
 import app.winters.octo.ui.imports.ImportShellViewModel
@@ -283,6 +284,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
         LocalPageArtworks provides pageArtworks,
         LocalOpenPage provides open,
         LocalNowPlayingId provides NowMark(now.trackId, now.isPlaying),
+        LocalPlayerCovers provides (playerOpen && hasTrack),
     ) {
         SharedTransitionLayout {
             // Any press marks where a menu it opens should float.

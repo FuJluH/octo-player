@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import app.winters.octo.ambient.AmbientArea
+import app.winters.octo.animated.AnimatedArtSetting
 import app.winters.octo.ambient.AmbientPrefs
 import app.winters.octo.ambient.AmbientStrength
 import app.winters.octo.playback.AutomixSettings
@@ -31,7 +32,12 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -96,6 +102,10 @@ data class PlayerPrefs(
     // Whether the glass (the bar, glazed buttons and sheets) takes the
     // accent too, or keeps Octo's blue gray.
     val glassTint: Boolean = false,
+    // Where an album's animated art plays: in place of the cover, filling
+    // the player, or nowhere. Kept by its key ("square", "full_screen",
+    // "off"), as the other apps keep it.
+    @Serializable(with = AnimatedArtByKey::class) val animatedArt: AnimatedArtSetting = AnimatedArtSetting.Default,
 ) {
     // What the player uses: the longest blend, or 0 for none.
     val crossfadeMs: Long get() = if (crossfade) crossfadeSeconds * 1_000L else 0
@@ -131,6 +141,16 @@ data class StreamPrefs(
     // How much of a stream is ready before a song starts.
     val startAfter: StartAfter = StartAfter.Short,
 )
+
+// The Animated art choice written by its key, the same in every app's
+// backups; one this app does not know reads as Square.
+object AnimatedArtByKey : KSerializer<AnimatedArtSetting> {
+    override val descriptor = PrimitiveSerialDescriptor("AnimatedArtSetting", PrimitiveKind.STRING)
+
+    override fun serialize(encoder: Encoder, value: AnimatedArtSetting) = encoder.encodeString(value.key)
+
+    override fun deserialize(decoder: Decoder): AnimatedArtSetting = AnimatedArtSetting.fromKey(decoder.decodeString())
+}
 
 // The range the longest blend can be set to.
 val CrossfadeSecondsRange = 2..16
@@ -180,10 +200,15 @@ private val CAST_KEEP_PLAYING = booleanPreferencesKey("cast_keep_playing")
 private val LIBRARY_ONLY = booleanPreferencesKey("library_only")
 private val ACCENT = stringPreferencesKey("accent_color")
 private val GLASS_TINT = booleanPreferencesKey("accent_glass")
+internal val ANIMATED_ART = stringPreferencesKey(AnimatedArtSetting.PREF_KEY)
 
 // A saved choice, or the default when nothing (or something unknown) is saved.
 private inline fun <reified T : Enum<T>> choice(name: String?, default: T): T =
     enumValues<T>().firstOrNull { it.name == name } ?: default
+
+// The Animated art choice as stored, by its key; Square when nothing (or
+// something unknown) is stored.
+internal fun animatedArtOf(stored: Preferences): AnimatedArtSetting = AnimatedArtSetting.fromKey(stored[ANIMATED_ART])
 
 // The streaming choices as stored, each one not stored yet at its default.
 internal fun streamPrefsOf(stored: Preferences): StreamPrefs {
@@ -246,6 +271,7 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
             libraryOnly = stored[LIBRARY_ONLY] ?: defaults.libraryOnly,
             accent = choice(stored[ACCENT], defaults.accent),
             glassTint = stored[GLASS_TINT] ?: defaults.glassTint,
+            animatedArt = animatedArtOf(stored),
         )
     }
 
@@ -391,6 +417,10 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
         context.playerPrefs.edit { it[GLASS_TINT] = on }
     }
 
+    suspend fun setAnimatedArt(setting: AnimatedArtSetting) {
+        context.playerPrefs.edit { it[ANIMATED_ART] = setting.key }
+    }
+
     // Everything at once, for a backup.
     suspend fun snapshot(): Pair<PlayerPrefs, StreamPrefs> = prefs.first() to streamPrefs.first()
 
@@ -431,6 +461,7 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
             it[LIBRARY_ONLY] = player.libraryOnly
             it[ACCENT] = player.accent.name
             it[GLASS_TINT] = player.glassTint
+            it[ANIMATED_ART] = player.animatedArt.key
             it[COPIES] = stream.copies.name
             it[STREAM_WIFI] = stream.wifi.name
             it[STREAM_MOBILE] = stream.mobile.name

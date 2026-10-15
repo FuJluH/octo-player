@@ -47,7 +47,8 @@ private val RimMinSize = 96.dp
 //
 // A smaller copy of the cover already in memory shows at once while the
 // sharp one loads. With `keptFirst` (the player's card), a smaller copy
-// kept on the disk shows too.
+// kept on the disk shows too. `rim` off leaves the rim to something drawn
+// over the cover (an animated cover keeps one rim over still and loop).
 @Composable
 fun Artwork(
     ref: String?,
@@ -56,6 +57,7 @@ fun Artwork(
     shape: Shape = ArtworkShape,
     outside: Boolean = false,
     keptFirst: Boolean = false,
+    rim: Boolean = true,
 ) {
     // A live station draws its own layered cover.
     stationArtOf(ref)?.let {
@@ -94,7 +96,7 @@ fun Artwork(
         }
         // The rim sits on top of the picture, so it is drawn last. Small
         // covers go without: on a thumbnail it reads as a frame cutting in.
-        if (size >= RimMinSize) Box(Modifier.matchParentSize().artworkRim(shape))
+        if (rim && size >= RimMinSize) Box(Modifier.matchParentSize().artworkRim(shape))
         if (outside) NotInLibraryMark(size, round = shape == CircleShape)
     }
 }

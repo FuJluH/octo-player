@@ -47,6 +47,35 @@ thiserror = "2.0.21"
 log = "0.4.34"
 uniffi = "0.32.2"
 
+# Animated covers are decoded by the system: Media Foundation on Windows,
+# AVFoundation on macOS, GStreamer on Linux (loaded when asked, so the
+# engine still loads where it is missing).
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi",
+    "Win32_Media_MediaFoundation", "Win32_System_Com", "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.4"
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFString"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = [
+    "std", "NSArray", "NSDictionary", "NSError", "NSString", "NSURL", "NSValue",
+] }
+objc2-av-foundation = { version = "0.3.2", default-features = false, features = [
+    "std", "AVAsset", "AVAssetReader", "AVAssetReaderOutput", "AVAssetTrack", "AVMediaFormat", "objc2-core-media",
+] }
+objc2-core-media = { version = "0.3.2", default-features = false, features = [
+    "std", "CMSampleBuffer", "CMTime", "objc2-core-video",
+] }
+objc2-core-video = { version = "0.3.2", default-features = false, features = [
+    "std", "CVBase", "CVBuffer", "CVImageBuffer", "CVPixelBuffer", "CVReturn",
+] }
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+libloading = "0.9.0"
+
 [dev-dependencies]
 # Reads the shared automix test vectors.
 serde_json = "1.0.151"
