@@ -90,8 +90,9 @@ fun ProgressRing(progress: () -> Float, paused: Boolean, modifier: Modifier, who
             return@Canvas
         }
         drawArc(accent.copy(alpha = PausedTrackAlpha), 0f, 360f, useCenter = false, style = Stroke(thin))
-        val b = if (still) 0f else breath.floatValue
-        val alpha = if (still) PausedStillAlpha else PausedLowAlpha + (1f - PausedLowAlpha) * b
+        val calm = still || breath.floatValue == BreathRested
+        val b = if (calm) 0f else breath.floatValue
+        val alpha = if (calm) PausedStillAlpha else PausedLowAlpha + (1f - PausedLowAlpha) * b
         val width = thin + (PausedWideDp - 2f).dp.toPx() * b
         drawArc(accent.copy(alpha = alpha), -90f, sweep, useCenter = false, style = Stroke(width, cap = StrokeCap.Round))
     }
@@ -106,16 +107,32 @@ const val PausedStillAlpha = 0.45f
 const val PausedWideDp = 3f
 
 // One breath in and out, in seconds, and the time between redraws: about
-// 30 a second, plenty for something this slow.
+// 12 a second, smooth enough for something this slow. Each one redraws the
+// whole window with its frosted glass, so fewer keep a paused phone cool.
 const val PauseBreathSeconds = 2.6
-const val PauseFrameMs = 33L
+const val PauseFrameMs = 83L
+
+// How long the ring breathes after a pause, in seconds, before it settles
+// into the still paused look until playing starts or the app comes back.
+const val PauseBreathLimitSeconds = 60.0
+
+// The breath's value once it has settled: the ring draws its still look.
+const val BreathRested = -1f
 
 // How far into a breath it is at `seconds`, 1 at its fullest and 0 at its
 // faintest, easing at both ends.
 fun pauseBreath(seconds: Double): Float = (0.5 + 0.5 * cos(2 * PI * seconds / PauseBreathSeconds)).toFloat()
 
-// The breath, ticking only while `on` and while the app is on screen; it
-// stops with the ring when the ring leaves the screen.
+// Whether a breath `seconds` in settles now: past the limit, near its
+// faintest, where the still look is close, so settling shows no jump.
+fun breathSettles(seconds: Double): Boolean =
+    seconds >= PauseBreathLimitSeconds && pauseBreath(seconds) <= SettleBelow
+
+private const val SettleBelow = 0.2f
+
+// The breath, ticking only while `on` and while the app is on screen, for
+// a minute before it settles; it stops with the ring when the ring leaves
+// the screen, and breathes again when the app comes back.
 @Composable
 private fun rememberPauseBreath(on: Boolean): FloatState {
     val breath = remember { mutableFloatStateOf(1f) }
@@ -127,7 +144,12 @@ private fun rememberPauseBreath(on: Boolean): FloatState {
             val start = withFrameNanos { it }
             while (true) {
                 delay(PauseFrameMs)
-                withFrameNanos { now -> breath.floatValue = pauseBreath((now - start) / 1e9) }
+                val seconds = withFrameNanos { now -> (now - start) / 1e9 }
+                if (breathSettles(seconds)) {
+                    breath.floatValue = BreathRested
+                    break
+                }
+                breath.floatValue = pauseBreath(seconds)
             }
         }
     }
