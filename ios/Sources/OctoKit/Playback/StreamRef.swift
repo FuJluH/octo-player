@@ -8,20 +8,25 @@ private let rawRequest = "raw"
 
 /// A server song as the queue holds it: which server, its id there, its type and bits a second,
 /// and, once chosen, what exactly to ask the server for. A request is chosen ("pinned") just
-/// before the song loads, so the saved copy and the signed address always agree.
+/// before the song loads, so the saved copy and the signed address always agree. `size` is the
+/// size of the song's file on the server, when it says: the server can swap a song's file for
+/// another under the same id, and the new file has a new size.
 public struct StreamRef: Sendable, Hashable {
     public var sourceId: String?
     public var serverId: String
     public var mimeType: String?
     public var bitrate: Int?
     public var pinned: StreamRequest?
+    public var size: Int64?
 
-    public init(sourceId: String?, serverId: String, mimeType: String?, bitrate: Int?, pinned: StreamRequest? = nil) {
+    public init(sourceId: String?, serverId: String, mimeType: String?, bitrate: Int?, pinned: StreamRequest? = nil,
+                size: Int64? = nil) {
         self.sourceId = sourceId
         self.serverId = serverId
         self.mimeType = mimeType
         self.bitrate = bitrate
         self.pinned = pinned
+        self.size = size.flatMap { $0 > 0 ? $0 : nil }
     }
 
     public func pin(_ request: StreamRequest) -> StreamRef {
@@ -40,6 +45,7 @@ public func streamUri(_ ref: StreamRef) -> String {
     if let source = ref.sourceId { params.append(("source", source)) }
     if let mime = ref.mimeType { params.append(("mime", mime)) }
     if let bitrate = ref.bitrate { params.append(("bitrate", "\(bitrate)")) }
+    if let size = ref.size { params.append(("size", "\(size)")) }
     if let pinned = ref.pinned { params.append(("max", pinned.maxKbps.map(String.init) ?? rawRequest)) }
     if !params.isEmpty { out += "?" + params.map { "\($0.0)=\(formEncode($0.1))" }.joined(separator: "&") }
     return out
@@ -68,14 +74,64 @@ public func parseStreamUri(_ uri: String) -> StreamRef? {
     }
     return StreamRef(sourceId: query["source"].flatMap { $0.isEmpty ? nil : $0 }, serverId: serverId,
                      mimeType: query["mime"].flatMap { $0.isEmpty ? nil : $0 }, bitrate: query["bitrate"].flatMap { Int($0) },
-                     pinned: pinned)
+                     pinned: pinned, size: query["size"].flatMap { Int64($0) })
 }
 
-/// The name a server song is saved under on the phone: the server, the song, its file type and
-/// what was asked for. Never the signed address, which has a new random part every time, so the
-/// same song finds its saved copy.
+/// The name a server song is saved under on the phone: the server, the song, its file type, what
+/// was asked for and, when the server says, the size of its file, so a new file under the same id
+/// is saved apart from the old one. Never the signed address, which has a new random part every
+/// time, so the same song finds its saved copy.
 public func streamCacheKey(_ sourceId: String, _ ref: StreamRef, _ request: StreamRequest) -> String {
-    "\(sourceId)|\(ref.serverId)|\(ref.mimeType ?? "unknown")|\(request.maxKbps.map(String.init) ?? rawRequest)"
+    let plain = "\(sourceId)|\(ref.serverId)|\(ref.mimeType ?? "unknown")|\(request.maxKbps.map(String.init) ?? rawRequest)"
+    return ref.size.map { "\(plain)|\($0)" } ?? plain
+}
+
+/// A saved key less the file size, when it has one. The part before a size is a request ("raw" or
+/// a number), which a file type never is.
+public func cacheKeyWithoutSize(_ key: String) -> String {
+    guard let bar = key.lastIndex(of: "|") else { return key }
+    let head = key[..<bar]
+    let before = head.lastIndex(of: "|").map { head[head.index(after: $0)...] } ?? head
+    let isRequest = before == Substring(rawRequest) || (!before.isEmpty && before.allSatisfy { $0.isASCII && $0.isNumber })
+    return isRequest ? String(head) : key
+}
+
+/// What the phone has saved under a name, for picking the name a song reads and writes its saved
+/// copy under.
+public protocol SavedCopies {
+    /// Whether any of it is saved.
+    func has(_ key: String) -> Bool
+    /// How long it is whole, or nil when that is not known.
+    func length(_ key: String) -> Int64?
+    /// The server's file size noted with it, if one was.
+    func notedSize(_ key: String) -> Int64?
+    mutating func note(_ key: String, size: Int64)
+    mutating func drop(_ key: String)
+}
+
+/// The name a song's saved copy is read and written under. A copy saved under the name without the
+/// file size (as songs were saved before names carried it) is still used while nothing says it is
+/// of another file: see `checkKeptCopy`. One of another file is let go, so it never plays, and the
+/// song is fetched again under its full name.
+public func savedCopyKey<Copies: SavedCopies>(_ sourceId: String, _ ref: StreamRef, _ request: StreamRequest,
+                                              _ saved: inout Copies) -> String {
+    let key = streamCacheKey(sourceId, ref, request)
+    guard let size = ref.size, !saved.has(key) else { return key }
+    var plain = ref
+    plain.size = nil
+    let older = streamCacheKey(sourceId, plain, request)
+    guard saved.has(older) else { return key }
+    switch checkKeptCopy(keptFor: saved.notedSize(older), serverSize: size, copySize: saved.length(older) ?? -1,
+                         asIs: request.maxKbps == nil) {
+    case .keep:
+        return older
+    case .note:
+        saved.note(older, size: size)
+        return older
+    case .refetch:
+        saved.drop(older)
+        return key
+    }
 }
 
 /// Every request any stream size could make for this song: the file as it is first, then
@@ -94,12 +150,13 @@ public func requestVariants(_ ref: StreamRef) -> [StreamRequest] {
 /// not saved on the phone and another size is: then that one plays, since it costs no data and
 /// works with no connection. Failing that, a size already partly saved, such as the one a song
 /// started playing in: a seek after moving from Wi-Fi to mobile data must read the same file, or
-/// it would land in the middle of a different one.
+/// it would land in the middle of a different one. `keyOf` names the saved copy of each request.
 public func chooseRequest(_ sourceId: String, _ ref: StreamRef, _ quality: StreamQuality, fullySaved: (String) -> Bool,
-                          partlySaved: (String) -> Bool = { _ in false }) -> StreamRequest {
+                          partlySaved: (String) -> Bool = { _ in false },
+                          keyOf: ((StreamRequest) -> String)? = nil) -> StreamRequest {
     if let pinned = ref.pinned { return pinned }
     let wanted = phoneRequest(ref.mimeType, ref.bitrate, quality)
-    func key(_ request: StreamRequest) -> String { streamCacheKey(sourceId, ref, request) }
+    let key = keyOf ?? { streamCacheKey(sourceId, ref, $0) }
     if fullySaved(key(wanted)) { return wanted }
     let others = requestVariants(ref).filter { $0 != wanted }
     if let saved = others.first(where: { fullySaved(key($0)) }) { return saved }

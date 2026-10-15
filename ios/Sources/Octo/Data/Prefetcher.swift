@@ -94,7 +94,7 @@ final class Prefetcher {
     private func upcoming() async -> [PrefetchEntry] {
         guard !queue.casting else { return [] }
         let count = prefetchCount(cacheEnabled: await cache.enabled, onWifi: connectivity.onWifi, online: connectivity.online,
-                                  prefs: settings.offline)
+                                  prefs: settings.offline, lowData: connectivity.lowData)
         let entries = queue.entries
         let places = prefetchAhead(playOrder: queue.playOrder, current: queue.current, repeatMode: queue.repeatMode,
                                    playing: queue.playing, count: count) { place in

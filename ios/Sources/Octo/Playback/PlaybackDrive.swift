@@ -113,7 +113,8 @@ enum PlaybackDrive {
             for slot in player.upNextSlots.dropFirst().prefix(5) where player.items.indices.contains(slot.index) {
                 guard let ref = parseStreamUri(player.items[slot.index].uri), let source = ref.sourceId ?? context.sourceId else { continue }
                 servers += 1
-                if await StreamCache.shared.isFullySaved(streamCacheKey(source, ref, ref.request(context.quality))) { saved += 1 }
+                let key = await StreamCache.shared.pick(source, ref, context.quality).key
+                if await StreamCache.shared.isFullySaved(key) { saved += 1 }
             }
             router.show("\(saved) of the next \(servers) server songs saved whole")
         case "playstate":

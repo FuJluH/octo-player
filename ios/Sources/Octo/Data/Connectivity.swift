@@ -9,6 +9,8 @@ import Observation
 final class Connectivity {
     private(set) var online = true
     private(set) var onWifi = false
+    /// Whether the connection is one the phone is asked to use sparingly (Low Data Mode).
+    private(set) var lowData = false
 
     @ObservationIgnored private let monitor = NWPathMonitor()
     @ObservationIgnored private var listeners: [UUID: @MainActor () -> Void] = [:]
@@ -18,17 +20,19 @@ final class Connectivity {
             let online = path.status == .satisfied
             // Any Wi-Fi counts, a personal hotspot too; anything else is mobile data.
             let wifi = online && (path.usesInterfaceType(.wifi) || path.usesInterfaceType(.wiredEthernet))
-            Task { @MainActor in self?.update(online: online, wifi: wifi) }
+            let lowData = online && path.isConstrained
+            Task { @MainActor in self?.update(online: online, wifi: wifi, lowData: lowData) }
         }
         monitor.start(queue: DispatchQueue(label: "app.winters.octo.connectivity"))
     }
 
-    private func update(online: Bool, wifi: Bool) {
-        let changed = online != self.online || wifi != onWifi
+    private func update(online: Bool, wifi: Bool, lowData: Bool) {
+        let changed = online != self.online || wifi != onWifi || lowData != self.lowData
         let back = online && !self.online
         let wifiBack = wifi && !onWifi
         self.online = online
         onWifi = wifi
+        self.lowData = lowData
         if changed || back || wifiBack {
             for listener in listeners.values { listener() }
         }

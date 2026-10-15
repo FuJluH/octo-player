@@ -38,7 +38,9 @@ public func queueItem(_ song: Song, sourceId: String?, quality: StreamQuality, s
                       albumOrder: Int? = nil) -> QueueItem {
     let bitrate = song.bitRate.flatMap { $0 > 0 ? $0 * 1_000 : nil }
     let mime = song.contentType?.isEmpty == false ? song.contentType : nil
-    let ref = StreamRef(sourceId: sourceId, serverId: song.id, mimeType: mime, bitrate: bitrate)
+    // A song found online has no file of its own on the server to tell apart.
+    let ref = StreamRef(sourceId: sourceId, serverId: song.id, mimeType: mime, bitrate: bitrate,
+                        size: song.isExternal ? nil : song.size)
     let loudness = song.replayGain.flatMap {
         ReplayGainTags.stored(trackGain: $0.trackGain, trackPeak: $0.trackPeak, albumGain: $0.albumGain, albumPeak: $0.albumPeak)
     }

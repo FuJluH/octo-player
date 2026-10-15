@@ -416,10 +416,14 @@ public struct KeptDownload: TableRow, Hashable {
     public var reason: String
     public var title: String
     public var artist: String
+    /// The server's size for the file the download was made from, so a new file under the same id
+    /// is told apart. Downloads made before it was noted have none until the first check after a
+    /// sync.
+    public var fileSize: Int64?
 
     public init(trackId: String, sourceId: String, serverId: String, path: String = "", sizeBytes: Int64 = 0,
                 format: String? = nil, state: DownloadStatus = .queued, progress: Float = 0, addedAt: Int64, reason: String,
-                title: String, artist: String) {
+                title: String, artist: String, fileSize: Int64? = nil) {
         self.trackId = trackId
         self.sourceId = sourceId
         self.serverId = serverId
@@ -432,13 +436,14 @@ public struct KeptDownload: TableRow, Hashable {
         self.reason = reason
         self.title = title
         self.artist = artist
+        self.fileSize = fileSize
     }
 
     public static let table = "download"
     public static let columns = ["trackId", "sourceId", "serverId", "path", "sizeBytes", "format", "state", "progress",
-                                 "addedAt", "reason", "title", "artist"]
+                                 "addedAt", "reason", "title", "artist", "fileSize"]
     public var values: [any SQLBindable] {
-        [trackId, sourceId, serverId, path, sizeBytes, format, state.rawValue, progress, addedAt, reason, title, artist]
+        [trackId, sourceId, serverId, path, sizeBytes, format, state.rawValue, progress, addedAt, reason, title, artist, fileSize]
     }
 
     public init(row: SQLRow) {
@@ -454,6 +459,7 @@ public struct KeptDownload: TableRow, Hashable {
         reason = row.string("reason")
         title = row.string("title")
         artist = row.string("artist")
+        fileSize = row.optionalInt64("fileSize")
     }
 }
 

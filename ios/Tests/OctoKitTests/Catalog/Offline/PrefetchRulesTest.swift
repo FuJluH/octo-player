@@ -44,4 +44,14 @@ import Testing
         #expect(prefetchCount(cacheEnabled: true, onWifi: false, online: false, prefs: prefs) == 0)
         #expect(prefetchCount(cacheEnabled: false, onWifi: true, online: true, prefs: prefs) == 0)
     }
+
+    @Test func lowDataModeFetchesAsFewAsMobileData() {
+        var prefs = OfflinePrefs()
+        prefs.prefetchWifi = 5
+        prefs.prefetchMobile = 2
+        #expect(prefetchCount(cacheEnabled: true, onWifi: true, online: true, prefs: prefs, lowData: true) == 2)
+        #expect(prefetchCount(cacheEnabled: true, onWifi: false, online: true, prefs: prefs, lowData: true) == 2)
+        #expect(prefetchCount(cacheEnabled: true, onWifi: true, online: false, prefs: prefs, lowData: true) == 0)
+        #expect(prefetchCount(cacheEnabled: true, onWifi: true, online: true, prefs: prefs, lowData: false) == 5)
+    }
 }

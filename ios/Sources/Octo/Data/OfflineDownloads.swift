@@ -46,6 +46,8 @@ final class OfflineDownloads {
         var task: URLSessionDownloadTask
         var fileName: String
         var format: String?
+        /// The server's size for the song's file as the download started.
+        var fileSize: Int64?
     }
 
     init(session: Session, library: Library, settings: AppSettings = .shared, connectivity: Connectivity, sync: ServerSync,
@@ -260,11 +262,32 @@ final class OfflineDownloads {
         return present
     }
 
-    /// After each copy of the server's library: downloads follow their songs to new ids, and songs
-    /// a rule wants that just arrived download.
+    /// After each copy of the server's library: downloads of files the server swapped download
+    /// again, downloads follow their songs to new ids, and songs a rule wants that just arrived
+    /// download.
     private func afterSync() async {
+        await refreshSwapped()
         if let wanted = lastWanted { await applyRules(wanted) }
         await pump()
+    }
+
+    /// A download whose server file is now another one (the server swapped it for a better copy,
+    /// say, under the same id) downloads again. Until it has, the song streams, so the old file
+    /// never plays. Downloads made before the server's size was noted have it noted here.
+    private func refreshSwapped() async {
+        guard let source = session.inUse?.sourceId else { return }
+        let store = library.store
+        for file in (try? await store.doneFiles(source)) ?? [] {
+            switch checkDownload(file) {
+            case .keep:
+                break
+            case .note:
+                if let size = file.serverSize { try? await store.noteDownloadFileSize(file.sourceId, file.serverId, fileSize: size) }
+            case .refetch:
+                tries[downloadKey(file.sourceId, file.serverId)] = nil
+                try? await store.setDownloadState(file.sourceId, file.serverId, state: .queued, progress: 0)
+            }
+        }
     }
 
     // MARK: Rules
@@ -360,9 +383,12 @@ final class OfflineDownloads {
         let maxKbps = downloadMaxKbps(mimeType: copy.mimeType, bitrate: downloadBitrate(copy), quality: settings.offline.downloadQuality)
         let format = downloadFormat(serverMimeType: copy.mimeType, maxKbps: maxKbps)
         let fileName = downloadFileName(artist: copy.artist, title: copy.title, sourceId: next.sourceId, serverId: next.serverId, format: format)
-        // A song saved whole as it played is copied from the phone rather than fetched again.
-        let ref = StreamRef(sourceId: next.sourceId, serverId: next.serverId, mimeType: copy.mimeType, bitrate: nil)
-        if let saved = await StreamCache.shared.savedFile(streamCacheKey(next.sourceId, ref, StreamRequest(maxKbps))) {
+        // A song saved whole as it played is copied from the phone rather than fetched again, as
+        // long as it was saved from the file the server has now.
+        let fileSize = copy.sizeBytes.flatMap { $0 > 0 ? $0 : nil }
+        let ref = StreamRef(sourceId: next.sourceId, serverId: next.serverId, mimeType: copy.mimeType, bitrate: nil, size: fileSize)
+        let savedKey = await StreamCache.shared.savedKey(next.sourceId, ref, StreamRequest(maxKbps))
+        if let saved = await StreamCache.shared.savedFile(savedKey) {
             let part = Self.folder.appendingPathComponent(downloadPartName(fileName))
             let target = Self.folder.appendingPathComponent(fileName)
             try? FileManager.default.removeItem(at: part)
@@ -370,7 +396,9 @@ final class OfflineDownloads {
             if (try? FileManager.default.copyItem(at: saved.url, to: part)) != nil,
                (try? FileManager.default.moveItem(at: part, to: target)) != nil {
                 let size = (try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? NSNumber)?.int64Value ?? 0
-                try? await store.finishDownload(next.sourceId, next.serverId, path: target.path, size: size, format: format)
+                try? await store.finishDownload(next.sourceId, next.serverId, path: target.path, size: size, format: format,
+                                                fileSize: fileSize)
+                Self.dropOldFile(next, now: target)
                 Task { await self.pump() }
                 return
             }
@@ -384,11 +412,18 @@ final class OfflineDownloads {
         request.setValue(octoPurposeOffline, forHTTPHeaderField: octoPurposeHeader)
         request.allowsCellularAccess = !settings.offline.wifiOnly
         let task = transfer.downloadTask(with: request)
-        task.taskDescription = [downloadKey(next.sourceId, next.serverId), fileName, format ?? ""].joined(separator: "\n")
-        running = Running(row: next, task: task, fileName: fileName, format: format)
+        task.taskDescription = [downloadKey(next.sourceId, next.serverId), fileName, format ?? "", fileSize.map(String.init) ?? ""]
+            .joined(separator: "\n")
+        running = Running(row: next, task: task, fileName: fileName, format: format, fileSize: fileSize)
         lastProgressMs = 0
         try? await store.setDownloadState(next.sourceId, next.serverId, state: .downloading, progress: 0)
         task.resume()
+    }
+
+    /// A song downloaded again under a new name (its file's type changed, say) lets its old file go.
+    nonisolated private static func dropOldFile(_ row: KeptDownload, now target: URL) {
+        guard !row.path.isEmpty, row.path != target.path else { return }
+        try? FileManager.default.removeItem(atPath: row.path)
     }
 
     /// A transfer still running from before the app last closed carries on; downloads marked as
@@ -398,14 +433,17 @@ final class OfflineDownloads {
         let store = library.store
         var live = Set<String>()
         for task in tasks {
+            // The key, the file name, the format and (from transfers started since sizes were
+            // noted) the server's size for the file.
             let parts = (task.taskDescription ?? "").components(separatedBy: "\n")
-            guard parts.count == 3, running == nil,
+            guard parts.count == 3 || parts.count == 4, running == nil,
                   let row = ((try? await store.allDownloads()) ?? []).first(where: { downloadKey($0.sourceId, $0.serverId) == parts[0] })
             else {
                 task.cancel()
                 continue
             }
-            running = Running(row: row, task: task, fileName: parts[1], format: parts[2].isEmpty ? nil : parts[2])
+            running = Running(row: row, task: task, fileName: parts[1], format: parts[2].isEmpty ? nil : parts[2],
+                              fileSize: parts.count == 4 ? Int64(parts[3]) : nil)
             live.insert(parts[0])
         }
         for row in (try? await store.allDownloads()) ?? [] where row.state == .downloading && !live.contains(downloadKey(row.sourceId, row.serverId)) {
@@ -446,7 +484,9 @@ final class OfflineDownloads {
                 try? FileManager.default.removeItem(at: target)
                 if (try? FileManager.default.moveItem(at: part, to: target)) != nil {
                     let size = (try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? NSNumber)?.int64Value ?? 0
-                    try? await store.finishDownload(row.sourceId, row.serverId, path: target.path, size: size, format: running.format)
+                    try? await store.finishDownload(row.sourceId, row.serverId, path: target.path, size: size, format: running.format,
+                                                    fileSize: running.fileSize)
+                    Self.dropOldFile(row, now: target)
                     tries[key] = nil
                     await pump()
                     return

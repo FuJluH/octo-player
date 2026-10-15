@@ -69,6 +69,8 @@ public struct Song: Codable, Sendable, Hashable, Identifiable {
     public var bitRate: Int?
     public var samplingRate: Int?
     public var bitDepth: Int?
+    /// The size of the song's file on the server, in bytes, when it says.
+    public var size: Int64?
     public var starred: String?
     public var genre: String?
     public var replayGain: ReplayGain?
@@ -80,7 +82,7 @@ public struct Song: Codable, Sendable, Hashable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, title, album, albumId, artist, artistId, displayArtist, track, discNumber, year, duration
-        case coverArt, suffix, contentType, bitRate, samplingRate, bitDepth, starred, genre, replayGain, explicitStatus
+        case coverArt, suffix, contentType, bitRate, samplingRate, bitDepth, size, starred, genre, replayGain, explicitStatus
         case isExternal, octoSuggestedBy
     }
 
@@ -103,6 +105,7 @@ public struct Song: Codable, Sendable, Hashable, Identifiable {
         bitRate = c.int(.bitRate)
         samplingRate = c.int(.samplingRate)
         bitDepth = c.int(.bitDepth)
+        size = c.int64(.size)
         starred = c.string(.starred)
         genre = c.string(.genre)
         replayGain = try? c.decodeIfPresent(ReplayGain.self, forKey: .replayGain)
@@ -328,6 +331,13 @@ extension KeyedDecodingContainer {
         if let i = try? decodeIfPresent(Int.self, forKey: key) { return i }
         if let d = try? decodeIfPresent(Double.self, forKey: key) { return Int(d) }
         if let s = try? decodeIfPresent(String.self, forKey: key) { return Int(s) }
+        return nil
+    }
+
+    func int64(_ key: Key) -> Int64? {
+        if let i = try? decodeIfPresent(Int64.self, forKey: key) { return i }
+        if let d = try? decodeIfPresent(Double.self, forKey: key) { return Int64(exactly: d.rounded()) }
+        if let s = try? decodeIfPresent(String.self, forKey: key) { return Int64(s) }
         return nil
     }
 

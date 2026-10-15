@@ -173,7 +173,7 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
             if let total { return total }
             if cancelled { throw PlayError(.ioUnspecified, detail: "stopped") }
             if let failure { throw failure }
-            if task == nil { try start(from: 0) }
+            if task == nil { try start(from: lengthAskFrom()) }
             condition.wait(until: Date().addingTimeInterval(0.5))
         }
     }
@@ -263,6 +263,15 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
         let info = (try? blocking { await StreamCache.shared.info(savedKey).map { Unchecked($0) } }) ?? nil
         if total == nil, let length = info?.value.length, length > 0 { total = length }
         if type == nil { type = info?.value.mimeType }
+    }
+
+    /// Where to ask the server from to learn the song's length: from its start, or, when the saved
+    /// songs hold its start but not its length, from the last saved byte, so only what is missing
+    /// comes down.
+    private func lengthAskFrom() -> Int64 {
+        guard let savedKey, !ignoreSaved else { return 0 }
+        let run = (try? blocking { await StreamCache.shared.savedRun(savedKey, from: 0) }) ?? 0
+        return max(0, run - 1)
     }
 
     /// Answers a read from the saved songs when they hold it. A read they hold all of is copied
@@ -446,7 +455,14 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
         } else if total == nil || writeAt < (total ?? 0) {
             // The answer ended: what came is all there is (a stream made on the way can be
             // shorter than it said it would be).
-            if total == nil || held.covers(0..<writeAt) { total = writeAt }
+            if total == nil || held.covers(0..<writeAt) {
+                total = writeAt
+                // The saved copy takes the length the song really has, so it counts as whole.
+                if let savedKey, held.covers(0..<writeAt) {
+                    let length = writeAt
+                    Task { await StreamCache.shared.describe(savedKey, contentLength: length, mimeType: nil) }
+                }
+            }
         }
         condition.broadcast()
     }
