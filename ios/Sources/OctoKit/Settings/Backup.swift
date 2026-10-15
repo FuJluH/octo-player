@@ -349,6 +349,7 @@ public enum BackupFile {
             ])),
             ("reduceMotion", .bool(p.reduceMotion)), ("castRenderers", .bool(p.castRenderers)), ("castKeepPlaying", .bool(p.castKeepPlaying)),
             ("libraryOnly", .bool(p.libraryOnly)), ("accent", .string(p.accent.storedName)), ("glassTint", .bool(p.glassTint)),
+            ("animatedArt", .string(p.animatedArt.storedName)),
         ])
     }
 

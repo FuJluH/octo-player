@@ -198,9 +198,6 @@ final class LoopVideoView: UIView {
     private func reveal(_ id: ObjectIdentifier) {
         guard let take, ObjectIdentifier(take) == id, !take.shown, take.layer.isReadyForDisplay else { return }
         take.shown = true
-        #if DEBUG
-        Logger(subsystem: "app.winters.octo", category: "loops").notice("loop shown \(Int(self.bounds.width))x\(Int(self.bounds.height)) in window \(self.window != nil)")
-        #endif
         fade(take.layer, to: 1, seconds: Double(loopFadeMs) / 1000)
         showing?(true)
     }
@@ -208,9 +205,6 @@ final class LoopVideoView: UIView {
     private func letGo(fade: Bool) {
         guard let old = take else { return }
         take = nil
-        #if DEBUG
-        Logger(subsystem: "app.winters.octo", category: "loops").notice("loop let go shown \(old.shown)")
-        #endif
         if old.shown { showing?(false) }
         guard fade, old.shown else {
             old.end()

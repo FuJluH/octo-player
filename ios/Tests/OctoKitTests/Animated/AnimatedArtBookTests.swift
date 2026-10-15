@@ -223,6 +223,15 @@ private actor Gate {
         #expect(loopPlay(seen: true, powerSave: false, reduceMotion: true) == .stillOnly)
     }
 
+    @Test func wordsOverALightShadeAreDark() {
+        // Short n' Sweet's pink, and a pale blue: white cannot be read on them.
+        #expect(loopShadeInk(0xFFE6_B0C8).dark)
+        #expect(loopShadeInk(0xFFBF_D9F2).dark)
+        // A dark brown and a deep blue keep white words.
+        #expect(!loopShadeInk(0xFF1A_0904).dark)
+        #expect(!loopShadeInk(0xFF1B_2A6B).dark)
+    }
+
     @Test func theAlbumsToAskAreThePlayingOnesThenTheNext() {
         #expect(albumsToAsk(playing: "a", next: ["b", "c"]) == ["a", "b"])
         #expect(albumsToAsk(playing: "a", next: ["a", "c"], ahead: 2) == ["a", "c"])

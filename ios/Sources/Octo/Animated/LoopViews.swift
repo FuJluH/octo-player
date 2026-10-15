@@ -155,7 +155,7 @@ struct PlayerBackdrop: View {
 /// over a light shade, white ones otherwise, the quiet icons as strong as reading needs.
 func backdropColors(_ base: PlayerColors, over color: UInt32) -> PlayerColors {
     var colors = base
-    let ink = inkOver(WashRange.of(color), color)
+    let ink = loopShadeInk(color)
     colors.dark = ink.dark
     colors.quiet = quietAlpha(color, ink: ink.dark ? DarkInkArgb : 0xFFFF_FFFF, soft: PlayerTitleRow.iconAlpha)
     return colors

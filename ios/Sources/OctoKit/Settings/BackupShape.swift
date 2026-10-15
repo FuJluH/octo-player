@@ -159,7 +159,8 @@ extension BackupShape {
             BackupField("settings", .flag), BackupField("bar", .flag), BackupField("pageArtwork", .flag)
         )),
         BackupField("reduceMotion", .flag), BackupField("castRenderers", .flag), BackupField("castKeepPlaying", .flag),
-        BackupField("libraryOnly", .flag), BackupField("accent", .choice), BackupField("glassTint", .flag)
+        BackupField("libraryOnly", .flag), BackupField("accent", .choice), BackupField("glassTint", .flag),
+        BackupField("animatedArt", .choice)
     )
 
     static let streaming = fields(

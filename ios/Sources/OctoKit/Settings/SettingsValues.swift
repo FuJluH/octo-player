@@ -556,6 +556,8 @@ public struct PlayerPrefs: Sendable, Equatable, Codable {
     public var accent: AccentChoice = .octo
     /// Whether Octo's glass takes the accent too, or stays Apple's own.
     public var glassTint = false
+    /// How an album's animated art shows.
+    public var animatedArt: AnimatedArtSetting = .standard
 
     public init() {}
 
@@ -587,7 +589,8 @@ public struct PlayerPrefs: Sendable, Equatable, Codable {
     enum CodingKeys: String, CodingKey {
         case liveBackground, background, crossfade, crossfadeSeconds, crossfadeCurve, smartTransitions, filterSweeps, matchTempo, lyricsOnline,
              speed, keepPitch, pitchSemitones, skipSilence, autoplay, radioDiscovery, radioAdventure, radioVariety, radioFavorites,
-             resumeWired, resumeBluetooth, resumeAlways, ambient, reduceMotion, castRenderers, castKeepPlaying, libraryOnly, accent, glassTint
+             resumeWired, resumeBluetooth, resumeAlways, ambient, reduceMotion, castRenderers, castKeepPlaying, libraryOnly, accent, glassTint,
+             animatedArt
     }
 
     public init(from decoder: Decoder) throws {
@@ -621,6 +624,7 @@ public struct PlayerPrefs: Sendable, Equatable, Codable {
         libraryOnly = c.value(.libraryOnly, or: d.libraryOnly)
         accent = c.choice(.accent, or: d.accent)
         glassTint = c.value(.glassTint, or: d.glassTint)
+        animatedArt = c.choice(.animatedArt, or: d.animatedArt)
     }
 }
 

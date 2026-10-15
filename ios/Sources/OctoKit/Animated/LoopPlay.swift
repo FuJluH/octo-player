@@ -31,3 +31,10 @@ public func albumsToAsk(playing: String?, next: [String?], ahead: Int = 1) -> [S
         !id.trimmingCharacters(in: .whitespaces).isEmpty && seen.insert(id).inserted
     }
 }
+
+/// The words over a full-screen loop shaded into `shade` (`0xFFRRGGBB`): dark where they read on
+/// it and white would not, else white. Weighed as if over black, since nothing behind the shade
+/// can be dimmed for the words.
+public func loopShadeInk(_ shade: UInt32) -> WashInk {
+    inkOver(WashRange.of(shade), 0xFF00_0000)
+}
