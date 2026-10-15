@@ -80,6 +80,91 @@ class LibraryHealthTest {
     }
 
     @Test
+    fun titlesThatNameDifferentVersionsAreNeverPaired() {
+        val pairs = listOf(
+            "Let's Get Lost [Bear//Face Remix]" to "Let's Get Lost (Teklife Remix)",
+            "Song (Remix)" to "Song",
+            "Song (Live)" to "Song",
+            "Song (Acoustic)" to "Song",
+            "Song (Sped Up)" to "Song",
+            "Song (Slowed)" to "Song",
+            "Song (Instrumental)" to "Song",
+            "Song (Radio Edit)" to "Song (Album Version)",
+            "Song (Demo)" to "Song",
+            "Song (Taylor's Version)" to "Song",
+        )
+        for ((one, other) in pairs) {
+            val found = report(song(one, seconds = 200, id = "a"), song(other, seconds = 201, id = "b"))
+            assertTrue("$one and $other", found.duplicates.isEmpty())
+        }
+    }
+
+    @Test
+    fun aSongTaggedPlainlyOnAnAlbumOfAnotherVersionIsNotACopy() {
+        val albums = listOf(
+            "Let's Get Lost Remixes",
+            "Song (Remixes) - EP",
+            "Song (Sped Up) - Single",
+            "Slowed Down Hits",
+            "Song (Acoustic)",
+            "The Instrumentals",
+            "Song (Radio Edit) - Single",
+            "Club Hits (Extended Mixes)",
+            "Song (Demo)",
+        )
+        for (album in albums) {
+            val found = report(
+                song("Song", seconds = 240, album = "Studio Album", id = "studio"),
+                song("Song", seconds = 242, album = album, id = "other"),
+            )
+            assertTrue(album, found.duplicates.isEmpty())
+        }
+    }
+
+    @Test
+    fun albumsThatNameNoOtherVersionStillPairTheirCopies() {
+        val albums = listOf(
+            "Studio Album (Deluxe Edition)",
+            "Studio Album (Extended Edition)",
+            "Studio Album (Remastered)",
+            "Studio Album (Explicit)",
+            "Mix Tape",
+        )
+        for (album in albums) {
+            val found = report(
+                song("Song", seconds = 240, album = "Studio Album", id = "studio"),
+                song("Song", seconds = 241, album = album, id = "other"),
+            )
+            assertEquals(album, 1, found.duplicates.size)
+        }
+    }
+
+    @Test
+    fun copiesOnTwoAlbumsOfTheSameVersionArePaired() {
+        val bothRemixes = report(
+            song("Song", seconds = 242, album = "Song Remixes", id = "ep"),
+            song("Song", seconds = 242, album = "Song (Remixes)", id = "ep-again"),
+        )
+        val versionInTheTitle = report(
+            song("Song (Remix)", seconds = 242, album = "Song (Remix) - Single", id = "single"),
+            song("Song (Remix)", seconds = 242, album = "Best of 2014", id = "compilation"),
+        )
+
+        assertEquals(1, bothRemixes.duplicates.size)
+        assertEquals(1, versionInTheTitle.duplicates.size)
+    }
+
+    @Test
+    fun anArtistsOwnNameOnTheAlbumIsNoVersion() {
+        val found = report(
+            song("Song", "The Remix Kids", 240, album = "Studio Album", id = "studio"),
+            song("Song", "The Remix Kids", 241, album = "The Remix Kids", id = "self-titled"),
+        )
+
+        assertEquals(1, found.duplicates.size)
+    }
+
+    @Test
     fun aRemasterGuestOrTrackNumberInTheTitleIsStillTheSameRecording() {
         val found = report(
             song("Pain 1993", "Drake", 149, id = "plain"),

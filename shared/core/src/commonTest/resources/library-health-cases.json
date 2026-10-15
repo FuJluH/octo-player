@@ -5119,6 +5119,58 @@
      ]
     }
    }
+  },
+  {
+   "name": "A song tagged plainly on its remix EP is not a copy of the studio album's",
+   "songs": [
+    {
+     "id": "original",
+     "title": "Let's Get Lost (feat. Devon Baldwin)",
+     "artist": "G-Eazy",
+     "album": "These Things Happen",
+     "albumId": "al-These Things Happen",
+     "duration": 240,
+     "suffix": "flac",
+     "bitDepth": 16,
+     "samplingRate": 44100,
+     "bitRate": 900,
+     "year": 2014,
+     "genre": "Rap",
+     "track": 10,
+     "displayAlbumArtist": "G-Eazy",
+     "albumArtists": [
+      {
+       "name": "G-Eazy"
+      }
+     ],
+     "coverArt": "mf-original"
+    },
+    {
+     "id": "remix-ep",
+     "title": "Let's Get Lost",
+     "artist": "G-Eazy",
+     "album": "Let's Get Lost Remixes",
+     "albumId": "al-Let's Get Lost Remixes",
+     "duration": 242,
+     "suffix": "flac",
+     "bitDepth": 16,
+     "samplingRate": 44100,
+     "bitRate": 900,
+     "year": 2014,
+     "genre": "Rap",
+     "track": 2,
+     "displayAlbumArtist": "G-Eazy",
+     "albumArtists": [
+      {
+       "name": "G-Eazy"
+      }
+     ],
+     "coverArt": "mf-remix-ep"
+    }
+   ],
+   "expect": {
+    "duplicates": []
+   }
   }
  ]
 }

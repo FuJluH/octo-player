@@ -17,7 +17,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 // Every case in library-health-cases.json, the file the Octo server runs
-// too, against its C# port of these checks. The songs are written as a
+// too, against its own copy of these checks. The songs are written as a
 // Subsonic server answers them, so they are read here as the app reads a
 // server's songs, through SubsonicHealth. A failure names the case, so a
 // rule changed on one side shows up here before the two disagree. Each
@@ -76,7 +76,7 @@ class LibraryHealthCasesTest {
 
     @Test
     fun theFileHasEveryCase() {
-        assertEquals(55, all.size)
+        assertEquals(56, all.size)
         assertEquals(all.size, all.map { text(it["name"]) }.distinct().size)
     }
 

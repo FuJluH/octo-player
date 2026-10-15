@@ -3,6 +3,7 @@ package app.winters.octo.health
 import app.winters.octo.catalog.SongIdentity
 import app.winters.octo.catalog.SongMatchOptions
 import app.winters.octo.catalog.SongRef
+import app.winters.octo.catalog.VersionVariant
 import app.winters.octo.query.isLosslessFormat
 import app.winters.octo.subsonic.Album
 import app.winters.octo.subsonic.Song
@@ -281,8 +282,8 @@ fun <T> checkLibrary(songs: List<T>, fields: HealthFields<T>): HealthReport<T> =
 // Songs that are the same recording, in sets. A set's copies are all in
 // one place. Songs whose tags name one recording (an ISRC or a MusicBrainz
 // recording id, with lengths close) go together first; then songs by the
-// same artist whose titles read the same, version and all, and whose
-// lengths are within a few seconds.
+// same artist whose titles read the same, version and all, whose albums
+// name no different versions, and whose lengths are within a few seconds.
 fun <T> findDuplicates(songs: List<T>, fields: HealthFields<T>): List<DuplicateGroup<T>> {
     val sets = Sets(songs.size)
     val byTag = HashMap<String, Int>(songs.size / 4)
@@ -311,6 +312,9 @@ fun <T> findDuplicates(songs: List<T>, fields: HealthFields<T>): List<DuplicateG
         if (match.substringAfter('|').isNotEmpty()) byTitle.getOrPut("$place\u0000$match") { ArrayList(2) } += index
     }
 
+    val versionsAt = arrayOfNulls<Set<String>>(songs.size)
+    fun albumVersionsOf(index: Int) = versionsAt[index] ?: albumVersions(songs[index], fields).also { versionsAt[index] = it }
+
     for (bucket in byTitle.values) {
         if (bucket.size < 2) continue
         for (i in bucket.indices) {
@@ -320,6 +324,7 @@ fun <T> findDuplicates(songs: List<T>, fields: HealthFields<T>): List<DuplicateG
                 if (sets.same(bucket[i], bucket[j])) continue
                 val b = songs[bucket[j]]
                 if (!lengthsClose(fields.seconds(a), fields.seconds(b), SAME_LENGTH_SECONDS)) continue
+                if (albumVersionsOf(bucket[i]) != albumVersionsOf(bucket[j])) continue
                 if (SongIdentity.same(refA, refOf(b, fields), DuplicateTitles).isSame) sets.join(bucket[i], bucket[j])
             }
         }
@@ -335,6 +340,17 @@ fun <T> findDuplicates(songs: List<T>, fields: HealthFields<T>): List<DuplicateG
         val basis = if (members.any { tagged[it] }) DuplicateBasis.Tags else DuplicateBasis.TitleAndLength
         DuplicateGroup(copies, basis, bestReason(copies, fields))
     }.sortedWith(compareBy<DuplicateGroup<T>> { sortKey(fields.artist(it.best)) }.thenBy { sortKey(fields.title(it.best)) }.thenBy { fields.id(it.best) })
+}
+
+// The versions a song's album names beyond what its title says. Two songs
+// of one title whose albums name different versions are different
+// recordings: "Let's Get Lost" on "Let's Get Lost Remixes" is a remix
+// tagged plainly, not a copy of the one on the studio album, however close
+// their lengths.
+private fun <T> albumVersions(song: T, fields: HealthFields<T>): Set<String> {
+    val album = fields.album(song) ?: return emptySet()
+    val inTitle = VersionVariant.requested(fields.title(song), null)
+    return VersionVariant.inFolder(album, fields.artist(song)) - inTitle
 }
 
 // Each song's key for "this song in this version". Reading a title is the

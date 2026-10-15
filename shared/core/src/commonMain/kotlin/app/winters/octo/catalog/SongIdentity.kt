@@ -1157,9 +1157,9 @@ object SongIdentity {
     // Patterns spell out what the server's engine means by a space, a digit
     // and the edge of a word, since the phone's engine and the JVM's read
     // the short forms differently.
-    private const val S = """[\t\n\u000B\f\r\u0085\p{Z}]"""
+    internal const val S = """[\t\n\u000B\f\r\u0085\p{Z}]"""
     private const val D = """\p{Nd}"""
-    private const val W = """[\p{L}\p{Mn}\p{Nd}\p{Pc}\u200C\u200D]"""
+    internal const val W = """[\p{L}\p{Mn}\p{Nd}\p{Pc}\u200C\u200D]"""
     private const val B = """(?<!$W)"""
     private const val E = """(?!$W)"""
 
@@ -1182,9 +1182,9 @@ object SongIdentity {
 
     private fun isSpace(ch: Char): Boolean = isSpace(ch.code)
 
-    private fun isBlank(value: String?): Boolean = value == null || value.all(::isSpace)
+    internal fun isBlank(value: String?): Boolean = value == null || value.all(::isSpace)
 
-    private fun trimSpace(value: String): String = value.trim(::isSpace)
+    internal fun trimSpace(value: String): String = value.trim(::isSpace)
 
     private fun isDigit(ch: Char): Boolean = Character.getType(ch) == Character.DECIMAL_DIGIT_NUMBER.toInt()
 
