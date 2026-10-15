@@ -30,7 +30,8 @@ import UIKit
 /// - `search:TEXT` plays the library songs a search for TEXT finds
 /// - `pause`
 /// - `covertime:N` times fetching N random albums' covers from the server, straight from it
-/// - `probe` logs the whole app's frame rate and late frames every two seconds
+/// - `probe` logs the whole app's frame rate and late frames every two seconds, each turn of the
+///   main thread over 20 ms, and the cover's flight between the bar and the player frame by frame
 /// - discovery steps: see `DiscoveryDrive`
 /// - `toast:TEXT` a plain message; `undo:TEXT` a message with Undo; `done:TEXT` one with a check
 /// - `dialog` the system question with Delete and Cancel; `sheet` a system sheet opened from
@@ -76,7 +77,10 @@ enum Drive {
                 }
             case "close": router.drive = .closePlayer
             case "lyrics": router.drive = .lyrics
-            case "probe": HitchProbe.shared.start()
+            case "probe":
+                HitchProbe.shared.start()
+                MainThreadProbe.start()
+                FlightProbe.on = true
             case "pause": player.pause()
             case "toast": router.show(value.isEmpty ? "Added to the queue" : value)
             case "undo": router.undoable(value.isEmpty ? "Removed from the queue" : value) { router.done("Put back") }
@@ -220,7 +224,7 @@ final class HitchProbe: NSObject {
             worst = max(worst, gap)
             if gap > (link.targetTimestamp - link.timestamp) * 1.8 + 0.004 {
                 late += 1
-                log.notice("app late frame \(gap * 1000, format: .fixed(precision: 1)) ms")
+                log.notice("app late frame \(gap * 1000, format: .fixed(precision: 1)) ms at \(now, format: .fixed(precision: 3))")
             }
         } else {
             since = now
@@ -236,6 +240,42 @@ final class HitchProbe: NSObject {
         }
     }
 }
+/// Logs the cover's flight between the bar and the player, frame by frame, with the clock, so a
+/// stall on a device can be told from a late frame and put next to what else happened.
+@MainActor
+enum FlightProbe {
+    private static let log = Logger(subsystem: "app.winters.octo", category: "flight")
+    static var on = false
+
+    static func note(_ text: @autoclosure () -> String) {
+        guard on else { return }
+        let message = text()
+        log.notice("flight \(CACurrentMediaTime(), format: .fixed(precision: 3)) \(message, privacy: .public)")
+    }
+}
+
+/// Logs every turn of the main run loop that keeps the main thread busy for more than 20 ms.
+@MainActor
+enum MainThreadProbe {
+    private static let log = Logger(subsystem: "app.winters.octo", category: "main")
+    private nonisolated(unsafe) static var observer: CFRunLoopObserver?
+    private nonisolated(unsafe) static var woke: CFTimeInterval = 0
+
+    static func start() {
+        guard observer == nil else { return }
+        let activities = CFRunLoopActivity.afterWaiting.rawValue | CFRunLoopActivity.beforeWaiting.rawValue
+        observer = CFRunLoopObserverCreateWithHandler(nil, activities, true, 0) { _, activity in
+            let now = CACurrentMediaTime()
+            if activity == .afterWaiting {
+                woke = now
+            } else if woke > 0, now - woke > 0.02 {
+                log.notice("main busy \((now - woke) * 1000, format: .fixed(precision: 1)) ms from \(woke, format: .fixed(precision: 3))")
+            }
+        }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+    }
+}
+
 /// Times how long the server takes to hand over album covers, for a debug build on a device.
 @MainActor
 enum CoverTiming {

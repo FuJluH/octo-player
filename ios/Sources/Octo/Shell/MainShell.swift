@@ -142,6 +142,8 @@ struct MainShell: View {
     /// fresh.
     @State private var playerOpening = 0
     @State private var takeDown: Task<Void, Never>?
+    /// The player opening a frame after its cover took off.
+    @State private var openingSoon: Task<Void, Never>?
     @Namespace private var art
 
     private var hasTrack: Bool { player.current != nil }
@@ -187,7 +189,11 @@ struct MainShell: View {
                     .zIndex(1)
             }
             // The cover flying between the bar and the player, above both.
-            CoverFlightLayer().zIndex(1.2)
+            CoverFlightLayer()
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+                .zIndex(1.2)
 
             // Over the bar and even the player.
             SelectionBarHost().zIndex(1.5)
@@ -355,7 +361,21 @@ struct MainShell: View {
     }
 
     /// Asked for, the player opens; with nothing loaded it waits and opens when a song loads.
-    private func openPlayer() { playerOpen = true }
+    private func openPlayer() {
+        guard !playerOpen else { return }
+        // From the small player the cover takes off first, and the player is built a frame
+        // later under it, so its building never holds the cover still.
+        guard hasTrack, CoverFlight.shared.launch(flightKey(player.current)) else {
+            playerOpen = true
+            return
+        }
+        openingSoon?.cancel()
+        openingSoon = Task {
+            try? await Task.sleep(for: .milliseconds(playerBuildDelayMs))
+            guard !Task.isCancelled else { return }
+            playerOpen = true
+        }
+    }
 
     /// The player opened or closed: mounted at once on opening (a fresh one when the last still
     /// lingers), and on closing taken down and the pages woken 0.7 s later, once the cover is home.

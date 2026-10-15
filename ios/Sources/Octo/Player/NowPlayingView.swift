@@ -517,6 +517,9 @@ struct NowPlayingView: View {
     // MARK: Opening and closing
 
     private func arrive() {
+        #if DEBUG
+        FlightProbe.note("player arrives")
+        #endif
         PlayerMotion.shared.moved(for: PlayerMotionClock.openSeconds)
         flight.playerOpening(flightKey(player.current))
         showLyrics(lyrics.open, animated: false)
