@@ -4,6 +4,7 @@ import Foundation
 public enum SettingsPage: String, CaseIterable, Sendable, Hashable, Codable {
     case playback = "Playback"
     case sound = "Sound"
+    case radio = "Radio"
     case appearance = "Appearance"
     case library = "Library"
     case server = "Server"
@@ -18,6 +19,7 @@ public enum SettingsPage: String, CaseIterable, Sendable, Hashable, Codable {
         switch self {
         case .playback: "Playback"
         case .sound: "Sound"
+        case .radio: "Radio"
         case .appearance: "Appearance"
         case .library: "Library"
         case .server: "Server and sync"
@@ -78,14 +80,6 @@ public enum SettingsIndex {
                                                  ["quiet", "gaps", "silent"])
     public static let autoplay = SettingEntry("autoplay", .playback, "Autoplay", "Similar songs keep playing when the queue ends",
                                               ["similar", "continue", "endless", "radio", "queue"])
-    public static let radioDiscovery = SettingEntry("radio_discovery", .playback, "Discovery", "How much of a radio comes from outside your library",
-                                                    ["radio", "new music", "outside", "library only", "discover"], section: "Radio")
-    public static let radioAdventure = SettingEntry("radio_adventure", .playback, "Adventure", "How far a radio strays from the song it started from",
-                                                    ["radio", "focused", "wander", "deep cuts", "similar"], section: "Radio")
-    public static let radioVariety = SettingEntry("radio_variety", .playback, "Artist variety", "How soon an artist or album comes back",
-                                                  ["radio", "repeat", "spacing", "artist", "album"], section: "Radio")
-    public static let radioFavorites = SettingEntry("radio_favorites", .playback, "Favorites more often", "Hearted and 4 or 5 star songs come around more",
-                                                    ["radio", "favorite", "hearted", "rating", "stars"], section: "Radio")
     public static let resumeWired = SettingEntry("resume_wired", .playback, "Resume when headphones connect", "Plays again when a cable goes back in",
                                                  ["headphones", "cable", "wired", "usb", "plug"], section: "Headphones")
     public static let resumeBluetooth = SettingEntry("resume_bluetooth", .playback, "Resume when Bluetooth connects", "Plays again when Bluetooth reconnects",
@@ -95,6 +89,27 @@ public enum SettingsIndex {
     public static let castKeepPlaying = SettingEntry("cast_keep_playing", .playback, "Keep playing on the phone when casting ends", "Otherwise the music pauses",
                                                      ["cast", "casting", "airplay", "chromecast", "tv", "speaker", "disconnect", "resume", "phone"],
                                                      section: "Casting")
+
+    // Radio: Octo's song radio, made from your music, and live radio, the stations on the air
+    public static let radioDiscovery = SettingEntry("radio_discovery", .radio, "Discovery", "How much of a song radio comes from outside your library",
+                                                    ["radio", "song radio", "start radio", "autoplay", "new music", "outside", "library only", "discover"],
+                                                    section: RadioWords.songRadio)
+    public static let radioAdventure = SettingEntry("radio_adventure", .radio, "Adventure", "How far a song radio strays from the song it started from",
+                                                    ["radio", "song radio", "start radio", "autoplay", "focused", "wander", "deep cuts", "similar"],
+                                                    section: RadioWords.songRadio)
+    public static let radioVariety = SettingEntry("radio_variety", .radio, "Artist variety", "How soon an artist or album comes back",
+                                                  ["radio", "song radio", "autoplay", "repeat", "spacing", "artist", "album"], section: RadioWords.songRadio)
+    public static let radioFavorites = SettingEntry("radio_favorites", .radio, "Favorites more often", "Hearted and 4 or 5 star songs come around more",
+                                                    ["radio", "song radio", "autoplay", "favorite", "hearted", "rating", "stars"], section: RadioWords.songRadio)
+    public static let liveRadioNear = SettingEntry("live_radio_near", .radio, "Find stations near you",
+                                                   "Live stations on the air around a place, to play or keep",
+                                                   ["live radio", "radio", "stations", "fm", "am", "local", "near me", "nearby", "internet radio",
+                                                    "location", "place", "kept"],
+                                                   section: RadioWords.liveRadio)
+    public static let radioStations = SettingEntry("radio_stations", .radio, "Stations on your server",
+                                                   "The live stations your server keeps, for everyone on it",
+                                                   ["live radio", "radio", "radio stations", "internet radio", "streams", "add a station", "server"],
+                                                   section: RadioWords.liveRadio)
 
     // Sound, which has a page of its own
     public static let sound: [SettingEntry] = SoundSearchEntry.all.map { SettingEntry($0.id, .sound, $0.title, $0.summary, $0.keywords) }
@@ -136,6 +151,12 @@ public enum SettingsIndex {
     public static let playlistCovers = SettingEntry("playlist_covers", .appearance, PlaylistCoverStyle.settingName,
                                                     "Designed covers, or the covers of their albums",
                                                     ["playlist", "cover", "artwork", "mosaic", "picture", "designed"], section: "Playlists")
+    public static let accentColor = SettingEntry("accent_color", .appearance, "Accent color", "The color of selections, sliders, switches and buttons",
+                                                 ["accent", "color", "colour", "theme", "tint", "highlight", "palette", "album art", "cover",
+                                                  "personalize"],
+                                                 section: "Accent color")
+    public static let glassTint = SettingEntry("accent_glass", .appearance, "Color the glass", "The bar, glass buttons and toasts take the accent too",
+                                               ["glass", "glaze", "frosted", "bar", "tint", "accent", "color", "colour", "theme"], section: "Accent color")
     public static let reduceMotion = SettingEntry("reduce_motion", .appearance, "Reduce motion", "What moves only for show holds still",
                                                   ["animation", "animations", "accessibility", "still", "calm", "motion sickness"], section: "Motion")
 
@@ -201,8 +222,6 @@ public enum SettingsIndex {
                                                        "Playlists you make here are made there too", ["playlists", "upload", "sync"], section: "Sync")
     public static let shares = SettingEntry("shares", .server, "Shared links", "Links to songs and albums you shared", ["share", "links"],
                                             section: "On the server")
-    public static let radioStations = SettingEntry("radio_stations", .server, "Radio stations", "The server's internet radio stations",
-                                                   ["radio", "internet radio", "streams"], section: "On the server")
     public static let scanServer = SettingEntry("scan_server", .server, "Scan library now", "Ask the server to look for new music",
                                                 ["scan", "refresh", "new music"], section: "On the server")
     public static let listeningNow = SettingEntry("listening_now", .server, "Listening now", "Who else is playing music from the server",
@@ -305,16 +324,16 @@ public enum SettingsIndex {
     /// Every setting, in the order written.
     public static let all: [SettingEntry] = [
         crossfade, crossfadeLength, crossfadeCurve, smartTransitions, filterSweeps, matchTempo, speed, skipSilence, autoplay,
-        radioDiscovery, radioAdventure, radioVariety, radioFavorites, resumeWired, resumeBluetooth, resumeAlways,
-        castKeepPlaying,
+        resumeWired, resumeBluetooth, resumeAlways, castKeepPlaying,
+        radioDiscovery, radioAdventure, radioVariety, radioFavorites, liveRadioNear, radioStations,
     ] + sound + [
         ambient, ambientHome, ambientLibrary, ambientSearch, ambientSettings, ambientBar, ambientPageArtwork, homeSections,
         playerBackground, liveBackground, backgroundBrightnessCap, backgroundSaturation, backgroundContrast, backgroundUseBpm,
-        backgroundSpeed, backgroundFps, playlistCovers, reduceMotion,
+        backgroundSpeed, backgroundFps, playlistCovers, accentColor, glassTint, reduceMotion,
         phoneAccess, phoneSongs, rescan, libraryOnly, musicFolders,
         connectServer, yourServers, addServer, serverAddress, serverConnection, serverUser, serverMusicFolder, editConnection,
         changePassword, serverKind, serverAnswer, serverScan, octoAdmin, importMusic, family, signInElsewhere, lastSynced, syncNow,
-        queueSync, playlistsToServer, shares, radioStations, scanServer, listeningNow, disconnect,
+        queueSync, playlistsToServer, shares, scanServer, listeningNow, disconnect,
         copies, accountHome, accountAway, deviceQuality, streamWifi, startAfter, streamMobile, cacheSize, fetchWifi, fetchMobile,
         clearCache, downloadQuality, wifiOnly, keepLiked, streamOnWifi, downloadedMusic,
         lyricsOnline, lyricsScreenOn, lyricsStyle, lyricsEmphasis, lyricsGlow, lyricsLift, lyricsMotionSpeed, lyricsInactiveScale,

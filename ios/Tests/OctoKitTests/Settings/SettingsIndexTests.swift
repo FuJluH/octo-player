@@ -69,7 +69,8 @@ private let longDashes: [Character] = ["\u{2014}", "\u{2013}"]
     @Test func aResultSaysWhereItLives() {
         #expect(SettingsIndex.ambientHome.place == "Appearance · Where it shows")
         #expect(SettingsIndex.lyricsOnline.place == "Lyrics")
-        #expect(SettingsIndex.radioDiscovery.place == "Playback · Radio")
+        #expect(SettingsIndex.radioDiscovery.place == "Radio · Song radio")
+        #expect(SettingsIndex.radioStations.place == "Radio · Live radio")
         #expect(SettingsIndex.checkUpdates.place == "About · Updates")
         #expect(SettingsIndex.musicFolders.place == "Library")
     }

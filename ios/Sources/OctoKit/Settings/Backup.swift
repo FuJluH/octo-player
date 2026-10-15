@@ -348,7 +348,7 @@ public enum BackupFile {
                 ("settings", .bool(a.settings)), ("bar", .bool(a.bar)), ("pageArtwork", .bool(a.pageArtwork)),
             ])),
             ("reduceMotion", .bool(p.reduceMotion)), ("castRenderers", .bool(p.castRenderers)), ("castKeepPlaying", .bool(p.castKeepPlaying)),
-            ("libraryOnly", .bool(p.libraryOnly)),
+            ("libraryOnly", .bool(p.libraryOnly)), ("accent", .string(p.accent.storedName)), ("glassTint", .bool(p.glassTint)),
         ])
     }
 

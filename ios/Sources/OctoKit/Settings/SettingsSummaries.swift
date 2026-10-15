@@ -42,6 +42,15 @@ public enum SettingsSummaries {
         )
     }
 
+    /// Radio's two parts, with how song radio is tuned when it is not as it came.
+    public static func radio(_ prefs: PlayerPrefs) -> String {
+        line(
+            prefs.libraryOnly || prefs.radioDiscovery == .libraryOnly
+                ? "Song radio from your library" : "Song radio \(prefs.radioDiscovery.label.lowercased())",
+            RadioWords.liveRadio
+        )
+    }
+
     public static func appearance(_ ambient: AmbientPrefs, liveBackground: Bool) -> String {
         let glow = switch ambient.strength {
         case .off: "No glow"

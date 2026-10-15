@@ -552,6 +552,10 @@ public struct PlayerPrefs: Sendable, Equatable, Codable {
     public var castRenderers = true
     public var castKeepPlaying = false
     public var libraryOnly = false
+    /// The accent the app is drawn in, or the playing cover's.
+    public var accent: AccentChoice = .octo
+    /// Whether Octo's glass takes the accent too, or stays Apple's own.
+    public var glassTint = false
 
     public init() {}
 
@@ -583,7 +587,7 @@ public struct PlayerPrefs: Sendable, Equatable, Codable {
     enum CodingKeys: String, CodingKey {
         case liveBackground, background, crossfade, crossfadeSeconds, crossfadeCurve, smartTransitions, filterSweeps, matchTempo, lyricsOnline,
              speed, keepPitch, pitchSemitones, skipSilence, autoplay, radioDiscovery, radioAdventure, radioVariety, radioFavorites,
-             resumeWired, resumeBluetooth, resumeAlways, ambient, reduceMotion, castRenderers, castKeepPlaying, libraryOnly
+             resumeWired, resumeBluetooth, resumeAlways, ambient, reduceMotion, castRenderers, castKeepPlaying, libraryOnly, accent, glassTint
     }
 
     public init(from decoder: Decoder) throws {
@@ -615,6 +619,8 @@ public struct PlayerPrefs: Sendable, Equatable, Codable {
         castRenderers = c.value(.castRenderers, or: d.castRenderers)
         castKeepPlaying = c.value(.castKeepPlaying, or: d.castKeepPlaying)
         libraryOnly = c.value(.libraryOnly, or: d.libraryOnly)
+        accent = c.choice(.accent, or: d.accent)
+        glassTint = c.value(.glassTint, or: d.glassTint)
     }
 }
 

@@ -103,3 +103,13 @@ public func frameDue(_ elapsedNanos: Int, _ limit: Float) -> Bool {
 public func framesElapsed(_ elapsedNanos: Int, _ limit: Float) -> Float {
     Float(Double(elapsedNanos) / 1_000_000_000.0 * Double(limit)).clamped(0.5, 3)
 }
+
+/// The classic mesh at full speed (while music plays): the color under any one pixel changes by
+/// about a level of brightness in a 30th of a second, which no eye picks out as a step.
+public let meshFullFps = 30
+
+/// The classic mesh moving at `pace` (1 while music plays) needs this many frames a second: 30
+/// at full speed, fewer as it slows, never under 10.
+public func meshFps(_ pace: Float) -> Double {
+    min(max(Double(meshFullFps) * Double(pace), 10), Double(meshFullFps))
+}
