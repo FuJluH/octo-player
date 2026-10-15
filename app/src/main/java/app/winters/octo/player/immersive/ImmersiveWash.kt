@@ -26,6 +26,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.IntSize
 import androidx.lifecycle.Lifecycle
@@ -47,9 +48,9 @@ private const val FirstFrameWaitNanos = 1_500_000_000L
 // others. `moving` off freezes the motion (a still wash) while covers
 // still fade into each other.
 @Composable
-fun ImmersiveWash(cover: WashCover?, bpm: Float, fpsLimit: Int, speed: Float, moving: Boolean, dolly: () -> Float) {
+fun ImmersiveWash(cover: WashCover?, bpm: Float, speed: Float, moving: Boolean, dolly: () -> Float, glass: WashGlass? = null) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        WashCanvas(cover, bpm, fpsLimit, speed, moving, dolly)
+        WashCanvas(cover, bpm, speed, moving, dolly, glass)
     } else {
         StillArtwork(cover, dolly)
     }
@@ -69,7 +70,7 @@ private class PictureHandoff {
 
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)
 @Composable
-private fun WashCanvas(cover: WashCover?, bpm: Float, fpsLimit: Int, speed: Float, moving: Boolean, dolly: () -> Float) {
+private fun WashCanvas(cover: WashCover?, bpm: Float, speed: Float, moving: Boolean, dolly: () -> Float, glass: WashGlass?) {
     val renderer = remember { WashRenderer() }
     DisposableEffect(renderer) { onDispose { renderer.release() } }
     val covers = remember { CoverSwap<Bitmap>() }
@@ -100,13 +101,17 @@ private fun WashCanvas(cover: WashCover?, bpm: Float, fpsLimit: Int, speed: Floa
                 landed.intValue++
             }
         }
-        onDispose { pictures?.close() }
+        glass?.follow(if (pictures != null) renderer else null, landed, { dollyScale(dolly()) }, { shown.value })
+        onDispose {
+            glass?.pictureShown(false)
+            pictures?.close()
+        }
     }
 
     val focused = LocalWindowInfo.current.isWindowFocused
     val powerSave = rememberPowerSave()
     val target by rememberUpdatedState(
-        targetFps(if (focused) WashVisibility.Focused else WashVisibility.Unfocused, washFps(fpsLimit), powerSave),
+        targetFps(if (focused) WashVisibility.Focused else WashVisibility.Unfocused, WashMaxFps, powerSave),
     )
     val tempo by rememberUpdatedState(bpm)
     val pace by rememberUpdatedState(speed)
@@ -191,6 +196,7 @@ private fun WashCanvas(cover: WashCover?, bpm: Float, fpsLimit: Int, speed: Floa
         Modifier
             .fillMaxSize()
             .onSizeChanged { area = it }
+            .onGloballyPositioned { glass?.placed(it) }
             .drawBehind {
                 frames.intValue
                 landed.intValue
@@ -210,15 +216,14 @@ private fun WashCanvas(cover: WashCover?, bpm: Float, fpsLimit: Int, speed: Floa
                         )
                     }
                     if (drew) first.drawn = true
+                    if (pictures != null) glass?.pictureShown(drew)
                 }
             },
     )
 }
 
 // The frame rate the wash draws at: its slow drift needs no more than 30
-// frames a second, so the setting's rate when it is lower, else 30.
-fun washFps(limit: Int): Int = min(limit, WashMaxFps)
-
+// frames a second.
 const val WashMaxFps = 30
 
 // Frames the clock waits, at most, to ask for the picture it stopped on.

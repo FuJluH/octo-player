@@ -138,6 +138,8 @@ import app.winters.octo.player.immersive.PlayerBackground
 import app.winters.octo.player.immersive.movingBackgroundFps
 import app.winters.octo.player.immersive.accentInk
 import app.winters.octo.player.immersive.backgroundDolly
+import app.winters.octo.player.immersive.WashGlass
+import app.winters.octo.design.LocalGlassBackdrop
 import app.winters.octo.player.immersive.isDarkInk
 import app.winters.octo.player.immersive.mutedInk
 import app.winters.octo.ui.common.Artwork
@@ -191,6 +193,9 @@ fun AnimatedVisibilityScope.PlayerOverlay(
     val dolly = backgroundDolly()
     // The moving background's frames, which the progress line steps on.
     val ticker = remember { FrameTicker() }
+    // What the glasses over the background draw from while the wash is a
+    // picture.
+    val glass = remember { WashGlass() }
     val close by rememberUpdatedState(onClose)
     val scope = rememberCoroutineScope()
     // How far the player has been pulled down, in pixels.
@@ -286,7 +291,7 @@ fun AnimatedVisibilityScope.PlayerOverlay(
             // bar frosts the page.
             CompositionLocalProvider(LocalFrameTicker provides ticker) {
                 Box(Modifier.fillMaxSize().hazeSource(backdrop)) {
-                    PlayerBackground(prefs, colors, now, dolly = { dolly.value })
+                    PlayerBackground(prefs, colors, now, dolly = { dolly.value }, glass = glass)
                 }
             }
             // The words and icons take the colour the background asks for.
@@ -295,6 +300,7 @@ fun AnimatedVisibilityScope.PlayerOverlay(
                 LocalContentColor provides ink,
                 LocalFrameTicker provides ticker,
                 LocalTitleIconAlpha provides colors.quiet,
+                LocalGlassBackdrop provides glass,
             ) {
                 PlayerContent(
                     now,
@@ -1073,6 +1079,7 @@ private fun QualityBadge(quality: AudioQuality, modifier: Modifier) {
             .clearAndSetSemantics { contentDescription = "${quality.label}, ${quality.full}" },
         backdrop = LocalHaze.current,
         film = GlazeClearFilm,
+        picture = LocalGlassBackdrop.current,
     ) {
         Row(
             Modifier.animateContentSize(spring(0.8f, 400f)).padding(horizontal = 10.dp),

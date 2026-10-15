@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.roundToIntRect
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.winters.octo.design.FloatingGlaze
+import app.winters.octo.design.LocalGlassBackdrop
 import app.winters.octo.design.GlowIcon
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
@@ -91,7 +92,8 @@ fun LyricsBar(
 
     FloatingGlaze(
         LocalHaze.current,
-        modifier
+        picture = LocalGlassBackdrop.current,
+        modifier = modifier
             .fillMaxWidth()
             .height(LyricsBarHeight)
             .pointerInput(Unit) {
