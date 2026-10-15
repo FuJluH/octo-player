@@ -130,4 +130,30 @@ class WashReadingTest {
         assertEquals(20..100, BrightnessCapRange)
         assertEquals(5..100, SpeedRange)
     }
+
+    @Test
+    fun quietIconsShowSoftlyWhereTheyStillRead() {
+        val white = 0xFFFFFFFF.toInt()
+        val black = 0xFF000000.toInt()
+        assertEquals(0.7f, quietAlpha(black, white, 0.7f), 0f)
+        assertTrue(contrastRatio(overlay(white, 0.7f, black), black) >= 4.5)
+    }
+
+    @Test
+    fun overABackgroundAtTheWordsLimitQuietIconsShowMore() {
+        val white = 0xFFFFFFFF.toInt()
+        // A grey white words just read on.
+        val grey = 0xFF767676.toInt()
+        val alpha = quietAlpha(grey, white, 0.7f)
+        assertTrue(alpha > 0.7f)
+        assertTrue(contrastRatio(overlay(white, alpha, grey), grey) >= 4.5 || alpha == 1f)
+    }
+
+    @Test
+    fun darkWordsQuietIconsReadOnTheBrightestCover() {
+        val dark = DarkInkArgb
+        val light = 0xFFF0F0F0.toInt()
+        val alpha = quietAlpha(light, dark, 0.7f)
+        assertTrue(contrastRatio(overlay(dark, alpha, light), light) >= 4.5)
+    }
 }

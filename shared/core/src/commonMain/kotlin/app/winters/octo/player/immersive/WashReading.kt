@@ -85,6 +85,23 @@ fun inkOver(range: WashRange, under: Int, contrast: Double = PlayerContrast): Wa
     return if (darkReads && white < 1f) WashInk(dark = true, show = 1f) else WashInk(dark = false, show = white)
 }
 
+// How strongly icons drawn a step quieter than the words, in `ink`, show
+// over the colour `under` them: `soft` where that keeps `contrast`, more
+// as far as reading needs over a background close to the words' limit,
+// at most fully.
+fun quietAlpha(under: Int, ink: Int, soft: Float, contrast: Double = PlayerContrast): Float {
+    fun reads(alpha: Float) = contrastRatio(overlay(ink, alpha, under), under) >= contrast
+    if (reads(soft)) return soft
+    if (!reads(1f)) return 1f
+    var low = soft
+    var high = 1f
+    repeat(20) {
+        val mid = (low + high) / 2
+        if (reads(mid)) high = mid else low = mid
+    }
+    return high
+}
+
 // The brightest the wash gets over a prepared cover, as a colour: the
 // pixel at the 98th percentile of brightness (every `step`th pixel is
 // looked at), dimmed as the final pass leaves it. The wash only mixes,

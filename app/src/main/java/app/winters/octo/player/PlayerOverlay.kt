@@ -33,7 +33,6 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -85,6 +84,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
@@ -156,6 +156,7 @@ import app.winters.octo.ui.menu.LocalSongMenu
 import app.winters.octo.ui.menu.SongMenuContext
 import app.winters.octo.ui.common.asClock
 import app.winters.octo.ui.common.rememberSystemReduceMotion
+import app.winters.octo.ui.common.fadingMarquee
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
@@ -289,7 +290,12 @@ fun AnimatedVisibilityScope.PlayerOverlay(
                 }
             }
             // The words and icons take the colour the background asks for.
-            CompositionLocalProvider(LocalHaze provides backdrop, LocalContentColor provides ink, LocalFrameTicker provides ticker) {
+            CompositionLocalProvider(
+                LocalHaze provides backdrop,
+                LocalContentColor provides ink,
+                LocalFrameTicker provides ticker,
+                LocalTitleIconAlpha provides colors.quiet,
+            ) {
                 PlayerContent(
                     now,
                     model,
@@ -774,19 +780,24 @@ private fun TitleRow(now: NowPlaying, model: PlayerViewModel, onClose: () -> Uni
     Column(Modifier.fillMaxWidth()) {
         val live = now.live
         val liveModel: LivePlayerViewModel? = if (live != null) hiltViewModel() else null
-        // The buttons sit on the middle of the name and artist, the same for
-        // a song and a station.
-        TitleWithButtons(
-            oneLine = now.artist.isNullOrBlank(),
-            titleSize = TitleStyle.fontSize,
-            artistSize = OctoType.body.fontSize,
-            sideMargin = PlayerSideMargin,
-            title = { TitleBlock(now, onOpenArtist, onClose) },
-        ) {
-            if (live != null && liveModel != null) {
-                LiveSongButtons(live, liveModel, calm = model.prefs.collectAsStateWithLifecycle().value.reduceMotion || rememberSystemReduceMotion())
-            } else {
-                SongButtons(now, model)
+        val calm = model.prefs.collectAsStateWithLifecycle().value.reduceMotion || rememberSystemReduceMotion()
+        // The buttons sit on the middle of the name's capitals, the same for a
+        // song and a station, their icons sized from those capitals.
+        val capHeight = rememberCapHeightPx(TitleStyle)
+        val density = LocalDensity.current
+        val icons = remember(capHeight, density) { TitleIcons(with(density) { capHeight.toDp() }) }
+        CompositionLocalProvider(LocalTitleIcons provides icons) {
+            TitleWithButtons(
+                capHeight = capHeight,
+                icons = icons,
+                sideMargin = PlayerSideMargin,
+                title = { TitleBlock(now, calm, onOpenArtist, onClose) },
+            ) {
+                if (live != null && liveModel != null) {
+                    LiveSongButtons(live, liveModel, calm = calm)
+                } else {
+                    SongButtons(now, model)
+                }
             }
         }
         Box(Modifier.padding(top = 2.dp).height(RatingLine)) {
@@ -904,10 +915,12 @@ private fun AnimatedVisibilityScope.PlayerArt(ref: String?, side: Dp, playing: B
     }
 }
 
-// The song's name and artist. The name also carries Close player for a
-// screen reader.
+// The song's name and artist, close together so they read as one. A name
+// too long for its room scrolls through (unless motion is `calm`), and
+// either line too long fades out at its end. The name also carries Close
+// player for a screen reader.
 @Composable
-private fun TitleBlock(now: NowPlaying, onOpenArtist: (String) -> Unit, onClose: () -> Unit) {
+private fun TitleBlock(now: NowPlaying, calm: Boolean, onOpenArtist: (String) -> Unit, onClose: () -> Unit) {
     AnimatedContent(
         targetState = now,
         contentKey = { it.trackId },
@@ -922,7 +935,7 @@ private fun TitleBlock(now: NowPlaying, onOpenArtist: (String) -> Unit, onClose:
                 style = TitleStyle,
                 color = LocalContentColor.current,
                 markColor = accentInk,
-                titleModifier = Modifier.basicMarquee().closesPlayer(onClose),
+                titleModifier = Modifier.fadingMarquee(song.trackId, scroll = !calm).closesPlayer(onClose),
                 overflow = TextOverflow.Clip,
             )
             Text(
@@ -933,7 +946,7 @@ private fun TitleBlock(now: NowPlaying, onOpenArtist: (String) -> Unit, onClose:
                 softWrap = false,
                 overflow = TextOverflow.Clip,
                 // A song found online has no artist in the library to open.
-                modifier = Modifier.clickable(
+                modifier = Modifier.raised(ArtistRaise).fadingMarquee(song.trackId, scroll = false).clickable(
                     enabled = !song.artistId.isNullOrEmpty(),
                     interactionSource = null,
                     indication = null,
@@ -952,7 +965,7 @@ private fun SongButtons(now: NowPlaying, model: PlayerViewModel) {
     if (now.trackId != null && isFind(now.trackId)) {
         val find by model.find.collectAsStateWithLifecycle()
         // Held back until the find for this song has loaded, not the last one.
-        find?.takeIf { it.id == now.trackId }?.let { AddToLibraryButton(it, size = TitleButtonSize, iconSize = TitleIconSize) }
+        find?.takeIf { it.id == now.trackId }?.let { AddToLibraryButton(it, size = TitleButtonSize, iconSize = titleIcons().size) }
             ?: Spacer(Modifier.size(TitleButtonSize))
     } else {
         LikeButton(model)
@@ -968,7 +981,7 @@ private fun SongButtons(now: NowPlaying, model: PlayerViewModel) {
             .semantics { contentDescription = "More" },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(painterResource(OctoIcons.More), contentDescription = null, tint = LocalContentColor.current.copy(alpha = 0.6f), modifier = Modifier.size(TitleMoreIconSize))
+        TitleMoreIcon()
     }
 }
 
@@ -990,13 +1003,7 @@ private fun LikeButton(model: PlayerViewModel) {
             },
         contentAlignment = Alignment.Center,
     ) {
-        GlowIcon(
-            painterResource(if (liked) OctoIcons.Liked else OctoIcons.Like),
-            tint = if (liked) LocalContentColor.current else LocalContentColor.current.copy(alpha = 0.6f),
-            lit = liked,
-            modifier = Modifier.size(TitleIconSize),
-            accent = pulse,
-        )
+        TitleHeart(liked, pulse)
     }
 }
 
@@ -1335,3 +1342,14 @@ private val TitleStyle = OctoType.title.copy(fontWeight = FontWeight.Bold)
 
 // The room between the player's content and the screen's sides.
 private val PlayerSideMargin = 24.dp
+
+// How far the artist line sits up into the room under the name, so the two
+// read as one: inside the name's line spacing, clear of its descenders.
+private val ArtistRaise = 3.dp
+
+// Draws the line `by` higher and takes that much less room below.
+private fun Modifier.raised(by: Dp): Modifier = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints)
+    val up = by.roundToPx()
+    layout(placeable.width, (placeable.height - up).coerceAtLeast(0)) { placeable.place(0, -up) }
+}

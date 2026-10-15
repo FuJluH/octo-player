@@ -1,47 +1,51 @@
 package app.winters.octo.player
 
+import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TitleButtonsTest {
     // In dp, at a density of 1: a 360 wide row 24 in from the screen's edges,
-    // 48 targets, the heart 10.5 and the dots 8.5 either side of their middles.
-    private val place = titleButtonsPlace(rowWidth = 360f, sideMargin = 24f, buttonSize = 48f, heartHalf = 10.5f, dotsHalf = 8.5f, nameGap = 8f)
+    // 48 targets, the heart 11.7 and the dots 8.3 either side of their middles.
+    private val place = titleButtonsPlace(rowWidth = 360f, sideMargin = 24f, buttonSize = 48f, heartHalf = 11.7f, dotsHalf = 8.3f)
 
     @Test
     fun theIconsAreAsFarApartAsTheDotsAreFromTheScreensEdge() {
         val screenRight = 360f + 24f
         val moreMiddle = place.buttonsRight - 24f
         val heartMiddle = moreMiddle - 48f
-        val between = (moreMiddle - 8.5f) - (heartMiddle + 10.5f)
-        val toEdge = screenRight - (moreMiddle + 8.5f)
-        assertEquals(29f, between, 1e-4f)
+        val between = (moreMiddle - 8.3f) - (heartMiddle + 11.7f)
+        val toEdge = screenRight - (moreMiddle + 8.3f)
+        assertEquals(28f, between, 1e-4f)
         assertEquals(between, toEdge, 1e-4f)
     }
 
     @Test
-    fun theNameEndsJustBeforeTheHeart() {
-        val heartLeft = place.buttonsRight - 96f + (24f - 10.5f)
-        assertEquals(heartLeft - 8f, place.titleWidth, 1e-4f)
+    fun theNameEndsAtTheHeartsTarget() {
+        assertEquals(place.buttonsRight - 96f, place.titleWidth, 1e-4f)
     }
 
     @Test
-    fun theButtonsSitOnTheMiddleOfBothLines() {
-        // Name baseline at 30 (24 text), artist baseline at 54 (16 text).
-        val center = buttonsCenter(first = 30f, last = 54f, oneLine = false, titlePx = 24f, artistPx = 16f, height = 60f)
-        val titleMiddle = 30f - 0.35f * 24f
-        val artistMiddle = 54f - 0.35f * 16f
-        assertEquals((titleMiddle + artistMiddle) / 2, center, 1e-4f)
+    fun theButtonsSitOnTheMiddleOfTheCapitals() {
+        assertEquals(30f - 17.5f / 2, capMiddle(first = 30f, capHeight = 17.5f, height = 60f), 1e-4f)
+        assertEquals(30f, capMiddle(first = null, capHeight = 17.5f, height = 60f), 1e-4f)
     }
 
     @Test
-    fun withOneLineTheButtonsSitOnIt() {
-        assertEquals(30f - 0.35f * 24f, buttonsCenter(first = 30f, last = 54f, oneLine = true, titlePx = 24f, artistPx = 16f, height = 60f), 1e-4f)
-        assertEquals(30f - 0.35f * 24f, buttonsCenter(first = 30f, last = 30f, oneLine = false, titlePx = 24f, artistPx = 16f, height = 40f), 1e-4f)
+    fun theHeartStandsAboutASixthTallerThanTheCapitals() {
+        val icons = TitleIcons(17.5.dp)
+        val heartTall = 176f / 256f * icons.size.value + SecondaryStroke.value
+        assertEquals(1.15f * 17.5f, heartTall, 1e-3f)
+        // Drawn at the bottom row's weight, lighter than a bold title's stems
+        // but no hairline.
+        assertEquals(1.375f, SecondaryStroke.value, 1e-4f)
+        assertTrue(icons.dotsHalf < icons.heartHalf)
+        assertEquals(8f / 256f * icons.size.value, icons.heartLift.value, 1e-4f)
     }
 
     @Test
-    fun withNoBaselinesTheButtonsSitInTheMiddle() {
-        assertEquals(30f, buttonsCenter(first = null, last = null, oneLine = false, titlePx = 24f, artistPx = 16f, height = 60f), 1e-4f)
+    fun theIconsStayAStepQuieterThanTheName() {
+        assertEquals(0.7f, TitleIconAlpha, 0f)
     }
 }
