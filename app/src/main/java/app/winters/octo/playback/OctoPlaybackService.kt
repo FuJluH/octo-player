@@ -4,6 +4,8 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
+import android.view.KeyEvent
+import androidx.core.content.IntentCompat
 import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -82,6 +84,7 @@ import javax.inject.Inject
 private val LIKE = SessionCommand("app.winters.octo.LIKE", Bundle.EMPTY)
 private val DOWNLOAD = SessionCommand("app.winters.octo.DOWNLOAD", Bundle.EMPTY)
 private val CLOSE = SessionCommand("app.winters.octo.CLOSE", Bundle.EMPTY)
+private val STOP = SessionCommand("app.winters.octo.STOP", Bundle.EMPTY)
 
 // "Play next" from the app, with the song ids to play.
 internal val PLAY_NEXT = SessionCommand("app.winters.octo.PLAY_NEXT", Bundle.EMPTY)
@@ -147,6 +150,10 @@ class OctoPlaybackService : MediaLibraryService() {
     private lateinit var headsets: HeadsetResume
     private var session: MediaLibrarySession? = null
     private val currentId = MutableStateFlow<String?>(null)
+
+    // Whether a station is on air, so the phone's media controls show Stop
+    // where a song shows Pause.
+    private val stationOnAir = MutableStateFlow(false)
     private val queueChanged = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     private var positionSaver: Job? = null
     // Done once last session's queue is back, or there was none.
@@ -221,7 +228,13 @@ class OctoPlaybackService : MediaLibraryService() {
         // The heart follows the song, the likes list, and for a song found
         // online, whether its download was asked for.
         scope.launch {
-            combine(currentId, likes.liked, downloads.states, ::notificationHeart).distinctUntilChanged().collect(::showButtons)
+            combine(currentId, likes.liked, downloads.states, ::notificationHeart)
+                .combine(stationOnAir) { heart, onAir -> heart to onAir }
+                .distinctUntilChanged()
+                .collect { (heart, onAir) ->
+                    mediaControlsFollow(onAir)
+                    showButtons(heart, onAir)
+                }
         }
         // Crossfade, speed and pitch, and skipping silence follow their
         // settings, each only when it changes, so a blend is not cut short.
@@ -300,42 +313,65 @@ class OctoPlaybackService : MediaLibraryService() {
         super.onDestroy()
     }
 
-    // Previous, play and next keep their places. The heart (or download)
-    // comes first after them and Close second. The phone's own media
+    // Previous, play and next keep their places. While a station is on air,
+    // Stop comes first and the play button is taken away (a station has no
+    // pause), so the phone's media controls show Stop beside previous and
+    // next. Then the heart (or download), then Close. The phone's own media
     // controls only take extra buttons offered for the overflow slot, and
-    // show the first two of those alongside previous, play and next, so
-    // these two are always in view there. Apps that know Media3's slots put the heart
-    // beside next and Close beside previous.
-    private fun showButtons(heart: NotificationHeart) {
-        val buttons = buildList {
-            when (heart) {
-                is NotificationHeart.Like -> add(
-                    CommandButton.Builder(if (heart.liked) CommandButton.ICON_HEART_FILLED else CommandButton.ICON_HEART_UNFILLED)
-                        .setDisplayName(if (heart.liked) "Unlike" else "Like")
+    // show the first two of those alongside previous, play and next. Apps
+    // that know Media3's slots put Stop in the middle, the heart beside next
+    // and Close beside previous.
+    private fun showButtons(heart: NotificationHeart, onAir: Boolean) {
+        val buttons = notificationButtons(heart, onAir).map { button ->
+            when (button) {
+                NotificationButton.Stop -> CommandButton.Builder(CommandButton.ICON_STOP)
+                    .setDisplayName("Stop")
+                    .setSessionCommand(STOP)
+                    .setSlots(CommandButton.SLOT_CENTRAL, CommandButton.SLOT_OVERFLOW)
+                    .build()
+                NotificationButton.Like, NotificationButton.Unlike -> {
+                    val liked = button == NotificationButton.Unlike
+                    CommandButton.Builder(if (liked) CommandButton.ICON_HEART_FILLED else CommandButton.ICON_HEART_UNFILLED)
+                        .setDisplayName(if (liked) "Unlike" else "Like")
                         .setSessionCommand(LIKE)
                         .setSlots(CommandButton.SLOT_FORWARD_SECONDARY, CommandButton.SLOT_OVERFLOW)
-                        .build(),
-                )
-                NotificationHeart.Download -> add(
-                    CommandButton.Builder(CommandButton.ICON_UNDEFINED)
-                        .setCustomIconResId(OctoIcons.AddToLibrary)
-                        .setDisplayName("Add to your library")
-                        .setSessionCommand(DOWNLOAD)
-                        .setSlots(CommandButton.SLOT_FORWARD_SECONDARY, CommandButton.SLOT_OVERFLOW)
-                        .build(),
-                )
-                NotificationHeart.None -> Unit
-            }
-            add(
-                CommandButton.Builder(CommandButton.ICON_UNDEFINED)
+                        .build()
+                }
+                NotificationButton.Download -> CommandButton.Builder(CommandButton.ICON_UNDEFINED)
+                    .setCustomIconResId(OctoIcons.AddToLibrary)
+                    .setDisplayName("Add to your library")
+                    .setSessionCommand(DOWNLOAD)
+                    .setSlots(CommandButton.SLOT_FORWARD_SECONDARY, CommandButton.SLOT_OVERFLOW)
+                    .build()
+                NotificationButton.Close -> CommandButton.Builder(CommandButton.ICON_UNDEFINED)
                     .setCustomIconResId(OctoIcons.Close)
                     .setDisplayName("Close")
                     .setSessionCommand(CLOSE)
                     .setSlots(CommandButton.SLOT_BACK_SECONDARY, CommandButton.SLOT_OVERFLOW)
-                    .build(),
-            )
+                    .build()
+            }
         }
         session?.setMediaButtonPreferences(buttons)
+    }
+
+    // The phone's media controls (the notification, the lock screen, a car
+    // or headset over Bluetooth) speak through the media notification
+    // controller. While a station is on air it has no play/pause, so they
+    // draw Stop instead of Pause.
+    private fun mediaControlsFollow(onAir: Boolean) {
+        val session = session ?: return
+        val controller = session.mediaNotificationControllerInfo ?: return
+        val all = ConnectionResult.DEFAULT_PLAYER_COMMANDS
+        val kept = mediaControlCommands((0 until all.size()).map(all::get).toSet(), onAir)
+        session.setAvailableCommands(controller, sessionCommands(), Player.Commands.Builder().addAll(*kept.toIntArray()).build())
+    }
+
+    private fun sessionCommands() = ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
+        .add(LIKE).add(DOWNLOAD).add(CLOSE).add(PLAY_NEXT).add(STOP)
+        .build()
+
+    private fun updateStationOnAir() {
+        stationOnAir.value = stationOnAir(player.currentMediaItem?.mediaId, player.playWhenReady, player.playbackState)
     }
 
     // Close: the music stops, the queue is kept for next time, the
@@ -495,6 +531,7 @@ class OctoPlaybackService : MediaLibraryService() {
                 }
             }
             currentId.value = mediaItem?.mediaId
+            updateStationOnAir()
             saveQueue()
             widgets.show(player)
             serverQueue.changed(snapshot())
@@ -536,6 +573,7 @@ class OctoPlaybackService : MediaLibraryService() {
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
+            updateStationOnAir()
             if (playbackState == Player.STATE_READY) {
                 failedInARow = 0
                 learnLength()
@@ -563,6 +601,7 @@ class OctoPlaybackService : MediaLibraryService() {
         // A pause keeps the server's copy of the queue exact.
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
             if (!playWhenReady) serverQueue.paused(snapshot())
+            updateStationOnAir()
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -600,13 +639,25 @@ class OctoPlaybackService : MediaLibraryService() {
             return scope.future {
                 restored.await()
                 ConnectionResult.AcceptedResultBuilder(session, controller)
-                    .setAvailableSessionCommands(
-                        ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
-                            .add(LIKE).add(DOWNLOAD).add(CLOSE).add(PLAY_NEXT)
-                            .build(),
-                    )
+                    .setAvailableSessionCommands(sessionCommands())
+                    .apply {
+                        if (session.isMediaNotificationController(controller) && stationOnAir.value) {
+                            val all = ConnectionResult.DEFAULT_PLAYER_COMMANDS
+                            val kept = mediaControlCommands((0 until all.size()).map(all::get).toSet(), true)
+                            setAvailablePlayerCommands(Player.Commands.Builder().addAll(*kept.toIntArray()).build())
+                        }
+                    }
                     .build()
             }
+        }
+
+        override fun onMediaButtonEvent(session: MediaSession, controllerInfo: MediaSession.ControllerInfo, intent: Intent): Boolean {
+            val key = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_KEY_EVENT, KeyEvent::class.java)
+            if (key != null && stationOnAir.value && keyStopsStation(key.keyCode)) {
+                if (key.action == KeyEvent.ACTION_DOWN && key.repeatCount == 0) player.pause()
+                return true
+            }
+            return super.onMediaButtonEvent(session, controllerInfo, intent)
         }
 
         override fun onCustomCommand(
@@ -619,6 +670,8 @@ class OctoPlaybackService : MediaLibraryService() {
                 LIKE -> currentId.value?.takeUnless(::isFind)?.let(likes::toggle)
                 DOWNLOAD -> downloadCurrent()
                 CLOSE -> close()
+                // A station stops, and lets its stream go.
+                STOP -> player.pause()
                 PLAY_NEXT -> args.getStringArrayList(ARG_IDS)?.let { ids ->
                     scope.launch { player.addNext(playable.items(ids).map { it.withSource(QueueSource.You) }) }
                 }
