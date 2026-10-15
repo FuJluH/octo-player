@@ -1,6 +1,7 @@
 package app.winters.octo.desktop.animated
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -124,11 +125,17 @@ internal class FrameBox {
 internal class LoopFeed(val small: IntSize?) {
     val frames = FrameBox()
     val smalls: FrameBox? = small?.let { FrameBox() }
+
+    // A still smaller copy (half the small one), whose edges are carried
+    // out to the player's edges.
+    val tiny: IntSize? = small?.let { IntSize(maxOf(2, it.width / 2), maxOf(2, it.height / 2)) }
+    val tinies: FrameBox? = tiny?.let { FrameBox() }
     val fade = Animatable(0f)
 
     fun close() {
         frames.close()
         smalls?.close()
+        tinies?.close()
     }
 }
 
@@ -137,7 +144,7 @@ internal class LoopFeed(val small: IntSize?) {
 // the window draws again only for a new frame. Held, the last frame stays
 // and nothing is decoded; with only the still, no decoder is opened.
 @Composable
-internal fun rememberLoopFeed(file: File?, play: LoopPlay, size: IntSize, small: IntSize? = null): LoopFeed {
+internal fun rememberLoopFeed(file: File?, play: LoopPlay, size: IntSize, small: IntSize? = null, fadeMs: Int = LOOP_FADE_MS): LoopFeed {
     val feed = remember(file, small) { LoopFeed(small) }
     DisposableEffect(feed) { onDispose { feed.close() } }
     val playing by rememberUpdatedState(play)
@@ -168,7 +175,7 @@ internal fun rememberLoopFeed(file: File?, play: LoopPlay, size: IntSize, small:
     // The fade in, once the first frame is there to draw.
     LaunchedEffect(feed) {
         snapshotFlow { feed.frames.arrived.intValue }.first { it > 0 }
-        feed.fade.animateTo(1f, tween(LOOP_FADE_MS))
+        feed.fade.animateTo(1f, tween(fadeMs, easing = FastOutSlowInEasing))
     }
     return feed
 }
@@ -177,9 +184,9 @@ internal fun rememberLoopFeed(file: File?, play: LoopPlay, size: IntSize, small:
 // until the first frame is drawn, then that frame fades in over what is
 // under it.
 @Composable
-fun LoopFrames(file: File?, play: LoopPlay, modifier: Modifier = Modifier) {
+fun LoopFrames(file: File?, play: LoopPlay, modifier: Modifier = Modifier, fadeMs: Int = LOOP_FADE_MS) {
     var size by remember { mutableStateOf(IntSize.Zero) }
-    val feed = rememberLoopFeed(file, play, size)
+    val feed = rememberLoopFeed(file, play, size, fadeMs = fadeMs)
     val paint = remember { Paint() }
     Spacer(
         modifier
@@ -193,16 +200,22 @@ fun LoopFrames(file: File?, play: LoopPlay, modifier: Modifier = Modifier) {
     )
 }
 
-// Draws `image` scaled to cover a box `width` by `height`, centered.
-internal fun coverDraw(canvas: org.jetbrains.skia.Canvas, image: SkiaImage, width: Float, height: Float, paint: Paint) {
+// Draws `image` scaled to cover a box `width` by `height`, centered,
+// leaving out `trimTop` of its own rows at the top (a dark first row some
+// videos carry).
+internal fun coverDraw(canvas: org.jetbrains.skia.Canvas, image: SkiaImage, width: Float, height: Float, paint: Paint, trimTop: Float = 0f) {
     val iw = image.width.toFloat()
-    val ih = image.height.toFloat()
+    val ih = image.height.toFloat() - trimTop
     val scale = maxOf(width / iw, height / ih)
     val sw = width / scale
     val sh = height / scale
-    val src = Rect.makeXYWH((iw - sw) / 2f, (ih - sh) / 2f, sw, sh)
+    val src = Rect.makeXYWH((iw - sw) / 2f, trimTop + (ih - sh) / 2f, sw, sh)
     canvas.drawImageRect(image, src, Rect.makeWH(width, height), SamplingMode.LINEAR, paint, true)
 }
+
+// The paint the tiniest copy is drawn with: softened up and down, so its
+// edges carried out sideways show no bands.
+internal fun edgePaint(): Paint = Paint().apply { imageFilter = org.jetbrains.skia.ImageFilter.makeBlur(0.4f, 1.4f, org.jetbrains.skia.FilterTileMode.CLAMP) }
 
 // How a frame is brought down to its small copy: averaged over its mipmaps,
 // so the copy does not flicker as the picture moves.
@@ -216,6 +229,7 @@ private suspend fun readFrames(video: LoopVideo, feed: LoopFeed) = withContext(D
     val height = video.height().toInt()
     val bitmap = Bitmap()
     val small = feed.small?.let { Surface.makeRasterN32Premul(it.width, it.height) }
+    val tiny = feed.tiny?.let { Surface.makeRasterN32Premul(it.width, it.height) }
     try {
         if (!bitmap.allocPixels(ImageInfo(width, height, ColorType.BGRA_8888, ColorAlphaType.OPAQUE))) return@withContext
         val pixels = bitmap.peekPixels() ?: return@withContext
@@ -224,6 +238,7 @@ private suspend fun readFrames(video: LoopVideo, feed: LoopFeed) = withContext(D
         val length = pixels.computeByteSize().toULong()
         val all = Rect.makeWH(width.toFloat(), height.toFloat())
         val paint = Paint()
+        val tinyPaint = edgePaint()
         var have = 0uL
         while (isActive) {
             val newest = video.waitFrame(have, WaitMs)
@@ -236,7 +251,13 @@ private suspend fun readFrames(video: LoopVideo, feed: LoopFeed) = withContext(D
             val frame = SkiaImage.makeFromBitmap(bitmap)
             if (small != null) {
                 small.canvas.drawImageRect(frame, all, Rect.makeWH(small.width.toFloat(), small.height.toFloat()), Shrink, paint, true)
-                feed.smalls?.put(small.makeImageSnapshot())
+                val copy = small.makeImageSnapshot()
+                if (tiny != null) {
+                    tiny.canvas.clear(0)
+                    tiny.canvas.drawImageRect(copy, Rect.makeWH(copy.width.toFloat(), copy.height.toFloat()), Rect.makeWH(tiny.width.toFloat(), tiny.height.toFloat()), Shrink, tinyPaint, true)
+                    feed.tinies?.put(tiny.makeImageSnapshot())
+                }
+                feed.smalls?.put(copy)
             }
             feed.frames.put(frame)
             withContext(Dispatchers.Main) { feed.frames.arrived.intValue++ }
@@ -244,6 +265,7 @@ private suspend fun readFrames(video: LoopVideo, feed: LoopFeed) = withContext(D
     } finally {
         bitmap.close()
         small?.close()
+        tiny?.close()
     }
 }
 // The album's square loop over its cover: the cover first, then the loop
@@ -274,7 +296,9 @@ fun AnimatedCover(
                 value = model.loopFile(albumId, LoopShape.Square, clip, px, px)
             }
             ShowingFile(model, file)
-            LoopFrames(file, play, Modifier.fillMaxSize())
+            // Twice the usual fade: a cover is often graded a little
+            // differently from its loop, and a slower change reads as a shift.
+            LoopFrames(file, play, Modifier.fillMaxSize(), fadeMs = LOOP_FADE_MS * 2)
             Box(Modifier.fillMaxSize().artworkRim(shape))
         }
     }

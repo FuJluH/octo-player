@@ -165,7 +165,7 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
     val seen = LocalWindowShown.current && app.fullPlayer
     val base = tall?.let { backdropColor(it, cover?.main) }
     // The words' color over the tall loop's fill once it shows, else over the wash.
-    var tallInk by remember(tall?.video) { mutableStateOf<Color?>(null) }
+    var tallInk by remember(tall?.video) { mutableStateOf(tall?.let { app.animated.tallInks[it.video] }) }
     val ink = tallInk?.takeIf { tall != null } ?: remember(cover) { cover?.playerInk() }.color()
     // Where the title starts, for the tall loop to fade out above it.
     var titleTop by remember { mutableStateOf<androidx.compose.ui.unit.Dp?>(null) }
@@ -218,7 +218,7 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
                 center = PlayerStart + if (panel != null) inner.column / 2 else inner.width / 2,
                 titleTop = titleTop?.let { it - with(density) { origin.toDp() } },
                 modifier = Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionInRoot().y },
-                ink = { tallInk = it },
+                ink = { tallInk = it; app.animated.tallInks[tall.video] = it },
                 shown = { covered = true },
                 measured = { w, h -> app.animated.tallPx = w to h },
             ) }
@@ -227,7 +227,7 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
             val artSide = minOf(440.dp, maxHeight - 290.dp, if (panel != null) maxWidth * 0.36f else maxWidth * 0.6f).coerceAtLeast(120.dp)
             Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(48.dp, Alignment.CenterHorizontally)) {
                 // The cover stays until the tall loop's fill is there to take its place.
-                PlayerColumn(app, song, state, ink, artSide, if (tall != null && tallInk == null) PlayerLoop.None else loop, albumId, seen, onTitleTop = { titleTop = it })
+                PlayerColumn(app, song, state, ink, artSide, if (tall != null && tallInk == null) art?.square?.takeIf { it.video.isNotBlank() }?.let { PlayerLoop.Cover(it) } ?: PlayerLoop.None else loop, albumId, seen, onTitleTop = { titleTop = it })
                 if (panel != null) {
                     Box(Modifier.weight(1f).fillMaxHeight()) {
                         when (panel) {

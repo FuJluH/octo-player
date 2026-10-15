@@ -150,7 +150,7 @@ class AnimatedArtTest {
         assertEquals(382.5f, alone.x, 0.01f)
         // Sharp down to an eased band that is gone right at the title.
         assertEquals(640f, alone.fadeEnd, 0.01f)
-        assertEquals(514f, alone.fadeStart, 0.01f)
+        assertEquals(496f, alone.fadeStart, 0.01f)
         // Beside the lyrics: as wide as the cover's side, from the left edge.
         val beside = tallPlacement(900f, 0f, 520f, 276f, titleTop = 640f, aspect = 0.75f, gap = 0f, leastRamp = 96f)
         assertEquals(520f, beside.width, 0.01f)

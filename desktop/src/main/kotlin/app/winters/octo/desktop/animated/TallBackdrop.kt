@@ -19,6 +19,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -83,8 +84,9 @@ data class TallPlacement(val x: Float, val width: Float, val height: Float, val 
 // `areaLeft` to `areaRight`), from the top, centered on `center` within
 // that space. Its top runs clean to the player's edge; towards the title
 // it dissolves into its blurred copy over an eased band (`leastRamp` at
-// least, a seventh of its height on a tall one) that ends `gap` above the
-// title (`titleTop`, or the loop's foot when not known yet).
+// least, a sixth of its height on a tall one) that ends `gap` above the
+// title's top (below it for a negative gap: the words' capitals sit a
+// little under it), or at the loop's foot when that is not known yet.
 fun tallPlacement(
     playerHeight: Float,
     areaLeft: Float,
@@ -100,13 +102,13 @@ fun tallPlacement(
     val height = width / shape
     val x = (center - width / 2f).coerceIn(areaLeft, max(areaLeft, areaRight - width))
     val end = min(height, titleTop?.let { it - gap } ?: height).coerceAtLeast(0f)
-    val start = (end - max(height * 0.14f, leastRamp)).coerceAtLeast(0f)
+    val start = (end - max(height * 0.16f, leastRamp)).coerceAtLeast(0f)
     return TallPlacement(x, width, height, start, end)
 }
 
 // The still's small copy and how the blurred loop is toned so the words
 // read on it, made once per clip.
-class SoftStill(val small: SkiaImage?, val tone: FillTone, val ink: Color)
+class SoftStill(val small: SkiaImage?, val tiny: SkiaImage?, val tone: FillTone, val ink: Color)
 
 // Shrinks the still to the blurred copy's size and works out its tone;
 // without a still, the clip's color.
@@ -123,8 +125,12 @@ fun softStill(still: SkiaImage?, color: Color, aspect: Float): SoftStill {
     }
     val small = surface.makeImageSnapshot()
     surface.close()
+    val little = Surface.makeRasterN32Premul(max(2, w / 2), max(2, h / 2))
+    little.canvas.drawImageRect(small, Rect.makeWH(w.toFloat(), h.toFloat()), Rect.makeWH(little.width.toFloat(), little.height.toFloat()), FilterMipmap(FilterMode.LINEAR, MipmapMode.LINEAR), edgePaint(), true)
+    val tiny = little.makeImageSnapshot()
+    little.close()
     val tone = fillTone(lightnesses(small))
-    return SoftStill(small, tone, if (tone.white) Color.White else DarkInk)
+    return SoftStill(small, tiny, tone, if (tone.white) Color.White else DarkInk)
 }
 
 // How the fill is toned for its words: white words on a fill darkened by
@@ -140,6 +146,10 @@ data class FillTone(val white: Boolean, val scale: Float, val lift: Float) {
     )
 }
 
+// The contrast white words get over nearly all of the fill: more than the
+// 4.5:1 a word needs, so the lyrics' quieter lines read too.
+private const val WhiteRatio = 6.5
+
 // The tone that gives the words at least 4.5:1 over nearly all of the
 // fill (all but its brightest or darkest twentieth): white words when they
 // read better on its middle, darkening it as far as needed; else dark
@@ -152,7 +162,7 @@ fun fillTone(lightness: List<Triple<Float, Float, Float>>): FillTone {
     val darkRatio = (middle + 0.05) / (luminanceOf(DarkInk) + 0.05)
     if (whiteRatio >= darkRatio) {
         var scale = 1f
-        while (scale > 0.2f && lightness.quantile(0.95, scale, 0f) > 1.05 / 4.5 - 0.05) scale -= 0.04f
+        while (scale > 0.2f && lightness.quantile(0.95, scale, 0f) > 1.05 / WhiteRatio - 0.05) scale -= 0.04f
         return FillTone(true, scale, 0f)
     }
     var lift = 0f
@@ -225,7 +235,7 @@ fun TallBackdrop(
         val place = with(density) {
             tallPlacement(
                 maxHeight.toPx(), areaLeft.toPx(), areaRight.toPx(), center.toPx(), titleTop?.toPx(),
-                aspect, gap = 0f, leastRamp = 96.dp.toPx(),
+                aspect, gap = -16.dp.toPx(), leastRamp = 148.dp.toPx(),
             )
         }
         val playerWidth = with(density) { maxWidth.toPx() }
@@ -278,12 +288,23 @@ fun TallBackdrop(
             val height: Dp = with(density) { place.height.toDp() }
             val atLeft = place.x <= 1f
             val atRight = place.right >= playerWidth - 1f
-            // The blurred loop over the whole player, scaled to cover it.
+            // The blurred loop over the whole player: its tiniest copy at the
+            // sharp loop's place and size, its edge colors carried out to the
+            // player's edges, so the colors beside the loop are its own.
+            fun tinyNow(): SkiaImage? {
+                feed.tinies?.arrived?.intValue
+                return feed.tinies?.take()?.takeIf { feed.frames.arrived.intValue > 0 } ?: ready.tiny
+            }
             Spacer(
                 Modifier.fillMaxSize().drawBehind {
                     feed.frames.arrived.intValue
-                    val image = smallNow() ?: return@drawBehind
-                    drawIntoCanvas { smoothCover(it.skiaCanvas, image, size.width, size.height, blurPaint) }
+                    val image = tinyNow() ?: return@drawBehind
+                    val local = Matrix33.makeTranslate(place.x, 0f).makeConcat(
+                        Matrix33.makeScale(place.width / image.width, place.height / image.height),
+                    )
+                    blurPaint.shader = image.makeShader(FilterTileMode.CLAMP, FilterTileMode.CLAMP, Smooth, local)
+                    drawIntoCanvas { it.skiaCanvas.drawRect(Rect.makeWH(size.width, size.height), blurPaint) }
+                    blurPaint.shader = null
                 },
             )
             // And at the sharp loop's own place and size, so what the sharp
@@ -328,17 +349,36 @@ fun TallBackdrop(
                     .drawBehind {
                         feed.frames.arrived.intValue
                         drawIntoCanvas { canvas ->
-                            still?.let { coverDraw(canvas.skiaCanvas, it, size.width, size.height, sharpPaint) }
+                            still?.let { coverDraw(canvas.skiaCanvas, it, size.width, size.height, sharpPaint, TopTrim) }
                             val frame = feed.frames.take() ?: return@drawIntoCanvas
                             sharpPaint.alpha = (feed.fade.value * 255).roundToInt()
-                            coverDraw(canvas.skiaCanvas, frame, size.width, size.height, sharpPaint)
+                            coverDraw(canvas.skiaCanvas, frame, size.width, size.height, sharpPaint, TopTrim)
                             sharpPaint.alpha = 255
                         }
                     },
             )
+            // A soft spot behind the window's own buttons at the top left,
+            // so they read over a light loop; the top edge stays clean.
+            Spacer(
+                Modifier.fillMaxSize().drawBehind {
+                    val spot = Offset(64.dp.toPx(), 20.dp.toPx())
+                    drawRect(
+                        Brush.radialGradient(
+                            0f to shade.copy(alpha = 0.26f),
+                            0.55f to shade.copy(alpha = 0.12f),
+                            1f to Color.Transparent,
+                            center = spot,
+                            radius = 120.dp.toPx(),
+                        ),
+                    )
+                },
+            )
         }
     }
 }
+
+// Rows left off the top of the tall loop: Apple's carry a darker first row.
+private const val TopTrim = 2f
 
 // Opaque down to the band's start, then eased out to nothing at its end.
 private fun footMask(place: TallPlacement): Brush {

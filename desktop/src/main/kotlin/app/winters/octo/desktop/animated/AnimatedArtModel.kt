@@ -77,6 +77,10 @@ class AnimatedArtModel(
     @Volatile var squarePx: Int = 600
     @Volatile var tallPx: Pair<Int, Int> = 675 to 900
 
+    // The words' color over each tall loop once worked out, by its video,
+    // so the player opens straight onto it the next time.
+    val tallInks = java.util.concurrent.ConcurrentHashMap<String, androidx.compose.ui.graphics.Color>()
+
     // The loop files on screen, which trimming the shelf keeps.
     private val onScreen = HashSet<File>()
 
