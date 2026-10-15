@@ -25,8 +25,8 @@ struct QueueEntry: Identifiable, Equatable {
 enum QueuePlace { case played, now, coming }
 
 private let queueRowHeight: CGFloat = 56
-private let comingFill = OctoColor.background.mix(with: OctoColor.accent, by: 0.05)
-private let nowFill = Color(hex: 0x1A1A1B).mix(with: OctoColor.accent, by: 0.12)
+private var comingFill: Color { OctoColor.background.mix(with: OctoColor.accent, by: 0.05) }
+private var nowFill: Color { Color(hex: 0x1A1A1B).mix(with: OctoColor.accent, by: 0.12) }
 
 /// Up next, in a sheet: the songs already played, the song on now in its own card, and the songs
 /// to come in the order they play. A song to come can be dragged by its handle to another place

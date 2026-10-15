@@ -4,6 +4,14 @@ import SwiftUI
 // Octo's glass on iPhone is Apple's Liquid Glass. Each surface keeps Octo's shape, size, film
 // and shadow: the film tints the glass, and floating glass casts a soft shadow pooled under it.
 
+extension Glass {
+    /// Apple's regular glass, carrying the accent while Color the glass is on; untinted otherwise.
+    static var octo: Glass {
+        let accent = AccentState.shared
+        return accent.glassTinted ? .regular.tint(accent.film) : .regular
+    }
+}
+
 extension View {
     /// Octo's glass in `shape`, with `film` laid into it. `interactive` lets it answer the
     /// finger the way Liquid Glass controls do.

@@ -7,7 +7,7 @@ enum SoundStyle {
     /// Buttons, tabs and quiet actions: 13.5 semibold.
     static let label = Font.system(size: 13.5, weight: .semibold)
     /// The accent button's fill: the accent taken nearly halfway to black.
-    static let accentFill = OctoColor.accent.mix(with: .black, by: 0.45)
+    static var accentFill: Color { OctoColor.accent.mix(with: .black, by: 0.45) }
     /// The darker pill that marks the chosen item inside glass.
     static let pill = Color.black.opacity(0.72)
     /// The springs the sliders move on.
@@ -197,7 +197,7 @@ struct SoundGlassButtonStyle: ButtonStyle {
             .lineLimit(1)
             .padding(.horizontal, 24)
             .frame(height: 50)
-            .glassEffect(accent ? .regular.tint(SoundStyle.accentFill).interactive() : .regular.interactive(), in: .capsule)
+            .glassEffect(accent ? .regular.tint(SoundStyle.accentFill).interactive() : Glass.octo.interactive(), in: .capsule)
             .scaleEffect(configuration.isPressed ? 0.96 : 1)
             .opacity(enabled ? 1 : 0.5)
             .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
@@ -244,7 +244,7 @@ struct SoundSegmented: View {
             .padding(4)
         }
         .frame(height: 40)
-        .glassEffect(.regular, in: .capsule)
+        .glassEffect(Glass.octo, in: .capsule)
         .overlay(Capsule().strokeBorder(OctoColor.accent.opacity(0.25), lineWidth: 0.5))
     }
 }
@@ -272,7 +272,7 @@ struct SoundPresetBar: View {
         .scrollPosition(id: $position, anchor: .leading)
         .frame(height: 44)
         .clipShape(Capsule())
-        .glassEffect(.regular, in: .capsule)
+        .glassEffect(Glass.octo, in: .capsule)
         .onAppear {
             // Opens with the chosen preset in view; it does not follow it later.
             if !choices.isEmpty { position = choices[PresetChoice.firstShown(choices, label: selected)].key }
@@ -349,7 +349,7 @@ struct SoundHoldButton: View {
             .foregroundStyle(OctoColor.textPrimary)
             .padding(.horizontal, 24)
             .frame(height: 48)
-            .glassEffect(held ? .regular.tint(OctoColor.accent.opacity(0.07)).interactive() : .regular.interactive(), in: .capsule)
+            .glassEffect(held ? .regular.tint(OctoColor.accent.opacity(0.07)).interactive() : Glass.octo.interactive(), in: .capsule)
             .opacity(enabled || held ? 1 : 0.6)
             .contentShape(Capsule())
             // The press is followed for as long as it lasts, even as the page changes under it.

@@ -275,7 +275,7 @@ private struct ChoiceChip: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 14)
         .frame(minHeight: 44)
-        .glassEffect(.regular.interactive(), in: .capsule)
+        .glassEffect(Glass.octo.interactive(), in: .capsule)
         .contentShape(Capsule())
     }
 }
@@ -405,7 +405,7 @@ private struct ChooserBackground: ViewModifier {
             content
         } else {
             content
-                .glassEffect(.regular, in: .rect(cornerRadius: 20))
+                .glassEffect(Glass.octo, in: .rect(cornerRadius: 20))
                 .padding(.horizontal, 20)
         }
     }
@@ -429,7 +429,7 @@ struct FindNearbyCard: View {
                     .foregroundStyle(.white)
                 }
                 .frame(width: Self.size, height: Self.size)
-                .glassEffect(.regular, in: .rect(cornerRadius: OctoRadius.artS))
+                .glassEffect(Glass.octo, in: .rect(cornerRadius: OctoRadius.artS))
                 Text("Find stations near you").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white).lineLimit(2)
             }
             .frame(width: Self.size, alignment: .leading)

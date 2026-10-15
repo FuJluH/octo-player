@@ -62,7 +62,7 @@ struct DownloadsPill: View {
                     .animation(.easeInOut(duration: calm ? 0.08 : 0.16), value: words)
                 }
                 .buttonStyle(.plain)
-                .glassEffect(.regular.interactive(), in: .capsule)
+                .glassEffect(Glass.octo.interactive(), in: .capsule)
                 .clipShape(Capsule())
                 .animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: calm ? 0.1 : 0.2), value: more)
                 .accessibilityElement(children: .ignore)

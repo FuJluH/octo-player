@@ -2,8 +2,8 @@ import OctoKit
 import SwiftUI
 import UIKit
 
-/// How the app looks: the artwork's colors glowing behind the pages, how strongly and where,
-/// Home's sections, the player's background, playlist covers, and how much moves.
+/// How the app looks: the accent, the artwork's colors glowing behind the pages, how strongly and
+/// where, Home's sections, the player's background, playlist covers, and how much moves.
 struct AppearanceSettingsPage: View {
     var highlight: String?
     @State private var settings = AppSettings.shared
@@ -12,6 +12,10 @@ struct AppearanceSettingsPage: View {
         let prefs = settings.player
         let ambient = prefs.ambient
         SettingsPageFrame(title: SettingsPage.appearance.title, highlight: highlight) {
+            SettingsGroup {
+                AccentPickerRow()
+                GlassTintRow()
+            }
             AmbientPreview(strength: ambient.strength).padding(.horizontal, 16)
             SettingsGroup {
                 ChoiceRow(SettingsIndex.ambient, value: ambient.strength.label, question: SettingsQuestion(

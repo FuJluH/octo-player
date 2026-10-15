@@ -675,7 +675,7 @@ struct StationCard: View {
             .frame(width: 22, height: 22)
             .foregroundStyle(.white)
             .padding(8)
-            .glassEffect(.regular.interactive(), in: .circle)
+            .glassEffect(Glass.octo.interactive(), in: .circle)
             .frame(width: 44, height: 44)
             .contentShape(Rectangle())
         }

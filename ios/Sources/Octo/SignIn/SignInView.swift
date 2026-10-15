@@ -216,7 +216,7 @@ struct SignInView: View {
             }
         }
         .padding(16)
-        .glassEffect(.regular, in: .rect(cornerRadius: 22))
+        .glassEffect(Glass.octo, in: .rect(cornerRadius: 22))
     }
 
     private func errorLine(_ text: String) -> some View {
@@ -573,7 +573,7 @@ struct TrustSheet: View {
                 .scrollBounceBehavior(.basedOnSize)
         }
         .frame(maxWidth: 380)
-        .glassEffect(.regular, in: .rect(cornerRadius: 20))
+        .glassEffect(Glass.octo, in: .rect(cornerRadius: 20))
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black.opacity(0.45).ignoresSafeArea().onTapGesture(perform: cancel))

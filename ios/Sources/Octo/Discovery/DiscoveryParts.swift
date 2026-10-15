@@ -6,7 +6,7 @@ enum DiscoveryStyle {
     /// Octo's label style: small buttons, chips and choices.
     static let label = Font.system(size: 13.5, weight: .semibold)
     /// The darker pill a chosen chip sits in.
-    static let accentSelected = Color.black.mix(with: OctoColor.accent, by: 0.40)
+    static var accentSelected: Color { Color.black.mix(with: OctoColor.accent, by: 0.40) }
     static let orange = Color(hex: 0xFF9500)
     static let green = Color(hex: 0x28CD41)
     static let red = Color(hex: 0xFF3B30)

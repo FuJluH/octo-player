@@ -186,10 +186,18 @@ struct ServerPage: View {
 
     // MARK: On the server
 
+    /// Shared links and, for an admin, a library scan. The server's radio stations are under
+    /// Settings, Radio.
+    @ViewBuilder
     private var onTheServer: some View {
+        if controls.sharing || controls.isAdmin {
+            onTheServerGroup
+        }
+    }
+
+    private var onTheServerGroup: some View {
         return SettingsGroup(title: "On the server", icon: SettingsIcon.cloud) {
             if controls.sharing { AccountLinkRow(entry: SettingsIndex.shares, route: .shares) }
-            AccountLinkRow(entry: SettingsIndex.radioStations, route: .radioStations)
             if controls.isAdmin {
                 let scan = controls.scan
                 let scanning = if case .scanning = scan { true } else { false }

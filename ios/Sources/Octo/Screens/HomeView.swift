@@ -244,7 +244,7 @@ struct HomeView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: .rect(cornerRadius: 20))
+        .glassEffect(Glass.octo, in: .rect(cornerRadius: 20))
         .padding(.horizontal, 20)
         .padding(.bottom, 12)
     }
@@ -262,7 +262,7 @@ struct HomeView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: .rect(cornerRadius: 20))
+        .glassEffect(Glass.octo, in: .rect(cornerRadius: 20))
         .padding(.horizontal, 20)
         .padding(.bottom, 8)
         .transition(.opacity.combined(with: .move(edge: .top)))

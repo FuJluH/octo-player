@@ -4,7 +4,7 @@ import SwiftUI
 /// The tokens the library pages use beyond the shared palette.
 enum LibraryLook {
     /// A selected row: the accent 40% of the way out of black.
-    static let accentSelected = Color.black.mix(with: OctoColor.accent, by: 0.4)
+    static var accentSelected: Color { Color.black.mix(with: OctoColor.accent, by: 0.4) }
     /// A hairline between rows.
     static let hairline = Color.white.opacity(0.08)
     /// The small bold words of buttons and chips.
@@ -12,7 +12,7 @@ enum LibraryLook {
     static let labelMedium = Font.system(size: 13.5, weight: .medium)
     /// Lifted glass: a little brighter than the resting glass, for the main button of a pair.
     static let lifted = Glass.regular.tint(.white.opacity(0.14)).interactive()
-    static let resting = Glass.regular.interactive()
+    static var resting: Glass { Glass.octo.interactive() }
 }
 
 /// Play and Shuffle across a detail page: two glass capsules of equal width. Play has the lifted
@@ -469,7 +469,7 @@ struct LetterRail: View {
                         .font(.octoTitle)
                         .foregroundStyle(.white)
                         .frame(width: 64, height: 64)
-                        .glassEffect(.regular, in: .circle)
+                        .glassEffect(Glass.octo, in: .circle)
                         .offset(x: -(24 + 16), y: slot * (CGFloat(touched) + 0.5) - 32)
                         .transition(.asymmetric(
                             insertion: .scale(scale: 0.85).combined(with: .opacity).animation(.easeOut(duration: 0.12)),

@@ -159,6 +159,8 @@ final class AppSettings {
     /// Motion. Read wherever motion is drawn.
     var motionReduced: Bool { player.reduceMotion || UIAccessibility.isReduceMotionEnabled }
     func setLibraryOnly(_ on: Bool) { update { $0.libraryOnly = on } }
+    func setAccent(_ accent: AccentChoice) { update { $0.accent = accent } }
+    func setGlassTint(_ on: Bool) { update { $0.glassTint = on } }
     func setAmbientStrength(_ strength: AmbientStrength) { update { $0.ambient.strength = strength } }
 
     func setAmbientArea(_ area: AmbientArea, _ on: Bool) {
@@ -477,6 +479,8 @@ final class AppSettings {
         static let castRenderers = "cast_renderers"
         static let castKeepPlaying = "cast_keep_playing"
         static let libraryOnly = "library_only"
+        static let accent = "accent_color"
+        static let glassTint = "accent_glass"
 
         static let cacheSize = "cache_size"
         static let prefetchWifi = "prefetch_wifi"
@@ -551,6 +555,8 @@ final class AppSettings {
         p.castRenderers = bool(Keys.castRenderers, d.castRenderers)
         p.castKeepPlaying = bool(Keys.castKeepPlaying, d.castKeepPlaying)
         p.libraryOnly = bool(Keys.libraryOnly, d.libraryOnly)
+        p.accent = AccentChoice.stored(s.string(forKey: Keys.accent), or: d.accent)
+        p.glassTint = bool(Keys.glassTint, d.glassTint)
         return p.sane()
     }
 
@@ -592,6 +598,8 @@ final class AppSettings {
         put(\.castRenderers, Keys.castRenderers)
         put(\.castKeepPlaying, Keys.castKeepPlaying)
         put(\.libraryOnly, Keys.libraryOnly)
+        put(\.accent, Keys.accent) { $0.storedName }
+        put(\.glassTint, Keys.glassTint)
     }
 
     private func writeBackground(_ b: BackgroundPrefs) {

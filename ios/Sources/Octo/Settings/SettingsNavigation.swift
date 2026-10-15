@@ -36,14 +36,14 @@ final class SettingsNavigator {
     private init() {}
 
     /// Runs one debug launch step:
-    /// - `settings:PAGE` opens a settings page (`playback`, `sound`, `appearance`, `library`,
+    /// - `settings:PAGE` opens a settings page (`playback`, `sound`, `radio`, `appearance`, `library`,
     ///   `server`, `streaming`, `audioquality`, `lyrics`, `scrobbling`, `backup`, `about`), and
     ///   `settings:PAGE@ROW` lights that row as a search result does; `settings:homesections`
     ///   opens the Home sections page
     /// - `settings-search:TEXT` types TEXT into the front page's search
     /// - `popup:NAME` opens that popover, sheet or question on the page in front: `speed`,
     ///   `change_password`, `disconnect` and `remove_server` (Server and sync), `delete_link`
-    ///   (Shared links, the first), `add_station` (Radio stations, for an admin),
+    ///   (Shared links, the first), `add_station` (Stations on your server, for an admin),
     ///   `reset_password` (Family, the first member), `paste_list` and `remove_list` (Import, the
     ///   first list), `rename_live_list` and `delete_live_list` (a live list), `save_playlist`
     ///   (Up next), `reset_home_sections` (Home sections). A choice row's answers and every other menu are system menus, which only a
@@ -155,6 +155,7 @@ struct SettingsDestination: View {
         switch route.page {
         case .playback: PlaybackSettingsPage(highlight: route.highlight)
         case .sound: SoundPage().detailPage()
+        case .radio: RadioSettingsPage(highlight: route.highlight)
         case .appearance: AppearanceSettingsPage(highlight: route.highlight)
         case .library: LibrarySettingsPage(highlight: route.highlight)
         case .server: ServerPage(highlight: route.highlight)

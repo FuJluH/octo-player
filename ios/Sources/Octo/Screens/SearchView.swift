@@ -120,7 +120,7 @@ struct SearchView: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(OctoColor.accent)
                     .frame(width: 40, height: 40)
-                    .glassEffect(.regular, in: .circle)
+                    .glassEffect(Glass.octo, in: .circle)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Live radio near you").font(.octoBodySmall).foregroundStyle(.white)

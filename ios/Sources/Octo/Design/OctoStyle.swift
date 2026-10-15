@@ -3,30 +3,39 @@ import SwiftUI
 import UIKit
 
 /// Winters' Glass, the palette every Octo app shares. Dark only. On iPhone the glass itself is
-/// Apple's Liquid Glass; these colors are what sits under and in it.
+/// Apple's Liquid Glass; these colors are what sits under and in it. The accent and its family
+/// follow the accent Appearance chose; words stay in Octo's own blue gray whatever it is.
 enum OctoColor {
     static let background = Color(OctoPalette.background)
     /// A low-alpha wash that tints glass panels.
     static let backgroundSecondary = Color(OctoPalette.backgroundSecondary)
     /// The solid surface under cards and glazed controls, and the artwork placeholder tile.
     static let backgroundTertiary = Color(OctoPalette.backgroundTertiary)
-    static let accent = Color(OctoPalette.accent)
-    static let accentHover = Color(OctoPalette.accentHover)
+    /// The accent chosen in Appearance: selected states, sliders, switches, focus rings and
+    /// filled buttons.
+    static var accent: Color { AccentState.shared.color }
+    /// Octo's own blue gray, the default accent.
+    static let octoAccent = Color(OctoPalette.accent)
+    static var accentHover: Color {
+        let accent = AccentState.shared.rgba
+        return accent == OctoPalette.accent ? Color(OctoPalette.accentHover) : Color(mix(accent, .white, 0.22))
+    }
     static let surfaceRaised = Color(OctoPalette.surfaceRaised)
     static let textPrimary = Color.white
-    static let textSecondary = accent
-    /// Four fifths of the accent: 5.8:1 on the page, so it keeps WCAG AA.
+    /// Words stay in Octo's blue gray whatever the accent, so a page reads the same in every color.
+    static let textSecondary = octoAccent
+    /// Four fifths of the blue gray: 5.8:1 on the page, so it keeps WCAG AA.
     static let textMuted = Color(OctoPalette.textMuted)
     static let error = Color(OctoPalette.error)
-    /// A standard button's resting fill.
-    static let accentTonal = Color(OctoPalette.accentTonal)
-    /// A selected list row.
-    static let accentSelected = Color(OctoPalette.accentSelected)
-    /// The filled button.
-    static let accentFill = Color(OctoPalette.accentFill)
-    static let focusRing = Color(OctoPalette.focusRing)
-    /// A menu row under the finger.
-    static let menuPress = Color(OctoPalette.menuPress)
+    /// A standard button's resting fill: a tenth of the accent in a dark gray.
+    static var accentTonal: Color { Color(mix(RGBA(hex: 0x1E1E1E), AccentState.shared.rgba, 0.10)) }
+    /// A selected list row: the accent 40% of the way out of black.
+    static var accentSelected: Color { Color(mix(.black, AccentState.shared.rgba, 0.40)) }
+    /// The filled button: the accent 45% of the way to black.
+    static var accentFill: Color { Color(mix(AccentState.shared.rgba, .black, 0.45)) }
+    static var focusRing: Color { accent.opacity(0.70) }
+    /// A menu row under the finger: the selected row's tint, half as strong.
+    static var menuPress: Color { accentSelected.opacity(0.55) }
     /// A destructive action's words; its icon stays white.
     static let destructive = Color(OctoPalette.destructive)
     static let signalRed = Color(OctoPalette.signalRed)
@@ -36,8 +45,8 @@ enum OctoColor {
     static let signalBlue = Color(OctoPalette.signalBlue)
     /// A sheet's nearly solid fill.
     static let sheetFill = Color(OctoPalette.sheetFill)
-    /// The film in Octo's glass: the faintest dim.
-    static let glazeFilm = Color(OctoPalette.glazeFilm)
+    /// The film in Octo's glass: the faintest dim, carrying the accent while Color the glass is on.
+    static var glazeFilm: Color { AccentState.shared.film }
     /// The darker pill that marks the chosen item inside glass.
     static let glazeSelected = Color(OctoPalette.glazeSelected)
     /// Hairlines between rows of a menu.

@@ -1,8 +1,8 @@
 import OctoKit
 import SwiftUI
 
-/// How songs play: blending, speed, skipping silence, Autoplay and how radio is tuned, music
-/// coming back when headphones connect, and what happens when casting ends.
+/// How songs play: blending, speed, skipping silence, Autoplay, music coming back when
+/// headphones connect, and what happens when casting ends. Radio has a page of its own.
 struct PlaybackSettingsPage: View {
     var highlight: String?
     @State private var settings = AppSettings.shared
@@ -17,12 +17,12 @@ struct PlaybackSettingsPage: View {
                 ToggleRow(SettingsIndex.crossfade, isOn: prefs.crossfade, helper: "Albums played in order stay gapless.", onChange: settings.setCrossfade)
                 if prefs.crossfade {
                     crossfadeLength(prefs.crossfadeSeconds)
-                    if prefs.smartTransitions {
-                        ActionRow(SettingsIndex.crossfadeCurve, helper: "Automix picks the curve for each transition.", enabled: false) {}
-                    } else {
-                        PopoverRow(SettingsIndex.crossfadeCurve, value: prefs.crossfadeCurve.label, isPresented: $curveOpen) {
-                            FadeCurveCard { curveOpen = false }.frame(width: 340)
-                        }
+                    // With Smart transitions on they pick the curve; the row says so and names
+                    // the switch under it that frees the choice.
+                    let curve = curveRowLook(prefs.crossfadeCurve, smartTransitions: prefs.smartTransitions)
+                    PopoverRow(SettingsIndex.crossfadeCurve, value: curve.value, helper: curve.helper, enabled: curve.choosable,
+                               isPresented: $curveOpen) {
+                        FadeCurveCard { curveOpen = false }.frame(width: 340)
                     }
                     ToggleRow(SettingsIndex.smartTransitions, isOn: prefs.smartTransitions,
                               helper: "Each blend starts where the two songs meet best, on the beat when it can. Off blends at the end of each song.",
@@ -39,21 +39,9 @@ struct PlaybackSettingsPage: View {
                     PaceCard().frame(width: 320)
                 }
                 ToggleRow(SettingsIndex.skipSilence, isOn: prefs.skipSilence, onChange: settings.setSkipSilence)
-                ToggleRow(SettingsIndex.autoplay, isOn: prefs.autoplay, helper: "When the queue ends, similar songs keep playing.",
+                ToggleRow(SettingsIndex.autoplay, isOn: prefs.autoplay,
+                          helper: "When the queue ends, similar songs keep playing, picked as Radio settings say.",
                           onChange: settings.setAutoplay)
-            }
-            SettingsGroup(title: "Radio", icon: SettingsIcon.radio) {
-                ChoiceRow(SettingsIndex.radioDiscovery, value: prefs.radioDiscovery.label, question: SettingsQuestion(
-                    SettingsIndex.radioDiscovery.title, RadioDiscovery.allCases, current: prefs.radioDiscovery,
-                    answer: { SettingsAnswer($0.label, $0.detail) }, pick: settings.setRadioDiscovery))
-                ChoiceRow(SettingsIndex.radioAdventure, value: prefs.radioAdventure.label, question: SettingsQuestion(
-                    SettingsIndex.radioAdventure.title, RadioAdventure.allCases, current: prefs.radioAdventure,
-                    answer: { SettingsAnswer($0.label, $0.detail) }, pick: settings.setRadioAdventure))
-                ChoiceRow(SettingsIndex.radioVariety, value: prefs.radioVariety.label, question: SettingsQuestion(
-                    SettingsIndex.radioVariety.title, RadioVariety.allCases, current: prefs.radioVariety,
-                    answer: { SettingsAnswer($0.label, $0.detail) }, pick: settings.setRadioVariety))
-                ToggleRow(SettingsIndex.radioFavorites, isOn: prefs.radioFavorites,
-                          helper: "Songs you hearted or rated 4 or 5 stars come around more often.", onChange: settings.setRadioFavorites)
             }
             SettingsGroup(title: "Headphones", icon: SettingsIcon.headphones,
                           footer: prefs.resumeWired || prefs.resumeBluetooth ? "Only while Octo is open or paused in the background." : nil) {
@@ -98,12 +86,17 @@ struct PlaybackSettingsPage: View {
 struct PopoverRow<Card: View>: View {
     let entry: SettingEntry?
     let value: String
+    var helper: String?
+    var enabled = true
     @Binding var isPresented: Bool
     let card: () -> Card
 
-    init(_ entry: SettingEntry?, value: String, isPresented: Binding<Bool>, @ViewBuilder card: @escaping () -> Card) {
+    init(_ entry: SettingEntry?, value: String, helper: String? = nil, enabled: Bool = true, isPresented: Binding<Bool>,
+         @ViewBuilder card: @escaping () -> Card) {
         self.entry = entry
         self.value = value
+        self.helper = helper
+        self.enabled = enabled
         _isPresented = isPresented
         self.card = card
     }
@@ -112,15 +105,20 @@ struct PopoverRow<Card: View>: View {
         Button { isPresented = true } label: {
             RowFrame(entry: entry) {
                 TitleValueLayout {
-                    Text(entry?.title ?? "")
-                        .font(.octoBody)
-                        .foregroundStyle(OctoColor.textPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .layoutValue(key: RowShare.self, value: 1)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(entry?.title ?? "")
+                            .font(.octoBody)
+                            .foregroundStyle(enabled ? OctoColor.textPrimary : OctoColor.textMuted)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let helper {
+                            Text(helper).font(.octoCaption).foregroundStyle(OctoColor.textMuted).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutValue(key: RowShare.self, value: 1)
                     Text(value)
                         .font(.octoBodySmall)
-                        .foregroundStyle(OctoColor.textSecondary)
+                        .foregroundStyle(enabled ? OctoColor.textSecondary : OctoColor.textMuted)
                         .multilineTextAlignment(.trailing)
                         .lineLimit(2)
                         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -129,13 +127,16 @@ struct PopoverRow<Card: View>: View {
                         .font(.system(size: 13, weight: .semibold))
                         .frame(width: 18, height: 18)
                         .foregroundStyle(OctoColor.textMuted)
+                        .opacity(enabled ? 1 : 0.5)
                         .accessibilityHidden(true)
                 }
             }
         }
         .buttonStyle(SettingsRowPress())
+        .disabled(!enabled)
         .accessibilityLabel(entry?.title ?? "")
         .accessibilityValue(value)
+        .accessibilityHint(helper ?? "")
         .glassPopover(isPresented: $isPresented, content: card)
     }
 }

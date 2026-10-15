@@ -17,7 +17,7 @@ struct RadioStationsScreen: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                ScreenTitle("Radio stations")
+                ScreenTitle(SettingsIndex.radioStations.title)
                 if controls.isAdmin {
                     GlazeButton("Add station", size: .medium) {
                         problem = nil
@@ -41,7 +41,22 @@ struct RadioStationsScreen: View {
                         .foregroundStyle(OctoColor.textMuted)
                         .padding(.horizontal, 20)
                         .padding(.vertical, 4)
+                    if !controls.isAdmin {
+                        Text(RadioWords.stationsNotAdmin)
+                            .font(.octoBodySmall)
+                            .foregroundStyle(OctoColor.textMuted)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 4)
+                    }
                 case .ready(let list):
+                    // Why there is no Add or Edit.
+                    if !controls.isAdmin {
+                        Text(RadioWords.stationsNotAdmin)
+                            .font(.octoBodySmall)
+                            .foregroundStyle(OctoColor.textMuted)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 4)
+                    }
                     ForEach(list) { station in row(station, readOnly: !controls.canEdit(stationId: station.id, coverArt: station.coverArt), admin: controls.isAdmin) }
                 }
             }

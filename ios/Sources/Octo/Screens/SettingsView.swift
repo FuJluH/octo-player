@@ -137,6 +137,8 @@ struct SettingsView: View {
                             summary: SettingsSummaries.playback(player), to: SettingsRoute(.playback))
                 CategoryRow(icon: SettingsIcon.sound, title: SettingsPage.sound.title,
                             summary: SoundEdits.soundSummary(sound.current), to: Route.sound)
+                CategoryRow(icon: SettingsIcon.radio, title: SettingsPage.radio.title,
+                            summary: SettingsSummaries.radio(player), to: SettingsRoute(.radio))
                 CategoryRow(icon: SettingsIcon.appearance, title: SettingsPage.appearance.title,
                             summary: SettingsSummaries.appearance(player.ambient, liveBackground: player.liveBackground),
                             to: SettingsRoute(.appearance))
@@ -282,7 +284,7 @@ struct SettingsSearchField: View {
         .frame(height: 48)
         .background(OctoColor.accent.opacity(on ? 0.15 : 0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(OctoColor.accent.opacity(on ? 0.6 : 0.1), lineWidth: on ? 1.5 : 1))
-        .glassEffect(.regular, in: .rect(cornerRadius: 12))
+        .glassEffect(Glass.octo, in: .rect(cornerRadius: 12))
         .animation(.easeOut(duration: 0.2), value: on)
     }
 }

@@ -101,7 +101,6 @@ struct OctoApp: App {
                 .environment(accounts)
                 .task { accounts.start() }
                 .motionScaled(motion)
-                .tint(OctoColor.accent)
                 .preferredColorScheme(.dark)
                 #if DEBUG
                 .task { PlaybackDrive.install(player: player, router: router, overlays: overlays)
@@ -122,5 +121,6 @@ struct RootView: View {
     var body: some View {
         MainShell()
             .systemEntries()
+            .keepsAccent()
     }
 }

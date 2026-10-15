@@ -233,7 +233,7 @@ struct SongsPage: View {
             }
             .padding(.leading, 14)
             .frame(minHeight: 44)
-            .glassEffect(.regular, in: .capsule)
+            .glassEffect(Glass.octo, in: .capsule)
             .padding(.horizontal, 20)
             ScrollView(.horizontal) {
                 HStack(spacing: 8) {
