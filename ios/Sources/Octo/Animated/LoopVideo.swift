@@ -157,8 +157,9 @@ final class LoopVideoView: UIView {
         posterLayer.contentsGravity = .resizeAspectFill
         posterLayer.opacity = 0
         frontHost.layer.addSublayer(posterLayer)
-        // Eased out: whole, then quickly softer, then a long tail into nothing.
-        fadeMask.colors = [1.0, 1.0, 0.82, 0.5, 0.2, 0.05, 0.0].map { UIColor.black.withAlphaComponent($0).cgColor }
+        // Eased in and out: the sharp loop gives way to its blurred copy slowly, then steadily,
+        // then slowly again, so no line shows where the blur begins or ends.
+        fadeMask.colors = [1.0, 1.0, 0.94, 0.72, 0.38, 0.1, 0.0].map { UIColor.black.withAlphaComponent($0).cgColor }
         blur.isUserInteractionEnabled = false
         addSubview(blur)
     }

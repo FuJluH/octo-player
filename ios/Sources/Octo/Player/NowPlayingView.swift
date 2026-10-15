@@ -27,8 +27,8 @@ struct NowPlayingView: View {
     /// The full-screen loop (or its still) fills the player: the card steps aside and the words
     /// take the loop's shade.
     @State private var backdropCovers = false
-    /// The top of the full-screen loop is light, so the status bar draws dark.
-    @State private var loopTopLight: Bool?
+    /// How the full-screen loop looks: its top for the status bar, its blurred colors for the words.
+    @State private var loopLooks: LoopLook?
     /// Where the title row sits, for a full-screen loop to fade out above it.
     @State private var backdropFit = BackdropTitle()
 
@@ -82,13 +82,21 @@ struct NowPlayingView: View {
     /// Where the playing album's animated art goes, as the setting has it.
     private var loop: PlayerLoop { settings.animatedArt.inPlayer(animated.known(loopAlbumId)) }
 
-    /// The shade a full-screen loop sits on: its own color, else the cover's.
+    /// The color the words over a full-screen loop are picked for: the blurred loop's own low
+    /// down, as the bottom's darkening leaves it under the title, once known; else the clip's
+    /// color, else the cover's.
     private func backdropShade(_ clip: AnimatedClip) -> UInt32 {
-        0xFF00_0000 | (clip.colorRgb ?? ((look.colors.dominant ?? look.colors.base) & 0xFF_FFFF))
+        if let under = loopLooks?.under { return OctoKit.overlay(0xFF00_0000, 0.08, under) }
+        return 0xFF00_0000 | (clip.colorRgb ?? ((look.colors.dominant ?? look.colors.base) & 0xFF_FFFF))
     }
     private var ink: Color { colors.content }
     private var muted: Color { overShade ? ink.opacity(0.62) : mutedInk(ink, dark: colors.dark) }
-    private var accent: Color { overShade ? shadedAccent : accentInk(ink, dark: colors.dark) }
+    private var accent: Color {
+        if overShade { return shadedAccent }
+        // White words over the blurred loop: the artist in a light tint of the loop's own color.
+        if backdropCovers, let under = loopLooks?.under { return Color(argb: OctoKit.overlay(0xFFFF_FFFF, 0.72, under)) }
+        return accentInk(ink, dark: colors.dark)
+    }
 
     /// Dark words over a Full screen loop's shade.
     private var overShade: Bool { backdropCovers && colors.dark }
@@ -118,7 +126,7 @@ struct NowPlayingView: View {
                     if case .backdrop(let clip) = loop {
                         BackdropFrame(clip: clip, albumId: loopAlbumId, color: backdropShade(clip), entrance: entrance, pull: pull,
                                       fit: backdropFit, lyricsOpen: lyrics.open, covers: { backdropCovers = $0 },
-                                      lightTop: { loopTopLight = $0 })
+                                      looked: { loopLooks = $0 })
                     }
                     Group {
                         if sideways {
@@ -143,7 +151,7 @@ struct NowPlayingView: View {
             }
             .ignoresSafeArea()
         }
-        .background(PlayerStatusBar(dark: backdropCovers ? (loopTopLight ?? colors.dark) : colors.dark))
+        .background(PlayerStatusBar(dark: backdropCovers ? (loopLooks?.topLight ?? colors.dark) : colors.dark))
         .sensoryFeedback(.impact(flexibility: .rigid, intensity: 0.8), trigger: ticks)
         .onChange(of: dragging) { _, now in
             guard !now, book.axis != .undecided else {
@@ -980,11 +988,11 @@ private struct BackdropFrame: View {
     let fit: BackdropTitle
     let lyricsOpen: Bool
     let covers: (Bool) -> Void
-    let lightTop: (Bool) -> Void
+    let looked: (LoopLook) -> Void
 
     var body: some View {
         PlayerBackdrop(clip: clip, albumId: albumId, color: color, titleTop: fit.top, shown: !entrance.closing,
-                       held: pull.distance > 0, lyricsOpen: lyricsOpen, covers: covers, lightTop: lightTop)
+                       held: pull.distance > 0, lyricsOpen: lyricsOpen, covers: covers, looked: looked)
     }
 }
 

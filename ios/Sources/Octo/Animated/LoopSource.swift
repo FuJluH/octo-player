@@ -70,12 +70,12 @@ actor LoopSource {
         return file
     }
 
-    /// Whether the top `share` of the loop's first frame is light, by its average brightness.
-    func topIsLight(_ file: URL, share: CGFloat) async -> Bool? {
+    /// How the loop's first frame looks: whether its top is light, and its colors low down.
+    func look(_ file: URL, topShare: CGFloat) async -> LoopLook? {
         let generator = AVAssetImageGenerator(asset: AVURLAsset(url: file))
         generator.maximumSize = CGSize(width: 96, height: 128)
         guard let frame = try? await generator.image(at: .zero).image else { return nil }
-        return loopTopIsLight(frame, share: share)
+        return loopLook(frame, topShare: topShare)
     }
 
     /// The clip's still, from the downloaded album or the shelf, fetched when needed.
@@ -94,28 +94,44 @@ actor LoopSource {
     }
 }
 
-/// Whether the top `share` of a picture is light enough that dark words read better on it than
-/// white ones: its average relative luminance over 0.4.
-func loopTopIsLight(_ picture: CGImage?, share: CGFloat) -> Bool? {
+/// What the player takes from a loop's picture: whether its top (under the status bar) is light,
+/// and the average color of its lower part, which is what the blurred loop shows behind the
+/// title and the controls (`0xFFRRGGBB`).
+struct LoopLook: Equatable {
+    var topLight: Bool
+    var under: UInt32
+}
+
+/// The look of a picture whose top `topShare` the status bar sits on.
+func loopLook(_ picture: CGImage?, topShare: CGFloat) -> LoopLook? {
     guard let picture, picture.width > 0, picture.height > 0 else { return nil }
-    let rows = max(1, Int((CGFloat(picture.height) * min(max(share, 0), 1)).rounded()))
-    guard let band = picture.cropping(to: CGRect(x: 0, y: 0, width: picture.width, height: rows)) else { return nil }
-    let width = 16, height = 4
-    var bytes = [UInt8](repeating: 0, count: width * height * 4)
-    let drawn: Bool = bytes.withUnsafeMutableBytes { buffer in
-        guard let context = CGContext(data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
-                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
-        else { return false }
-        context.interpolationQuality = .medium
-        context.draw(band, in: CGRect(x: 0, y: 0, width: width, height: height))
-        return true
+    func average(from: CGFloat, to: CGFloat) -> UInt32? {
+        let top = Int((CGFloat(picture.height) * min(max(from, 0), 1)).rounded())
+        let rows = max(1, Int((CGFloat(picture.height) * min(max(to - from, 0), 1)).rounded()))
+        guard let band = picture.cropping(to: CGRect(x: 0, y: top, width: picture.width, height: rows)) else { return nil }
+        let width = 16, height = 4
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let drawn: Bool = bytes.withUnsafeMutableBytes { buffer in
+            guard let context = CGContext(data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                                          space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
+            else { return false }
+            context.interpolationQuality = .medium
+            context.draw(band, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard drawn else { return nil }
+        var r = 0, g = 0, b = 0
+        for i in 0..<(width * height) {
+            r += Int(bytes[i * 4])
+            g += Int(bytes[i * 4 + 1])
+            b += Int(bytes[i * 4 + 2])
+        }
+        let n = width * height
+        return 0xFF00_0000 | UInt32(r / n) << 16 | UInt32(g / n) << 8 | UInt32(b / n)
     }
-    guard drawn else { return nil }
-    var total = 0.0
-    for i in 0..<(width * height) {
-        total += relativeLuminance(0xFF00_0000 | UInt32(bytes[i * 4]) << 16 | UInt32(bytes[i * 4 + 1]) << 8 | UInt32(bytes[i * 4 + 2]))
-    }
-    return total / Double(width * height) > 0.4
+    guard let top = average(from: 0, to: topShare), let under = average(from: 0.55, to: 1) else { return nil }
+    // Over 0.4 relative luminance dark words read better than white ones.
+    return LoopLook(topLight: relativeLuminance(top) > 0.4, under: under)
 }
 
 /// The fetcher for a clip's addresses: one that leads to the server goes with the server's own

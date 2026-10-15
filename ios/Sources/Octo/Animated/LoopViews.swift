@@ -80,9 +80,9 @@ struct PlayerBackdrop: View {
     var held: Bool
     var lyricsOpen: Bool
     var covers: (Bool) -> Void
-    /// Hears whether the top of what is drawn (the still, then the loop) is light, for the status
-    /// bar's color.
-    var lightTop: (Bool) -> Void = { _ in }
+    /// Hears how what is drawn looks (the still, then the loop): for the status bar's color and
+    /// the words' over the blurred loop.
+    var looked: (LoopLook) -> Void = { _ in }
     @Environment(Session.self) private var session
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.octoReduceMotion) private var calm
@@ -93,8 +93,10 @@ struct PlayerBackdrop: View {
     @State private var poster: UIImage?
     @State private var playing = false
 
-    /// How long the loop takes to fade out, in points: a short, soft band ending at the title.
-    private static let fadeLength: CGFloat = 70
+    /// The band the loop blurs over, as a share of the screen's height, and how far above the
+    /// title it is fully blurred, in points.
+    private static let fadeShare: CGFloat = 0.08
+    private static let clearOfTitle: CGFloat = 6
 
     private var play: LoopPlay {
         loopPlay(seen: shown && !held && scenePhase == .active, powerSave: stage.lowPower, reduceMotion: calm)
@@ -103,13 +105,14 @@ struct PlayerBackdrop: View {
     private var covered: Bool { playing || poster != nil }
 
     /// The loop's place: the width of the screen at the clip's own shape (3:4 when it names
-    /// none), clear down to the title's top or its own bottom, whichever is higher, and gone
-    /// there after a short fade.
+    /// none), sharp down to a band about 8% of the screen tall that ends just above the title (or
+    /// at its own bottom, when that is higher), over which it gives way to its blurred copy.
     private func fit(_ size: CGSize) -> LoopBackdropFit {
         let shape = clip.width > 0 && clip.height > 0 ? CGFloat(clip.height) / CGFloat(clip.width) : 4.0 / 3.0
         let height = (size.width * shape).rounded()
-        let gone = max(min(height, titleTop ?? height), Self.fadeLength)
-        return LoopBackdropFit(height: height, fadeStart: max(gone - Self.fadeLength, 0), fadeEnd: gone)
+        let band = (size.height * Self.fadeShare).rounded()
+        let gone = max(min(height, (titleTop ?? height) - Self.clearOfTitle), band)
+        return LoopBackdropFit(height: height, fadeStart: max(gone - band, 0), fadeEnd: gone)
     }
 
     var body: some View {
@@ -137,10 +140,10 @@ struct PlayerBackdrop: View {
                 poster = still
                 // The status bar reads on the top 50 pt.
                 let band = 50 / max(fit.height, 1)
-                if let still, let light = loopTopIsLight(still.cgImage, share: band) { lightTop(light) }
+                if let still, let look = loopLook(still.cgImage, topShare: band) { looked(look) }
                 guard play != .stillOnly, !Task.isCancelled else { return }
                 file = await LoopSource.shared.file(clip, albumId: albumId, shape: .tall, pixels: pixels, fetcher: fetcher)
-                if let file, let light = await LoopSource.shared.topIsLight(file, share: band), !Task.isCancelled { lightTop(light) }
+                if let file, let look = await LoopSource.shared.look(file, topShare: band), !Task.isCancelled { looked(look) }
             }
         }
         .ignoresSafeArea()
@@ -158,21 +161,27 @@ struct PlayerBackdrop: View {
         }
     }
 
-    /// The shade: coming in as the loop fades out, so the blurred color under the controls is
-    /// mostly the shade, and over everything while lyrics show. The top of the loop is left clean.
+    /// The shade: a light trace of the color the words are picked for as the loop blurs, so the
+    /// blurred shapes still show under the title, and a gentle darkening toward the bottom; much
+    /// more of the color while lyrics show. The top of the loop is left clean.
     private func shade(_ fit: LoopBackdropFit, height: CGFloat) -> some View {
         let tint = Color(argb: color)
         let points = max(height, 1)
         let start = fit.fadeStart / points
         let end = fit.fadeEnd / points
         return ZStack {
-            // Eased in with the loop's fade, then steady under the controls.
+            // Eased in with the blur, then held light under the controls.
             LinearGradient(stops: [
                 .init(color: tint.opacity(0), location: start),
-                .init(color: tint.opacity(0.12), location: start + (end - start) * 0.4),
-                .init(color: tint.opacity(0.42), location: start + (end - start) * 0.75),
-                .init(color: tint.opacity(0.62), location: end),
-                .init(color: tint.opacity(0.66), location: 1),
+                .init(color: tint.opacity(0.06), location: start + (end - start) * 0.5),
+                .init(color: tint.opacity(0.16), location: end),
+                .init(color: tint.opacity(0.22), location: 1),
+            ], startPoint: .top, endPoint: .bottom)
+            // Darker toward the bottom, from the title down.
+            LinearGradient(stops: [
+                .init(color: .black.opacity(0), location: end),
+                .init(color: .black.opacity(0.12), location: end + (1 - end) * 0.5),
+                .init(color: .black.opacity(0.30), location: 1),
             ], startPoint: .top, endPoint: .bottom)
             tint.opacity(lyricsOpen ? 0.78 : 0)
         }
