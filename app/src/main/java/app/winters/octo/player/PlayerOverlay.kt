@@ -139,6 +139,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import coil3.compose.AsyncImage
 import app.winters.octo.catalog.isFind
 import app.winters.octo.design.AccentFill
+import app.winters.octo.design.artworkRim
 import app.winters.octo.design.GlassPopup
 import app.winters.octo.design.PopupPager
 import app.winters.octo.design.rememberPopupPages
@@ -987,11 +988,13 @@ private fun AnimatedVisibilityScope.PlayerArt(
         ) {
             // The square loop plays in place of the cover, its still first.
             LoopVideo(loop, loopPlay, Modifier.size(side).clip(shape)) {
-                Artwork(ref, side, shape = shape, keptFirst = true)
+                Artwork(ref, side, shape = shape, keptFirst = true, rim = loop == null)
                 loop?.poster?.let { poster ->
                     AsyncImage(model = poster, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(side))
                 }
             }
+            // One rim over the still and the loop alike.
+            if (loop != null) Box(Modifier.size(side).artworkRim(shape))
         }
     }
 }

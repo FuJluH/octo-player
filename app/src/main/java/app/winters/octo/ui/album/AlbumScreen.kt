@@ -45,6 +45,7 @@ import app.winters.octo.player.PlayerSettings
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
+import app.winters.octo.design.artworkRim
 import app.winters.octo.design.elevation3
 import app.winters.octo.data.ServerDownloads
 import app.winters.octo.discovery.Discovery
@@ -412,11 +413,15 @@ fun AlbumHeader(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             val play = rememberLoopPlay(inView = !LocalPlayerCovers.current)
-            LoopVideo(loop, play, Modifier.elevation3(CoverShape).size(CoverSide).clip(CoverShape)) {
-                Artwork(artwork, CoverSide, shape = CoverShape)
-                loop?.poster?.let { poster ->
-                    AsyncImage(model = poster, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(CoverSide))
+            Box {
+                LoopVideo(loop, play, Modifier.elevation3(CoverShape).size(CoverSide).clip(CoverShape)) {
+                    Artwork(artwork, CoverSide, shape = CoverShape, rim = loop == null)
+                    loop?.poster?.let { poster ->
+                        AsyncImage(model = poster, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(CoverSide))
+                    }
                 }
+                // One rim over the still and the loop alike.
+                if (loop != null) Box(Modifier.size(CoverSide).artworkRim(CoverShape))
             }
             Spacer(Modifier.height(20.dp))
             Text(title, style = OctoType.title, color = OctoColors.TextPrimary, textAlign = TextAlign.Center)
