@@ -43,7 +43,7 @@ val SecondaryStroke: Dp = (22f * 16f / 256f).dp
 // The buttons' icons, sized from the name's capital height: the heart
 // stands about 1.15 times as tall, drawn with the secondary stroke; the
 // dots and the plus are drawn on the same square with the same weight
-// (the dots one and a half strokes across, as Phosphor draws them).
+// (the dots two strokes across, so the three weigh as much as the heart's line).
 class TitleIcons(capHeight: Dp) {
     // The side of the square every icon is drawn on.
     val size: Dp = ((capHeight.value * HeightOverCap - SecondaryStroke.value) * 256f / HeartLineHeight).dp
@@ -79,7 +79,7 @@ class TitleIcons(capHeight: Dp) {
 
     private companion object {
         const val HeightOverCap = 1.15f
-        const val DotOverStroke = 1.5f
+        const val DotOverStroke = 2f
 
         // Phosphor's heart and plus as the lines its regular weight strokes,
         // on its 256 square: the heart spans 208 across and 176 down, its
