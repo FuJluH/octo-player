@@ -64,13 +64,7 @@ fun Modifier.fadingMarquee(key: Any?, scroll: Boolean, fade: Dp = MarqueeFade): 
     }
 
     this
-        .layout { measurable, constraints ->
-            val placeable = measurable.measure(constraints.copy(minWidth = 0, maxWidth = Constraints.Infinity))
-            val width = min(placeable.width, constraints.maxWidth).coerceAtLeast(constraints.minWidth)
-            room = width
-            content = placeable.width
-            layout(width, placeable.height) { placeable.place(0, 0) }
-        }
+        // The line's room: its own layer, cut to the room, with the fades.
         .graphicsLayer {
             compositingStrategy = CompositingStrategy.Offscreen
             clip = true
@@ -78,6 +72,14 @@ fun Modifier.fadingMarquee(key: Any?, scroll: Boolean, fade: Dp = MarqueeFade): 
         .drawWithContent {
             drawContent()
             if (overflow) fadeEdges(fade.toPx(), leftFade.value)
+        }
+        // The line at its full length inside it, moved by its own layer.
+        .layout { measurable, constraints ->
+            val placeable = measurable.measure(constraints.copy(minWidth = 0, maxWidth = Constraints.Infinity))
+            val width = min(placeable.width, constraints.maxWidth).coerceAtLeast(constraints.minWidth)
+            room = width
+            content = placeable.width
+            layout(width, placeable.height) { placeable.place(0, 0) }
         }
         .graphicsLayer { translationX = -offset.value }
         .drawWithContent {
