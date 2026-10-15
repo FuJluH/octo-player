@@ -3,27 +3,18 @@ import Observation
 import OctoKit
 
 /// Whether the Octo server in use has a newer release, read from its own update page (never
-/// from GitHub): when Settings starts, when the server page opens, and every few hours. An
-/// update started here, or seen under way, is asked about every two seconds until it ends.
-/// Only a Navidrome admin account gets an answer; anyone else, and a server without the page,
+/// from GitHub), and updating it from the app. It asks once when the server is taken up, then
+/// every few hours, every two seconds while an update is under way, and at once when the server
+/// page opens. Only a Navidrome admin account gets an answer; anyone else, and any other server,
 /// sees nothing.
 @MainActor
 @Observable
 final class ServerUpdates {
     static let shared = ServerUpdates()
 
-    private(set) var tracker = ServerUpdateTracker()
-    /// The kept server the tracker's answers belong to.
+    private(set) var track = ServerUpdateTrack()
+    /// The kept server the track belongs to.
     private(set) var serverId: String?
-    /// The update is being handed to the server.
-    private(set) var handing = false
-    /// Why the server did not take the update, in words to show.
-    private(set) var problem: String?
-    /// The release "Later" was chosen on, for the server in use.
-    private(set) var dismissed: String?
-    /// When the page was last asked, answered or not. The panel reads it, so it is drawn again
-    /// after each look, which is what moves an update that does not answer on to "has not come back".
-    private(set) var lastReadMs: Int64 = 0
 
     @ObservationIgnored private weak var session: Session?
     @ObservationIgnored private var loop: Task<Void, Never>?
@@ -33,12 +24,20 @@ final class ServerUpdates {
     private init() {}
 
     /// What the panel shows for the server in use now.
-    var panel: ServerUpdatePanel {
-        guard let session, session.client != nil, session.runsOcto, serverId == session.activeId else { return .hidden }
-        return tracker.panel(dismissed: dismissed, nowMs: max(epochNowMs(), lastReadMs))
+    var panel: ServerUpdatePanel { current ? track.panel : .hidden }
+
+    /// Whether the rows and the tab leading to the panel carry their small dot.
+    var showsDot: Bool { current && track.showsDot }
+
+    /// "Octo 2026.10.13, up to date" for the server facts, when the server says so.
+    var upToDateLine: String? { current ? track.upToDateLine : nil }
+
+    private var current: Bool {
+        guard let session, session.client != nil, session.runsOcto, let serverId else { return false }
+        return serverId == session.activeId
     }
 
-    /// Starts looking. The first look waits for nothing, but a look in the last few hours counts.
+    /// Follows whichever Octo server is in use, from now on.
     func start(_ session: Session) {
         guard self.session == nil else { return }
         self.session = session
@@ -48,113 +47,82 @@ final class ServerUpdates {
         serverChanged()
     }
 
-    /// The server page opened: it is asked at once.
-    func pageOpened(_ session: Session) {
-        start(session)
-        restart(readFirst: true)
+    /// Asks the server now, as the server page opens.
+    func refresh() {
+        guard serverId != nil else { return }
+        restart()
     }
 
-    /// Hands the newest release to the server's update helper.
+    /// Asks the server to bring in the newest release.
     func updateNow() {
-        guard let session, let client = session.client, let id = session.activeId, !handing,
-              let state = tracker.state, state.canUpdateNow, let latest = state.latest else { return }
-        handing = true
-        problem = nil
+        guard let session, let client = session.client, let id = serverId, current,
+              let status = track.status, status.canUpdate, let tag = status.latest?.tag,
+              !track.starting, track.watch == nil else { return }
+        track = track.beganStart()
         Task {
-            let request = ServerUpdateCalls.startRequest(client, tag: latest.tag)
-            let (status, data) = await Self.send(request, through: client.session)
-            handing = false
+            let (code, data) = await Self.send(ServerUpdateCalls.startRequest(client, tag: tag), through: client.session)
             guard serverId == id, session.activeId == id else { return }
-            switch ServerUpdateCalls.startAnswer(status: status, data: data, tag: latest.tag) {
-            case .started(let runId, let tag):
-                tracker.started(tag: tag, id: runId, nowMs: epochNowMs())
-                restart(readFirst: true)
-            case .refused(let words):
-                problem = words
-                restart(readFirst: true)
-            case .failed:
-                problem = "Couldn't reach your server to start the update. Try again in a moment."
-            }
+            track = track.started(ServerUpdateCalls.startAnswer(status: code, data: data, tag: tag))
+            restart()
         }
     }
 
-    /// Hides the offer until a newer release than this one comes out, for the server in use.
+    /// Puts the news away until a release newer than this one, for the server in use.
     func later() {
-        guard let id = serverId, case .offer(let offer) = panel else { return }
-        prefs.set(offer.latest.tag, "later", id)
-        dismissed = offer.latest.tag
-        problem = nil
+        guard let id = serverId else { return }
+        track = track.later()
+        if let tag = track.dismissed { prefs.set(tag, "later", id) }
     }
 
-    /// Puts away a finished update's result.
-    func closeResult() {
-        tracker.closeResult(nowMs: epochNowMs())
-        problem = nil
-        restart(readFirst: true)
+    /// The listener has read how the update ended.
+    func closeOutcome() {
+        track = track.closeOutcome()
     }
 
-    // MARK: Looking
+    /// Octo's dashboard, for updating there.
+    func dashboard() -> URL? {
+        session?.client.map(ServerUpdateCalls.dashboard)
+    }
 
+    // MARK: Asking
+
+    /// The server in use changed: the one followed already changes nothing; another starts afresh.
     private func serverChanged() {
         guard let session else { return }
         let id = session.client != nil && session.runsOcto ? session.activeId : nil
-        if id != serverId {
-            serverId = id
-            tracker = ServerUpdateTracker()
-            problem = nil
-            lastReadMs = 0
-            dismissed = id.flatMap { prefs.string("later", $0) }
-        }
-        restart(readFirst: Self.due(lastReadMs: lastReadMs, nowMs: epochNowMs()))
-    }
-
-    private static func due(lastReadMs: Int64, nowMs: Int64) -> Bool {
-        nowMs - lastReadMs >= ServerUpdateTiming.idlePollMs
-    }
-
-    /// One loop asks the page: now when `readFirst`, then as often as the tracker says.
-    private func restart(readFirst: Bool) {
+        guard id != serverId else { return }
         loop?.cancel()
-        guard serverId != nil else {
-            loop = nil
-            return
-        }
+        loop = nil
+        serverId = id
+        track = ServerUpdateTrack(dismissed: id.flatMap { prefs.string("later", $0) })
+        if id != nil { restart() }
+    }
+
+    /// One loop asks the page now, then as often as the track says.
+    private func restart() {
+        loop?.cancel()
         loop = Task { [weak self] in
-            var read = readFirst
             while !Task.isCancelled {
                 guard let self else { return }
-                if read { await self.readOnce() }
-                read = true
-                let wait = self.tracker.following
-                    ? self.tracker.nextPollMs(nowMs: epochNowMs())
-                    : max(0, ServerUpdateTiming.idlePollMs - (epochNowMs() - self.lastReadMs))
-                try? await Task.sleep(for: .milliseconds(wait))
+                await self.readOnce()
+                guard !Task.isCancelled else { return }
+                try? await Task.sleep(for: .milliseconds(self.track.nextReadMs))
             }
         }
     }
 
     private func readOnce() async {
         guard let session, let client = session.client, let id = serverId, session.activeId == id else { return }
-        let following = tracker.following
-        // While an update runs, each look goes through a session of its own with a short limit,
-        // so a connection to the Octo that was replaced is never waited on.
-        let fresh = following ? session.freshSession(seconds: ServerUpdateTiming.runCallSeconds) : nil
-        let seconds = following ? ServerUpdateTiming.runCallSeconds : ServerUpdateTiming.callSeconds
-        let request = ServerUpdateCalls.stateRequest(client, seconds: seconds)
-        let (status, data) = await Self.send(request, through: fresh ?? client.session)
+        // While an update is under way each question goes through a session of its own, so a
+        // connection kept open to the Octo that was replaced is never waited on.
+        let fresh = track.watch != nil ? session.freshSession(seconds: ServerUpdateTiming.callSeconds) : nil
+        let (code, data) = await Self.send(ServerUpdateCalls.stateRequest(client), through: fresh ?? client.session)
         fresh?.finishTasksAndInvalidate()
         guard !Task.isCancelled, serverId == id, session.activeId == id else { return }
-        let now = epochNowMs()
-        lastReadMs = now
-        switch ServerUpdateCalls.readAnswer(status: status, data: data) {
-        case .state(let state):
-            if tracker.read(state, nowMs: now) {
-                Task { await session.readServerAgain() }
-            }
-        case .refused:
-            tracker.missed(refused: true, nowMs: now)
-        case .missed:
-            tracker.missed(refused: false, nowMs: now)
+        let before = track
+        track = track.read(ServerUpdateCalls.readAnswer(status: code, data: data), nowMs: epochNowMs())
+        if case .done = track.outcome, before.outcome != track.outcome {
+            Task { await session.readServerAgain() }
         }
     }
 

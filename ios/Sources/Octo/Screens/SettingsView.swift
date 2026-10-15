@@ -87,7 +87,7 @@ struct SettingsView: View {
             AccountRow(icon: SettingsIcon.cloud, title: active.name, lines: [
                 (active.username.isEmpty ? "Signed in with a key" : active.username, OctoColor.textSecondary),
                 (status, problem != nil ? OctoColor.error : OctoColor.textMuted),
-            ], badged: serverUpdates.panel.badged) { label in NavigationLink(value: SettingsRoute(.server)) { label } }
+            ]) { label in NavigationLink(value: SettingsRoute(.server)) { label } }
         } else if session.servers.isEmpty {
             AccountRow(icon: SettingsIcon.cloud, title: "Connect a music server",
                        lines: [("Add the music on your own server", OctoColor.textMuted)]) { label in
@@ -150,7 +150,7 @@ struct SettingsView: View {
                             summary: SettingsSummaries.library(phone.access, songs: phone.songCount, folders: libraryFolders),
                             to: SettingsRoute(.library))
                 CategoryRow(icon: SettingsIcon.cloud, title: SettingsPage.server.title, summary: serverLine, to: SettingsRoute(.server),
-                            badged: serverUpdates.panel.badged)
+                            badged: serverUpdates.showsDot)
                 CategoryRow(icon: SettingsIcon.download, title: SettingsPage.streaming.title,
                             summary: SettingsSummaries.streaming(settings.stream, settings.offline), to: SettingsRoute(.streaming))
                 CategoryRow(icon: SettingsIcon.audioQuality, title: SettingsPage.audioQuality.title,
@@ -214,16 +214,12 @@ private struct AccountRow<Wrapped: View>: View {
     let icon: String
     let title: String
     let lines: [(String, Color)]
-    /// Marks a server update waiting on the page the row opens.
-    var badged = false
     let wrap: (AnyView) -> Wrapped
 
-    init(icon: String, title: String, lines: [(String, Color)], badged: Bool = false,
-         @ViewBuilder wrap: @escaping (AnyView) -> Wrapped) {
+    init(icon: String, title: String, lines: [(String, Color)], @ViewBuilder wrap: @escaping (AnyView) -> Wrapped) {
         self.icon = icon
         self.title = title
         self.lines = lines
-        self.badged = badged
         self.wrap = wrap
     }
 
@@ -241,7 +237,6 @@ private struct AccountRow<Wrapped: View>: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            if badged { ServerUpdateBadge() }
             Image(systemName: SettingsIcon.chevron)
                 .font(.system(size: 14, weight: .semibold))
                 .frame(width: 20, height: 20)

@@ -64,7 +64,10 @@ struct ServerPage: View {
         .task(id: session.client == nil ? nil : session.generation) { await readFolders(quietly: true) }
         .task(id: session.client == nil ? nil : session.activeId) { await watchListening() }
         // Whether the server has an update is asked each time the page opens.
-        .task(id: session.client == nil ? nil : session.activeId) { ServerUpdates.shared.pageOpened(session) }
+        .task(id: session.client == nil ? nil : session.activeId) {
+            ServerUpdates.shared.start(session)
+            ServerUpdates.shared.refresh()
+        }
         .task(id: session.activeId) {
             // Sharing is asked about once for each server the page shows.
             guard sharingProbedFor != session.activeId else { return }
@@ -144,8 +147,10 @@ struct ServerPage: View {
 
     private func facts(_ server: StoredServer) -> some View {
         SettingsGroup(title: "Server", icon: SettingsIcon.info) {
+            // Octo that knows it runs the newest release says so.
             InfoRow(SettingsIndex.serverKind,
-                    value: serverKind(server.serverType ?? session.profile?.info.type, server.serverVersion ?? session.profile?.info.serverVersion),
+                    value: ServerUpdates.shared.upToDateLine
+                        ?? serverKind(server.serverType ?? session.profile?.info.type, server.serverVersion ?? session.profile?.info.serverVersion),
                     helper: offersOf(session.extensions))
             if let ms = look?.answerMs {
                 InfoRow(SettingsIndex.serverAnswer, value: "\(ms) ms")

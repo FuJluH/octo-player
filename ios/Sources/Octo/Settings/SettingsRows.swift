@@ -633,7 +633,7 @@ struct CategoryRow: View {
                 }
                 .padding(.leading, 4)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                if badged { ServerUpdateBadge() }
+                if badged { ServerUpdateDot() }
                 Image(systemName: SettingsIcon.chevron)
                     .font(.system(size: 14, weight: .semibold))
                     .frame(width: 20, height: 20)

@@ -129,6 +129,8 @@ private struct TabTray: View {
     let tab: AppTab
     let select: (AppTab) -> Void
 
+    @State private var updates = ServerUpdates.shared
+
     private static let iconSize: CGFloat = 23
     private static let pillWidth: CGFloat = 62
 
@@ -148,7 +150,8 @@ private struct TabTray: View {
                     .offset(x: pillX)
                 HStack(spacing: 0) {
                     ForEach(AppTab.allCases, id: \.self) { item in
-                        TabButton(item: item, selected: item == tab, showIcon: folded <= 0 || item != tab) {
+                        TabButton(item: item, selected: item == tab, showIcon: folded <= 0 || item != tab,
+                                  marked: item == .settings && item != tab && updates.showsDot) {
                             select(item)
                         }
                         .frame(width: column, height: height)
@@ -176,6 +179,8 @@ private struct TabButton: View {
     let item: AppTab
     let selected: Bool
     let showIcon: Bool
+    /// Something waits on the tab: a small dot on the icon's corner.
+    var marked = false
     let action: () -> Void
 
     var body: some View {
@@ -184,13 +189,18 @@ private struct TabButton: View {
                 // The outline and filled symbols swap at once; only the color moves. The system's
                 // own symbol replace would shrink the icon out of sight and back.
                 .contentTransition(.identity)
+                .overlay(alignment: .topTrailing) {
+                    if marked {
+                        Circle().fill(OctoColor.accent).frame(width: 7, height: 7).offset(x: 3, y: -2)
+                    }
+                }
                 .opacity(showIcon ? 1 : 0)
                 .animation(.octo(OctoSprings.state), value: selected)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
         }
         .buttonStyle(NoHighlight())
-        .accessibilityLabel(item.title)
+        .accessibilityLabel(marked ? "\(item.title), \(ServerUpdateWords.mark)" : item.title)
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
     }
 }

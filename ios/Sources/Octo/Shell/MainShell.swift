@@ -247,6 +247,8 @@ struct MainShell: View {
             savedPaths = try? JSONEncoder().encode(byName)
         }
         .task(id: session.activeId) { await downloads.resume() }
+        // The server's own updates are followed from the start, for the Settings tab's dot.
+        .task { ServerUpdates.shared.start(session) }
         .onChange(of: session.client == nil) { _, _ in Task { await downloads.resume() } }
         .onChange(of: scenePhase, initial: true) { _, phase in
             downloads.setForeground(phase == .active)
