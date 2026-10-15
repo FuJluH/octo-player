@@ -10,7 +10,7 @@ enum class AnimatedArtSetting(val key: String, val label: String, val about: Str
     FullScreen(
         "full_screen",
         "Full screen",
-        "Fills the player behind the controls when the album has a tall one, and plays in place of the cover when it does not.",
+        "Fills the player when the album has a tall version, otherwise plays in place of the cover.",
     ),
     Off("off", "Off", "Always shows the still cover."),
     ;
