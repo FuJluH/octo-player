@@ -9,6 +9,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.withFrameMillis
 import app.winters.octo.playback.NowPlaying
+import app.winters.octo.ui.common.delayToNextTick
 import kotlinx.coroutines.delay
 
 // How far into the song playback is. While music plays it is read on a
@@ -21,13 +22,22 @@ import kotlinx.coroutines.delay
 // only needs a new frame each time it moves half a pixel, so the position
 // is read that often instead of on every frame; 0 reads it on every frame,
 // for what moves faster than any line (the words being sung).
+//
+// `everyMs`, when set, reads it once each whole `everyMs` of the clock
+// instead (`delayToNextTick`), for a small line that moves a pixel or two
+// a second and so shares its frames with the other slow things on screen.
 @Composable
-fun rememberPositionMs(now: NowPlaying, positionMs: () -> Long, lengthPx: Float = 0f): MutableLongState {
+fun rememberPositionMs(now: NowPlaying, positionMs: () -> Long, lengthPx: Float = 0f, everyMs: Long = 0): MutableLongState {
     val position = remember { mutableLongStateOf(positionMs()) }
     val length by rememberUpdatedState(lengthPx)
-    LaunchedEffect(now.trackId, now.isPlaying, now.durationMs) {
+    LaunchedEffect(now.trackId, now.isPlaying, now.durationMs, everyMs) {
         position.longValue = positionMs()
         while (now.isPlaying) {
+            if (everyMs > 0) {
+                delayToNextTick(everyMs)
+                withFrameMillis { position.longValue = positionMs() }
+                continue
+            }
             withFrameMillis { position.longValue = positionMs() }
             val step = progressStepMs(now.durationMs, length)
             if (step > 0) delay(step)
