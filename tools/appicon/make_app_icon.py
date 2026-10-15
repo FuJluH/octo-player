@@ -4,10 +4,10 @@ octopus). Nothing here scales a picture, so no size shows pixels.
 
   python make_app_icon.py              writes the phone's adaptive icon layers
                                        and launch screen's octopus as vector
-                                       drawables, the desktop window's opening
-                                       octopus, the square store icon,
-                                       F-Droid's icon, and the square the
-                                       desktop icons are cut from
+                                       drawables, the square store icon and
+                                       F-Droid's icon (the desktop draws its
+                                       octopus and every icon size from
+                                       octopus.svg itself)
   python make_app_icon.py ios          writes the iPhone app's icon: the Icon
                                        Composer file Apple's Liquid Glass
                                        draws from, ios/AppIcon.icon, and a
@@ -48,9 +48,6 @@ OCTOPUS_SVG = HERE / "octopus.svg"
 RES = ROOT / "app/src/main/res"
 STORE = ROOT / "app/src/main/ic_launcher-playstore.png"
 FDROID = ROOT / "fdroid/octo.png"
-# The square the desktop's PNG, ICO and ICNS are cut from: 1024, the size
-# of the largest of them (macOS's 512 at 2x).
-DESKTOP_SQUARE = ROOT / "desktop/icons/octo-square.png"
 # The iPhone app's icon: an Icon Composer file whose layers Apple's Liquid
 # Glass lights (Xcode's actool turns it into the app's Assets.car), and a
 # flat 1024 square for builds without that. iOS rounds the corners of both.
@@ -79,11 +76,6 @@ SQUARE_REACH = 0.44
 # square and shows only the circle 192 dp across in its middle.
 SPLASH_DP = 288
 SPLASH_REACH = 0.29
-# The desktop window opens on the octopus alone, FrameSize.OpeningMark
-# (112 dp) across, drawn sharp up to 300% display scaling.
-DESKTOP_OPENING = ROOT / "desktop/src/main/resources/octo-opening.png"
-OPENING_PX = 336
-OPENING_REACH = 0.48
 
 # The logo: a clear 1024 square with the octopus at its painted size, where
 # the painted logo had it (its box's top left corner).
@@ -253,12 +245,10 @@ def write():
     (drawables / "ic_launcher_monochrome.xml").write_text(
         octopus_vector(108, ADAPTIVE_REACH, fill="#FFFFFFFF"), encoding="utf-8")
     (drawables / "splash_octopus.xml").write_text(octopus_vector(SPLASH_DP, SPLASH_REACH), encoding="utf-8")
-    placed(OPENING_PX, OPENING_REACH).save(DESKTOP_OPENING, optimize=True)
     square(512).convert("RGB").save(STORE, optimize=True)
     square(512).convert("RGB").save(FDROID, optimize=True)
-    square(1024).convert("RGB").save(DESKTOP_SQUARE, optimize=True)
-    print("Wrote the adaptive icon and launch screen drawables, the desktop's opening octopus,",
-          ", ".join(str(p.relative_to(ROOT)) for p in (STORE, FDROID, DESKTOP_SQUARE)))
+    print("Wrote the adaptive icon and launch screen drawables,",
+          ", ".join(str(p.relative_to(ROOT)) for p in (STORE, FDROID)))
 
 
 def colour(hex_colour):

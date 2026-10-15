@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.pages
 
+import app.winters.octo.desktop.system.OctopusPainter
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -11,10 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.FilterQuality
-import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.painter.Painter
-import androidx.compose.ui.graphics.toComposeImageBitmap
 import app.winters.octo.design.FrameSize
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.OctoColors
@@ -113,11 +111,8 @@ private fun AboutCard() {
     }
 }
 
-// The octopus the window opens on, drawn smaller than it is stored.
-private fun octopusPicture(): Painter? = runCatching {
-    val bytes = AppState::class.java.getResourceAsStream("/octo-opening.png")!!.use { it.readBytes() }
-    BitmapPainter(org.jetbrains.skia.Image.makeFromEncoded(bytes).toComposeImageBitmap(), filterQuality = FilterQuality.High)
-}.getOrNull()
+// The octopus the window opens on, drawn from the vector at its size.
+private fun octopusPicture(): Painter = OctopusPainter()
 
 // How many lines of a release's notes show under its row.
 private const val NOTES_LINES = 12

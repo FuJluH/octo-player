@@ -142,9 +142,50 @@ class SystemFilesTest {
     @Test
     fun theIconFilesAreWritten() {
         val out = folder.newFolder("icons")
-        writeIconFiles(art, out)
+        writeIconFiles(out)
         listOf("octo.png", "octo.ico", "octo.icns").forEach { assertTrue(it, File(out, it).length() > 0) }
         assertEquals(512, ImageIO.read(File(out, "octo.png")).width)
+    }
+
+    @Test
+    fun theIcoHoldsEverySizeEachDrawnOnItsOwn() {
+        val out = folder.newFolder("ico")
+        writeIconFiles(out)
+        val bytes = File(out, "octo.ico").readBytes()
+        val head = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+        val count = head.getShort(4).toInt()
+        assertEquals(IcoSizes.size, count)
+        val seen = mutableListOf<Int>()
+        for (i in 0 until count) {
+            val at = 6 + i * 16
+            val side = (bytes[at].toInt() and 0xFF).let { if (it == 0) 256 else it }
+            val length = head.getInt(at + 8)
+            val offset = head.getInt(at + 12)
+            val entry = bytes.copyOfRange(offset, offset + length)
+            val png = entry[0] == 0x89.toByte() && entry[1] == 'P'.code.toByte()
+            // The 256 is a PNG; every smaller one is a 32-bit bitmap of its own size.
+            if (side >= 256) {
+                assertTrue("256 is a PNG", png)
+            } else {
+                assertTrue("$side is a bitmap", !png)
+                val info = ByteBuffer.wrap(entry).order(ByteOrder.LITTLE_ENDIAN)
+                assertEquals(40, info.getInt(0))
+                assertEquals(side, info.getInt(4))
+                assertEquals(side * 2, info.getInt(8))
+                assertEquals(32, info.getShort(14).toInt())
+            }
+            seen += side
+        }
+        assertEquals(IcoSizes, seen)
+        // Each size is its own drawing: the 16 is not the 32 halved.
+        val sixteen = OctopusArt.iconImage(16)
+        val halved = java.awt.image.BufferedImage(16, 16, java.awt.image.BufferedImage.TYPE_INT_ARGB).also {
+            val g = it.createGraphics()
+            g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+            g.drawImage(OctopusArt.iconImage(32), 0, 0, 16, 16, null)
+            g.dispose()
+        }
+        assertTrue((0 until 16).any { x -> (0 until 16).any { y -> sixteen.getRGB(x, y) != halved.getRGB(x, y) } })
     }
 
     @Test

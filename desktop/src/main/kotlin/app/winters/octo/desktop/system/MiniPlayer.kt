@@ -291,6 +291,8 @@ fun MiniPlayerWindow(
         LaunchedEffect(Unit) {
             window.minimumSize = Dimension(MINI_MIN_WIDTH.toInt(), MINI_MIN_HEIGHT.toInt())
             window.maximumSize = Dimension(MINI_MAX_WIDTH.toInt(), MINI_MAX_HEIGHT.toInt())
+            // Its icons for Alt+Tab and the taskbar, each size drawn from the vector.
+            if (icon == null) window.iconImages = withContext(Dispatchers.Default) { OctopusArt.windowIcons() }
         }
         // Asked again whenever the window's style can change (pinned, kept
         // on top) or its native window is made again, which drops the ask.

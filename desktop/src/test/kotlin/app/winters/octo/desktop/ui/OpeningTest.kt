@@ -1,5 +1,7 @@
 package app.winters.octo.desktop.ui
 
+import app.winters.octo.desktop.system.OctopusPainter
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -19,11 +21,9 @@ import java.io.File
 // moment, says so once, and fades away only after the app has drawn.
 // OCTO_SHOTS=1 also saves frames as build/shots/opening-*.png to look at.
 class OpeningTest {
-    private val octopus = BitmapPainter(
-        Image.makeFromEncoded(OpeningTest::class.java.getResourceAsStream("/octo-opening.png")!!.readBytes()).toComposeImageBitmap(),
-    )
+    private val octopus = OctopusPainter()
 
-    private class Run(calm: Boolean, octopus: BitmapPainter) {
+    private class Run(calm: Boolean, octopus: Painter) {
         var leaving by mutableStateOf(false)
         var entered = 0
         var gone = 0

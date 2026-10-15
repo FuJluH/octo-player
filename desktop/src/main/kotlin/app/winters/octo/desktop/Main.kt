@@ -12,10 +12,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.FilterQuality
-import androidx.compose.ui.graphics.painter.BitmapPainter
-import androidx.compose.ui.graphics.painter.Painter
-import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isAltPressed
@@ -100,19 +96,16 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import org.jetbrains.skiko.GraphicsApi
+import app.winters.octo.desktop.system.OctopusArt
+import app.winters.octo.desktop.system.OctopusPainter
+import java.awt.image.BufferedImage
+import java.util.concurrent.CompletableFuture
+import kotlinx.coroutines.withContext
 
-private fun appIcon(): Painter? = runCatching {
-    val bytes = AppState::class.java.getResourceAsStream("/octo-icon.png")!!.use { it.readBytes() }
-    BitmapPainter(org.jetbrains.skia.Image.makeFromEncoded(bytes).toComposeImageBitmap())
-}.getOrNull()
-
-// Octo's octopus alone, for the window's opening: the logo's own pixels with
-// no tile, written by tools/appicon/make_app_icon.py. Drawn smaller than it
-// is stored, so it is scaled smoothly.
-private fun openingOctopus(): Painter? = runCatching {
-    val bytes = AppState::class.java.getResourceAsStream("/octo-opening.png")!!.use { it.readBytes() }
-    BitmapPainter(org.jetbrains.skia.Image.makeFromEncoded(bytes).toComposeImageBitmap(), filterQuality = FilterQuality.High)
-}.getOrNull()
+// The window's icons, one drawn from the vector for each size Windows may
+// ask for, made beside the start so they are ready when the window shows.
+private fun windowIconsAhead(): CompletableFuture<List<BufferedImage>> =
+    CompletableFuture.supplyAsync { runCatching { OctopusArt.windowIcons() }.getOrDefault(emptyList()) }
 
 // What the window runs once the app is made.
 private class Opened(val app: AppState, val system: SystemIntegration, val updates: DesktopUpdates)
@@ -152,8 +145,8 @@ fun main(args: Array<String>) {
     var systemCalm by mutableStateOf(false)
     // The system's text size, read the same way.
     var systemText by mutableStateOf(1f)
-    val icon = appIcon()
-    val octopus = openingOctopus()
+    val icons = windowIconsAhead()
+    val octopus = OctopusPainter()
     val inTray = startsInTray(args.toList())
     // The opening comes in quietly when the listener asked for calm motion.
     val calmStart = settings.current.appearance.calmMotion
@@ -264,7 +257,6 @@ fun main(args: Array<String>) {
             // Before the app is made: shown, unless it starts in the tray.
             visible = ready?.system?.windowVisible ?: !inTray,
             title = "Octo",
-            icon = icon,
             undecorated = custom,
             onPreviewKeyEvent = { event ->
                 val made = opened ?: return@Window false
@@ -287,6 +279,10 @@ fun main(args: Array<String>) {
         ) {
             // Before the window first draws, so its surfaces know their pixels.
             remember { useTextPixels(window, appTextPixels) }
+            LaunchedEffect(Unit) {
+                val drawn = withContext(Dispatchers.IO) { icons.get() }
+                if (drawn.isNotEmpty()) window.iconImages = drawn
+            }
             val own = remember { if (custom) Frame(window, windowState) else null }
             LaunchedEffect(Unit) {
                 frame = own
@@ -394,7 +390,7 @@ fun main(args: Array<String>) {
             }
             }
         }
-        if (ready != null) with(ready.system) { Surfaces(icon) }
+        if (ready != null) with(ready.system) { Surfaces(null) }
     }
 }
 
