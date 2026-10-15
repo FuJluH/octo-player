@@ -38,3 +38,26 @@ public func albumsToAsk(playing: String?, next: [String?], ahead: Int = 1) -> [S
 public func loopShadeInk(_ shade: UInt32) -> WashInk {
     inkOver(WashRange.of(shade), 0xFF00_0000)
 }
+
+/// Which album of the server to ask about for a song's album id, as the queue holds it.
+public enum AnimatedAlbum: Sendable, Equatable {
+    /// This album id on the server in use.
+    case server(String)
+    /// The library's own id for the album: its songs' copies on the server name the album.
+    case lookUp
+    /// Not an album on the server in use (music on the phone, another server): never asked.
+    case none
+}
+
+/// The server's own album for `albumId`: a library id made from the server in use
+/// ("<source>:<native id>") is that native id; a plain id, as the server hands it, is itself; a
+/// library id of another source, or one the library made, is found through the songs' copies, or
+/// is no server album at all.
+public func animatedAlbum(_ albumId: String?, serverInUse: String?) -> AnimatedAlbum {
+    guard let albumId, !albumId.trimmingCharacters(in: .whitespaces).isEmpty, let serverInUse else { return .none }
+    if albumId.hasPrefix(serverInUse + ":") {
+        return serverAlbumIdOf(serverInUse, albumId).map(AnimatedAlbum.server) ?? .lookUp
+    }
+    if isServerSource(albumId) { return .none }
+    return albumId.contains(":") ? .lookUp : .server(albumId)
+}

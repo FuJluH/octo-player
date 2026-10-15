@@ -25,24 +25,53 @@ final class AnimatedArtStore {
     }
     #endif
 
+    /// The server albums of library songs whose album the library made, by song, found through
+    /// the songs' copies on the server; nil when a song has none there.
+    @ObservationIgnored private var lookedUp: [String: String?] = [:]
+    @ObservationIgnored private var lookingUp = Set<String>()
+    @ObservationIgnored private weak var library: Library?
+
     /// Starts following the songs the player plays, asking about their albums' art ahead.
-    func attach(session: Session, player: Player) {
+    func attach(session: Session, player: Player, library: Library) {
         self.session = session
-        watches.append(Watch({ [weak player] in
-            guard let player else { return [String]() }
-            return albumsToAsk(playing: Self.serverAlbumId(player.current), next: player.upNext.prefix(1).map(Self.serverAlbumId))
+        self.library = library
+        watches.append(Watch({ [weak self, weak player] in
+            guard let self, let player else { return [String]() }
+            return albumsToAsk(playing: self.albumId(of: player.current), next: player.upNext.prefix(1).map { self.albumId(of: $0) })
         }) { [weak self] ids in
             guard let self, AppSettings.shared.animatedArt != .off else { return }
             self.currentBook()?.ahead(ids)
         })
     }
 
-    /// The server's album id for a song the queue holds, when the song is the server's own.
-    static func serverAlbumId(_ song: Song?) -> String? {
-        guard let song, let albumId = song.albumId, !albumId.isEmpty, !song.isExternal, !isFind(song.id),
-              !albumId.hasPrefix(findPrefix), !isRadio(song.id)
-        else { return nil }
-        return albumId
+    /// The server's own id for the album of a song the queue holds, the same id an album page
+    /// asks by, so both find one answer; nil for a song with no album on the server in use. A
+    /// song whose album the library made is looked up through its copies, and has its album a
+    /// moment later.
+    func albumId(of song: Song?) -> String? {
+        _ = version
+        guard let song, !song.isExternal, !isFind(song.id), !isRadio(song.id) else { return nil }
+        if let albumId = song.albumId, albumId.hasPrefix(findPrefix) { return nil }
+        let here = session?.inUse?.sourceId
+        switch animatedAlbum(song.albumId, serverInUse: here) {
+        case .server(let id): return id
+        case .none: return nil
+        case .lookUp:
+            if let known = lookedUp[song.id] { return known }
+            lookUp(song.id, serverInUse: here)
+            return nil
+        }
+    }
+
+    private func lookUp(_ trackId: String, serverInUse: String?) {
+        guard let serverInUse, let library, lookingUp.insert(trackId).inserted else { return }
+        Task { [weak self] in
+            let copies = await library.copies(trackId)
+            guard let self else { return }
+            self.lookingUp.remove(trackId)
+            self.lookedUp[trackId] = .some(serverAlbumId(copies: copies, serverInUse: serverInUse))
+            self.version += 1
+        }
     }
 
     /// What is known of the album's art right now: a downloaded album's own, else the book's.
@@ -83,6 +112,8 @@ final class AnimatedArtStore {
         made.changed = { [weak self] in Task { @MainActor in self?.version += 1 } }
         book = made
         bookKey = key
+        // Another server: its albums are other ones.
+        lookedUp = [:]
         return made
     }
 

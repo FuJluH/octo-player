@@ -69,7 +69,7 @@ struct OctoApp: App {
         SystemHooks.start(player: player, router: router)
         FamilyNotices.session = session
         AccountHooks.install(data, session: session, family: accounts.family)
-        AnimatedArtStore.shared.attach(session: session, player: player)
+        AnimatedArtStore.shared.attach(session: session, player: player, library: data.library)
         #if DEBUG
         DataDrive.install(data) { router.show($0) }
         AnimatedDrive.install(player: player, session: session)

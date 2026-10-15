@@ -232,6 +232,23 @@ private actor Gate {
         #expect(!loopShadeInk(0xFF1B_2A6B).dark)
     }
 
+    @Test func aSongsAlbumIsAskedForByTheServersOwnId() {
+        let here = "server:192.168.50.119:5294"
+        // The queue's library id for the album: the server's id without the source.
+        #expect(animatedAlbum("\(here):599sUgxg94Qb416qnZCpE3", serverInUse: here) == .server("599sUgxg94Qb416qnZCpE3"))
+        // An id as the server hands it is its own.
+        #expect(animatedAlbum("599sUgxg94Qb416qnZCpE3", serverInUse: here) == .server("599sUgxg94Qb416qnZCpE3"))
+        // Another server's album is never sent to this one.
+        #expect(animatedAlbum("server:music.example.com:al-1", serverInUse: here) == .none)
+        // An album the library made, or the phone's, is found through its songs.
+        #expect(animatedAlbum("\(here):album:abc", serverInUse: here) == .lookUp)
+        #expect(animatedAlbum("device:al-9", serverInUse: here) == .lookUp)
+        // No server, no album: nothing is asked.
+        #expect(animatedAlbum("al-1", serverInUse: nil) == .none)
+        #expect(animatedAlbum(nil, serverInUse: here) == .none)
+        #expect(animatedAlbum(" ", serverInUse: here) == .none)
+    }
+
     @Test func theAlbumsToAskAreThePlayingOnesThenTheNext() {
         #expect(albumsToAsk(playing: "a", next: ["b", "c"]) == ["a", "b"])
         #expect(albumsToAsk(playing: "a", next: ["a", "c"], ahead: 2) == ["a", "c"])

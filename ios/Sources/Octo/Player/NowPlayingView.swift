@@ -77,7 +77,7 @@ struct NowPlayingView: View {
     }
 
     /// The album whose animated art the player shows: the playing song's, on the server.
-    private var loopAlbumId: String? { AnimatedArtStore.serverAlbumId(player.current) }
+    private var loopAlbumId: String? { animated.albumId(of: player.current) }
 
     /// Where the playing album's animated art goes, as the setting has it.
     private var loop: PlayerLoop { settings.animatedArt.inPlayer(animated.known(loopAlbumId)) }
