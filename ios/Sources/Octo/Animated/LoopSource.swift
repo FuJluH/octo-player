@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import OctoKit
 import UIKit
@@ -69,6 +70,14 @@ actor LoopSource {
         return file
     }
 
+    /// Whether the top `share` of the loop's first frame is light, by its average brightness.
+    func topIsLight(_ file: URL, share: CGFloat) async -> Bool? {
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: file))
+        generator.maximumSize = CGSize(width: 96, height: 128)
+        guard let frame = try? await generator.image(at: .zero).image else { return nil }
+        return loopTopIsLight(frame, share: share)
+    }
+
     /// The clip's still, from the downloaded album or the shelf, fetched when needed.
     func poster(_ clip: AnimatedClip, albumId: String?, shape: LoopShape, fetcher: LoopFetcher) async -> UIImage? {
         if let albumId {
@@ -83,6 +92,30 @@ actor LoopSource {
         guard let image = UIImage(contentsOfFile: target.path) else { return nil }
         return await image.byPreparingForDisplay() ?? image
     }
+}
+
+/// Whether the top `share` of a picture is light enough that dark words read better on it than
+/// white ones: its average relative luminance over 0.4.
+func loopTopIsLight(_ picture: CGImage?, share: CGFloat) -> Bool? {
+    guard let picture, picture.width > 0, picture.height > 0 else { return nil }
+    let rows = max(1, Int((CGFloat(picture.height) * min(max(share, 0), 1)).rounded()))
+    guard let band = picture.cropping(to: CGRect(x: 0, y: 0, width: picture.width, height: rows)) else { return nil }
+    let width = 16, height = 4
+    var bytes = [UInt8](repeating: 0, count: width * height * 4)
+    let drawn: Bool = bytes.withUnsafeMutableBytes { buffer in
+        guard let context = CGContext(data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
+        else { return false }
+        context.interpolationQuality = .medium
+        context.draw(band, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return true
+    }
+    guard drawn else { return nil }
+    var total = 0.0
+    for i in 0..<(width * height) {
+        total += relativeLuminance(0xFF00_0000 | UInt32(bytes[i * 4]) << 16 | UInt32(bytes[i * 4 + 1]) << 8 | UInt32(bytes[i * 4 + 2]))
+    }
+    return total / Double(width * height) > 0.4
 }
 
 /// The fetcher for a clip's addresses: one that leads to the server goes with the server's own

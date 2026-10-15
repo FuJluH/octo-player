@@ -80,6 +80,9 @@ struct PlayerBackdrop: View {
     var held: Bool
     var lyricsOpen: Bool
     var covers: (Bool) -> Void
+    /// Hears whether the top of what is drawn (the still, then the loop) is light, for the status
+    /// bar's color.
+    var lightTop: (Bool) -> Void = { _ in }
     @Environment(Session.self) private var session
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.octoReduceMotion) private var calm
@@ -91,7 +94,7 @@ struct PlayerBackdrop: View {
     @State private var playing = false
 
     /// How long the loop takes to fade out, and how far above the title it is gone, in points.
-    private static let fadeLength: CGFloat = 170
+    private static let fadeLength: CGFloat = 125
     private static let clearOfTitle: CGFloat = 14
 
     private var play: LoopPlay {
@@ -133,8 +136,12 @@ struct PlayerBackdrop: View {
                 let still = await LoopSource.shared.poster(clip, albumId: albumId, shape: .tall, fetcher: fetcher)
                 guard !Task.isCancelled else { return }
                 poster = still
+                // The status bar reads on the top 50 pt.
+                let band = 50 / max(fit.height, 1)
+                if let still, let light = loopTopIsLight(still.cgImage, share: band) { lightTop(light) }
                 guard play != .stillOnly, !Task.isCancelled else { return }
                 file = await LoopSource.shared.file(clip, albumId: albumId, shape: .tall, pixels: pixels, fetcher: fetcher)
+                if let file, let light = await LoopSource.shared.topIsLight(file, share: band), !Task.isCancelled { lightTop(light) }
             }
         }
         .ignoresSafeArea()
@@ -152,22 +159,14 @@ struct PlayerBackdrop: View {
         }
     }
 
-    /// The shade: the clip's color along the top under the status bar and the album's name,
-    /// coming in as the loop fades out so the blurred color under the controls is mostly the
-    /// shade, and over everything while lyrics show.
+    /// The shade: coming in as the loop fades out, so the blurred color under the controls is
+    /// mostly the shade, and over everything while lyrics show. The top of the loop is left clean.
     private func shade(_ fit: LoopBackdropFit, height: CGFloat) -> some View {
         let tint = Color(argb: color)
         let points = max(height, 1)
         let start = fit.fadeStart / points
         let end = fit.fadeEnd / points
         return ZStack {
-            // Along the top, eased out by 140 pt.
-            LinearGradient(stops: [
-                .init(color: tint.opacity(0.70), location: 0),
-                .init(color: tint.opacity(0.35), location: 60 / points),
-                .init(color: tint.opacity(0.10), location: 105 / points),
-                .init(color: tint.opacity(0), location: 140 / points),
-            ], startPoint: .top, endPoint: .bottom)
             // Eased in with the loop's fade, then steady under the controls.
             LinearGradient(stops: [
                 .init(color: tint.opacity(0), location: start),

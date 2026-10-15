@@ -27,6 +27,8 @@ struct NowPlayingView: View {
     /// The full-screen loop (or its still) fills the player: the card steps aside and the words
     /// take the loop's shade.
     @State private var backdropCovers = false
+    /// The top of the full-screen loop is light, so the status bar draws dark.
+    @State private var loopTopLight: Bool?
     /// Where the title row sits, for a full-screen loop to fade out above it.
     @State private var backdropFit = BackdropTitle()
 
@@ -115,7 +117,8 @@ struct NowPlayingView: View {
                                      focused: focused)
                     if case .backdrop(let clip) = loop {
                         BackdropFrame(clip: clip, albumId: loopAlbumId, color: backdropShade(clip), entrance: entrance, pull: pull,
-                                      fit: backdropFit, lyricsOpen: lyrics.open) { backdropCovers = $0 }
+                                      fit: backdropFit, lyricsOpen: lyrics.open, covers: { backdropCovers = $0 },
+                                      lightTop: { loopTopLight = $0 })
                     }
                     Group {
                         if sideways {
@@ -140,7 +143,7 @@ struct NowPlayingView: View {
             }
             .ignoresSafeArea()
         }
-        .background(PlayerStatusBar(dark: colors.dark))
+        .background(PlayerStatusBar(dark: backdropCovers ? (loopTopLight ?? colors.dark) : colors.dark))
         .sensoryFeedback(.impact(flexibility: .rigid, intensity: 0.8), trigger: ticks)
         .onChange(of: dragging) { _, now in
             guard !now, book.axis != .undecided else {
@@ -977,10 +980,11 @@ private struct BackdropFrame: View {
     let fit: BackdropTitle
     let lyricsOpen: Bool
     let covers: (Bool) -> Void
+    let lightTop: (Bool) -> Void
 
     var body: some View {
         PlayerBackdrop(clip: clip, albumId: albumId, color: color, titleTop: fit.top, shown: !entrance.closing,
-                       held: pull.distance > 0, lyricsOpen: lyricsOpen, covers: covers)
+                       held: pull.distance > 0, lyricsOpen: lyricsOpen, covers: covers, lightTop: lightTop)
     }
 }
 
