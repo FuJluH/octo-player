@@ -64,6 +64,79 @@ func ids(_ group: DuplicateGroup<ServerSong>) -> [String] { group.copies.map(\.i
         #expect(found.duplicates.isEmpty)
     }
 
+    @Test func titlesThatNameDifferentVersionsAreNeverPaired() {
+        let pairs = [
+            ("Let's Get Lost [Bear//Face Remix]", "Let's Get Lost (Teklife Remix)"),
+            ("Song (Remix)", "Song"),
+            ("Song (Live)", "Song"),
+            ("Song (Acoustic)", "Song"),
+            ("Song (Sped Up)", "Song"),
+            ("Song (Slowed)", "Song"),
+            ("Song (Instrumental)", "Song"),
+            ("Song (Radio Edit)", "Song (Album Version)"),
+            ("Song (Demo)", "Song"),
+            ("Song (Taylor's Version)", "Song"),
+        ]
+        for (one, other) in pairs {
+            let found = healthReport(make.song(one, seconds: 200, id: "a"), make.song(other, seconds: 201, id: "b"))
+            #expect(found.duplicates.isEmpty, "\(one) and \(other)")
+        }
+    }
+
+    @Test func aSongTaggedPlainlyOnAnAlbumOfAnotherVersionIsNotACopy() {
+        let albums = [
+            "Let's Get Lost Remixes",
+            "Song (Remixes) - EP",
+            "Song (Sped Up) - Single",
+            "Slowed Down Hits",
+            "Song (Acoustic)",
+            "The Instrumentals",
+            "Song (Radio Edit) - Single",
+            "Club Hits (Extended Mixes)",
+            "Song (Demo)",
+        ]
+        for album in albums {
+            let found = healthReport(
+                make.song("Song", seconds: 240, album: "Studio Album", id: "studio"),
+                make.song("Song", seconds: 242, album: album, id: "other"))
+            #expect(found.duplicates.isEmpty, "\(album)")
+        }
+    }
+
+    @Test func albumsThatNameNoOtherVersionStillPairTheirCopies() {
+        let albums = [
+            "Studio Album (Deluxe Edition)",
+            "Studio Album (Extended Edition)",
+            "Studio Album (Remastered)",
+            "Studio Album (Explicit)",
+            "Mix Tape",
+        ]
+        for album in albums {
+            let found = healthReport(
+                make.song("Song", seconds: 240, album: "Studio Album", id: "studio"),
+                make.song("Song", seconds: 241, album: album, id: "other"))
+            #expect(found.duplicates.count == 1, "\(album)")
+        }
+    }
+
+    @Test func copiesOnTwoAlbumsOfTheSameVersionArePaired() {
+        let bothRemixes = healthReport(
+            make.song("Song", seconds: 242, album: "Song Remixes", id: "ep"),
+            make.song("Song", seconds: 242, album: "Song (Remixes)", id: "ep-again"))
+        let versionInTheTitle = healthReport(
+            make.song("Song (Remix)", seconds: 242, album: "Song (Remix) - Single", id: "single"),
+            make.song("Song (Remix)", seconds: 242, album: "Best of 2014", id: "compilation"))
+        #expect(bothRemixes.duplicates.count == 1)
+        #expect(versionInTheTitle.duplicates.count == 1)
+    }
+
+    @Test func anArtistsOwnNameOnTheAlbumIsNoVersion() {
+        let found = healthReport(
+            make.song("Song", "The Remix Kids", seconds: 240, album: "Studio Album", id: "studio"),
+            make.song("Song", "The Remix Kids", seconds: 241, album: "The Remix Kids", id: "self-titled"))
+        #expect(found.duplicates.count == 1)
+    }
+
     @Test func aRemasterGuestOrTrackNumberInTheTitleIsStillTheSameRecording() {
         let found = healthReport(
             make.song("Pain 1993", "Drake", seconds: 149, id: "plain"),

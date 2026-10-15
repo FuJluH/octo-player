@@ -347,7 +347,8 @@ public func checkLibrary<T>(_ songs: [T], _ fields: HealthFields<T>) -> HealthRe
 
 /// Songs that are the same recording, in sets. A set's copies are all in one place. Songs whose
 /// tags name one recording go together first; then songs by the same artist whose titles read
-/// the same, version and all, and whose lengths are within a few seconds.
+/// the same, version and all, whose albums name no different versions, and whose lengths are
+/// within a few seconds.
 public func findDuplicates<T>(_ songs: [T], _ fields: HealthFields<T>) -> [DuplicateGroup<T>] {
     let sets = UnionSets(songs.count)
     var byTag: [String: Int] = [:]
@@ -382,6 +383,14 @@ public func findDuplicates<T>(_ songs: [T], _ fields: HealthFields<T>) -> [Dupli
         }
     }
 
+    var versionsAt = [Set<String>?](repeating: nil, count: songs.count)
+    func albumVersionsOf(_ index: Int) -> Set<String> {
+        if let known = versionsAt[index] { return known }
+        let read = albumVersions(songs[index], fields)
+        versionsAt[index] = read
+        return read
+    }
+
     for key in byTitleOrder {
         guard let bucket = byTitle[key], bucket.count >= 2 else { continue }
         for i in bucket.indices {
@@ -391,6 +400,7 @@ public func findDuplicates<T>(_ songs: [T], _ fields: HealthFields<T>) -> [Dupli
                 if sets.same(bucket[i], bucket[j]) { continue }
                 let b = songs[bucket[j]]
                 if !lengthsClose(fields.seconds(a), fields.seconds(b), sameLengthSeconds) { continue }
+                if albumVersionsOf(bucket[i]) != albumVersionsOf(bucket[j]) { continue }
                 if SongIdentity.same(refA, refOf(b, fields), options: duplicateTitles).isSame { _ = sets.join(bucket[i], bucket[j]) }
             }
         }
@@ -423,6 +433,16 @@ public func findDuplicates<T>(_ songs: [T], _ fields: HealthFields<T>) -> [Dupli
         if ta != tb { return ta < tb }
         return fields.id(a.best) < fields.id(b.best)
     }
+}
+
+/// The versions a song's album names beyond what its title says. Two songs of one title whose
+/// albums name different versions are different recordings: "Let's Get Lost" on "Let's Get Lost
+/// Remixes" is a remix tagged plainly, not a copy of the one on the studio album, however close
+/// their lengths.
+private func albumVersions<T>(_ song: T, _ fields: HealthFields<T>) -> Set<String> {
+    guard let album = fields.album(song) else { return [] }
+    let inTitle = VersionVariant.requested(fields.title(song), nil)
+    return VersionVariant.inFolder(album, fields.artist(song)).subtracting(inTitle)
 }
 
 /// Each song's key for "this song in this version". Each artist and title pair is read once,

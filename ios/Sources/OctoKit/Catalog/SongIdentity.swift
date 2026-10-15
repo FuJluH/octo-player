@@ -1248,9 +1248,9 @@ public enum SongIdentity {
 
     // Patterns spell out what the server's engine means by a space, a digit and the edge of a
     // word, since engines read the short forms differently.
-    private static let S = #"[\t\n\u000B\f\r\u0085\p{Z}]"#
+    static let S = #"[\t\n\u000B\f\r\u0085\p{Z}]"#
     private static let D = #"\p{Nd}"#
-    private static let W = #"[\p{L}\p{Mn}\p{Nd}\p{Pc}‌‍]"#
+    static let W = #"[\p{L}\p{Mn}\p{Nd}\p{Pc}‌‍]"#
     private static let B = "(?<!\(W))"
     private static let E = "(?!\(W))"
 
@@ -1278,12 +1278,12 @@ public enum SongIdentity {
 
     private static func isSpace(unit: UInt16) -> Bool { isSpace(UInt32(unit)) }
 
-    private static func isBlank(_ value: String?) -> Bool {
+    static func isBlank(_ value: String?) -> Bool {
         guard let value else { return true }
         return value.utf16.allSatisfy { isSpace(unit: $0) }
     }
 
-    private static func trimSpace(_ value: String) -> String { value.trimUnits { isSpace(unit: $0) } }
+    static func trimSpace(_ value: String) -> String { value.trimUnits { isSpace(unit: $0) } }
 
     private static func isDigit(_ ch: UInt16) -> Bool { generalCategory(ch) == .decimalNumber }
 

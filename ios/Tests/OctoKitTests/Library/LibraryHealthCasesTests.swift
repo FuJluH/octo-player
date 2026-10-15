@@ -17,7 +17,7 @@ import Testing
 
     @Test func theFileHasEveryCase() {
         let all = cases
-        #expect(all.count == 55)
+        #expect(all.count == 56)
         #expect(Set(all.compactMap { $0["name"] as? String }).count == all.count)
     }
 
