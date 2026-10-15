@@ -59,6 +59,13 @@ private class FirstFrame {
     var drawn = false
 }
 
+// Whether the clock is running, and whether a picture has arrived that its
+// next frame should show.
+private class PictureHandoff {
+    var ticking = false
+    var waiting = false
+}
+
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)
 @Composable
 private fun WashCanvas(cover: WashCover?, bpm: Float, fpsLimit: Int, speed: Float, moving: Boolean, dolly: () -> Float) {
@@ -79,10 +86,18 @@ private fun WashCanvas(cover: WashCover?, bpm: Float, fpsLimit: Int, speed: Floa
     // known. Null where they cannot be made: it then draws on the window.
     var area by remember { mutableStateOf(IntSize.Zero) }
     val pictures = remember(area) { washPictures(area) }
+    // While the clock runs, a picture that arrives waits for the clock's
+    // next frame, which shows it and asks for the next one, so each step
+    // of the wash costs the window one frame, not two.
+    val handoff = remember { PictureHandoff() }
     DisposableEffect(pictures) {
         pictures?.onPicture = {
-            renderer.pictureArrived(pictures)
-            landed.intValue++
+            if (handoff.ticking) {
+                handoff.waiting = true
+            } else {
+                renderer.pictureArrived(pictures)
+                landed.intValue++
+            }
         }
         onDispose { pictures?.close() }
     }
@@ -133,14 +148,31 @@ private fun WashCanvas(cover: WashCover?, bpm: Float, fpsLimit: Int, speed: Floa
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             clock.start(withFrameNanos { it })
             render()
-            while (clock.busy(moving)) {
-                // Between drawn frames the clock rests rather than waking on
-                // every frame of a faster screen.
-                val rest = withFrameNanos { now ->
-                    if (clock.tick(now, target, tempo, pace, moving)) render()
-                    clock.restNanos(now)
+            handoff.ticking = true
+            try {
+                while (clock.busy(moving)) {
+                    // Between drawn frames the clock rests rather than waking on
+                    // every frame of a faster screen.
+                    val rest = withFrameNanos { now ->
+                        if (clock.tick(now, target, tempo, pace, moving)) {
+                            if (handoff.waiting && pictures != null) {
+                                handoff.waiting = false
+                                renderer.pictureArrived(pictures)
+                                landed.intValue++
+                            }
+                            render()
+                        }
+                        clock.restNanos(now)
+                    }
+                    if (rest > 0) delay(rest / 1_000_000)
                 }
-                if (rest > 0) delay(rest / 1_000_000)
+            } finally {
+                handoff.ticking = false
+                if (handoff.waiting && pictures != null) {
+                    handoff.waiting = false
+                    renderer.pictureArrived(pictures)
+                    landed.intValue++
+                }
             }
             // The frame the clock stopped on, once the one before is in, so
             // a still wash shows the cover fully faded in.
