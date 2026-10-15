@@ -359,6 +359,7 @@ struct MainShell: View {
     /// lingers), and on closing taken down and the pages woken 0.7 s later, once the cover is home.
     private func playerShown(_ open: Bool) {
         takeDown?.cancel()
+        PlayerMotion.shared.moved(for: open ? PlayerMotionClock.openSeconds : PlayerMotionClock.closeSeconds)
         if open {
             if playerMounted { playerOpening += 1 }
             playerMounted = true

@@ -44,14 +44,15 @@ struct LiveBar: View {
 struct LivePill: View {
     let beating: Bool
     @Environment(\.octoReduceMotion) private var calm
+    @State private var motion = PlayerMotion.shared
 
     private static let red = Color(red: 1, green: 0.27, blue: 0.23)
 
     var body: some View {
         HStack(spacing: 6) {
             let moving = beating && !calm
-            // A slow fade needs no more than 30 steps a second.
-            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !moving)) { context in
+            // A slow fade needs no more than 30 steps a second, except while the player moves.
+            TimelineView(.animation(minimumInterval: pacedInterval(1.0 / 30, moving: motion.moving), paused: !moving)) { context in
                 // Fades to a third and back every 1.8 s.
                 let phase = context.date.timeIntervalSinceReferenceDate * .pi / 0.9
                 Circle()

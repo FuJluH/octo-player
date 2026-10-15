@@ -22,6 +22,7 @@ struct PlayerBackground: View {
     let bpm: Int?
     let entrance: PlayerEntrance
     let focused: Bool
+    @State private var motion = PlayerMotion.shared
 
     var body: some View {
         ZStack {
@@ -55,7 +56,7 @@ struct PlayerBackground: View {
                 .animation(.timingCurve(0.65, 0, 0.35, 1, duration: 0.5), value: colors.dominant)
         case .classic:
             if live && WashGPU.shared != nil {
-                ClassicMesh(colors: colors.mesh, playing: playing)
+                ClassicMesh(colors: colors.mesh, playing: playing, moving: motion.moving)
             } else {
                 BlurredCover(coverId: coverId)
                     .opacity(0.6)

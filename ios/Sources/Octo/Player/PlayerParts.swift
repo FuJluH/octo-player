@@ -297,15 +297,17 @@ struct PlayerProgress: View {
     @Environment(\.displayScale) private var scale
     @State private var settings = AppSettings.shared
     @State private var lineWidth: CGFloat = 0
-
-    /// Whole seconds of the clock.
-    private static let wholeSeconds = Date(timeIntervalSinceReferenceDate: 0)
+    @State private var motion = PlayerMotion.shared
+    /// The whole second the times step from.
+    @State private var wholeSeconds = wholeSecondAtOrBefore(.now)
 
     var body: some View {
         let _ = player.timeEvents
         let step = progressStepSeconds(player.duration / Double(max(player.speed, 0.1)), lengthPixels: Double(lineWidth * scale))
+        // Every frame while the player opens, is pulled or closes; each half pixel at rest.
+        let interval = pacedInterval(step > 0 ? step : nil, moving: motion.moving)
         VStack(spacing: 0) {
-            TimelineView(.animation(minimumInterval: step > 0 ? step : nil, paused: !player.isPlaying)) { _ in
+            TimelineView(.animation(minimumInterval: interval, paused: !player.isPlaying)) { _ in
                 let length = player.duration
                 OctoSlider(value: length > 0 ? min(max(player.livePosition / length, 0), 1) : 0, onChange: { fraction in
                     player.seek(to: fraction * player.duration)
@@ -317,7 +319,7 @@ struct PlayerProgress: View {
                 // An unknown length shows 0:00 both sides.
                 Group {
                     if player.isPlaying {
-                        TimelineView(.periodic(from: Self.wholeSeconds, by: 1)) { _ in times }
+                        TimelineView(.periodic(from: wholeSeconds, by: 1)) { _ in times }
                     } else {
                         times
                     }

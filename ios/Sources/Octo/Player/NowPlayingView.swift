@@ -517,6 +517,7 @@ struct NowPlayingView: View {
     // MARK: Opening and closing
 
     private func arrive() {
+        PlayerMotion.shared.moved(for: PlayerMotionClock.openSeconds)
         flight.playerOpening(flightKey(player.current))
         showLyrics(lyrics.open, animated: false)
         withAnimation(PlayerDolly.open) { entrance.dolly = 1 }
@@ -530,6 +531,7 @@ struct NowPlayingView: View {
     private func close(then go: (() -> Void)? = nil) {
         guard !entrance.closing else { return }
         entrance.closing = true
+        PlayerMotion.shared.moved(for: PlayerMotionClock.closeSeconds)
         flight.playerClosing(flightKey(player.current))
         withAnimation(PlayerDolly.close) { entrance.dolly = 0 }
         withAnimation(.octoSpring(1, 1500)) { entrance.corner = 50 }
@@ -609,6 +611,7 @@ struct NowPlayingView: View {
                     book.slopOrigin = dy
                 } else if moved >= Self.slop {
                     book.axis = .vertical
+                    PlayerMotion.shared.hold(true)
                     pull.distance = min(max((moved - Self.slop) * 0.82, 0), cap)
                     book.lastDy = dy
                     return
@@ -662,6 +665,7 @@ struct NowPlayingView: View {
     }
 
     private func resetDrag() {
+        if book.axis == .vertical { PlayerMotion.shared.hold(false) }
         book.axis = .undecided
         book.artDecided = false
         book.slopOrigin = 0

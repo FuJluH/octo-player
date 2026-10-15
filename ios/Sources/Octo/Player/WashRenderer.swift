@@ -482,10 +482,12 @@ private final class WashTarget: NSObject {
 struct ClassicMesh: UIViewRepresentable {
     let colors: [UInt32]
     let playing: Bool
+    /// The player is opening, pulled or closing: the mesh draws every frame meanwhile.
+    var moving = false
 
     func makeUIView(context: Context) -> MeshView { MeshView() }
 
-    func updateUIView(_ view: MeshView, context: Context) { view.update(colors: colors, playing: playing) }
+    func updateUIView(_ view: MeshView, context: Context) { view.update(colors: colors, playing: playing, moving: moving) }
 
     static func dismantleUIView(_ view: MeshView, coordinator: ()) { view.stop() }
 }
@@ -504,6 +506,7 @@ final class MeshView: UIView {
     private var colorAt: CFTimeInterval = 0
     private var last: CFTimeInterval?
     private var drawnAt: CFTimeInterval?
+    private var moving = false
     private var watches: [NSObjectProtocol] = []
 
     override init(frame: CGRect) {
@@ -530,7 +533,11 @@ final class MeshView: UIView {
         canvas.frame = bounds
     }
 
-    func update(colors: [UInt32], playing: Bool) {
+    func update(colors: [UInt32], playing: Bool, moving: Bool) {
+        if moving != self.moving {
+            self.moving = moving
+            link?.preferredFrameRateRange = frameRange
+        }
         let now = CACurrentMediaTime()
         let next = colors.map { c in SIMD4<Float>(Float((c >> 16) & 0xFF) / 255, Float((c >> 8) & 0xFF) / 255, Float(c & 0xFF) / 255, 1) }
         if colorTo.isEmpty {
@@ -560,11 +567,16 @@ final class MeshView: UIView {
         last = nil
         drawnAt = nil
         let link = CADisplayLink(target: MeshTarget(self), selector: #selector(MeshTarget.tick(_:)))
-        // The mesh paces itself; the range never caps the screen below what the rest of the app
-        // asks for (the system picks one rate that suits every link).
-        link.preferredFrameRateRange = CAFrameRateRange(minimum: 10, maximum: 120, preferred: Float(meshFullFps))
+        link.preferredFrameRateRange = frameRange
         link.add(to: .main, forMode: .common)
         self.link = link
+    }
+
+    /// At rest the mesh paces itself; while the player moves it asks for the screen's full rate.
+    private var frameRange: CAFrameRateRange {
+        moving
+            ? CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
+            : CAFrameRateRange(minimum: 10, maximum: 120, preferred: Float(meshFullFps))
     }
 
     private func pause() {
@@ -584,10 +596,11 @@ final class MeshView: UIView {
         pace = paceFrom + (paceTo - paceFrom) * Float(Easing.fastOutSlowIn(Double(t)))
         if let last { time += Float(now - last) * pace }
         last = now
-        // A slow flow needs few frames: 30 a second at full speed, down to 10 paused. A twentieth
-        // short, so a frame landing a hair early still counts.
-        let step = 1 / meshFps(pace)
-        if let drawnAt, now - drawnAt < step - step / 20 { return }
+        // A slow flow needs few frames: 30 a second at full speed, down to 10 paused, and every
+        // frame while the player moves. A twentieth short, so a frame landing a hair early still
+        // counts.
+        let step = meshFrameStep(pace, moving: moving)
+        if let drawnAt, step > 0, now - drawnAt < step - step / 20 { return }
         drawnAt = now
         draw(now)
     }

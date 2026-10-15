@@ -149,10 +149,10 @@ final class FlowingModel {
         #if DEBUG
         FrameProbe.shared.trace(engine, time: link.timestamp)
         #endif
-        // Paused with every line in place and nobody scrolling: nothing can move until something
-        // wakes the loop, so it stops.
+        // Paused with every line in place, nobody scrolling and the player at rest: nothing can
+        // move until something wakes the loop, so it stops.
         let rest = engine.settled
-        if rest && !playing {
+        if rest && !playing && !PlayerMotion.shared.moving {
             idle = true
             link.invalidate()
             self.link = nil
@@ -206,6 +206,7 @@ struct FlowingLyricsView: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var stamp: Int?
     @State private var stampToken = 0
+    @State private var motion = PlayerMotion.shared
 
     var body: some View {
         GeometryReader { box in
@@ -249,6 +250,7 @@ struct FlowingLyricsView: View {
         .onChange(of: calm) { _, _ in sync() }
         .onChange(of: player.isPlaying) { _, _ in sync(); model.anchor() }
         .onChange(of: player.current?.id) { _, _ in model.anchor() }
+        .onChange(of: motion.moving) { _, now in if now { model.wake() } }
         .onChange(of: player.speed) { _, _ in sync(); model.anchor() }
         // The loop rests only while the app is out of sight; Control Center and the like leave
         // it running.

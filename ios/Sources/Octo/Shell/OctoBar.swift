@@ -479,9 +479,9 @@ struct ProgressRing: View {
     @Environment(\.scenePhase) private var phase
     @State private var pausedAt = Date()
     @State private var settled = false
-
-    /// Whole seconds of the clock.
-    private static let wholeSeconds = Date(timeIntervalSinceReferenceDate: 0)
+    @State private var motion = PlayerMotion.shared
+    /// The whole second the playing ring steps from.
+    @State private var wholeSeconds = wholeSecondAtOrBefore(.now)
 
     var body: some View {
         let live = player.live != nil
@@ -494,14 +494,14 @@ struct ProgressRing: View {
                 ring(sweep: scrub, arc: .of(paused: false, breath: nil), track: false)
             } else if paused {
                 let still = calm || settled || away
-                TimelineView(.animation(minimumInterval: RingLook.breathFrameSeconds, paused: still)) { time in
+                TimelineView(.animation(minimumInterval: pacedInterval(RingLook.breathFrameSeconds, moving: motion.moving), paused: still)) { time in
                     let breath = still ? nil : pauseBreath(max(0, time.date.timeIntervalSince(pausedAt)))
                     ring(sweep: sweep(live: live), arc: .of(paused: true, breath: breath), track: true)
                 }
             } else if live || away {
                 ring(sweep: sweep(live: live), arc: .of(paused: false, breath: nil), track: false)
             } else {
-                TimelineView(.periodic(from: Self.wholeSeconds, by: RingLook.stepSeconds)) { _ in
+                TimelineView(.periodic(from: wholeSeconds, by: RingLook.stepSeconds)) { _ in
                     ring(sweep: sweep(live: false), arc: .of(paused: false, breath: nil), track: false)
                 }
             }
