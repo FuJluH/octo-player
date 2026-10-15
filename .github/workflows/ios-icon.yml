@@ -1,0 +1,45 @@
+# Compiles the iPhone app's Liquid Glass icon (ios/AppIcon.icon, written by
+# tools/appicon/make_app_icon.py ios) and its launch screen color and octopus
+# (ios/Launch.xcassets) into the Assets.car the app ships.
+# Apple's actool only runs on macOS; the app itself builds anywhere with xtool.
+# Run by hand when the icon changes, then put the artifact's Assets.car in
+# ios/Resources.
+name: iOS icon
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pick the newest Xcode
+        run: |
+          xcode=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
+
+      - name: Compile the icon and the launch screen
+        run: |
+          mkdir -p out
+          xcrun actool ios/AppIcon.icon ios/Launch.xcassets \
+            --compile out \
+            --platform iphoneos \
+            --target-device iphone \
+            --minimum-deployment-target 26.0 \
+            --app-icon AppIcon \
+            --output-partial-info-plist out/partial.plist \
+            --output-format human-readable-text --notices --warnings --errors
+          ls -la out
+          plutil -p out/partial.plist
+          xcrun assetutil --info out/Assets.car | head -60
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-icon
+          path: out/

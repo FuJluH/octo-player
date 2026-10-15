@@ -1,0 +1,15 @@
+version: 1
+bundleID: app.winters.octo
+product: Octo
+infoPath: Info.plist
+iconPath: Resources/AppIcon.png
+entitlementsPath: Octo.entitlements
+extensions:
+  - product: OctoShare
+    bundleID: app.winters.octo.share
+    infoPath: OctoShare-Info.plist
+    entitlementsPath: OctoShare.entitlements
+  - product: OctoWidgets
+    bundleID: app.winters.octo.widgets
+    infoPath: OctoWidgets-Info.plist
+    entitlementsPath: OctoWidgets.entitlements
