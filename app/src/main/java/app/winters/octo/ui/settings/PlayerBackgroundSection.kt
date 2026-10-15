@@ -93,7 +93,6 @@ fun PlayerBackgroundSection(vm: PlayerBackgroundViewModel = hiltViewModel()) {
                 else -> null
             },
         )
-        AnimatedArtRow(player.animatedArt, vm::setAnimatedArt)
         if (background.prepared) {
             PercentSlider(SettingsIndex.BackgroundBrightnessCap, background.brightnessCap, BrightnessCapRange, step = 5) { value ->
                 vm.update { it.copy(brightnessCap = value) }
@@ -123,6 +122,7 @@ fun PlayerBackgroundSection(vm: PlayerBackgroundViewModel = hiltViewModel()) {
                 )
             })
         }
+        AnimatedArtRow(player.animatedArt, vm::setAnimatedArt)
     }
 }
 

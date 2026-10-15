@@ -31,7 +31,12 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -92,8 +97,9 @@ data class PlayerPrefs(
     // out songs found online.
     val libraryOnly: Boolean = false,
     // Where an album's animated art plays: in place of the cover, filling
-    // the player, or nowhere.
-    val animatedArt: AnimatedArtSetting = AnimatedArtSetting.Default,
+    // the player, or nowhere. Kept by its key ("square", "full_screen",
+    // "off"), as the other apps keep it.
+    @Serializable(with = AnimatedArtByKey::class) val animatedArt: AnimatedArtSetting = AnimatedArtSetting.Default,
 ) {
     // What the player uses: the longest blend, or 0 for none.
     val crossfadeMs: Long get() = if (crossfade) crossfadeSeconds * 1_000L else 0
@@ -129,6 +135,16 @@ data class StreamPrefs(
     // How much of a stream is ready before a song starts.
     val startAfter: StartAfter = StartAfter.Short,
 )
+
+// The Animated art choice written by its key, the same in every app's
+// backups; one this app does not know reads as Square.
+object AnimatedArtByKey : KSerializer<AnimatedArtSetting> {
+    override val descriptor = PrimitiveSerialDescriptor("AnimatedArtSetting", PrimitiveKind.STRING)
+
+    override fun serialize(encoder: Encoder, value: AnimatedArtSetting) = encoder.encodeString(value.key)
+
+    override fun deserialize(decoder: Decoder): AnimatedArtSetting = AnimatedArtSetting.fromKey(decoder.decodeString())
+}
 
 // The range the longest blend can be set to.
 val CrossfadeSecondsRange = 2..16

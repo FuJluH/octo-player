@@ -90,9 +90,13 @@ class BackupTest {
     @Test
     fun theAnimatedArtChoiceIsKept() {
         val text = encodeBackup(Backup(player = PlayerPrefs(animatedArt = AnimatedArtSetting.FullScreen)))
+        // By the setting's key, as the other apps write it.
+        assertTrue(text.contains("\"animatedArt\": \"full_screen\""))
         assertEquals(AnimatedArtSetting.FullScreen, (decodeBackup(text) as BackupRead.Read).backup.player?.animatedArt)
+        val off = decodeBackup("{\"kind\": \"octo-settings\", \"player\": {\"animatedArt\": \"off\"}}") as BackupRead.Read
+        assertEquals(AnimatedArtSetting.Off, off.backup.player?.animatedArt)
         // One this app does not know reads as the default, Square.
-        val unknown = decodeBackup(text.replace("\"FullScreen\"", "\"Hologram\"")) as BackupRead.Read
+        val unknown = decodeBackup(text.replace("\"full_screen\"", "\"hologram\"")) as BackupRead.Read
         assertEquals(AnimatedArtSetting.Square, unknown.backup.player?.animatedArt)
         // A backup from before the setting has it at Square.
         assertEquals(AnimatedArtSetting.Square, PlayerPrefs().animatedArt)
