@@ -7,16 +7,18 @@ import app.winters.octo.desktop.player.PlayerState
 // thumbnail and the song's progress across it, worked out from the player
 // apart from the system so it can be checked without a window.
 
-// Previous, play or pause, and next. `playing` puts pause in the middle.
+// Previous, play or pause, and next. `playing` puts pause in the middle,
+// or Stop for a live station (`live`), which has no pause.
 data class TaskbarButtons(
     val playing: Boolean,
     val previous: Boolean,
     val toggle: Boolean,
     val next: Boolean,
+    val live: Boolean = false,
 ) {
-    val previousTip: String get() = "Previous"
-    val toggleTip: String get() = if (playing) "Pause" else "Play"
-    val nextTip: String get() = "Next"
+    val previousTip: String get() = if (live) "Previous station" else "Previous"
+    val toggleTip: String get() = if (!playing) "Play" else if (live) "Stop" else "Pause"
+    val nextTip: String get() = if (live) "Next station" else "Next"
 }
 
 // How the progress shows, by the system library's numbers.
@@ -43,6 +45,7 @@ fun taskbarViewOf(state: PlayerState, positionMs: Long, failing: Boolean = false
         previous = now?.canPrevious == true,
         toggle = now != null,
         next = now?.canNext == true,
+        live = now?.live == true,
     )
     val length = now?.durationMs ?: 0
     val progress = when {

@@ -104,6 +104,7 @@ class WindowsTaskbar internal constructor(
     // Held here so the JVM never frees it while the library can call it.
     private var callback: ButtonCallback? = null
     private var light: Boolean? = null
+    private var stopIcon: Boolean? = null
 
     // Starts looking after the window's taskbar button. `window` is its
     // handle; clicks come back to `onButton` on the app's scope.
@@ -134,13 +135,14 @@ class WindowsTaskbar internal constructor(
 
     // The icons at the size Windows wants, for the taskbar's theme, when
     // that theme changed.
-    private fun icons() {
+    private fun icons(stop: Boolean = stopIcon == true) {
         val now = runCatching(lightTaskbar).getOrDefault(false)
-        if (now == light) return
+        if (now == light && stop == stopIcon) return
         light = now
+        stopIcon = stop
         later("Drawing the taskbar icons") {
             val size = library.octo_taskbar_icon_size().takeIf { it in 8..256 } ?: 16
-            val pixels = taskbarIconPixels(size, taskbarIconColour(now))
+            val pixels = taskbarIconPixels(size, taskbarIconColour(now), stop)
             library.octo_taskbar_set_icons(pixels, pixels.size.toLong(), size).toLong()
         }
     }
@@ -150,6 +152,8 @@ class WindowsTaskbar internal constructor(
         val now = clock()
         val view = taskbarViewOf(state, player.positionMs(), failures.failing(state.problem, now))
         val (buttons, progress) = throttle.next(view, now)
+        // A live station's middle button is Stop: its icon is drawn first.
+        buttons?.let { b -> if (b.live != stopIcon) icons(stop = b.live) }
         buttons?.let { b ->
             later("Showing the taskbar buttons") {
                 library.octo_taskbar_set_buttons(1, b.playing.bit(), b.previous.bit(), b.toggle.bit(), b.next.bit(), b.previousTip, b.toggleTip, b.nextTip).toLong()
