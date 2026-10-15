@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.settings
 
+import app.winters.octo.animated.AnimatedArtSetting
 import app.winters.octo.offline.KeepChoices
 import app.winters.octo.playback.FadeCurve
 import app.winters.octo.playback.StartAfter
@@ -301,7 +302,14 @@ data class Appearance(
     // Home's shelves in order, a hidden one led by "-", as the phone keeps
     // them; null for the usual order, all shown.
     @SerialName(HOME_SECTIONS_KEY) val homeSections: String? = null,
+    // Animated album covers on Octo servers that offer them: "square" in
+    // place of the cover, "full_screen" behind the player, or "off"
+    // (AnimatedArtSetting's keys; anything else reads as the default).
+    @SerialName(AnimatedArtSetting.PREF_KEY) val animatedArt: String = AnimatedArtSetting.Default.key,
 )
+
+// The Animated art choice.
+val Appearance.animatedArtSetting: AnimatedArtSetting get() = AnimatedArtSetting.fromKey(animatedArt)
 
 // The window's colours: the playing cover blurred into a glow across the
 // top, or the full player's moving wash of it behind the whole window.

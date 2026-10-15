@@ -66,6 +66,8 @@ import app.winters.octo.design.OctoIcons
 import app.winters.octo.desktop.hotkeys.GlobalShortcutGroup
 import app.winters.octo.desktop.ui.LocalSoftwareDrawing
 import app.winters.octo.ui.family.AUDIO_QUALITY
+import app.winters.octo.animated.AnimatedArtSetting
+import app.winters.octo.desktop.settings.animatedArtSetting
 import kotlin.math.roundToInt
 
 // Settings: the servers, how Octo looks, playback, listening, lyrics,
@@ -139,6 +141,15 @@ private fun AppearanceGroups(app: AppState, settings: AppSettings) {
     }
     HomeSectionsGroup(app, look.homeSections)
     Group("Full player") {
+        val animated = look.animatedArtSetting
+        val animatedHelp = when {
+            animated == AnimatedArtSetting.Off -> animated.about
+            LocalReduceMotion.current -> "Shows the still cover while motion is reduced, by Calm motion or your system."
+            else -> animated.about
+        }
+        ChoiceRow(AnimatedArtSetting.TITLE, animatedHelp, AnimatedArtSetting.entries, animated, AnimatedArtSetting::label) { choice ->
+            appearance { it.copy(animatedArt = choice.key) }
+        }
         SwitchRow("Moving background", "Off holds the colours still, easier on a battery.", look.wash.moving) { on ->
             wash { it.copy(moving = on) }
         }

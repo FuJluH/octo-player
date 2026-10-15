@@ -1,5 +1,12 @@
 package app.winters.octo.desktop
 
+import app.winters.octo.animated.AnimatedArtSetting
+import app.winters.octo.desktop.animated.AnimatedArtModel
+import app.winters.octo.desktop.animated.KeptLoops
+import app.winters.octo.desktop.animated.PowerSaving
+import app.winters.octo.desktop.settings.animatedArtSetting
+import app.winters.octo.subsonic.AnimatedArtAnswer
+import app.winters.octo.subsonic.OCTO_ANIMATED_ART
 import app.winters.octo.serverupdate.LaterStore
 import app.winters.octo.serverupdate.ServerUpdateHttp
 import app.winters.octo.serverupdate.ServerUpdateWatcher
@@ -240,6 +247,9 @@ class AppState(
     // the Family page follow.
     val family = FamilyModel({ connection?.client }, { connection?.family == true }, scope)
 
+    // The animated art kept with downloaded albums.
+    private val keptLoops: KeptLoops = KeptLoops(http) { offline.folder }
+
     // Songs kept on this computer to play without a connection.
     val offline = DesktopOffline(
         settings,
@@ -250,7 +260,20 @@ class AppState(
         { library?.index?.songs },
         family,
         { words -> notice = words },
+        keptLoops,
+        askArt = { artAsker() },
     )
+
+    // How to ask the server in use about an album's animated art, for the
+    // albums kept here; none when it offers none or the setting is Off.
+    private fun artAsker(): (suspend (String) -> AnimatedArtAnswer)? {
+        val now = connection ?: return null
+        if (settings.current.appearance.animatedArtSetting == AnimatedArtSetting.Off || !now.supports(OCTO_ANIMATED_ART)) return null
+        return { id -> now.client.animatedArt(id) }
+    }
+
+    // Animated album covers on the server in use, and their loop files.
+    val animated = AnimatedArtModel(http, scope, { connection }, keptLoops, PowerSaving(os).also { it.start(scope) })
 
     // What a stream asks the server for: this app's own quality without a
     // family, or when this device is left to the app; otherwise the file as
@@ -452,6 +475,7 @@ class AppState(
         queueSync.start()
         watchProblems()
         followLive()
+        followAnimatedArt()
         restored?.let(::signedIn)
     }
 
@@ -470,6 +494,16 @@ class AppState(
                     else -> skippedLine(song.title, problem.words)
                 }
                 noticeDetail = problem.detail
+            }
+        }
+    }
+
+    // Each song's album and the next one's are asked about as it starts,
+    // and the next song's loop is fetched ahead.
+    private fun followAnimatedArt() {
+        scope.launch {
+            player.state.map { it.current?.song?.albumId to it.upcoming.firstOrNull()?.song?.albumId }.distinctUntilChanged().collect { (playing, next) ->
+                animated.songChanged(playing, next, settings.current.appearance.animatedArtSetting)
             }
         }
     }
@@ -616,6 +650,7 @@ class AppState(
         serverFacts.forget()
         liveRadio.forget()
         followServerUpdate(connection)
+        animated.follow(connection)
         // The family decides what adding an outside song does and who picks
         // the stream quality, so it is read before the first song plays.
         if (connection.family) scope.launch { family.plan() }
@@ -713,6 +748,7 @@ class AppState(
             serverFacts.forget()
             liveRadio.forget()
             followServerUpdate(null)
+            animated.follow(null)
             playlists = emptyList()
             fullPlayer = false
             navigator.startOver()

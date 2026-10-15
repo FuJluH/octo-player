@@ -6,7 +6,10 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import app.winters.octo.desktop.animated.KEPT_LOOPS
+import app.winters.octo.desktop.animated.KeptLoops
 import app.winters.octo.desktop.server.Connection
+import app.winters.octo.subsonic.AnimatedArtAnswer
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.offline.KeepChoices
 import app.winters.octo.offline.KeptCopyCheck
@@ -51,6 +54,8 @@ data class KeptFile(
     val title: String = "",
     val artist: String = "",
     val fileSize: Long? = null,
+    // The song's album, so the album's animated art is kept with it.
+    val album: String = "",
 )
 
 // Whether a kept file is the server's file as it is: it has the song's own
@@ -81,6 +86,11 @@ class DesktopOffline(
     private val liked: () -> List<Song>?,
     private val family: FamilyModel,
     private val say: (String) -> Unit,
+    // The animated art of the albums kept here, and how to ask the server
+    // in use about an album's (null when it offers none, or the listener
+    // has animated art off).
+    private val loops: KeptLoops? = null,
+    private val askArt: () -> (suspend (String) -> AnimatedArtAnswer)? = { null },
 ) {
     private val http = http.markedFor(OctoPurpose.Offline)
     private val lock = Mutex()
@@ -105,7 +115,10 @@ class DesktopOffline(
         files = readIndex()
         status = statusOf(files)
         worker = scope.launch(Dispatchers.IO) {
-            for (signal in wake) runCatching { sync() }
+            for (signal in wake) {
+                runCatching { sync() }
+                runCatching { keepLoops() }
+            }
         }
         poke()
     }
@@ -168,6 +181,18 @@ class DesktopOffline(
                         old.delete()
                     }
                 }
+                // The albums' animated art goes with them.
+                files.map { it.server }.distinct().forEach { server ->
+                    val old = File(from, "${app.winters.octo.offline.fileSafe(server)}${File.separator}$KEPT_LOOPS")
+                    val new = File(target, "${app.winters.octo.offline.fileSafe(server)}${File.separator}$KEPT_LOOPS")
+                    if (old.isDirectory && !new.exists()) {
+                        new.parentFile?.mkdirs()
+                        if (!old.renameTo(new)) {
+                            old.copyRecursively(new, overwrite = true)
+                            old.deleteRecursively()
+                        }
+                    }
+                }
                 File(from, INDEX).delete()
                 settings.update { it.copy(offline = it.offline.copy(folder = target.absolutePath)) }
                 writeIndex(files)
@@ -179,9 +204,13 @@ class DesktopOffline(
     // Lets every kept song of the server in use go, and stops keeping any.
     fun removeAll() {
         val server = connection()?.server?.id ?: return
+        scope.launch(Dispatchers.IO) { lock.withLock { loops?.removeAll(server) } }
         settings.update { it.copy(offline = it.offline.copy(servers = it.offline.servers - server)) }
         poke()
     }
+
+    // The albums' animated art kept here, for their songs.
+    val keptLoops: KeptLoops? get() = loops
 
     private fun change(edit: (KeepChoices) -> KeepChoices) {
         val server = connection()?.server?.id ?: return
@@ -190,6 +219,15 @@ class DesktopOffline(
             now.copy(offline = now.offline.copy(servers = now.offline.servers + (server to next)))
         }
         poke()
+    }
+
+    // Keeps the animated art of every album with a song kept from the
+    // server in use, and lets go of the rest.
+    private suspend fun keepLoops() = lock.withLock {
+        val loops = loops ?: return@withLock
+        val server = connection()?.server?.id ?: return@withLock
+        val albums = files.filter { it.server == server && it.album.isNotBlank() }.mapTo(HashSet()) { it.album }
+        loops.keep(server, albums, askArt())
     }
 
     // Fetches what should be kept and is not, and lets go what should not.
@@ -273,7 +311,7 @@ class DesktopOffline(
             }
             if (target.exists()) target.delete()
             if (!part.renameTo(target)) return@withContext null
-            KeptFile(server, song.id, path, target.length(), song.title, song.artist.orEmpty(), song.size?.takeIf { it > 0 })
+            KeptFile(server, song.id, path, target.length(), song.title, song.artist.orEmpty(), song.size?.takeIf { it > 0 }, song.albumId.orEmpty())
         } catch (e: IOException) {
             part.delete()
             null
@@ -290,10 +328,12 @@ class DesktopOffline(
         val swapped = ArrayList<KeptFile>()
         val checked = files.map { kept ->
             val song = now[kept.id]?.takeIf { kept.server == server } ?: return@map kept
-            when (checkKeptCopy(kept.fileSize, song.size, kept.size, keptAsIs(kept.path, song.suffix))) {
-                KeptCopyCheck.Keep -> kept
-                KeptCopyCheck.Note -> kept.copy(fileSize = song.size).also { changed = true }
-                KeptCopyCheck.Refetch -> kept.also { swapped += it }
+            // Files kept before their album was noted have it noted here.
+            val noted = if (kept.album.isEmpty() && !song.albumId.isNullOrBlank()) kept.copy(album = song.albumId.orEmpty()).also { changed = true } else kept
+            when (checkKeptCopy(noted.fileSize, song.size, noted.size, keptAsIs(noted.path, song.suffix))) {
+                KeptCopyCheck.Keep -> noted
+                KeptCopyCheck.Note -> noted.copy(fileSize = song.size).also { changed = true }
+                KeptCopyCheck.Refetch -> noted.also { swapped += it }
             }
         }
         val refused = swapped.isNotEmpty() && connection()?.family == true && !offlineCopiesAllowed(family.plan())
