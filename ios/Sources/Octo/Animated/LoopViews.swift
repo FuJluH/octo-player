@@ -46,7 +46,8 @@ struct CoverLoop: View {
 
     var body: some View {
         let play = play
-        LoopVideo(source: file, run: loopRun(play, shown: shown, owns: stage.owner == id), radius: radius)
+        let run = loopRun(play, shown: shown, owns: stage.owner == id)
+        LoopVideo(source: file, run: run, radius: radius)
             .frame(width: side, height: side)
             .allowsHitTesting(false)
             .accessibilityHidden(true)

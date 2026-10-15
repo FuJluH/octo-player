@@ -26,6 +26,8 @@ struct AlbumView: View {
     @State private var animated = AnimatedArtStore.shared
     /// The header's cover is on screen.
     @State private var coverShown = false
+    /// The album on the server in use that most of the page's songs come from.
+    @State private var serverAlbum: String?
     @Environment(\.shellAwake) private var awake
 
     /// The songs the page lists: the whole album with its finds, unless only the library's are
@@ -97,6 +99,7 @@ struct AlbumView: View {
         }
         shown = found
         tracks = await library.albumTracks(found.id)
+        serverAlbum = await state.data.controls.shareableAlbumId(found.id)
         more = await library.artistAlbums(found.artistId)
             .filter { $0.id != found.id }
             .sorted { a, b in
@@ -148,15 +151,9 @@ struct AlbumView: View {
         return [album.year.map(String.init), songsCount(count), asLength(length)].compactMap { $0 }.joined(separator: " • ")
     }
 
-    /// The album on the server in use whose animated art the header plays: the page's own when it
-    /// is the server's, else the album its songs' server copies name.
-    private var loopAlbumId: String? {
-        let here = session.inUse?.sourceId
-        if let shown, isServerSource(shown.sourceId), shown.sourceId == here { return shown.nativeId }
-        return tracks.lazy.compactMap { track in
-            track.sourceId == here ? serverId(of: track.albumId, sourceId: track.sourceId) : nil
-        }.first ?? (online?.id)
-    }
+    /// The album on the server in use whose animated art the header plays: the one its songs'
+    /// server copies come from, or the server's own album the page shows.
+    private var loopAlbumId: String? { serverAlbum ?? online?.id }
 
     @ViewBuilder
     private func header(_ album: LibraryAlbum) -> some View {
