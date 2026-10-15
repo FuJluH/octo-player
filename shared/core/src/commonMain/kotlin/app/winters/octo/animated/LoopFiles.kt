@@ -30,11 +30,20 @@ class LoopFetcher(private val http: OkHttpClient) {
     // `height` pixels in a format the device plays, or null when the clip
     // offers none or cannot be read just now.
     suspend fun locate(clip: AnimatedClip, width: Int, height: Int, codecs: Set<LoopCodec> = setOf(LoopCodec.Avc)): LoopFile? {
+        val variant = pick(clip, width, height, codecs)?.url ?: return null
+        return text(variant)?.let { parseLoopFile(it, variant) }
+    }
+
+    // The version of the clip that suits a space `width` by `height` pixels
+    // in a format the device plays, as its own playlist: a player given it
+    // has that one version only, so it never starts small and steps up.
+    // Null when the clip offers none or cannot be read just now.
+    suspend fun pick(clip: AnimatedClip, width: Int, height: Int, codecs: Set<LoopCodec> = setOf(LoopCodec.Avc)): LoopVariant? {
         val master = clip.video.toHttpUrlOrNull() ?: return null
         val ladder = text(master)?.let { parseLoopLadder(it, master) } ?: return null
         // A playlist with no versions is itself a version's playlist.
-        val variant = if (ladder.isEmpty()) master else pickLoopVariant(ladder, width, height, codecs)?.url ?: return null
-        return text(variant)?.let { parseLoopFile(it, variant) }
+        if (ladder.isEmpty()) return LoopVariant(master, 0L, clip.width, clip.height, "")
+        return pickLoopVariant(ladder, width, height, codecs)
     }
 
     // Puts the loop's file at `target` unless it is there already: through
@@ -115,6 +124,13 @@ class LoopShelf(val dir: File, private val maxBytes: Long) {
 fun offlineLoopFile(dir: File, albumId: String, shape: String): File = File(dir, "${hashOf(albumId)}-$shape.mp4")
 
 fun offlineLoopPoster(dir: File, albumId: String, shape: String): File = File(dir, "${hashOf(albumId)}-$shape.jpg")
+
+// What is kept of a downloaded album's animated art beside its loops (the
+// art as the server gave it), so it is known with no connection too.
+fun offlineLoopRecord(dir: File, albumId: String): File = File(dir, "${hashOf(albumId)}.json")
+
+// What the name of every file kept for a downloaded album's loops starts with.
+fun offlineLoopStem(albumId: String): String = hashOf(albumId)
 
 internal fun hashOf(text: String): String =
     MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).take(16).joinToString("") { "%02x".format(it) }

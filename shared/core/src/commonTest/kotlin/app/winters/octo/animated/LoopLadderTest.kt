@@ -130,6 +130,24 @@ class LoopLadderTest {
     }
 
     @Test
+    fun aPlayerIsGivenTheOneVersionThatSuits() = runTest {
+        server.enqueue(MockResponse.Builder().body(master).build())
+        val fetcher = LoopFetcher(OkHttpClient())
+        val picked = fetcher.pick(AnimatedClip(video = server.url("/m/default.m3u8").toString()), 700, 700)!!
+        assertEquals("https://cdn.example.com/b/video_768.m3u8", picked.url.toString())
+        assertEquals(1, server.requestCount)
+        // A version's own playlist is played as it is.
+        server.enqueue(MockResponse.Builder().body(media).build())
+        val alone = fetcher.pick(AnimatedClip(video = server.url("/b/video.m3u8").toString(), width = 768, height = 768), 700, 700)!!
+        assertEquals(server.url("/b/video.m3u8"), alone.url)
+        assertEquals(768, alone.width)
+        // Nothing that answers is nothing to play.
+        server.enqueue(MockResponse.Builder().code(500).build())
+        assertNull(fetcher.pick(AnimatedClip(video = server.url("/gone.m3u8").toString()), 700, 700))
+        assertNull(fetcher.pick(AnimatedClip(video = "not an address"), 700, 700))
+    }
+
+    @Test
     fun aFailedFetchLeavesNothingBehind() = runTest {
         server.enqueue(MockResponse.Builder().code(404).build())
         val target = folder.root.resolve("gone.mp4")
