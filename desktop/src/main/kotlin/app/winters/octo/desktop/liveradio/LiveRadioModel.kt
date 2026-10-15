@@ -29,7 +29,8 @@ sealed interface LiveFind {
 
     data object Finding : LiveFind
 
-    data class Found(val place: LivePlace, val stations: List<LiveStation>) : LiveFind
+    // `hidden`: how many stations around were left out as unplayable here.
+    data class Found(val place: LivePlace, val stations: List<LiveStation>, val hidden: Int = 0) : LiveFind
 
     // The place could not be found, in words.
     data class Problem(val words: String) : LiveFind
@@ -148,7 +149,9 @@ class LiveRadioModel(
 
     private suspend fun stationsAround(place: LivePlace): LiveFind = try {
         val now = prefs
-        LiveFind.Found(place, catalog.near(place, radiusMeters(now.radius, miles), now.sort, ::livePlayable))
+        val around = catalog.near(place, radiusMeters(now.radius, miles), now.sort)
+        val playable = around.filter(::livePlayable)
+        LiveFind.Found(place, playable, hidden = around.size - playable.size)
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {

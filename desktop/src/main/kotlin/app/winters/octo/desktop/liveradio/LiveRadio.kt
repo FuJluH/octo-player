@@ -106,7 +106,20 @@ fun tagsText(station: LiveStation): String? = station.tags.take(3).joinToString(
 // What the desktop plays: these codecs, and HLS streams of any.
 val LivePlayableCodecs = setOf("MP3", "AAC", "AAC+", "OGG", "OPUS", "FLAC")
 
-fun livePlayable(station: LiveStation): Boolean = station.hls || station.codec.trim().uppercase() in LivePlayableCodecs
+// A station that lists several kinds ("MP3,AAC") plays when every one of
+// them does; one with no kind given, or only UNKNOWN, is left out.
+fun livePlayable(station: LiveStation): Boolean {
+    if (station.hls) return true
+    val kinds = station.codec.split(',').map { it.trim().uppercase() }.filter { it.isNotEmpty() }
+    return kinds.isNotEmpty() && kinds.all { it in LivePlayableCodecs }
+}
+
+// The line under the stations when some were left out as unplayable.
+fun hiddenStationsLine(count: Int): String? = when {
+    count <= 0 -> null
+    count == 1 -> "1 station is left out because Octo can't play its stream on this computer."
+    else -> "$count stations are left out because Octo can't play their streams on this computer."
+}
 
 const val NO_STATIONS_AROUND = "No stations within %s. Try a wider circle."
 const val CATALOG_DOWN = "The radio catalog is not answering right now."

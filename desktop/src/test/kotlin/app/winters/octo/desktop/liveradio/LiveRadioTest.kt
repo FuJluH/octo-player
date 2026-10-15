@@ -207,6 +207,14 @@ class LiveRadioTest {
         listOf("MP3", "AAC", "AAC+", "OGG", "OPUS", "FLAC", "mp3").forEach { assertTrue(it, livePlayable(LiveStation("u", "X", "http://x", codec = it))) }
         listOf("WMA", "UNKNOWN", "").forEach { assertFalse(it, livePlayable(LiveStation("u", "X", "http://x", codec = it))) }
         assertTrue("HLS of any codec", livePlayable(LiveStation("u", "X", "http://x", codec = "UNKNOWN", hls = true)))
+        // A station listing several kinds plays when each of them does.
+        assertTrue(livePlayable(LiveStation("u", "X", "http://x", codec = "MP3,AAC")))
+        assertTrue(livePlayable(LiveStation("u", "X", "http://x", codec = "aac, aac+")))
+        assertFalse(livePlayable(LiveStation("u", "X", "http://x", codec = "MP3,WMA")))
+        // What was left out is said under the stations.
+        assertEquals(null, hiddenStationsLine(0))
+        assertEquals("1 station is left out because Octo can't play its stream on this computer.", hiddenStationsLine(1))
+        assertEquals("3 stations are left out because Octo can't play their streams on this computer.", hiddenStationsLine(3))
     }
 
     @Test

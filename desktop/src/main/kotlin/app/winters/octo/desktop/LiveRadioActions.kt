@@ -100,12 +100,17 @@ fun liveStationOf(id: String): LiveStation? {
 // Keeps a catalog station on this computer, or takes it off.
 fun AppState.keepLive(station: LiveStation) {
     liveRadio.keep(station)
-    passingNotice("Kept ${station.name}. It's on Home under Live radio.")
+    passingNotice("Kept ${station.name} on Live radio.")
 }
 
+// A station let go, with Undo to keep it again.
 fun AppState.dropLive(station: LiveStation) {
     liveRadio.drop(station.uuid)
-    passingNotice("Removed ${station.name}.")
+    val line = "Removed ${station.name}."
+    passingNotice(line, NoticeAction(line, "Undo") {
+        liveRadio.keep(station)
+        notice = null
+    })
 }
 
 // Whether a catalog station is kept on this computer.

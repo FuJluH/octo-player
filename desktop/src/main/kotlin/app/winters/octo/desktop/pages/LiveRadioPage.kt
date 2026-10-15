@@ -57,6 +57,7 @@ import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.liveradio.CATALOG_DOWN
 import app.winters.octo.desktop.liveradio.LIVE_RADIO_NEAR
 import app.winters.octo.desktop.liveradio.LiveFind
+import app.winters.octo.desktop.liveradio.hiddenStationsLine
 import app.winters.octo.desktop.liveradio.nothingFound
 import app.winters.octo.desktop.liveradio.radiusChoices
 import app.winters.octo.desktop.liveradio.radiusLabel
@@ -156,6 +157,9 @@ private fun LazyListScope.stations(app: AppState, find: LiveFind, keptIds: Set<S
                 item(key = "none") { NothingHere(nothingFound(find.place, value, miles)) }
             }
             items(find.stations, key = { "near:${it.uuid}" }) { station -> StationRow(app, station, kept = station.uuid in keptIds, miles = miles, near = true, lineup = find.stations, source = LIVE_RADIO_NEAR) }
+            hiddenStationsLine(find.hidden)?.let { line ->
+                item(key = "hidden") { Txt(line, DesktopType.meta, OctoColors.TextMuted, Modifier.padding(vertical = Space.S), maxLines = 2) }
+            }
         }
     }
 }
