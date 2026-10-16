@@ -21,7 +21,7 @@ class SearchMixTest {
         assertEquals("Searching outside your library…", outsideLine(OutsideLook.Looking, "linkin park"))
         assertEquals("No songs outside your library for \"linkin park\"", outsideLine(OutsideLook.NoneFound, " linkin park "))
         assertEquals("Couldn't search outside your library", outsideLine(OutsideLook.Failed, "x"))
-        assertNull(outsideLine(OutsideLook.Found, "x"))
+        assertEquals("Not in your library", outsideLine(OutsideLook.Found, "x"))
         assertNull(outsideLine(OutsideLook.Off, "x"))
     }
 
@@ -45,6 +45,7 @@ class SearchMixTest {
     @Test
     fun findsSitCloseUnderTheLibrarysSongs() {
         assertTrue(LIBRARY_SONGS_SHOWN <= 5)
-        assertTrue(WAITING_ROWS in 1..ONLINE_SONGS_SHOWN)
+        // The waiting rows are as many as the finds that take their places.
+        assertEquals(ONLINE_SONGS_SHOWN, WAITING_ROWS)
     }
 }

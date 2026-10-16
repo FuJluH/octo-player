@@ -1,5 +1,10 @@
 package app.winters.octo.desktop.pages
 
+import app.winters.octo.design.RowHeight
+import app.winters.octo.design.ControlHeight
+import app.winters.octo.desktop.ui.LocalKeyColour
+import app.winters.octo.desktop.ui.TableNote
+import androidx.compose.foundation.layout.RowScope
 import app.winters.octo.design.Spinner
 import app.winters.octo.design.GlazeCapsule
 import androidx.compose.foundation.background
@@ -98,6 +103,7 @@ fun SearchPage(app: AppState, visit: Visit) {
         list,
         id = "search",
         marksAlways = app.wantsOnline(),
+        note = found?.let { songsNote(app, it, model.filter, online) },
         footer = { if (found != null) after(app, found, online) },
     ) {
         // The field itself is at the top of the sidebar, on every page.
@@ -187,10 +193,9 @@ private fun LazyListScope.after(app: AppState, found: SearchFound, online: Onlin
     // A page that found nothing anywhere says so once, above.
     if (library.isEmpty && outside.isEmpty && online == OnlinePhase.Done) return
     when (model.filter) {
-        SearchFilter.All, SearchFilter.Songs -> outsideLine(app, look(online, wanted, outside.songs.size), "songs", online, waiting = true)
-        SearchFilter.Albums -> outsideLine(app, look(online, wanted, outside.albums.size + outside.partAlbums.size), "albums", online, waiting = false)
-        SearchFilter.Artists -> outsideLine(app, look(online, wanted, outside.artists.size), "artists", online, waiting = false)
-        SearchFilter.Playlists -> Unit
+        SearchFilter.Albums -> outsideLine(app, look(online, wanted, outside.albums.size + outside.partAlbums.size), "albums", online)
+        SearchFilter.Artists -> outsideLine(app, look(online, wanted, outside.artists.size), "artists", online)
+        SearchFilter.All, SearchFilter.Songs, SearchFilter.Playlists -> Unit
     }
     artistTopSongs(app, model.tops)
     val albums = library.albums.size + outside.partAlbums.size + outside.albums.size
@@ -230,57 +235,70 @@ private fun LazyListScope.after(app: AppState, found: SearchFound, online: Onlin
     }
 }
 
-// The line between the library's results of a kind and the server's: a
-// small spinner while it looks (over rows that hold the songs' place, for
-// songs), a warning mark and Try again when it could not be asked, a plain
-// line when it found none. Nothing once finds are listed.
-private fun LazyListScope.outsideLine(app: AppState, look: OutsideLook, kind: String, online: OnlinePhase, waiting: Boolean) {
+// The line in the song table between the library's songs and those found
+// online, on the table's columns: its mark in the column of checks and
+// pluses, its words where the titles start. While the server looks it has
+// a spinner and rows that hold the finds' places; once they are in it
+// stays, quietly, over them, so nothing moves.
+private fun songsNote(app: AppState, found: SearchFound, filter: SearchFilter, online: OnlinePhase): TableNote? {
+    if (filter != SearchFilter.All && filter != SearchFilter.Songs) return null
+    if (found.library.isEmpty && found.outside.isEmpty && online == OnlinePhase.Done) return null
+    val look = look(online, app.wantsOnline(), found.outside.songs.size)
+    val text = outsideLine(look, app.search?.text.orEmpty(), "songs") ?: return null
+    val library = if (filter == SearchFilter.All) found.library.songs.take(LIBRARY_SONGS_SHOWN).size else found.library.songs.size
+    return TableNote(
+        at = library,
+        icon = { OutsideMark(look) },
+        waiting = if (look == OutsideLook.Looking) WAITING_ROWS else 0,
+    ) { OutsideWords(app, look, text, online) }
+}
+
+// Under the albums or artists of a filter: the same line, on its own.
+private fun LazyListScope.outsideLine(app: AppState, look: OutsideLook, kind: String, online: OnlinePhase) {
     val model = app.search ?: return
     val text = outsideLine(look, model.text, kind) ?: return
     item(key = "outside-line") {
         Row(
-            Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = 10.dp).semantics { liveRegion = LiveRegionMode.Polite },
+            Modifier.fillMaxWidth().heightIn(min = RowHeight.Regular).padding(horizontal = Space.M),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(Space.L),
         ) {
-            when (look) {
-                OutsideLook.Looking -> Spinner(size = 16.dp, color = OctoColors.Accent)
-                OutsideLook.Failed -> Glyph(OctoIcons.Info, size = 18.dp, tint = OctoColors.SignalOrange)
-                else -> Glyph(OctoIcons.Search, size = 18.dp, tint = OctoColors.TextMuted)
-            }
-            Txt(
-                text + ((online as? OnlinePhase.Failed)?.message?.let { ". $it" } ?: ""),
-                OctoType.bodySmall,
-                if (look == OutsideLook.Failed) OctoColors.TextPrimary else OctoColors.TextSecondary,
-                Modifier.weight(1f),
-                maxLines = 2,
-            )
-            if (look == OutsideLook.Failed) GlazeCapsule(null, TRY_AGAIN, model::again)
+            Box(Modifier.size(ControlHeight.S), contentAlignment = Alignment.Center) { OutsideMark(look) }
+            OutsideWords(app, look, text, online)
         }
-    }
-    if (waiting && look == OutsideLook.Looking) {
-        items(WAITING_ROWS, key = { "outside-waiting:$it" }) { WaitingRow(app) }
     }
 }
 
-// A row that holds a find's place while the server looks: the shape of a
-// song row in the table, in the faint fill of an empty cover.
+// The line's mark: a spinner in the key colour while the server looks, an
+// orange sign when it could not be asked, a plus over the finds, and the
+// search glass when it found none.
 @Composable
-private fun WaitingRow(app: AppState) {
-    val settings by app.settings.state.collectAsState()
-    val fill = OctoColors.TextPrimary.copy(alpha = 0.06f)
-    Row(
-        Modifier.fillMaxWidth().height(rowHeightFor(settings.density)).padding(horizontal = 10.dp).clearAndSetSemantics {},
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Box(Modifier.width(20.dp).height(10.dp).background(fill, RoundedCornerShape(4.dp)))
-        Box(Modifier.size(rowHeightFor(settings.density) - 14.dp).background(fill, RoundedCornerShape(6.dp)))
-        Box(Modifier.weight(0.34f).height(10.dp).background(fill, RoundedCornerShape(4.dp)))
-        Box(Modifier.weight(0.22f).height(10.dp).background(fill, RoundedCornerShape(4.dp)))
-        Box(Modifier.weight(0.22f).height(10.dp).background(fill, RoundedCornerShape(4.dp)))
-        Spacer(Modifier.weight(0.22f))
+private fun OutsideMark(look: OutsideLook) {
+    when (look) {
+        OutsideLook.Looking -> Spinner(size = 18.dp, color = LocalKeyColour.current)
+        OutsideLook.Failed -> Glyph(OctoIcons.Info, size = 18.dp, tint = OctoColors.SignalOrange)
+        OutsideLook.Found -> Glyph(OctoIcons.Add, size = 18.dp, tint = OctoColors.TextMuted)
+        else -> Glyph(OctoIcons.Search, size = 18.dp, tint = OctoColors.TextMuted)
     }
+}
+
+// The line's words, said as it changes; Try again right after them when
+// the server could not be asked.
+@Composable
+private fun RowScope.OutsideWords(app: AppState, look: OutsideLook, text: String, online: OnlinePhase) {
+    Txt(
+        text + ((online as? OnlinePhase.Failed)?.message?.let { ". $it" } ?: ""),
+        OctoType.bodySmall,
+        when (look) {
+            OutsideLook.Failed -> OctoColors.TextPrimary
+            OutsideLook.Found -> OctoColors.TextMuted
+            else -> OctoColors.TextSecondary
+        },
+        Modifier.weight(1f, fill = false).semantics { liveRegion = LiveRegionMode.Polite },
+        maxLines = 2,
+    )
+    if (look == OutsideLook.Failed) app.search?.let { model -> GlazeCapsule(null, TRY_AGAIN, model::again, height = ControlHeight.M) }
+    Spacer(Modifier.weight(1f))
 }
 
 // A row of cards, as many as fit on one line.

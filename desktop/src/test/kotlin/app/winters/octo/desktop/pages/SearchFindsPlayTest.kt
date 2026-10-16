@@ -38,7 +38,7 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 
 // Clicking a song the server found online, on the real Search page, against
-// a pretend Octo server: it plays, as it does on the phone.
+// a pretend Octo server: it is a row of the song table like the library's.
 @OptIn(ExperimentalComposeUiApi::class)
 class SearchFindsPlayTest {
     @get:Rule val temp = TemporaryFolder()
@@ -117,16 +117,20 @@ class SearchFindsPlayTest {
         }
     }
 
+    // Songs found online are rows of the same song table as the library's:
+    // a click picks one, as in every table, and plays nothing.
     @Test
-    fun aClickPlaysTheFindAndTheFindsAfterIt() {
+    fun aClickPicksTheFind() {
         clickFind(1)
-        assertEquals(listOf(listOf("find1", "find2")), plays)
-        assertEquals("find1", silent.state.value.current?.song?.id)
+        assertEquals(emptyList<List<String>>(), plays)
     }
 
+    // A double click plays the list from the find, the library's song
+    // before it and the finds after it, once.
     @Test
-    fun aDoubleClickPlaysItOnce() {
+    fun aDoubleClickPlaysTheListFromTheFindOnce() {
         clickFind(2)
-        assertEquals(listOf(listOf("find1", "find2")), plays)
+        assertEquals(listOf(listOf("lib1", "find1", "find2")), plays)
+        assertEquals("find1", silent.state.value.current?.song?.id)
     }
 }

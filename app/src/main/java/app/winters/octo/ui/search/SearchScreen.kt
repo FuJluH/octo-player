@@ -1,5 +1,11 @@
 package app.winters.octo.ui.search
 
+import app.winters.octo.ui.common.LocalReduceMotion
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -493,19 +499,22 @@ private fun DiscoverState.without(listed: Set<String>): DiscoverState =
 
 // Under the library's results of a kind: while the server looks, a line
 // saying so over rows that hold the finds' place; when it found songs, the
-// first few times a line saying what the plus does, then the songs; when it
-// found none, or could not be asked, a line that says so plainly, with Try
-// again for the second.
+// same line, quieter, the first few times a line saying what the plus does,
+// then the songs; when it found none, or could not be asked, a line that
+// says so plainly, with Try again for the second.
 private fun LazyListScope.outsideRows(shown: Shown, look: OutsideLook, kind: String, songs: List<TrackEntity>) {
     when (look) {
         OutsideLook.Off -> Unit
         OutsideLook.Looking -> {
-            item(key = "outside:$kind:looking") { OutsideLine(look, shown.query, kind) }
-            items(WAITING_ROWS, key = { "outside:$kind:waiting:$it" }) { WaitingRow(round = kind == "artists") }
+            item(key = "outside:$kind:line") { OutsideLine(look, shown.query, kind) }
+            items(WAITING_ROWS, key = { "outside:$kind:waiting:$it" }) { WaitingRow(round = kind == "artists", n = it) }
         }
-        OutsideLook.NoneFound -> item(key = "outside:$kind:none") { OutsideLine(look, shown.query, kind) }
-        OutsideLook.Failed -> item(key = "outside:$kind:failed") { OutsideLine(look, shown.query, kind, shown.onRetry) }
+        OutsideLook.NoneFound -> item(key = "outside:$kind:line") { OutsideLine(look, shown.query, kind) }
+        OutsideLook.Failed -> item(key = "outside:$kind:line") { OutsideLine(look, shown.query, kind, shown.onRetry) }
         OutsideLook.Found -> {
+            // The line stays where it said it was looking, quieter, over
+            // the finds that took the waiting rows' places.
+            if (songs.isNotEmpty()) item(key = "outside:$kind:line") { OutsideLine(look, shown.query, kind) }
             if (shown.hint && songs.isNotEmpty()) item(key = "outside:hint") { AddHintLine(shown.onHintSeen) }
             items(songs, key = { "discover:${it.id}" }) { track ->
                 SongRow(track, offerAdd = true) { shown.onPlayFound(track) }
@@ -514,25 +523,34 @@ private fun LazyListScope.outsideRows(shown: Shown, look: OutsideLook, kind: Str
     }
 }
 
-// The line between the library's results and the server's: a small
-// spinner while it looks, a warning mark when it could not be asked.
+// The line between the library's results and the server's, on the rows'
+// lines: its mark centred where their covers are, its words where their
+// titles start. A small spinner while the server looks, a warning mark
+// when it could not be asked, the plus over the finds.
 @Composable
 private fun OutsideLine(look: OutsideLook, query: String, kind: String, onRetry: (() -> Unit)? = null) {
     val text = outsideLine(look, query, kind) ?: return
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(start = 20.dp, end = 10.dp),
+        Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(start = ListRowSide, end = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        when (look) {
-            OutsideLook.Looking -> CircularProgressIndicator(color = OctoColors.Accent, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
-            OutsideLook.Failed -> Icon(painterResource(OctoIcons.Info), contentDescription = null, tint = OctoColors.SignalOrange, modifier = Modifier.size(18.dp))
-            else -> Icon(painterResource(OctoIcons.Search), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.size(18.dp))
+        Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+            when (look) {
+                OutsideLook.Looking -> CircularProgressIndicator(color = OctoColors.Accent, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                OutsideLook.Failed -> Icon(painterResource(OctoIcons.Info), contentDescription = null, tint = OctoColors.SignalOrange, modifier = Modifier.size(18.dp))
+                OutsideLook.Found -> Icon(painterResource(OctoIcons.NotInLibrary), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.size(18.dp))
+                else -> Icon(painterResource(OctoIcons.Search), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.size(18.dp))
+            }
         }
         Text(
             text,
             style = OctoType.bodySmall,
-            color = if (look == OutsideLook.Failed) OctoColors.TextPrimary else OctoColors.TextSecondary,
+            color = when (look) {
+                OutsideLook.Failed -> OctoColors.TextPrimary
+                OutsideLook.Found -> OctoColors.TextMuted
+                else -> OctoColors.TextSecondary
+            },
             modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite },
         )
         if (onRetry != null) QuietButton(TRY_AGAIN, onRetry)
@@ -540,19 +558,27 @@ private fun OutsideLine(look: OutsideLook, query: String, kind: String, onRetry:
 }
 
 // A row that holds a find's place while the server looks: the shape of a
-// song row (or an artist's, round), in the faint fill of an empty cover.
+// song row (or an artist's, round), in the faint fill of an empty cover,
+// its lines a little longer or shorter from row to row.
 @Composable
-private fun WaitingRow(round: Boolean) {
+private fun WaitingRow(round: Boolean, n: Int) {
     Row(
         Modifier.fillMaxWidth().heightIn(min = if (round) 64.dp else 56.dp).padding(horizontal = ListRowSide, vertical = 4.dp).clearAndSetSemantics {},
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        val fill = OctoColors.TextPrimary.copy(alpha = 0.06f)
+        // Breathing slowly, unless motion is reduced.
+        val breath = if (LocalReduceMotion.current) 1f else rememberInfiniteTransition(label = "waiting").animateFloat(
+            initialValue = 1f,
+            targetValue = 0.45f,
+            animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
+            label = "breath",
+        ).value
+        val fill = OctoColors.TextPrimary.copy(alpha = 0.10f * breath)
         Box(Modifier.size(if (round) 48.dp else 44.dp).background(fill, if (round) CircleShape else RoundedCornerShape(6.dp)))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            Box(Modifier.fillMaxWidth(0.55f).height(11.dp).background(fill, RoundedCornerShape(4.dp)))
-            Box(Modifier.fillMaxWidth(0.35f).height(9.dp).background(fill, RoundedCornerShape(4.dp)))
+            Box(Modifier.fillMaxWidth(listOf(0.55f, 0.42f, 0.62f, 0.48f)[n % 4]).height(11.dp).background(fill, RoundedCornerShape(4.dp)))
+            Box(Modifier.fillMaxWidth(listOf(0.35f, 0.3f, 0.4f, 0.26f)[n % 4]).height(9.dp).background(fill, RoundedCornerShape(4.dp)))
         }
     }
 }

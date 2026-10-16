@@ -11,8 +11,9 @@ const val LIBRARY_SONGS_SHOWN = 4
 const val ONLINE_SONGS_SHOWN = 4
 
 // How many waiting rows stand in for the songs found online while the
-// server looks.
-const val WAITING_ROWS = 3
+// server looks: as many as "All" shows, so the finds take their places and
+// nothing below moves.
+const val WAITING_ROWS = ONLINE_SONGS_SHOWN
 
 // Where looking online stands, for the line between the library's songs
 // and the songs found online.
@@ -33,9 +34,10 @@ enum class OutsideLook {
     Failed,
 }
 
-// What the line says for each state; none when the finds speak for
-// themselves or there are none to look for.
+// What the line says for each state; none when there is nothing to look
+// for. Over the finds it stays, quietly, where it said it was looking.
 const val SEARCHING_OUTSIDE = "Searching outside your library…"
+const val FOUND_OUTSIDE = "Not in your library"
 const val OUTSIDE_FAILED = "Couldn't search outside your library"
 
 // `kind` names what was looked for in the plural: songs, albums, artists.
@@ -45,7 +47,8 @@ fun outsideLine(look: OutsideLook, query: String, kind: String = "songs"): Strin
     OutsideLook.Looking -> SEARCHING_OUTSIDE
     OutsideLook.NoneFound -> noneOutsideText(query, kind)
     OutsideLook.Failed -> OUTSIDE_FAILED
-    OutsideLook.Off, OutsideLook.Found -> null
+    OutsideLook.Found -> FOUND_OUTSIDE
+    OutsideLook.Off -> null
 }
 
 // The state from what is known: whether finds are wanted at all, whether
