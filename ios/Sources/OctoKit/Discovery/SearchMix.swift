@@ -5,8 +5,9 @@ import Foundation
 // them, so the finds are never under a long run of library songs.
 
 /// How many library songs "All" shows before the songs found online, and how many of those it shows;
-/// "See all" lists every one of both.
-public let librarySongsShown = 4
+/// "See all" lists every one of both. Three keeps the line about looking online above the tab bar
+/// under a row of artists.
+public let librarySongsShown = 3
 public let onlineSongsShown = 4
 
 /// How many waiting rows stand in for the songs found online while the server looks: as many as

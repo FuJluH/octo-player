@@ -34,7 +34,7 @@ struct SearchMixTests {
     }
 
     @Test func theSameNumbersAsThePhone() {
-        #expect(librarySongsShown == 4)
+        #expect(librarySongsShown == 3)
         #expect(onlineSongsShown == 4)
         #expect(waitingRows == 4)
     }

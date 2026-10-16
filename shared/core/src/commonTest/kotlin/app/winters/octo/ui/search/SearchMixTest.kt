@@ -44,7 +44,7 @@ class SearchMixTest {
     // a handful of library songs before them.
     @Test
     fun findsSitCloseUnderTheLibrarysSongs() {
-        assertTrue(LIBRARY_SONGS_SHOWN <= 5)
+        assertTrue(LIBRARY_SONGS_SHOWN <= 3)
         // The waiting rows are as many as the finds that take their places.
         assertEquals(ONLINE_SONGS_SHOWN, WAITING_ROWS)
     }
