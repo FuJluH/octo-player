@@ -144,6 +144,9 @@ class SearchViewModel @Inject constructor(
     // Goes up each time the server is asked anew, so the library is too.
     private val rounds = MutableStateFlow(0)
 
+    // Goes up each time the listener asks the server again after it failed.
+    private val retries = MutableStateFlow(0)
+
     // Null until at least two characters are typed. One more than shown is
     // asked for, to know whether there are more. A song that joins the
     // library while the results are shown stays where it is, among the songs
@@ -195,10 +198,10 @@ class SearchViewModel @Inject constructor(
     // pauses; new text cancels the question before it.
     @OptIn(ExperimentalCoroutinesApi::class)
     val discover: StateFlow<DiscoverState> =
-        combine(snapshotFlow { text.trim() }, discovery.server) { q, server -> server?.let { q.takeIf { searchKey(it).length >= 2 }?.let { q to server } } }
+        combine(snapshotFlow { text.trim() }, discovery.server, retries) { q, server, retry -> server?.let { q.takeIf { searchKey(it).length >= 2 }?.let { Triple(q, server, retry) } } }
             .distinctUntilChanged()
             .transformLatest { asked ->
-                // Another server in use asks it anew.
+                // Another server in use asks it anew, and so does Try again.
                 val q = asked?.first
                 if (q == null) {
                     emit(DiscoverState.Idle)
@@ -287,6 +290,11 @@ class SearchViewModel @Inject constructor(
     fun keepSearch() {
         val query = text
         viewModelScope.launch { recents.add(query) }
+    }
+
+    // Asks the server again after it could not be reached.
+    fun retryOnline() {
+        retries.update { it + 1 }
     }
 
     fun searchAgain(query: String) {

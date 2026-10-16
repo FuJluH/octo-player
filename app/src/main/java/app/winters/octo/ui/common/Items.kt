@@ -526,20 +526,31 @@ private fun PlayNextSwipe(enabled: Boolean, onSwiped: () -> Unit, content: @Comp
 @Composable
 fun ArtistRow(artist: ArtistEntity, onClick: () -> Unit) {
     val menus = LocalSongMenu.current.collections
+    ArtistRow(artist.artwork, artist.name, artist.albumCount, onClick, { menus.open(CollectionTarget.Artist(artist.id)) }, outside = false)
+}
+
+// An artist on the server the library lacks, drawn the same way, with the
+// not-in-library mark; the album count only when the server knows it.
+@Composable
+fun ArtistRow(artist: OnlineArtist, onClick: () -> Unit) =
+    ArtistRow(artist.artwork, artist.name, artist.albumCount.takeIf { it > 0 }, onClick, null, outside = true)
+
+@Composable
+private fun ArtistRow(artwork: String?, name: String, albumCount: Int?, onClick: () -> Unit, onLongClick: (() -> Unit)?, outside: Boolean) {
     Row(
         Modifier
             .fillMaxWidth()
-            .pressOrHold(LocalHapticFeedback.current, LocalPressSpot.current, onClick) { menus.open(CollectionTarget.Artist(artist.id)) }
+            .pressOrHold(LocalHapticFeedback.current, LocalPressSpot.current, onClick, onLongClick)
             // At least a row tall; taller when large text needs it.
             .heightIn(min = 64.dp)
             .padding(horizontal = ListRowSide, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Artwork(artist.artwork, 48.dp, shape = CircleShape)
+        Artwork(artwork, 48.dp, shape = CircleShape, outside = outside)
         Column(Modifier.weight(1f)) {
-            Text(artist.name, style = OctoType.bodySmall, color = OctoColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(albums(artist.albumCount), style = OctoType.caption, color = OctoColors.TextMuted)
+            Text(name, style = OctoType.bodySmall, color = OctoColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (albumCount != null) Text(albums(albumCount), style = OctoType.caption, color = OctoColors.TextMuted)
         }
     }
 }

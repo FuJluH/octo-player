@@ -133,8 +133,7 @@ fun rowAddSign(trackId: String, adopted: Set<String>, offersAdd: Boolean): AddSi
 // Whether a row keeps an empty space where the add button would be, so its
 // length lines up with the rows that have one. Only where the list gives its
 // library songs that space (`librarySpace`): a list mixing them with finds
-// does, while search lists its library songs apart, ending at their length.
-// A find's row that turned into its library song ends the same way.
+// does, search among them. A find's row that turned into its library song ends the same way.
 fun rowKeepsAddSpace(sign: AddSign, librarySpace: Boolean): Boolean = librarySpace && sign != AddSign.Button
 
 // What a song row has after its length: the add button, the button's space
