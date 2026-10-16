@@ -1,6 +1,25 @@
 package app.winters.octo.desktop.pages
 
-import app.winters.octo.desktop.ui.MarkedTitle
+import app.winters.octo.design.Spinner
+import app.winters.octo.design.GlazeCapsule
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import app.winters.octo.desktop.search.OnlinePhase
+import app.winters.octo.desktop.ui.rowHeightFor
+import app.winters.octo.ui.family.TRY_AGAIN
+import app.winters.octo.ui.search.LIBRARY_SONGS_SHOWN
+import app.winters.octo.ui.search.ONLINE_SONGS_SHOWN
+import app.winters.octo.ui.search.OutsideLook
+import app.winters.octo.ui.search.WAITING_ROWS
+import app.winters.octo.ui.search.moreSongsThanShown
+import app.winters.octo.ui.search.outsideLine
+import app.winters.octo.ui.search.outsideLook
+import app.winters.octo.ui.search.songsShown
 import app.winters.octo.design.Corner
 import app.winters.octo.design.FrameSize
 import app.winters.octo.desktop.ui.PlaylistPicture
@@ -18,7 +37,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -39,55 +57,48 @@ import app.winters.octo.design.Space
 import app.winters.octo.design.Txt
 import app.winters.octo.design.hoverLift
 import app.winters.octo.desktop.AppState
-import app.winters.octo.desktop.library.Cover
 import app.winters.octo.desktop.library.SongColumn
-import app.winters.octo.desktop.library.lengthText
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.Visit
-import app.winters.octo.desktop.search.FetchPhase
 import app.winters.octo.desktop.search.SearchFilter
 import app.winters.octo.desktop.search.SearchFound
 import app.winters.octo.desktop.search.SearchState
-import app.winters.octo.desktop.ui.DOUBLE_CLICK_MS
 import app.winters.octo.desktop.ui.FailedLine
-import app.winters.octo.desktop.ui.FetchButton
 import app.winters.octo.desktop.ui.LoadingLine
 import app.winters.octo.desktop.ui.LocalBottomRoom
-import app.winters.octo.desktop.ui.LocalPointer
 import app.winters.octo.desktop.ui.PageTitle
 import app.winters.octo.desktop.ui.SectionTitle
 import app.winters.octo.desktop.ui.ShelfCardWidth
-import app.winters.octo.desktop.ui.SongMenu
 import app.winters.octo.desktop.ui.SongTable
 import app.winters.octo.desktop.ui.onRightClick
 import app.winters.octo.desktop.ui.pagePadding
 import app.winters.octo.desktop.ui.playlistMenu
 import app.winters.octo.desktop.ui.rememberListState
-import app.winters.octo.discovery.knownLengthMs
-import app.winters.octo.discovery.PartlyInLibraryText
 import app.winters.octo.subsonic.Song
 
-// Not in the library, in the phone app's words.
-const val NotInLibraryText = "Not in your library"
-
-// Search: the same filters as the phone, then the library's
-// artists, albums, songs and playlists, and, from an Octo server that can
-// fetch music, what it found online with a "+" to add each song.
+// Search: the same filters as the phone, then the artists, songs, albums
+// and playlists, each kind one list with the library's first and, from an
+// Octo server that can fetch music, what it found online right after, with
+// a "+" to add each song.
 @Composable
 fun SearchPage(app: AppState, visit: Visit) {
     val model = app.search ?: return
     val list = rememberListState(app.navigator, visit)
     val state = model.state
-    val found = (state as? SearchState.Done)?.found
-    // The library's songs are a song table like every other list; the rest
-    // of the page goes above and below it.
+    val done = state as? SearchState.Done
+    val found = done?.found
+    val online = done?.online ?: OnlinePhase.Done
+    // The songs are a song table like every other list: the library's, then
+    // those found online, each row saying which. The rest of the page goes
+    // above and below it.
     SongTable(
         app,
-        found?.library?.songs.orEmpty(),
+        found?.let { tableSongs(it, model.filter) }.orEmpty(),
         listOf(SongColumn.Number, SongColumn.Title, SongColumn.Artist, SongColumn.Album, SongColumn.Favourite, SongColumn.Length),
         list,
         id = "search",
-        footer = { if (found != null) after(app, found) },
+        marksAlways = app.wantsOnline(),
+        footer = { if (found != null) after(app, found, online) },
     ) {
         // The field itself is at the top of the sidebar, on every page.
         item(key = "filters") {
@@ -106,7 +117,7 @@ fun SearchPage(app: AppState, visit: Visit) {
             is SearchState.Failed -> item(key = "failed") { FailedLine(state.message, model::again) }
             is SearchState.Done -> {
                 if (asksForRadio(model.text)) item(key = "live-radio") { LiveRadioSearchRow(app) }
-                before(app, state.found)
+                before(app, state.found, state.online)
             }
         }
     }
@@ -120,48 +131,83 @@ fun asksForRadio(text: String): Boolean {
 
 private fun seeAll(app: AppState, more: Boolean): String? = if (more && app.search?.filter == SearchFilter.All) "See all" else null
 
-// Above the songs: nothing found, or the artists and albums, and the songs'
-// heading.
-private fun LazyListScope.before(app: AppState, found: SearchFound) {
+// The songs in the table: "All" shows a few of the library's and a few
+// found online, a filter all of both.
+private fun tableSongs(found: SearchFound, filter: SearchFilter): List<Song> =
+    if (filter == SearchFilter.All) found.library.songs.take(LIBRARY_SONGS_SHOWN) + found.outside.songs.take(ONLINE_SONGS_SHOWN)
+    else found.library.songs + found.outside.songs
+
+// Where looking online stands for one kind, by how many of it came back.
+private fun look(online: OnlinePhase, wanted: Boolean, count: Int): OutsideLook = outsideLook(
+    wanted = wanted,
+    looking = online == OnlinePhase.Looking,
+    failed = online is OnlinePhase.Failed,
+    songs = count,
+)
+
+// Whether the server is asked for what it found online at all.
+private fun AppState.wantsOnline(): Boolean = connection?.acquires == true && !settings.current.libraryOnly
+
+// Above the songs: nothing found, or the artists (the library's, then
+// those found online, when the library has some) and the songs' heading.
+private fun LazyListScope.before(app: AppState, found: SearchFound, online: OnlinePhase) {
     val model = app.search ?: return
     val library = found.library
-    if (library.isEmpty && found.outside.isEmpty) {
+    val outside = found.outside
+    if (library.isEmpty && outside.isEmpty && online == OnlinePhase.Done) {
         item(key = "nothing") { NothingHere("Nothing found", "Try other words, or fewer of them.") }
         return
     }
     if (library.artists.isNotEmpty()) {
         item(key = "artists") {
             SectionTitle("Artists", action = seeAll(app, library.moreArtists)) { model.pick(SearchFilter.Artists) }
-            CardRow(library.artists.size) { i -> ArtistCard(app, library.artists[i]) }
+            CardRow(library.artists.size + outside.artists.size) { i ->
+                if (i < library.artists.size) ArtistCard(app, library.artists[i]) else ArtistCard(app, outside.artists[i - library.artists.size], outside = true)
+            }
         }
     }
-    artistTopSongs(app, model.tops)
-    if (library.albums.isNotEmpty()) {
-        item(key = "albums") {
-            SectionTitle("Albums", action = seeAll(app, library.moreAlbums)) { model.pick(SearchFilter.Albums) }
-            CardRow(library.albums.size) { i -> AlbumCard(app, library.albums[i]) }
-        }
-    }
-    // Albums found online that the library holds some of: each card says how
-    // much, and opening one plays the library's copies and adds the rest.
-    val partly = found.outside.partAlbums
-    if (partly.isNotEmpty()) {
-        item(key = "part-albums") {
-            SectionTitle(PartlyInLibraryText)
-            Txt("Found online by your server. Open one to play the songs you have and add the rest.", OctoType.caption, OctoColors.TextMuted, Modifier.padding(bottom = 8.dp))
-            CardRow(partly.size) { i -> AlbumCard(app, partly[i], outside = true) }
-        }
-    }
-    if (library.songs.isNotEmpty()) {
-        item(key = "songs-title") { SectionTitle("Songs", action = seeAll(app, library.moreSongs)) { model.pick(SearchFilter.Songs) } }
+    val songsLook = look(online, app.wantsOnline(), outside.songs.size)
+    val shownSongs = model.filter == SearchFilter.All || model.filter == SearchFilter.Songs
+    if (shownSongs && songsShown(library.songs.size, songsLook)) {
+        val more = moreSongsThanShown(library.songs.size + if (library.moreSongs) 1 else 0, outside.songs.size)
+        item(key = "songs-title") { SectionTitle("Songs", action = seeAll(app, more)) { model.pick(SearchFilter.Songs) } }
     }
 }
 
-// Below the songs: the playlists, then what the server found online.
-private fun LazyListScope.after(app: AppState, found: SearchFound) {
+// Below the songs: while the server looks, a line saying so over rows that
+// hold the finds' place, or a plain line when it found none or could not be
+// asked; then the artist's top songs, the albums (the library's, then those
+// found online), the playlists, and artists found online when the library
+// has none.
+private fun LazyListScope.after(app: AppState, found: SearchFound, online: OnlinePhase) {
     val model = app.search ?: return
     val library = found.library
     val outside = found.outside
+    val wanted = app.wantsOnline()
+    // A page that found nothing anywhere says so once, above.
+    if (library.isEmpty && outside.isEmpty && online == OnlinePhase.Done) return
+    when (model.filter) {
+        SearchFilter.All, SearchFilter.Songs -> outsideLine(app, look(online, wanted, outside.songs.size), "songs", online, waiting = true)
+        SearchFilter.Albums -> outsideLine(app, look(online, wanted, outside.albums.size + outside.partAlbums.size), "albums", online, waiting = false)
+        SearchFilter.Artists -> outsideLine(app, look(online, wanted, outside.artists.size), "artists", online, waiting = false)
+        SearchFilter.Playlists -> Unit
+    }
+    artistTopSongs(app, model.tops)
+    val albums = library.albums.size + outside.partAlbums.size + outside.albums.size
+    if (albums > 0) {
+        item(key = "albums") {
+            SectionTitle("Albums", action = seeAll(app, library.moreAlbums)) { model.pick(SearchFilter.Albums) }
+            CardRow(albums) { i ->
+                val part = i - library.albums.size
+                val rest = part - outside.partAlbums.size
+                when {
+                    i < library.albums.size -> AlbumCard(app, library.albums[i])
+                    part < outside.partAlbums.size -> AlbumCard(app, outside.partAlbums[part], outside = true)
+                    else -> AlbumCard(app, outside.albums[rest], outside = true)
+                }
+            }
+        }
+    }
     if (library.playlists.isNotEmpty()) {
         item(key = "playlists-title") { SectionTitle("Playlists", action = seeAll(app, library.morePlaylists)) { model.pick(SearchFilter.Playlists) } }
         items(library.playlists, key = { "pl:${it.id}" }) { playlist ->
@@ -176,28 +222,64 @@ private fun LazyListScope.after(app: AppState, found: SearchFound) {
             }
         }
     }
-    if (!outside.notInLibraryEmpty) {
-        item(key = "outside-title") {
-            Column {
-                SectionTitle(NotInLibraryText)
-                Txt("Found online by your server. Press + to add a song to your library.", OctoType.caption, OctoColors.TextMuted, Modifier.padding(bottom = 8.dp))
+    if (library.artists.isEmpty() && outside.artists.isNotEmpty()) {
+        item(key = "out-artists") {
+            SectionTitle("Artists")
+            CardRow(outside.artists.size) { i -> ArtistCard(app, outside.artists[i], outside = true) }
+        }
+    }
+}
+
+// The line between the library's results of a kind and the server's: a
+// small spinner while it looks (over rows that hold the songs' place, for
+// songs), a warning mark and Try again when it could not be asked, a plain
+// line when it found none. Nothing once finds are listed.
+private fun LazyListScope.outsideLine(app: AppState, look: OutsideLook, kind: String, online: OnlinePhase, waiting: Boolean) {
+    val model = app.search ?: return
+    val text = outsideLine(look, model.text, kind) ?: return
+    item(key = "outside-line") {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = 10.dp).semantics { liveRegion = LiveRegionMode.Polite },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            when (look) {
+                OutsideLook.Looking -> Spinner(size = 16.dp, color = OctoColors.Accent)
+                OutsideLook.Failed -> Glyph(OctoIcons.Info, size = 18.dp, tint = OctoColors.SignalOrange)
+                else -> Glyph(OctoIcons.Search, size = 18.dp, tint = OctoColors.TextMuted)
             }
+            Txt(
+                text + ((online as? OnlinePhase.Failed)?.message?.let { ". $it" } ?: ""),
+                OctoType.bodySmall,
+                if (look == OutsideLook.Failed) OctoColors.TextPrimary else OctoColors.TextSecondary,
+                Modifier.weight(1f),
+                maxLines = 2,
+            )
+            if (look == OutsideLook.Failed) GlazeCapsule(null, TRY_AGAIN, model::again)
         }
-        if (outside.songs.isNotEmpty()) {
-            itemsIndexed(outside.songs, key = { i, s -> "out:$i:${s.id}" }) { index, song -> OutsideSong(app, outside.songs, index, song) }
-        }
-        if (outside.albums.isNotEmpty()) {
-            item(key = "out-albums") {
-                Txt("Albums", OctoType.label, OctoColors.TextSecondary, Modifier.padding(top = 16.dp, bottom = 4.dp))
-                CardRow(outside.albums.size) { i -> AlbumCard(app, outside.albums[i], outside = true) }
-            }
-        }
-        if (outside.artists.isNotEmpty()) {
-            item(key = "out-artists") {
-                Txt("Artists", OctoType.label, OctoColors.TextSecondary, Modifier.padding(top = 16.dp, bottom = 4.dp))
-                CardRow(outside.artists.size) { i -> ArtistCard(app, outside.artists[i], outside = true) }
-            }
-        }
+    }
+    if (waiting && look == OutsideLook.Looking) {
+        items(WAITING_ROWS, key = { "outside-waiting:$it" }) { WaitingRow(app) }
+    }
+}
+
+// A row that holds a find's place while the server looks: the shape of a
+// song row in the table, in the faint fill of an empty cover.
+@Composable
+private fun WaitingRow(app: AppState) {
+    val settings by app.settings.state.collectAsState()
+    val fill = OctoColors.TextPrimary.copy(alpha = 0.06f)
+    Row(
+        Modifier.fillMaxWidth().height(rowHeightFor(settings.density)).padding(horizontal = 10.dp).clearAndSetSemantics {},
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Box(Modifier.width(20.dp).height(10.dp).background(fill, RoundedCornerShape(4.dp)))
+        Box(Modifier.size(rowHeightFor(settings.density) - 14.dp).background(fill, RoundedCornerShape(6.dp)))
+        Box(Modifier.weight(0.34f).height(10.dp).background(fill, RoundedCornerShape(4.dp)))
+        Box(Modifier.weight(0.22f).height(10.dp).background(fill, RoundedCornerShape(4.dp)))
+        Box(Modifier.weight(0.22f).height(10.dp).background(fill, RoundedCornerShape(4.dp)))
+        Spacer(Modifier.weight(0.22f))
     }
 }
 
@@ -210,48 +292,4 @@ private fun CardRow(count: Int, card: @Composable (Int) -> Unit) {
             (0 until minOf(fit, count)).forEach { i -> Box(Modifier.width(ShelfCardWidth)) { card(i) } }
         }
     }
-}
-
-// A song the server found online: a click plays it and the finds after it,
-// as on the phone, a right click opens its menu, and the "+" has the server
-// add it to the library. The second click of a double click does not start
-// it over.
-@Composable
-private fun OutsideSong(app: AppState, songs: List<Song>, index: Int, song: Song) {
-    val outside = true
-    val pointer = LocalPointer.current
-    val clicks = androidx.compose.runtime.remember { longArrayOf(0L) }
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .height(52.dp)
-            .hoverLift(RoundedCornerShape(8.dp))
-            .onRightClick { app.popups.showAt(pointer.point) { close -> SongMenu(app, listOf(song), close, outside = outside) } }
-            .clickable(role = Role.Button) {
-                val now = System.currentTimeMillis()
-                if (now - clicks[0] >= DOUBLE_CLICK_MS) app.play(songs, index)
-                clicks[0] = now
-            }
-            .padding(horizontal = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Cover(song.coverArt, Modifier.size(38.dp), shape = RoundedCornerShape(6.dp), online = outside, placeholder = OctoIcons.Songs)
-        Column(Modifier.weight(1f)) {
-            MarkedTitle(song, OctoType.bodySmall) { Txt(song.title, OctoType.bodySmall, modifier = it) }
-            Txt(listOfNotNull(song.displayArtist ?: song.artist, song.album).joinToString(" · "), OctoType.caption, OctoColors.TextMuted)
-        }
-        Txt(lengthText(app.realSeconds(song) ?: (knownLengthMs(song) / 1000).toInt()), OctoType.caption, OctoColors.TextMuted, Modifier.width(52.dp))
-        FetchButton(app, song)
-        FetchProblem(app, song)
-    }
-}
-
-// Why the server couldn't add a song found online, beside its "+".
-@Composable
-private fun FetchProblem(app: AppState, song: Song) {
-    val fetches = app.fetches ?: return
-    val phases by fetches.phases.collectAsState()
-    val phase = phases[song.id] as? FetchPhase.Failed ?: return
-    Txt("Couldn't add it: ${phase.reason}. Press to try again.", OctoType.caption, OctoColors.TextMuted, Modifier.width(180.dp), maxLines = 2)
 }

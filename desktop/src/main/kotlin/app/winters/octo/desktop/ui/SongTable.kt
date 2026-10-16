@@ -226,6 +226,10 @@ fun SongTable(
     // picked, or null for none.
     menuExtra: ((List<Song>, () -> Unit) -> (@Composable ColumnScope.() -> Unit)?)? = null,
     empty: @Composable () -> Unit = {},
+    // Whether every row says if its song is in the library even before any
+    // song outside it is listed, for a list that songs found online join
+    // later, so its columns do not move when they do.
+    marksAlways: Boolean = false,
     footer: LazyListScope.() -> Unit = {},
     header: LazyListScope.() -> Unit = {},
 ) {
@@ -259,7 +263,7 @@ fun SongTable(
     // Songs found online, not in the library. A list that has any says, on
     // every row, which songs are in the library and which are not.
     val outside = rememberOutside(app, songs)
-    val marks = outside.isNotEmpty()
+    val marks = marksAlways || outside.isNotEmpty()
 
     fun picked(): List<Song> = selection.of(rows).map(TableRow::song)
     fun playFrom(key: String) {
