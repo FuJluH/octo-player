@@ -206,6 +206,9 @@ struct ArtistListRow: View {
     let coverArt: String?
     let albumCount: Int
     var library: LibraryArtist?
+    /// An artist the server found online, not in the library: its page is the server's, its picture
+    /// has the not-in-library mark, and its album count shows only when known.
+    var outside = false
     var opened: () -> Void = {}
     @Environment(Router.self) private var router
 
@@ -213,15 +216,17 @@ struct ArtistListRow: View {
     var body: some View {
         Button {
             opened()
-            router.go(.artist(id: id, name: name))
+            router.go(outside ? .onlineArtist(id: id, name: name) : .artist(id: id, name: name))
         } label: {
             HStack(spacing: 12) {
-                Cover(id: coverArt, size: 48, radius: 24)
+                OutsideCover(id: coverArt, size: 48, radius: 24, outside: outside)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(name).font(.octoBodySmall).foregroundStyle(.white).lineLimit(1)
-                    Text(albumCount == 1 ? "1 album" : "\(albumCount) albums")
-                        .font(.octoCaption)
-                        .foregroundStyle(OctoColor.textMuted)
+                    if !outside || albumCount > 0 {
+                        Text(albumCount == 1 ? "1 album" : "\(albumCount) albums")
+                            .font(.octoCaption)
+                            .foregroundStyle(OctoColor.textMuted)
+                    }
                 }
                 Spacer(minLength: 0)
             }

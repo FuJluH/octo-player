@@ -130,8 +130,12 @@ extension CatalogStore {
                     [query, limit])
     }
 
+    /// Songs whose title holds the words, then those whose artist does (an artist's name matched
+    /// as typed, accents and all), each by title.
     public func searchTracks(_ query: String, limit: Int) throws -> [LibraryTrack] {
-        try db.rows(LibraryTrack.self, "SELECT * FROM track WHERE searchKey LIKE '%' || ? || '%' ORDER BY sortKey LIMIT ?",
+        try db.rows(LibraryTrack.self,
+                    "SELECT * FROM track WHERE searchKey LIKE '%' || ?1 || '%' OR lower(artist) LIKE '%' || ?1 || '%' "
+                        + "ORDER BY searchKey LIKE '%' || ?1 || '%' DESC, sortKey LIMIT ?2",
                     [query, limit])
     }
 

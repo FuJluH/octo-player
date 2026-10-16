@@ -43,6 +43,8 @@ import Testing
         #expect(try await store.libraryTrackCount() == 2)
         #expect(try await store.albumTracks("\(server):album").map(\.title) == ["Hotline Bling", "One Dance"])
         #expect(try await store.searchTracks("hotline", limit: 10).map(\.id) == ["\(server):1"])
+        // An artist's name finds the artist's songs, after any song whose title holds it.
+        #expect(try await store.searchTracks("drake", limit: 10).map(\.title) == ["Hotline Bling", "One Dance"])
         #expect(try await store.copies("\(server):1").map(\.nativeId) == ["1"])
         // Left out again, its copies are no library song's.
         try await store.rebuild(serverInUse: nil)

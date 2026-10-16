@@ -2,8 +2,8 @@ import OctoKit
 import SwiftUI
 
 /// Search: its field under the title, the kinds to search, the "Library songs only" chip, recent
-/// searches and the chart while the field is empty, the library's answers first and, on a server,
-/// what it found beyond the library below them.
+/// searches and the chart while the field is empty, then each kind as one list: the library's
+/// answers first and, on a server, what it found beyond the library right after them.
 struct SearchView: View {
     @Environment(Session.self) private var session
     @Environment(Player.self) private var player
@@ -236,11 +236,10 @@ struct SearchView: View {
             LibraryList {
                 Color.clear.frame(height: 0).id("top")
                 if model.filter == .all {
-                    everything(found)
+                    everything(found, online)
                 } else {
-                    oneKind(found)
+                    oneKind(found, online)
                 }
-                tail(found, online)
             }
             .contentMargins(.top, 12, for: .scrollContent)
             .barClearance()
@@ -260,52 +259,64 @@ struct SearchView: View {
             .map { Pickable($0) }
     }
 
-    /// The server could not be asked, so say the library has none; then what it found online.
+    /// A few of every kind, each kind one list: the library's first, then what the server found
+    /// online. Songs come right under the artists, so songs found online are on the first screen
+    /// whatever the library holds: a few library songs, then a few finds, or, while the server
+    /// looks, a line that says so over rows that hold their place. An artist the library lacks joins
+    /// the row of library artists, or, when there is none, gets a row of its own lower down, so
+    /// nothing above the songs moves when it arrives.
     @ViewBuilder
-    private func tail(_ found: LibraryResults, _ online: DiscoverState) -> some View {
-        if found.isEmpty, case .failed = online {
-            SearchHint(text: "No results for \"\(trimmed)\"")
-        }
-        if !online.showsNothing {
-            discoverSection(online, spaced: !found.isEmpty)
-        }
-    }
-
-    /// A few of every kind, each kind with "See all" when it has more, and the named artist's top
-    /// songs after the artists.
-    @ViewBuilder
-    private func everything(_ found: LibraryResults) -> some View {
-        let kinds = [!found.artists.isEmpty, !found.albums.isEmpty, !found.playlists.isEmpty, !found.songs.isEmpty]
-        let firstKind = kinds.firstIndex(of: true) ?? -1
+    private func everything(_ found: LibraryResults, _ online: DiscoverState) -> some View {
+        let finds = online.finds
+        let onlineSongs = (finds?.songs ?? []).map(\.asSong)
+        let onlineArtists = finds?.artists ?? []
+        let onlineAlbums = (finds?.partAlbums ?? []) + (finds?.albums ?? [])
+        let look = online.look(count: onlineSongs.count)
+        let showsSongs = songsShown(library: found.songs.count, look: look)
+        let firstIsArtists = !found.artists.isEmpty
         if !found.artists.isEmpty {
-            kindTitle("Artists", more: found.moreArtists, kind: .artists, spaced: firstKind != 0)
+            kindTitle("Artists", more: found.moreArtists, kind: .artists, spaced: false)
             SideScroller {
                 ForEach(found.artists) { artist in
                     ArtistCircle(id: artist.pageId(discovery.sourceId), name: artist.name, coverArt: coverId(of: artist.artwork),
                                  library: artist)
                         .simultaneousGesture(TapGesture().onEnded { model.keepSearch() })
                 }
+                ForEach(onlineArtists) { artist in
+                    OnlineArtistCircle(id: artist.id, name: artist.name, coverArt: coverId(of: artist.artwork)) { model.keepSearch() }
+                }
             }
+        }
+        if showsSongs {
+            let more = moreSongsThanShown(library: found.songs.count + (found.moreSongs ? 1 : 0), online: onlineSongs.count)
+            kindTitle("Songs", more: more, kind: .songs, spaced: firstIsArtists)
+            songRows(found, limit: librarySongsShown, addSpace: online.wanted)
+            outsideRows(look, kind: "songs", songs: Array(onlineSongs.prefix(onlineSongsShown)))
         }
         if let top {
             rankedSection("top", "Top songs", top, shown: searchTopShown, open: topOpen, withArtist: false, spaced: true)
         }
-        if !found.albums.isEmpty {
-            kindTitle("Albums", more: found.moreAlbums, kind: .albums, spaced: firstKind != 1)
+        if !found.albums.isEmpty || !onlineAlbums.isEmpty {
+            kindTitle("Albums", more: found.moreAlbums, kind: .albums, spaced: firstIsArtists || showsSongs || top != nil)
             SideScroller {
                 ForEach(found.albums) { album in
                     AlbumCard(album: album.asAlbum)
                         .simultaneousGesture(TapGesture().onEnded { model.keepSearch() })
                 }
+                ForEach(onlineAlbums) { OnlineAlbumCard(album: $0) { model.keepSearch() } }
             }
         }
         if !found.playlists.isEmpty {
-            kindTitle("Playlists", more: found.morePlaylists, kind: .playlists, spaced: firstKind != 2)
+            kindTitle("Playlists", more: found.morePlaylists, kind: .playlists, spaced: true)
             playlistRows(found)
         }
-        if !found.songs.isEmpty {
-            kindTitle("Songs", more: found.moreSongs, kind: .songs, spaced: firstKind != 3)
-            songRows(found)
+        if found.artists.isEmpty && !onlineArtists.isEmpty {
+            kindTitle("Artists", more: false, kind: .artists, spaced: true)
+            SideScroller {
+                ForEach(onlineArtists) { artist in
+                    OnlineArtistCircle(id: artist.id, name: artist.name, coverArt: coverId(of: artist.artwork)) { model.keepSearch() }
+                }
+            }
         }
     }
 
@@ -317,11 +328,14 @@ struct SearchView: View {
         }
     }
 
-    /// Library songs: no add button and no empty add space.
-    private func songRows(_ found: LibraryResults) -> some View {
+    /// Library songs, the first `limit` of them. Beside songs found online they keep the add
+    /// button's space empty, so the lengths line up.
+    private func songRows(_ found: LibraryResults, limit: Int = .max, addSpace: Bool) -> some View {
+        let shown = Array(found.songs.prefix(limit))
         let songs = found.songs.map(\.asSong)
-        return ForEach(Array(found.songs.enumerated()), id: \.element.id) { position, track in
-            SongRow(song: songs[position], list: songs, position: position, tap: { model.playSong(track) })
+        return ForEach(Array(shown.enumerated()), id: \.element.id) { position, track in
+            SongRow(song: songs[position], list: songs, position: position, offersAdd: addSpace, addSpace: addSpace,
+                    tap: { model.playSong(track) })
         }
     }
 
@@ -329,28 +343,51 @@ struct SearchView: View {
         TitleRow(title: text, action: more ? "See all" : nil, top: spaced ? 12 : 0) { model.filter = kind }
     }
 
-    /// All of one kind, as a list: rows for songs, artists and playlists, and covers two to a row
-    /// for albums.
+    /// All of one kind, as one list: rows for songs, artists and playlists, and covers two to a row
+    /// for albums, the library's first and then those found online, with the line about looking
+    /// online after them.
     @ViewBuilder
-    private func oneKind(_ found: LibraryResults) -> some View {
-        ForEach(found.artists) { artist in
-            ArtistListRow(id: artist.pageId(discovery.sourceId), name: artist.name, coverArt: coverId(of: artist.artwork),
-                          albumCount: artist.albumCount, library: artist) { model.keepSearch() }
-        }
-        let width = max(100, (listWidth - 40 - 14) / 2)
-        ForEach(Array(stride(from: 0, to: found.albums.count, by: 2)), id: \.self) { start in
-            HStack(alignment: .top, spacing: 14) {
-                ForEach(found.albums[start..<min(start + 2, found.albums.count)]) { album in
-                    AlbumCard(album: album.asAlbum, width: width)
-                        .simultaneousGesture(TapGesture().onEnded { model.keepSearch() })
-                }
-                if start + 1 >= found.albums.count { Spacer(minLength: 0) }
+    private func oneKind(_ found: LibraryResults, _ online: DiscoverState) -> some View {
+        let finds = online.finds
+        switch model.filter {
+        case .artists:
+            ForEach(found.artists) { artist in
+                ArtistListRow(id: artist.pageId(discovery.sourceId), name: artist.name, coverArt: coverId(of: artist.artwork),
+                              albumCount: artist.albumCount, library: artist) { model.keepSearch() }
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 9)
+            let artists = finds?.artists ?? []
+            ForEach(artists) { artist in
+                ArtistListRow(id: artist.id, name: artist.name, coverArt: coverId(of: artist.artwork), albumCount: artist.albumCount,
+                              outside: true) { model.keepSearch() }
+            }
+            outsideRows(online.look(count: artists.count), kind: "artists", songs: [])
+        case .albums:
+            let width = max(100, (listWidth - 40 - 14) / 2)
+            let cards = found.albums.map { AlbumItem.library($0) } + ((finds?.partAlbums ?? []) + (finds?.albums ?? [])).map { AlbumItem.online($0) }
+            ForEach(Array(stride(from: 0, to: cards.count, by: 2)), id: \.self) { start in
+                HStack(alignment: .top, spacing: 14) {
+                    ForEach(cards[start..<min(start + 2, cards.count)]) { card in
+                        switch card {
+                        case .library(let album):
+                            AlbumCard(album: album.asAlbum, width: width)
+                                .simultaneousGesture(TapGesture().onEnded { model.keepSearch() })
+                        case .online(let album):
+                            OnlineAlbumCard(album: album, width: width) { model.keepSearch() }
+                        }
+                    }
+                    if start + 1 >= cards.count { Spacer(minLength: 0) }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 9)
+            }
+            outsideRows(online.look(count: cards.count - found.albums.count), kind: "albums", songs: [])
+        case .playlists:
+            playlistRows(found)
+        default:
+            songRows(found, addSpace: online.wanted)
+            let songs = (finds?.songs ?? []).map(\.asSong)
+            outsideRows(online.look(count: songs.count), kind: "songs", songs: songs)
         }
-        playlistRows(found)
-        songRows(found)
     }
 
     // MARK: Ranked lists
@@ -388,62 +425,39 @@ struct SearchView: View {
 
     // MARK: Beyond the library
 
-    /// What the server has beyond the library: albums held in part first, then songs, albums and
-    /// artists under "Not in your library". While it looks, or when it cannot be reached, a quiet
-    /// line says so.
+    /// Under the library's results of a kind: while the server looks, a line saying so over rows
+    /// that hold the finds' place; when it found songs, the same line, quieter, the first few times a
+    /// line saying what the plus does, then the songs; when it found none, or could not be asked, a line that says so
+    /// plainly, with Try again for the second.
     @ViewBuilder
-    private func discoverSection(_ online: DiscoverState, spaced: Bool) -> some View {
-        let part: [OnlineAlbum] = if case .done(let found) = online { found.partAlbums } else { [] }
-        if !part.isEmpty {
-            TitleRow(title: partlyInLibraryText, top: spaced ? 12 : 0)
-            SideScroller {
-                ForEach(part) { OnlineAlbumCard(album: $0) { model.keepSearch() } }
+    private func outsideRows(_ look: OutsideLook, kind: String, songs: [Song]) -> some View {
+        switch look {
+        case .off:
+            EmptyView()
+        case .looking:
+            OutsideLine(look: look, text: outsideLine(look, query: trimmed, kind: kind) ?? "")
+            ForEach(0..<waitingRows, id: \.self) { n in WaitingRow(round: kind == "artists", n: n) }
+        case .noneFound:
+            OutsideLine(look: look, text: outsideLine(look, query: trimmed, kind: kind) ?? "")
+        case .failed:
+            OutsideLine(look: look, text: outsideLine(look, query: trimmed, kind: kind) ?? "", retry: model.retryOnline)
+        case .found:
+            // The line stays where it said it was looking, quieter, over the finds that took the
+            // waiting rows' places.
+            if !songs.isEmpty { OutsideLine(look: look, text: outsideLine(look, query: trimmed, kind: kind) ?? "") }
+            if showsHint && !songs.isEmpty {
+                Text("Tap + to add a song to your library.")
+                    .font(.octoCaption)
+                    .foregroundStyle(OctoColor.textMuted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 2)
+                    .onAppear { model.hintSeen() }
             }
-        }
-        if part.isEmpty || !(online.foundNotInLibraryEmpty) {
-            TitleRow(title: notInLibraryText, top: spaced || !part.isEmpty ? 12 : 0)
-            switch online {
-            case .loading:
-                QuietNote(text: "Looking online")
-            case .failed:
-                QuietNote(text: "Could not reach your server")
-            case .done(let found):
-                if showsHint && !found.songs.isEmpty {
-                    Text("Tap + to add a song to your library.")
-                        .font(.octoCaption)
-                        .foregroundStyle(OctoColor.textMuted)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 2)
-                        .onAppear { model.hintSeen() }
-                }
-                if !found.songs.isEmpty {
-                    let songs = found.songs.map(\.asSong)
-                    FindsSubtitle(text: "Songs")
-                    ForEach(Array(songs.enumerated()), id: \.element.id) { position, song in
-                        // A find that turns into its library song ends like the library songs
-                        // listed above, at its length.
-                        SongRow(song: song, list: songs, position: position, offersAdd: true, addSpace: false,
-                                tap: { model.playFound(song) })
-                            .id("discover:\(song.id)")
-                    }
-                }
-                if !found.albums.isEmpty {
-                    FindsSubtitle(text: "Albums")
-                    SideScroller {
-                        ForEach(found.albums) { OnlineAlbumCard(album: $0) { model.keepSearch() } }
-                    }
-                }
-                if !found.artists.isEmpty {
-                    FindsSubtitle(text: "Artists")
-                    SideScroller {
-                        ForEach(found.artists) { artist in
-                            OnlineArtistCircle(id: artist.id, name: artist.name, coverArt: coverId(of: artist.artwork)) { model.keepSearch() }
-                        }
-                    }
-                }
-            case .idle:
-                EmptyView()
+            ForEach(Array(songs.enumerated()), id: \.element.id) { position, song in
+                SongRow(song: song, list: songs, position: position, offersAdd: true, addSpace: true,
+                        tap: { model.playFound(song) })
+                    .id("discover:\(song.id)")
             }
         }
     }
@@ -455,10 +469,106 @@ struct SearchView: View {
 }
 
 private extension DiscoverState {
-    /// Nothing to list under "Not in your library" in a finished search.
-    var foundNotInLibraryEmpty: Bool {
-        if case .done(let found) = self { return found.notInLibraryEmpty }
-        return false
+    /// What the server found, once it answered.
+    var finds: Discovered? {
+        if case .done(let found) = self { return found }
+        return nil
+    }
+
+    /// Whether the server is asked at all, so library songs keep the add button's space and their
+    /// lengths line up with the finds'.
+    var wanted: Bool {
+        if case .idle = self { return false }
+        return true
+    }
+}
+
+/// A library album or one found online, for the grid of albums.
+private enum AlbumItem: Identifiable {
+    case library(LibraryAlbum)
+    case online(OnlineAlbum)
+
+    var id: String {
+        switch self {
+        case .library(let album): album.id
+        case .online(let album): "online:\(album.id)"
+        }
+    }
+}
+
+/// The line between the library's results and the server's, on the rows' lines: its mark centered
+/// where their covers are, its words where their titles start. A small spinner while the server
+/// looks, a warning mark and Try again when it could not be asked, the plus over the finds.
+private struct OutsideLine: View {
+    let look: OutsideLook
+    let text: String
+    var retry: (() -> Void)?
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Group {
+                switch look {
+                case .looking:
+                    ProgressView().controlSize(.small).tint(OctoColor.accent)
+                case .failed:
+                    Image(systemName: "exclamationmark.circle").foregroundStyle(.orange)
+                case .found:
+                    Image(systemName: "plus").foregroundStyle(OctoColor.textMuted)
+                default:
+                    Image(systemName: "magnifyingglass").foregroundStyle(OctoColor.textMuted)
+                }
+            }
+            .font(.system(size: 15, weight: .medium))
+            .frame(width: 44, height: 18)
+            .accessibilityHidden(true)
+            Text(text)
+                .font(.octoBodySmall)
+                .foregroundStyle(look == .failed ? .white : look == .found ? OctoColor.textMuted : OctoColor.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if let retry {
+                Button("Try again", action: retry)
+                    .font(.octoBodySmall.weight(.semibold))
+                    .foregroundStyle(OctoColor.accent)
+                    .buttonStyle(.plain)
+            }
+        }
+        .frame(minHeight: 48)
+        .padding(.leading, ListRow.side)
+        .padding(.trailing, 16)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// A row that holds a find's place while the server looks: the shape of a song row (or an
+/// artist's, round), in the faint fill of an empty cover, breathing slowly unless motion is
+/// reduced, its lines a little longer or shorter from row to row.
+private struct WaitingRow: View {
+    let round: Bool
+    let n: Int
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var dim = false
+
+    var body: some View {
+        let fill = Color.white.opacity(0.10)
+        HStack(spacing: 12) {
+            RoundedRectangle(cornerRadius: round ? 24 : OctoRadius.artS, style: .continuous)
+                .fill(fill)
+                .frame(width: round ? 48 : 44, height: round ? 48 : 44)
+            VStack(alignment: .leading, spacing: 7) {
+                Capsule().fill(fill).frame(width: [150, 118, 170, 132][n % 4], height: 11)
+                Capsule().fill(fill).frame(width: [96, 84, 110, 72][n % 4], height: 9)
+            }
+            Spacer(minLength: 0)
+        }
+        .opacity(dim ? 0.45 : 1)
+        .padding(.horizontal, ListRow.side)
+        .padding(.vertical, 4)
+        .frame(minHeight: round ? 64 : 56)
+        .accessibilityHidden(true)
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { dim = true }
+        }
     }
 }
 
