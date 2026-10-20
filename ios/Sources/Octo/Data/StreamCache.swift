@@ -137,6 +137,18 @@ actor StreamCache {
         return (file(key), index.entries[key]?.mimeType)
     }
 
+    /// The server answered for a saved song: a saved copy of another file (another type or whole
+    /// length) goes, file and all, then the song is described as the server gave it. True when the
+    /// saved copy went.
+    @discardableResult
+    func answered(_ key: String, contentLength: Int64?, mimeType: String?) -> Bool {
+        guard index.enabled else { return false }
+        let went = index.answered(key, StreamShape(type: mimeType, total: contentLength))
+        if went { settleDropped() }
+        describe(key, contentLength: contentLength, mimeType: mimeType)
+        return went
+    }
+
     /// Notes the whole length and type of a song as the server gave them, or the length a stream
     /// really had once it ended.
     func describe(_ key: String, contentLength: Int64?, mimeType: String?) {

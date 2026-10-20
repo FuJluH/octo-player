@@ -144,6 +144,8 @@ final class Player {
     @ObservationIgnored private let queueStore = QueueStore(rows: QueueFile.standard, parked: ParkedQueues(PlayerTexts()))
     @ObservationIgnored private let shared: PlayerShared
     @ObservationIgnored private var failuresInARow = 0
+    /// The queue entry last opened again because the server began sending another file for it.
+    @ObservationIgnored private var reopenedEntry: String?
     @ObservationIgnored private var saveSoon: Task<Void, Never>?
     @ObservationIgnored private var ticker: Timer?
     @ObservationIgnored private var ticks = 0
@@ -849,6 +851,13 @@ final class Player {
     /// over only when a song becomes ready. A live station that fails stops there with its line,
     /// never moving on to the next station by itself.
     private func failed(_ item: QueueItem, _ error: PlayError) {
+        // The server began sending another file for the playing song: it opens again from where
+        // it is, once for each time it is in the queue.
+        if error.code == .sourceChanged, let entry = item.entryId, entry == engine.currentItem?.entryId, reopenedEntry != entry {
+            reopenedEntry = entry
+            engine.reopenCurrent()
+            return
+        }
         guard engine.playWhenReady else { return }
         let why = item.isRadioStation ? stationFailureWords(error) : playFailureOf(error, outside: item.isFind).words
         let title = item.title.trimmingCharacters(in: .whitespaces).isEmpty ? "a song" : item.title

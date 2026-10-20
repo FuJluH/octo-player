@@ -143,6 +143,9 @@ final class Prefetcher {
             else { return false }
             defer { try? handle.close() }
             let cache = StreamCache.shared
+            // A part saved earlier of another file (the server's listed preview, say) goes first.
+            let size = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? Int64) ?? nil
+            await cache.answered(key, contentLength: size, mimeType: http.mimeType)
             var offset: Int64 = 0
             while let chunk = try handle.read(upToCount: 1 << 20), !chunk.isEmpty {
                 if Task.isCancelled { return false }

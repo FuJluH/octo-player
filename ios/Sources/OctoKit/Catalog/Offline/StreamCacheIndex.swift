@@ -69,6 +69,18 @@ public struct StreamCacheIndex: Sendable, Equatable {
 
     // MARK: Changing
 
+    /// The server answered for a saved song with `shape`. When that is another file than the one
+    /// saved (another type or whole length), the saved copy goes, so its bytes are never continued
+    /// with the new file's. True when it went.
+    @discardableResult
+    public mutating func answered(_ key: String, _ shape: StreamShape) -> Bool {
+        guard let entry = entries[key], StreamShape(type: entry.mimeType, total: entry.contentLength).differs(from: shape) else {
+            return false
+        }
+        drop(key)
+        return true
+    }
+
     /// Notes the whole length and type of a song as the server gave them. A song may be described
     /// before any of it is saved, and a stream that ended short of what it said is described again
     /// with the length it really had.

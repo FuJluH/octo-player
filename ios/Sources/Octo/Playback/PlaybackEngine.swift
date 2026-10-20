@@ -284,6 +284,18 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
         crossfader.songChanged()
     }
 
+    /// Opens the current song again from where it is, with a fresh source: the server began
+    /// sending another file for it than the one the player had read.
+    func reopenCurrent() {
+        guard queue.currentItem != nil else { return }
+        let at = positionMs
+        crossfader.interrupt()
+        ended = false
+        stoppedAtEnd = false
+        loadCurrent(atMs: at)
+        crossfader.songChanged()
+    }
+
     /// Plays the song at queue position `index` from `ms`.
     func seek(to index: Int, ms: Int = 0) {
         guard queue.items.indices.contains(index) else { return }
