@@ -24,6 +24,7 @@
 #   -Art <key>        Animated art: full_screen (default), square or off
 #   -Wash <on|off>    the immersive background (on) or the glow (off)
 #   -Lyrics <on|off>  the lyrics beside the cover in the full player
+#   -Full <on|off>    the full player open (on), or Home with the player bar
 #   -Source <name>    library (default) or radio
 #   -Minimized        minimizes the window once it is up
 #   -Advance <s>      seconds per song (default 45; 0 lets each play out)
@@ -47,6 +48,7 @@ param(
     [ValidateSet("full_screen", "square", "off")][string]$Art = "full_screen",
     [ValidateSet("on", "off")][string]$Wash = "on",
     [ValidateSet("on", "off")][string]$Lyrics = "on",
+    [ValidateSet("on", "off")][string]$Full = "on",
     [ValidateSet("library", "radio")][string]$Source = "library",
     [switch]$Minimized,
     [int]$Advance = 45,
@@ -241,7 +243,7 @@ foreach ($place in "config\settings.json", "Roaming\Octo\settings.json") {
     [IO.File]::WriteAllText($file, ($settings | ConvertTo-Json -Depth 32), (New-Object System.Text.UTF8Encoding($false)))
 }
 $plan = Join-Path $profileDir "soak.properties"
-$planText = "source=$Source`nlyrics=$Lyrics`nadvance=$Advance`nqueue=$($Queue -replace '\\', '/')`n"
+$planText = "source=$Source`nlyrics=$Lyrics`nfull=$Full`nadvance=$Advance`nqueue=$($Queue -replace '\\', '/')`n"
 [IO.File]::WriteAllText($plan, $planText)
 
 $gcLog = Join-Path $out "gc.log"
@@ -276,7 +278,7 @@ try {
         Start-Sleep -Milliseconds 200
     }
     if ($Minimized) { Start-Sleep -Seconds 20; [void][OctoSoak.Win]::ShowWindow($process.MainWindowHandle, 6) }
-    Write-Host "Soak $Label`: pid $($process.Id), art $Art, wash $Wash, lyrics $Lyrics, $Source, $(if ($Minimized) { 'minimized' } else { 'shown' }), $Advance s a song, $Minutes min"
+    Write-Host "Soak $Label`: pid $($process.Id), art $Art, wash $Wash, lyrics $Lyrics, full player $Full, $Source, $(if ($Minimized) { 'minimized' } else { 'shown' }), $Advance s a song, $Minutes min"
 
     $shown = $clock.Elapsed.TotalSeconds
     $shotsDue = @($Shots -split ',' | Where-Object { $_.Trim() } | ForEach-Object { [int]$_ } | Sort-Object)
@@ -315,7 +317,7 @@ try {
     $mark = $regular | Where-Object { $_.Minute -ge 15 } | Select-Object -First 1
     $last = $regular[-1]
     $summary = @(
-        "Soak $Label ($((Get-Date).ToString('yyyy-MM-dd HH:mm'))): art $Art, wash $Wash, lyrics $Lyrics, $Source, $(if ($Minimized) { 'minimized' } else { 'shown' }), $Advance s a song, $Minutes min, JVM extra '$Jvm'",
+        "Soak $Label ($((Get-Date).ToString('yyyy-MM-dd HH:mm'))): art $Art, wash $Wash, lyrics $Lyrics, full player $Full, $Source, $(if ($Minimized) { 'minimized' } else { 'shown' }), $Advance s a song, $Minutes min, JVM extra '$Jvm'",
         "Private MB: start $($regular[0].PrivateMB), 15 min $($mark.PrivateMB), end $($last.PrivateMB), most $(($regular | Measure-Object PrivateMB -Maximum).Maximum), after GC $($after.PrivateMB) (drop $([math]::Round($before.PrivateMB - $after.PrivateMB, 1)))",
         "Growth MB/h from 15 min: private $(Get-Slope $samples 'PrivateMB'), working set $(Get-Slope $samples 'WorkingSetMB'), outside the JVM $(Get-Slope $samples 'OutsideJvmMB'), JVM total $(Get-Slope $samples 'NmtMB'), heap used $(Get-Slope $samples 'HeapUsedMB'), GPU dedicated $(Get-Slope $samples 'GpuDedicatedMB')",
         "End: working set $($last.WorkingSetMB), threads $($last.Threads), octo-video threads $($last.VideoThreads), handles $($last.Handles), heap $($last.HeapUsedMB)/$($last.HeapMB), JVM total $($last.NmtMB), outside the JVM $($last.OutsideJvmMB), GPU dedicated $($last.GpuDedicatedMB)",

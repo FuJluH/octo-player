@@ -33,6 +33,7 @@ import kotlin.random.Random
 //                    (`songs` of them, asking about at most `ask` albums),
 //                    or radio: the server's stations, else the kept ones
 //   lyrics=on|off    the lyrics beside the cover
+//   full=on|off      the full player open, or Home behind the player bar
 //   advance=45       seconds a song plays before the next
 //   queue=<file>     the songs picked, written by the first run and read by
 //                    the next ones, so every run plays the same songs
@@ -47,8 +48,9 @@ suspend fun soakRun(app: AppState, plan: File) {
     }
     val advance = wants.getProperty("advance", "45").toLong()
     val lyrics = wants.getProperty("lyrics", "on") == "on"
+    val full = wants.getProperty("full", "on") == "on"
     val radio = wants.getProperty("source", "library") == "radio"
-    note("start source=${if (radio) "radio" else "library"} lyrics=$lyrics advance=$advance")
+    note("start source=${if (radio) "radio" else "library"} lyrics=$lyrics full=$full advance=$advance")
 
     val index = withTimeoutOrNull(300_000) {
         val library = snapshotFlow { app.library }.filterNotNull().first()
@@ -71,7 +73,7 @@ suspend fun soakRun(app: AppState, plan: File) {
     var played = 0
     while (true) {
         app.player.setVolume(0f)
-        app.fullPlayer = true
+        app.fullPlayer = full
         if ((app.playerPanel == SidePanel.Lyrics) != lyrics) app.togglePlayerPanel(SidePanel.Lyrics)
         val now = app.player.state.value
         note("playing ${played++} ${now.current?.song?.id} album=${now.current?.song?.albumId} playing=${now.playing}")
