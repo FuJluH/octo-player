@@ -62,7 +62,7 @@ suspend fun soakRun(app: AppState, plan: File) {
         note("stations ${ids.size}")
         app.playStations(ids, 0, "Soak")
     } else {
-        val songs = soakSongs(app, index.songs, wants)
+        val songs = soakSongs(app, index.songs, wants, ::note)
         if (songs.isEmpty()) return note("stop: no songs")
         note("songs ${songs.size}")
         app.play(songs, 0, source = "Soak")
@@ -89,7 +89,7 @@ suspend fun soakRun(app: AppState, plan: File) {
 
 // The songs a library run plays: the ones picked by an earlier run, or one
 // song from each album with a tall loop, the rest from any album.
-private suspend fun soakSongs(app: AppState, library: List<Song>, wants: Properties): List<Song> {
+private suspend fun soakSongs(app: AppState, library: List<Song>, wants: Properties, note: (String) -> Unit): List<Song> {
     val queue = wants.getProperty("queue")?.let(::File)
     val byId = library.associateBy { it.id }
     queue?.takeIf { it.exists() }?.let { file ->
@@ -110,6 +110,7 @@ private suspend fun soakSongs(app: AppState, library: List<Song>, wants: Propert
         if (art?.clip(LoopShape.Tall) != null) picked += song else plain += song
     }
     val songs = picked + plain.take(count - picked.size)
+    runCatching { File(wants.getProperty("events", "")).takeIf { it.path.isNotBlank() }?.appendText("${System.currentTimeMillis()} picked ${picked.size} with a tall loop of ${songs.size}\n") }
     queue?.let { file -> withContext(Dispatchers.IO) { file.writeText(songs.joinToString("\n") { it.id }) } }
     return songs
 }

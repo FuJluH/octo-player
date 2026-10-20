@@ -68,7 +68,7 @@ if (-not ("OctoSoak.Win" -as [type])) {
 [DllImport("kernel32.dll")] public static extern int GetThreadDescription(System.IntPtr thread, out System.IntPtr description);
 [DllImport("kernel32.dll")] public static extern System.IntPtr LocalFree(System.IntPtr memory);
 public static string ThreadName(int id) {
-    System.IntPtr thread = OpenThread(0x1000, false, id);
+    System.IntPtr thread = OpenThread(0x0800, false, id);
     if (thread == System.IntPtr.Zero) return null;
     try {
         System.IntPtr text;
