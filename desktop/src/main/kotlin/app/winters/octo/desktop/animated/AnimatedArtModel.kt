@@ -2,11 +2,12 @@ package app.winters.octo.desktop.animated
 
 import app.winters.octo.desktop.lruMap
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import app.winters.octo.animated.AnimatedArtBook
 import app.winters.octo.animated.AnimatedArtSetting
@@ -119,16 +120,22 @@ class AnimatedArtModel(
     }
 
     // The album's art as it becomes known: a downloaded album's kept answer
-    // at once, else what the book holds and then the server's answer.
+    // at once, else what the book holds and then the server's answer. Each
+    // album has a state of its own: one state for every album kept the album
+    // before's art when the next one's was already known (the next song's
+    // album is asked about ahead), and Full screen went on playing that
+    // album's loop.
     @Composable
     fun artOf(albumId: String?): State<AnimatedArt?> {
         val book = book
         val server = connection()?.server?.id
         val held = albumId?.let { id -> kept?.art(server, id) ?: (book?.peek(id) as? KnownArt.Has)?.art }
-        return produceState(held, book, albumId, server) {
-            if (albumId == null || held != null) return@produceState
-            value = withContext(Dispatchers.IO) { kept?.art(server, albumId) } ?: book?.art(albumId)
+        val art = remember(book, albumId, server) { mutableStateOf(held) }
+        LaunchedEffect(art) {
+            if (albumId == null || art.value != null) return@LaunchedEffect
+            art.value = withContext(Dispatchers.IO) { kept?.art(server, albumId) } ?: book?.art(albumId)
         }
+        return art
     }
 
     // A song started: its album and the next one's are asked about, and the

@@ -108,6 +108,42 @@ class AnimatedArtTest {
     }
 
     @Test
+    fun theNextAlbumShowsItsOwnArtWhenItWasKnownAhead() {
+        serverWithLoop().use { server ->
+            val connection = connectionTo(server)
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            val model = AnimatedArtModel(OkHttpClient(), scope, { connection }, null)
+            model.follow(connection)
+            val first = AnimatedArt(tall = AnimatedClip(video = "https://loops.example/first.m3u8"))
+            val next = AnimatedArt(tall = AnimatedClip(video = "https://loops.example/next.m3u8"))
+            // Both known before either shows, as the next song's album is.
+            model.note("first", first)
+            model.note("next", next)
+            val album = mutableStateOf("first")
+            var shown: AnimatedArt? = null
+            lateinit var scene: ImageComposeScene
+            SwingUtilities.invokeAndWait {
+                scene = ImageComposeScene(10, 10, Density(1f)) { shown = model.artOf(album.value).value }
+            }
+            fun frame() = SwingUtilities.invokeAndWait { scene.render(System.nanoTime()).close() }
+            try {
+                frame()
+                assertEquals(first, shown)
+                album.value = "next"
+                repeat(3) { frame() }
+                assertEquals(next, shown)
+                // An album not known yet shows nothing of the one before.
+                album.value = "unknown"
+                frame()
+                assertFalse(shown == next)
+            } finally {
+                SwingUtilities.invokeAndWait { scene.close() }
+                scope.cancel()
+            }
+        }
+    }
+
+    @Test
     fun theModelFetchesALoopToTheShelfOnceAndPrefersAKeptOne() = runBlocking {
         serverWithLoop().use { server ->
             val connection = connectionTo(server)
