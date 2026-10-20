@@ -1,7 +1,9 @@
 package app.winters.octo.playback
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CarIdsTest {
@@ -36,5 +38,13 @@ class CarIdsTest {
         assertEquals(1, startIndex(list, "b"))
         assertEquals(0, startIndex(list, "gone"))
         assertEquals(0, startIndex(list, null))
+    }
+
+    @Test
+    fun theServersToolPlaylistsAreKnownByTheirMark() {
+        assertTrue(isToolPlaylist("🛠 Delete"))
+        assertTrue(isToolPlaylist("🛠️ Better quality"))
+        assertFalse(isToolPlaylist("Road trip"))
+        assertFalse(isToolPlaylist("Fixing up 🛠"))
     }
 }

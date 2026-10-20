@@ -62,3 +62,7 @@ fun parseCarId(id: String): CarNode? = when {
 // is no longer there.
 fun startIndex(trackIds: List<String>, chosen: String?): Int =
     chosen?.let { trackIds.indexOf(it) }?.takeIf { it >= 0 } ?: 0
+
+// The server's library action playlists, named with a leading 🛠 (U+1F6E0).
+// A song added to one is acted on, so a car, which only plays, leaves them out.
+fun isToolPlaylist(name: String): Boolean = name.startsWith(String(Character.toChars(0x1F6E0)))
