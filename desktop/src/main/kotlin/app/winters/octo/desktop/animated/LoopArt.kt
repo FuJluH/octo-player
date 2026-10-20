@@ -153,10 +153,13 @@ internal fun rememberLoopFeed(file: File?, play: LoopPlay, size: IntSize, small:
     LaunchedEffect(feed, opened) {
         val target = file?.takeIf { opened } ?: return@LaunchedEffect
         val at = wanted
-        val video = withContext(NonCancellable + Dispatchers.IO) {
-            runCatching { LoopVideo.open(target.path, at.width.toUInt(), at.height.toUInt()) }.getOrNull()
-        } ?: return@LaunchedEffect
-        try {
+        openAndUse(
+            open = { LoopVideo.open(target.path, at.width.toUInt(), at.height.toUInt()) },
+            close = { video ->
+                video.stop()
+                video.destroy()
+            },
+        ) { video ->
             snapshotFlow { playing }.collectLatest { now ->
                 if (now == LoopPlay.Play) {
                     video.play()
@@ -164,11 +167,6 @@ internal fun rememberLoopFeed(file: File?, play: LoopPlay, size: IntSize, small:
                 } else {
                     video.hold()
                 }
-            }
-        } finally {
-            withContext(NonCancellable + Dispatchers.IO) {
-                video.stop()
-                video.destroy()
             }
         }
     }
@@ -178,6 +176,20 @@ internal fun rememberLoopFeed(file: File?, play: LoopPlay, size: IntSize, small:
         feed.fade.animateTo(1f, tween(fadeMs, easing = FastOutSlowInEasing))
     }
     return feed
+}
+
+// Opens something and uses it, closing it however the use ends. An open
+// cannot be stopped part way, so one still under way when the caller is
+// cancelled finishes and is closed straight after; taken back only as the
+// open's answer, it was lost then, with its decoder and its thread.
+internal suspend fun <T : Any> openAndUse(open: () -> T, close: (T) -> Unit, use: suspend (T) -> Unit) {
+    var opened: T? = null
+    try {
+        withContext(NonCancellable + Dispatchers.IO) { opened = runCatching(open).getOrNull() }
+        opened?.let { use(it) }
+    } finally {
+        opened?.let { made -> withContext(NonCancellable + Dispatchers.IO) { close(made) } }
+    }
 }
 
 // A loop's frames filling the box, scaled to cover it: nothing at all
@@ -214,8 +226,11 @@ internal fun coverDraw(canvas: org.jetbrains.skia.Canvas, image: SkiaImage, widt
 }
 
 // The paint the tiniest copy is drawn with: softened up and down, so its
-// edges carried out sideways show no bands.
-internal fun edgePaint(): Paint = Paint().apply { imageFilter = org.jetbrains.skia.ImageFilter.makeBlur(0.4f, 1.4f, org.jetbrains.skia.FilterTileMode.CLAMP) }
+// edges carried out sideways show no bands. The paint keeps its own hold on
+// the blur, so closing the paint lets both go.
+internal fun edgePaint(): Paint = Paint().apply {
+    org.jetbrains.skia.ImageFilter.makeBlur(0.4f, 1.4f, org.jetbrains.skia.FilterTileMode.CLAMP).use { imageFilter = it }
+}
 
 // How a frame is brought down to its small copy: averaged over its mipmaps,
 // so the copy does not flicker as the picture moves.
@@ -230,6 +245,8 @@ private suspend fun readFrames(video: LoopVideo, feed: LoopFeed) = withContext(D
     val bitmap = Bitmap()
     val small = feed.small?.let { Surface.makeRasterN32Premul(it.width, it.height) }
     val tiny = feed.tiny?.let { Surface.makeRasterN32Premul(it.width, it.height) }
+    val paint = Paint()
+    val tinyPaint = edgePaint()
     try {
         if (!bitmap.allocPixels(ImageInfo(width, height, ColorType.BGRA_8888, ColorAlphaType.OPAQUE))) return@withContext
         val pixels = bitmap.peekPixels() ?: return@withContext
@@ -237,8 +254,6 @@ private suspend fun readFrames(video: LoopVideo, feed: LoopFeed) = withContext(D
         val rowBytes = pixels.rowBytes.toUInt()
         val length = pixels.computeByteSize().toULong()
         val all = Rect.makeWH(width.toFloat(), height.toFloat())
-        val paint = Paint()
-        val tinyPaint = edgePaint()
         var have = 0uL
         while (isActive) {
             val newest = video.waitFrame(have, WaitMs)
@@ -266,6 +281,8 @@ private suspend fun readFrames(video: LoopVideo, feed: LoopFeed) = withContext(D
         bitmap.close()
         small?.close()
         tiny?.close()
+        paint.close()
+        tinyPaint.close()
     }
 }
 // The album's square loop over its cover: the cover first, then the loop

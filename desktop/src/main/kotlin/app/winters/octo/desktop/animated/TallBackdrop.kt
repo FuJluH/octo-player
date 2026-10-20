@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,6 +37,8 @@ import app.winters.octo.animated.LOOP_FADE_MS
 import app.winters.octo.animated.LoopPlay
 import app.winters.octo.design.LocalReduceMotion
 import app.winters.octo.desktop.ui.DarkInk
+import app.winters.octo.desktop.ui.LateClose
+import app.winters.octo.desktop.ui.Shared
 import app.winters.octo.subsonic.AnimatedClip
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -118,15 +121,19 @@ fun softStill(still: SkiaImage?, color: Color, aspect: Float): SoftStill {
     val surface = Surface.makeRasterN32Premul(w, h)
     surface.canvas.clear(color.toArgb())
     if (still != null) {
-        surface.canvas.drawImageRect(
-            still, Rect.makeWH(still.width.toFloat(), still.height.toFloat()), Rect.makeWH(w.toFloat(), h.toFloat()),
-            FilterMipmap(FilterMode.LINEAR, MipmapMode.LINEAR), Paint(), true,
-        )
+        Paint().use { paint ->
+            surface.canvas.drawImageRect(
+                still, Rect.makeWH(still.width.toFloat(), still.height.toFloat()), Rect.makeWH(w.toFloat(), h.toFloat()),
+                FilterMipmap(FilterMode.LINEAR, MipmapMode.LINEAR), paint, true,
+            )
+        }
     }
     val small = surface.makeImageSnapshot()
     surface.close()
     val little = Surface.makeRasterN32Premul(max(2, w / 2), max(2, h / 2))
-    little.canvas.drawImageRect(small, Rect.makeWH(w.toFloat(), h.toFloat()), Rect.makeWH(little.width.toFloat(), little.height.toFloat()), FilterMipmap(FilterMode.LINEAR, MipmapMode.LINEAR), edgePaint(), true)
+    edgePaint().use { paint ->
+        little.canvas.drawImageRect(small, Rect.makeWH(w.toFloat(), h.toFloat()), Rect.makeWH(little.width.toFloat(), little.height.toFloat()), FilterMipmap(FilterMode.LINEAR, MipmapMode.LINEAR), paint, true)
+    }
     val tiny = little.makeImageSnapshot()
     little.close()
     val tone = fillTone(lightnesses(small))
@@ -244,17 +251,30 @@ fun TallBackdrop(
         val hPx = place.height.roundToInt()
         LaunchedEffect(wPx, hPx) { measured(wPx, hPx) }
 
-        // The still and its small copy, made once.
+        // The still and its small copy, made once, and closed once replaced
+        // (the small copy is made from the still off the window's thread,
+        // so the still waits for that too).
         var stillWaited by remember(albumId) { mutableStateOf(false) }
-        val still by produceState<SkiaImage?>(null, albumId, clip.poster) {
+        val stillHeld by produceState<Shared<SkiaImage>?>(null, albumId, clip.poster) {
             val got = withTimeoutOrNull(StillWaitMs) { model.posterFile(albumId, LoopShape.Tall, clip) }
             stillWaited = true
             val file = got ?: model.posterFile(albumId, LoopShape.Tall, clip) ?: return@produceState
-            value = withContext(Dispatchers.IO) { readStill(file) }
+            value = withContext(Dispatchers.IO) { readStill(file) }?.let(::Shared)
         }
-        val soft by produceState<SoftStill?>(null, still, stillWaited, color, aspect) {
-            if (still == null && !stillWaited) return@produceState
-            value = withContext(Dispatchers.Default) { softStill(still, color, aspect) }
+        DisposableEffect(stillHeld) { onDispose { stillHeld?.release() } }
+        val still = stillHeld?.thing
+        val soft by produceState<SoftStill?>(null, stillHeld, stillWaited, color, aspect) {
+            val held = stillHeld
+            if (held == null && !stillWaited) return@produceState
+            value = withContext(Dispatchers.Default) {
+                if (held == null) softStill(null, color, aspect) else held.use { softStill(it, color, aspect) }
+            }
+        }
+        DisposableEffect(soft) {
+            onDispose {
+                LateClose.close(soft?.small)
+                LateClose.close(soft?.tiny)
+            }
         }
         LaunchedEffect(soft) { soft?.ink?.let(inkNow) }
         val alpha = remember(albumId) { Animatable(0f) }
@@ -273,7 +293,14 @@ fun TallBackdrop(
         val feed = rememberLoopFeed(file, play, IntSize(wPx, hPx), small = smallSize)
         val tone = remember(ready) { ready.tone.filter() }
         val blurPaint = remember(tone) { Paint().apply { colorFilter = tone } }
+        DisposableEffect(blurPaint) {
+            onDispose {
+                LateClose.close(blurPaint)
+                LateClose.close(tone)
+            }
+        }
         val sharpPaint = remember { Paint() }
+        DisposableEffect(sharpPaint) { onDispose { LateClose.close(sharpPaint) } }
         // The words' side darkens (or lightens) a little more, gently.
         val shade = if (ready.tone.white) Color.Black else Color.White
         Box(Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha.value }) {
@@ -302,9 +329,13 @@ fun TallBackdrop(
                     val local = Matrix33.makeTranslate(place.x, 0f).makeConcat(
                         Matrix33.makeScale(place.width / image.width, place.height / image.height),
                     )
-                    blurPaint.shader = image.makeShader(FilterTileMode.CLAMP, FilterTileMode.CLAMP, Smooth, local)
+                    // The frame's shader is made for it; what was drawn keeps
+                    // its own hold on it.
+                    val shader = image.makeShader(FilterTileMode.CLAMP, FilterTileMode.CLAMP, Smooth, local)
+                    blurPaint.shader = shader
                     drawIntoCanvas { it.skiaCanvas.drawRect(Rect.makeWH(size.width, size.height), blurPaint) }
                     blurPaint.shader = null
+                    shader.close()
                 },
             )
             // And at the sharp loop's own place and size, so what the sharp
