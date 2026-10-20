@@ -68,7 +68,9 @@ import app.winters.octo.desktop.ui.FollowLateCloses
 import app.winters.octo.desktop.ui.ListFocus
 import app.winters.octo.desktop.ui.LocalListFocus
 import app.winters.octo.desktop.ui.LocalSoftwareDrawing
+import app.winters.octo.desktop.ui.LocalWindowGpu
 import app.winters.octo.desktop.ui.LocalWindowShown
+import app.winters.octo.desktop.ui.WindowGpu
 import app.winters.octo.desktop.ui.Opening
 import app.winters.octo.desktop.ui.Shell
 import app.winters.octo.desktop.update.DesktopUpdates
@@ -295,6 +297,9 @@ fun main(args: Array<String>) {
             remember { useTextPixels(window, appTextPixels) }
             // What the drawing let go of closes as this window draws.
             FollowLateCloses()
+            // The graphics card context this window draws with, for drawing
+            // that keeps its own surfaces.
+            val gpu = remember { WindowGpu(window) }
             LaunchedEffect(Unit) {
                 val drawn = withContext(Dispatchers.IO) { icons.get() }
                 if (drawn.isNotEmpty()) window.iconImages = drawn
@@ -395,6 +400,7 @@ fun main(args: Array<String>) {
                         LocalListFocus provides lists,
                         LocalWindowShown provides (system.windowVisible && !windowState.isMinimized),
                         LocalSoftwareDrawing provides software,
+                        LocalWindowGpu provides gpu,
                     ) {
                         AudioDropZone(system::openFiles) { Shell(app, own, ::closeWindow) }
                     }
