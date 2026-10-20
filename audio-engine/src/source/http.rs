@@ -21,6 +21,7 @@ use symphonia::core::io::MediaSource;
 
 use crate::error::{ErrorKind, Failure};
 use crate::source::icy::{IcySplitter, IcyStatus, StreamMeta};
+use ureq::unversioned::transport::{Buffers, ConnectionDetails, Connector, NextTimeout, Transport};
 use crate::source::trust::{PinnedTls, Trust};
 
 /// How a stream is fetched.
@@ -111,6 +112,11 @@ const LIVE_READ: usize = 4 << 10;
 /// certificates pinned in `trust`. One per engine, shared by every stream,
 /// so connections are reused.
 pub fn agent(trust: Arc<Trust>) -> ureq::Agent {
+    agent_with_idle_limit(trust, IDLE_LIMIT)
+}
+
+/// A client whose reads give up after `idle` with nothing arriving.
+fn agent_with_idle_limit(trust: Arc<Trust>, idle: Duration) -> ureq::Agent {
     use ureq::unversioned::resolver::DefaultResolver;
     use ureq::unversioned::transport::{ConnectProxyConnector, Connector, TcpConnector};
     let config = ureq::Agent::config_builder()
@@ -120,14 +126,71 @@ pub fn agent(trust: Arc<Trust>) -> ureq::Agent {
         .timeout_recv_response(Some(Duration::from_secs(15)))
         .user_agent("Octo")
         .build();
-    // ureq's usual chain, with TLS that also knows the pins, and old
-    // SHOUTcast servers' ICY answers read as HTTP.
+    // ureq's usual chain, with TLS that also knows the pins, old SHOUTcast
+    // servers' ICY answers read as HTTP, and a limit on a quiet read.
     let connector =
         ().chain(ConnectProxyConnector::default())
             .chain(TcpConnector::default())
             .chain(PinnedTls::new(trust))
-            .chain(IcyStatus);
+            .chain(IcyStatus)
+            .chain(IdleLimit(idle));
     ureq::Agent::with_parts(config, connector, DefaultResolver::default())
+}
+
+/// The longest a connection may give nothing while it is read. With no
+/// deadline for a body, a read from a server that went quiet without
+/// closing waited for ever, and its fetch thread with it, holding the
+/// stream's whole window of memory after the stream itself was let go.
+const IDLE_LIMIT: Duration = Duration::from_secs(30);
+
+/// A link in the connection chain that gives up a read waiting longer than
+/// IDLE_LIMIT for its next bytes, as a timeout.
+#[derive(Debug)]
+struct IdleLimit(Duration);
+
+impl<In: Transport> Connector<In> for IdleLimit {
+    type Out = IdleTransport<In>;
+
+    fn connect(&self, _details: &ConnectionDetails, chained: Option<In>) -> Result<Option<Self::Out>, ureq::Error> {
+        Ok(chained.map(|inner| IdleTransport { inner, limit: self.0 }))
+    }
+}
+
+#[derive(Debug)]
+struct IdleTransport<In> {
+    inner: In,
+    limit: Duration,
+}
+
+impl<In: Transport> Transport for IdleTransport<In> {
+    fn buffers(&mut self) -> &mut dyn Buffers {
+        self.inner.buffers()
+    }
+
+    fn transmit_output(&mut self, amount: usize, timeout: NextTimeout) -> Result<(), ureq::Error> {
+        self.inner.transmit_output(amount, timeout)
+    }
+
+    fn await_input(&mut self, timeout: NextTimeout) -> Result<bool, ureq::Error> {
+        self.inner.await_input(idle_limited(timeout, self.limit))
+    }
+
+    fn is_open(&mut self) -> bool {
+        self.inner.is_open()
+    }
+
+    fn is_tls(&self) -> bool {
+        self.inner.is_tls()
+    }
+}
+
+/// The wait for input, at most `limit`.
+fn idle_limited(timeout: NextTimeout, limit: Duration) -> NextTimeout {
+    if timeout.after.is_not_happening() || *timeout.after > limit {
+        NextTimeout { after: ureq::unversioned::transport::time::Duration::Exact(limit), reason: timeout.reason }
+    } else {
+        timeout
+    }
 }
 
 // A client with no pins, for streams opened outside an engine.

@@ -115,6 +115,44 @@ fn replaces_a_connection_that_goes_quiet() {
 }
 
 #[test]
+fn a_quiet_connection_lets_go_of_the_stream_once_replaced() {
+    let body = data(1_000_000);
+    let server =
+        TestServer::start(body.clone(), Behaviour { stall_after: Some(200_000), ..Default::default() });
+    let opts = HttpOptions {
+        agent: agent_with_idle_limit(Arc::new(Trust::default()), Duration::from_millis(800)),
+        stall_timeout: Duration::from_millis(400),
+        max_retries: 1_000,
+        ..quick()
+    };
+    let mut source = HttpSource::open(&server.url(), opts).unwrap();
+    assert_eq!(read_all(&mut source), body);
+    // The fetch threads hold the stream's memory; the one on the quiet
+    // connection gives up its read and ends, as do the rest.
+    let held = Arc::downgrade(&source.shared);
+    drop(source);
+    let until = Instant::now() + Duration::from_secs(10);
+    while held.strong_count() > 0 && Instant::now() < until {
+        thread::sleep(Duration::from_millis(50));
+    }
+    assert_eq!(held.strong_count(), 0, "a fetch thread still holds the stream");
+}
+
+#[test]
+fn a_wait_for_input_is_limited_and_a_shorter_one_kept() {
+    use ureq::unversioned::transport::time::Duration as Wait;
+    let limit = Duration::from_secs(30);
+    let endless = NextTimeout { after: Wait::NotHappening, reason: ureq::Timeout::RecvBody };
+    assert_eq!(*idle_limited(endless, limit).after, limit);
+    let long = NextTimeout { after: Wait::Exact(Duration::from_secs(90)), reason: ureq::Timeout::RecvBody };
+    assert_eq!(*idle_limited(long, limit).after, limit);
+    let short = NextTimeout { after: Wait::Exact(Duration::from_secs(5)), reason: ureq::Timeout::RecvResponse };
+    let kept = idle_limited(short, limit);
+    assert_eq!(*kept.after, Duration::from_secs(5));
+    assert_eq!(kept.reason, ureq::Timeout::RecvResponse);
+}
+
+#[test]
 fn missing_song_fails_at_once() {
     let server = TestServer::start(Vec::new(), Behaviour { status: Some(404), ..Default::default() });
     let err = HttpSource::open(&server.url(), quick()).err().unwrap();
