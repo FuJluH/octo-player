@@ -3,6 +3,7 @@ package app.winters.octo.desktop.system
 import androidx.compose.runtime.snapshotFlow
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.SidePanel
+import app.winters.octo.animated.KnownArt
 import app.winters.octo.desktop.animated.LoopShape
 import app.winters.octo.desktop.animated.clip
 import app.winters.octo.desktop.player.RepeatMode
@@ -95,6 +96,10 @@ suspend fun soakRun(app: AppState, plan: File) {
         if ((app.playerPanel == SidePanel.Lyrics) != lyrics) app.togglePlayerPanel(SidePanel.Lyrics)
         val now = app.player.state.value
         note("playing ${played++} ${now.current?.song?.id} album=${now.current?.song?.albumId} playing=${now.playing} gpuCache=${gpuCacheLimit()}")
+        now.current?.song?.let { song ->
+            val art = song.albumId?.let { (app.animated.book?.peek(it) as? KnownArt.Has)?.art }
+            note("art title=${song.title} album=${song.album} tall=${art?.tall?.video} poster=${art?.tall?.poster}")
+        }
         if (advance > 0) {
             delay(advance * 1000)
             app.player.next()
