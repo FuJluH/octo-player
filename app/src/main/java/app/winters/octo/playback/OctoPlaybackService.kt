@@ -23,6 +23,7 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSession.ConnectionResult
 import androidx.media3.session.MediaSession.MediaItemsWithStartPosition
 import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionError
 import androidx.media3.session.SessionResult
 import app.winters.octo.MainActivity
 import app.winters.octo.catalog.OnlineDao
@@ -634,22 +635,30 @@ class OctoPlaybackService : MediaLibraryService() {
             // Apps we don't trust keep the read-only access Media3 gives them.
             // A car and the voice assistant need to press play too.
             if (!controller.isTrusted && controller.packageName !in carApps) return super.onConnectAsync(session, controller)
+            // Controllers on the old interfaces are accepted at once: a car or
+            // assistant on the old browser waits for this answer on the main thread.
+            if (controller.controllerVersion == MediaSession.ControllerInfo.LEGACY_CONTROLLER_VERSION) {
+                return Futures.immediateFuture(accepted(session, controller))
+            }
             // The app connects only once the saved queue is back, so it never
             // mistakes a player still restoring for an empty one.
             return scope.future {
                 restored.await()
-                ConnectionResult.AcceptedResultBuilder(session, controller)
-                    .setAvailableSessionCommands(sessionCommands())
-                    .apply {
-                        if (session.isMediaNotificationController(controller) && stationOnAir.value) {
-                            val all = ConnectionResult.DEFAULT_PLAYER_COMMANDS
-                            val kept = mediaControlCommands((0 until all.size()).map(all::get).toSet(), true)
-                            setAvailablePlayerCommands(Player.Commands.Builder().addAll(*kept.toIntArray()).build())
-                        }
-                    }
-                    .build()
+                accepted(session, controller)
             }
         }
+
+        private fun accepted(session: MediaSession, controller: MediaSession.ControllerInfo): ConnectionResult =
+            ConnectionResult.AcceptedResultBuilder(session, controller)
+                .setAvailableSessionCommands(sessionCommands())
+                .apply {
+                    if (session.isMediaNotificationController(controller) && stationOnAir.value) {
+                        val all = ConnectionResult.DEFAULT_PLAYER_COMMANDS
+                        val kept = mediaControlCommands((0 until all.size()).map(all::get).toSet(), true)
+                        setAvailablePlayerCommands(Player.Commands.Builder().addAll(*kept.toIntArray()).build())
+                    }
+                }
+                .build()
 
         override fun onMediaButtonEvent(session: MediaSession, controllerInfo: MediaSession.ControllerInfo, intent: Intent): Boolean {
             val key = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_KEY_EVENT, KeyEvent::class.java)
@@ -740,6 +749,7 @@ class OctoPlaybackService : MediaLibraryService() {
             }
         }
 
+        // Answered at once: the old browser waits for the root on the main thread too.
         override fun onGetLibraryRoot(
             session: MediaLibrarySession,
             browser: MediaSession.ControllerInfo,
@@ -758,6 +768,16 @@ class OctoPlaybackService : MediaLibraryService() {
             val items = car.children(parentId, page, pageSize)
             car.grantArtwork(browser.packageName, items)
             LibraryResult.ofItemList(items, params)
+        }
+
+        override fun onGetItem(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            mediaId: String,
+        ): ListenableFuture<LibraryResult<MediaItem>> = scope.future {
+            val item = car.lookup(mediaId) ?: return@future LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
+            car.grantArtwork(browser.packageName, listOf(item))
+            LibraryResult.ofItem(item, null)
         }
 
         override fun onSearch(

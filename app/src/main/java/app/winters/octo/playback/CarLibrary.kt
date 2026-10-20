@@ -11,6 +11,7 @@ import androidx.media3.session.MediaConstants
 import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.ArtistEntity
 import app.winters.octo.catalog.CatalogDao
+import app.winters.octo.catalog.PlaylistSummary
 import app.winters.octo.catalog.SongIdentity
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.UserDao
@@ -38,12 +39,7 @@ class CarLibrary @Inject constructor(
     // What is inside one place in the tree, a page at a time.
     suspend fun children(parentId: String, page: Int, pageSize: Int): List<MediaItem> {
         val all = when (val node = parseCarId(parentId)) {
-            CarNode.Root -> listOf(
-                folder(CarNode.Recent, "Recent"),
-                folder(CarNode.Playlists, "Playlists"),
-                folder(CarNode.Albums, "Albums", grid = true),
-                folder(CarNode.Artists, "Artists"),
-            )
+            CarNode.Root -> tabs()
             CarNode.Recent -> {
                 val albums = byLatestPlay(history.albums.first(), 20)
                 val songs = byPlayCount(history.tracks.first(), 20)
@@ -53,8 +49,8 @@ class CarLibrary @Inject constructor(
             CarNode.Playlists -> {
                 val summaries = playlists.playlists.first()
                 val liked = user.likedCount().first()
-                val likedItem = if (liked > 0) listOf(listItem(CarNode.Liked, "Liked songs", "$liked songs", null)) else emptyList()
-                likedItem + summaries.map { listItem(CarNode.Playlist(it.id), it.name, "${it.songCount} songs", it.covers.firstOrNull()) }
+                val likedItem = if (liked > 0) listOf(likedItem(liked)) else emptyList()
+                likedItem + summaries.map(::playlistItem)
             }
             CarNode.Albums -> catalog.albums().first().map { albumItem(it) }
             CarNode.Artists -> catalog.artists().first().map(::artistItem)
@@ -63,6 +59,18 @@ class CarLibrary @Inject constructor(
             else -> emptyList()
         }
         return all.drop(page * pageSize).take(pageSize)
+    }
+
+    // One item by its id, for a car that asks about a single place or song.
+    suspend fun lookup(id: String): MediaItem? = when (val node = parseCarId(id)) {
+        CarNode.Root -> root()
+        CarNode.Recent, CarNode.Playlists, CarNode.Albums, CarNode.Artists -> tabs().first { it.mediaId == id }
+        CarNode.Liked -> likedItem(user.likedCount().first())
+        is CarNode.Album -> catalog.album(node.id).first()?.let { albumItem(it) }
+        is CarNode.Artist -> catalog.artist(node.id).first()?.let(::artistItem)
+        is CarNode.Playlist -> playlists.playlists.first().firstOrNull { it.id == node.id }?.let(::playlistItem)
+        is CarNode.Song -> catalog.track(node.trackId)?.let { songItem(it, node.list) }
+        CarNode.MostPlayed, null -> null
     }
 
     // The songs to play for a choice made in the car, and where to start.
@@ -115,6 +123,18 @@ class CarLibrary @Inject constructor(
         CarNode.MostPlayed -> byPlayCount(history.tracks.first(), 20)
         else -> emptyList()
     }
+
+    private fun tabs() = listOf(
+        folder(CarNode.Recent, "Recent"),
+        folder(CarNode.Playlists, "Playlists"),
+        folder(CarNode.Albums, "Albums", grid = true),
+        folder(CarNode.Artists, "Artists"),
+    )
+
+    private fun likedItem(count: Int) = listItem(CarNode.Liked, "Liked songs", "$count songs", null)
+
+    private fun playlistItem(playlist: PlaylistSummary) =
+        listItem(CarNode.Playlist(playlist.id), playlist.name, "${playlist.songCount} songs", playlist.covers.firstOrNull())
 
     private fun folder(node: CarNode, title: String, grid: Boolean = false) = item(
         node,
