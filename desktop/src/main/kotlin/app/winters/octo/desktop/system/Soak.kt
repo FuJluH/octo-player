@@ -36,6 +36,8 @@ import kotlin.random.Random
 //   lyrics=on|off    the lyrics beside the cover
 //   full=on|off      the full player open, or Home behind the player bar
 //   pauseAfter=20    minutes before it pauses and stays paused (0, never)
+//   cacheAfter=30:32 minutes before the window's graphics card cache limit
+//                    is set to that many MB, to see what it gives back
 //   advance=45       seconds a song plays before the next
 //   queue=<file>     the songs picked, written by the first run and read by
 //                    the next ones, so every run plays the same songs
@@ -52,6 +54,8 @@ suspend fun soakRun(app: AppState, plan: File) {
     val lyrics = wants.getProperty("lyrics", "on") == "on"
     val full = wants.getProperty("full", "on") == "on"
     val pauseAfter = wants.getProperty("pauseAfter", "0").toLong() * 60_000
+    val cacheAfter = wants.getProperty("cacheAfter", "").split(":").mapNotNull(String::toLongOrNull).takeIf { it.size == 2 }
+    var cacheSet = false
     val radio = wants.getProperty("source", "library") == "radio"
     note("start source=${if (radio) "radio" else "library"} lyrics=$lyrics full=$full advance=$advance")
 
@@ -76,6 +80,11 @@ suspend fun soakRun(app: AppState, plan: File) {
     var played = 0
     val started = System.currentTimeMillis()
     while (true) {
+        if (cacheAfter != null && !cacheSet && System.currentTimeMillis() - started >= cacheAfter[0] * 60_000) {
+            cacheSet = true
+            windowContext()?.resourceCacheLimit = cacheAfter[1] * 1024 * 1024
+            note("cache limit set to ${cacheAfter[1]} MB, now ${gpuCacheLimit()}")
+        }
         if (pauseAfter > 0 && System.currentTimeMillis() - started >= pauseAfter) {
             app.player.pause()
             note("paused gpuCache=${gpuCacheLimit()}")
@@ -101,7 +110,9 @@ suspend fun soakRun(app: AppState, plan: File) {
 // The graphics card cache limit of the window's drawing, in bytes, as Skia
 // has it: skiko keeps the context out of reach, so it is read by reflection
 // (null when its insides differ, or it draws without the card).
-private fun gpuCacheLimit(): Long? = runCatching {
+private fun gpuCacheLimit(): Long? = windowContext()?.resourceCacheLimit
+
+private fun windowContext(): org.jetbrains.skia.DirectContext? = runCatching {
     fun find(component: java.awt.Component): org.jetbrains.skiko.SkiaLayer? {
         if (component is org.jetbrains.skiko.SkiaLayer) return component
         if (component is java.awt.Container) component.components.forEach { child -> find(child)?.let { return it } }
@@ -111,7 +122,7 @@ private fun gpuCacheLimit(): Long? = runCatching {
     val redrawer = layer.javaClass.getMethod("getRedrawer\$skiko").invoke(layer) ?: return null
     val handler = redrawer.javaClass.getDeclaredField("contextHandler").apply { isAccessible = true }.get(redrawer) ?: return null
     val context = Class.forName("org.jetbrains.skiko.context.ContextHandler").getDeclaredMethod("getContext").apply { isAccessible = true }.invoke(handler)
-    (context as? org.jetbrains.skia.DirectContext)?.resourceCacheLimit
+    context as? org.jetbrains.skia.DirectContext
 }.getOrNull()
 
 // The songs a library run plays: the ones picked by an earlier run, or one

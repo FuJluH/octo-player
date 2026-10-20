@@ -30,6 +30,7 @@
 #   -Minimized        minimizes the window once it is up
 #   -MinimizeAfter <m> minimizes it that many minutes in
 #   -PauseAfter <m>   pauses the music that many minutes in, for good
+#   -CacheAfter <m:MB> sets the window's GPU cache limit that many minutes in
 #   -Advance <s>      seconds per song (default 45; 0 lets each play out)
 #   -Every <s>        seconds between samples (default 60)
 #   -Queue <file>     the songs every library run plays (default
@@ -57,6 +58,7 @@ param(
     [switch]$Minimized,
     [int]$MinimizeAfter = 0,
     [int]$PauseAfter = 0,
+    [string]$CacheAfter = "",
     [int]$Advance = 45,
     [int]$Every = 60,
     [string]$Queue = "",
@@ -251,7 +253,7 @@ foreach ($place in "config\settings.json", "Roaming\Octo\settings.json") {
     [IO.File]::WriteAllText($file, ($settings | ConvertTo-Json -Depth 32), (New-Object System.Text.UTF8Encoding($false)))
 }
 $plan = Join-Path $profileDir "soak.properties"
-$planText = "source=$Source`nlyrics=$Lyrics`nfull=$Full`npauseAfter=$PauseAfter`nadvance=$Advance`nqueue=$($Queue -replace '\\', '/')`n"
+$planText = "source=$Source`nlyrics=$Lyrics`nfull=$Full`npauseAfter=$PauseAfter`ncacheAfter=$CacheAfter`nadvance=$Advance`nqueue=$($Queue -replace '\\', '/')`n"
 [IO.File]::WriteAllText($plan, $planText)
 
 $gcLog = Join-Path $out "gc.log"
