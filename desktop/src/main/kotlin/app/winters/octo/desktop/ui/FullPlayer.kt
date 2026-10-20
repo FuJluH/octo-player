@@ -31,6 +31,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
@@ -192,6 +194,9 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
     // The words' color over the tall loop's fill once it shows, else over the wash.
     var tallInk by remember(tall?.video) { mutableStateOf(tall?.let { app.animated.tallInks[it.video] }) }
     val ink = tallInk?.takeIf { tall != null } ?: remember(cover) { cover?.playerInk() }.color()
+    // The window's own controls above the player take its ink too.
+    SideEffect { app.playerInk = ink }
+    DisposableEffect(Unit) { onDispose { app.playerInk = null } }
     // Where the title starts, for the tall loop to fade out above it.
     var titleTop by remember { mutableStateOf<androidx.compose.ui.unit.Dp?>(null) }
     // The icons beside the name, a step quieter than it.

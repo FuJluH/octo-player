@@ -329,6 +329,11 @@ class AppState(
 
     var fullPlayer by mutableStateOf(false)
 
+    // The color the full player draws its words and controls in while it
+    // shows, dark over a light loop or wash, for the window's own controls
+    // above it; null while it is closed.
+    var playerInk by mutableStateOf<androidx.compose.ui.graphics.Color?>(null)
+
     // What the full player shows beside the cover: the lyrics, the queue,
     // or nothing.
     var playerPanel by mutableStateOf<SidePanel?>(SidePanel.Lyrics)
