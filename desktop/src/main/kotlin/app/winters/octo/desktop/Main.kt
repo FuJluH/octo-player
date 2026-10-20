@@ -54,7 +54,9 @@ import app.winters.octo.desktop.settings.systemTextScale
 import app.winters.octo.desktop.settings.textScale
 import app.winters.octo.desktop.system.AudioDropZone
 import app.winters.octo.desktop.system.LocalSystem
+import app.winters.octo.desktop.system.COLLECT_EVERY
 import app.winters.octo.desktop.system.SOAK_RUN
+import app.winters.octo.desktop.system.collectWhilePlaying
 import app.winters.octo.desktop.system.SingleInstance
 import app.winters.octo.desktop.system.SystemIntegration
 import app.winters.octo.desktop.system.letRunningOctoComeForward
@@ -62,6 +64,7 @@ import app.winters.octo.desktop.system.preloadStartClasses
 import app.winters.octo.desktop.system.soakRun
 import app.winters.octo.desktop.system.startsInTray
 import app.winters.octo.desktop.system.useAppNatives
+import app.winters.octo.desktop.ui.FollowLateCloses
 import app.winters.octo.desktop.ui.ListFocus
 import app.winters.octo.desktop.ui.LocalListFocus
 import app.winters.octo.desktop.ui.LocalSoftwareDrawing
@@ -248,6 +251,9 @@ fun main(args: Array<String>) {
             System.getProperty(SOAK_RUN)?.let { path ->
                 LaunchedEffect(ready) { soakRun(ready.app, File(path)) }
             }
+            System.getProperty(COLLECT_EVERY)?.toLongOrNull()?.takeIf { it > 0 }?.let { every ->
+                LaunchedEffect(ready) { collectWhilePlaying(ready.app.player, every) }
+            }
             LaunchedEffect(ready) {
                 // The covers of the song on and the next ones, ready ahead.
                 launch { followCoversAhead(ready.app.player, { ready.app.connection?.client }, { SingletonImageLoader.get(PlatformContext.INSTANCE) }) }
@@ -287,6 +293,8 @@ fun main(args: Array<String>) {
         ) {
             // Before the window first draws, so its surfaces know their pixels.
             remember { useTextPixels(window, appTextPixels) }
+            // What the drawing let go of closes as this window draws.
+            FollowLateCloses()
             LaunchedEffect(Unit) {
                 val drawn = withContext(Dispatchers.IO) { icons.get() }
                 if (drawn.isNotEmpty()) window.iconImages = drawn
