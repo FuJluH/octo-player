@@ -1,5 +1,10 @@
 package app.winters.octo.desktop.ui
 
+import androidx.compose.ui.unit.dp
+import app.winters.octo.design.LocalReduceMotion
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.semantics.awtRole
 import javax.accessibility.AccessibleRole
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -226,6 +231,13 @@ fun SongTable(
     // picked, or null for none.
     menuExtra: ((List<Song>, () -> Unit) -> (@Composable ColumnScope.() -> Unit)?)? = null,
     empty: @Composable () -> Unit = {},
+    // Whether every row says if its song is in the library even before any
+    // song outside it is listed, for a list that songs found online join
+    // later, so its columns do not move when they do.
+    marksAlways: Boolean = false,
+    // A line among the rows, on their columns, and rows that hold the places
+    // of songs still to come.
+    note: TableNote? = null,
     footer: LazyListScope.() -> Unit = {},
     header: LazyListScope.() -> Unit = {},
 ) {
@@ -259,7 +271,7 @@ fun SongTable(
     // Songs found online, not in the library. A list that has any says, on
     // every row, which songs are in the library and which are not.
     val outside = rememberOutside(app, songs)
-    val marks = outside.isNotEmpty()
+    val marks = marksAlways || outside.isNotEmpty()
 
     fun picked(): List<Song> = selection.of(rows).map(TableRow::song)
     fun playFrom(key: String) {
@@ -391,7 +403,7 @@ fun SongTable(
         }
         LazyColumn(Modifier.fillMaxSize().scrollbar(state, LocalBottomRoom.current), state = state, contentPadding = padding) {
             header()
-            if (songs.isEmpty()) {
+            if (songs.isEmpty() && note == null) {
                 item(key = "empty") { empty() }
                 footer()
                 return@LazyColumn
@@ -409,6 +421,7 @@ fun SongTable(
                 )
             }
             itemsIndexed(rows, key = { _, row -> RowKey + row.key }) { index, row ->
+                if (note != null && note.at == index) NoteRow(note, shown, ::cell)
                 groupTitle(index)?.let { title ->
                     val detail = groupDetail(index)
                     Txt(title, DesktopType.emphasis, OctoColors.TextSecondary, Modifier.padding(start = Space.M, top = if (index == 0) Space.Xs else Space.Xl, bottom = if (detail == null) Space.S else Space.None))
@@ -457,6 +470,10 @@ fun SongTable(
                     },
                 )
             }
+            if (note != null && note.at >= rows.size) {
+                item(key = "note") { NoteRow(note, shown, ::cell) }
+                items(note.waiting, key = { "waiting:$it" }) { n -> WaitingRow(n, shown, rowHeight, showCovers, marks, ::cell) }
+            }
             footer()
         }
         if (selection.picked.size > 1) {
@@ -475,6 +492,68 @@ private const val RowKey = "row:"
 // The library mark's column: as wide as a small button, just after the
 // number (first when the number is hidden).
 private val MarkWidth = ControlHeight.S
+
+// A line among a table's rows, before row `at` (after the last when `at` is
+// the number of rows): `icon` in the library mark's column and `words` from
+// where the titles start, then `waiting` rows that hold the places of songs
+// still to come.
+class TableNote(
+    val at: Int,
+    val icon: @Composable () -> Unit,
+    val waiting: Int = 0,
+    val words: @Composable RowScope.() -> Unit,
+)
+
+// The note on the rows' columns: the columns before the title stay empty.
+@Composable
+private fun NoteRow(note: TableNote, shown: List<SongColumn>, cell: (RowScope, SongColumn) -> Modifier) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = RowHeight.Regular).padding(horizontal = Space.M),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(ColumnGap),
+    ) {
+        for ((at, column) in shown.withIndex()) {
+            if (at == markAt(shown)) Box(Modifier.width(MarkWidth), contentAlignment = Alignment.Center) { note.icon() }
+            if (column == SongColumn.Title) break
+            Spacer(cell(this, column))
+        }
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.L)) { note.words(this) }
+    }
+}
+
+// A row that holds a song's place: faint bars where its number, title,
+// artist, album and length will be, and its cover's square when rows show
+// covers, breathing slowly. Their lengths change from row to row.
+@Composable
+private fun WaitingRow(n: Int, shown: List<SongColumn>, height: Dp, covers: Boolean, marks: Boolean, cell: (RowScope, SongColumn) -> Modifier) {
+    val breath by rememberSteppedPulse(0.45f, 900, running = !LocalReduceMotion.current && LocalWindowShown.current)
+    val fill = OctoColors.TextPrimary.copy(alpha = 0.10f * breath)
+    @Composable
+    fun bar(width: Dp) = Box(Modifier.width(width).height(10.dp).background(fill, RoundedCornerShape(5.dp)))
+    Row(
+        Modifier.fillMaxWidth().height(height).padding(horizontal = Space.M).clearAndSetSemantics {},
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(ColumnGap),
+    ) {
+        shown.forEachIndexed { at, column ->
+            if (marks && at == markAt(shown)) Spacer(Modifier.width(MarkWidth))
+            Box(cell(this, column), contentAlignment = if (specOf(column).endAligned) Alignment.CenterEnd else Alignment.CenterStart) {
+                when (column) {
+                    SongColumn.Number -> bar(12.dp)
+                    SongColumn.Title -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M + Space.Xxs)) {
+                        if (covers) Box(Modifier.size(RowHeight.Roomy - Space.L).background(fill, Corner.ArtSShape))
+                        bar(listOf(120, 96, 140, 110)[n % 4].dp)
+                    }
+                    SongColumn.Artist -> bar(listOf(72, 88, 64, 80)[n % 4].dp)
+                    SongColumn.Album -> bar(listOf(110, 90, 124, 100)[n % 4].dp)
+                    SongColumn.Length -> bar(28.dp)
+                    else -> Unit
+                }
+            }
+        }
+        Spacer(Modifier.width(RowEnd))
+    }
+}
 
 private fun markAt(shown: List<SongColumn>): Int = shown.indexOf(SongColumn.Number) + 1
 private const val HeaderKey = "columns"

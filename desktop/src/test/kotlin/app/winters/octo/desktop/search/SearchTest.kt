@@ -5,6 +5,7 @@ import app.winters.octo.desktop.library.LibraryIndex
 import app.winters.octo.desktop.songJson
 import app.winters.octo.discovery.albumShareLine
 import app.winters.octo.subsonic.Acquisition
+import app.winters.octo.subsonic.OCTO_ACQUISITIONS
 import app.winters.octo.subsonic.Album
 import app.winters.octo.subsonic.Artist
 import app.winters.octo.subsonic.Playlist
@@ -229,6 +230,79 @@ class SearchTest {
         assertEquals("lif", asked.queryParameter("query"))
         assertTrue("always more than Octo holds back for", asked.queryParameter("songCount")!!.toInt() > 12)
         scope.cancel()
+    }
+    // A search shows the library's results at once, from the library as last
+    // read, while the server is asked for what it found online; the songs
+    // found online join after them, and the library's rows keep their places.
+    @Test
+    fun theLibraryShowsAtOnceWhileTheServerLooks() = runBlocking {
+        val gate = java.util.concurrent.CountDownLatch(1)
+        server.answerBy("search3") {
+            gate.await(5, java.util.concurrent.TimeUnit.SECONDS)
+            server.ok(""""searchResult3":{"song":[${songJson("lib1", "Karma Police", artist = "Radiohead")},${songJson("ext1", "Lift", artist = "Radiohead").dropLast(1)},"isExternal":true}]}""")
+        }
+        val scope = CoroutineScope(Dispatchers.Default + Job())
+        val model = SearchModel(server.connection(listOf("$OCTO_ACQUISITIONS:1")), { library }, { emptyList() }, scope)
+        model.type("radiohead")
+        val early = model.state as SearchState.Done
+        assertEquals(listOf("lib1"), early.found.library.songs.map { it.id })
+        assertEquals(OnlinePhase.Looking, early.online)
+        gate.countDown()
+        withTimeout(5_000) { while ((model.state as? SearchState.Done)?.online != OnlinePhase.Done) delay(20) }
+        val done = model.state as SearchState.Done
+        assertEquals(listOf("lib1"), done.found.library.songs.map { it.id })
+        assertEquals(listOf("ext1"), done.found.outside.songs.map { it.id })
+        scope.cancel()
+    }
+
+    // The server could not be asked: the library's results stay, and the
+    // line under them says so, with Try again.
+    @Test
+    fun aFailedAskKeepsTheLibrarysResults() = runBlocking {
+        server.fail("search3", 0, "Octo is restarting")
+        val scope = CoroutineScope(Dispatchers.Default + Job())
+        val model = SearchModel(server.connection(listOf("$OCTO_ACQUISITIONS:1")), { library }, { emptyList() }, scope)
+        model.type("karma")
+        withTimeout(5_000) { while ((model.state as? SearchState.Done)?.online == OnlinePhase.Looking) delay(20) }
+        val done = model.state as SearchState.Done
+        assertEquals(listOf("lib1"), done.found.library.songs.map { it.id })
+        assertTrue(done.online is OnlinePhase.Failed)
+        scope.cancel()
+    }
+
+    // "Library songs only": nothing is waited for online.
+    @Test
+    fun libraryOnlyWaitsForNothingOnline() {
+        val scope = CoroutineScope(Dispatchers.Default + Job())
+        val model = SearchModel(server.connection(listOf("$OCTO_ACQUISITIONS:1")), { library }, { emptyList() }, scope, libraryOnly = { true })
+        model.type("karma")
+        assertEquals(OnlinePhase.Done, (model.state as SearchState.Done).online)
+        scope.cancel()
+    }
+
+    @Test
+    fun theLibrarysOwnSearchMatchesEveryWordAnywhere() {
+        val index = LibraryIndex(
+            songs = listOf(
+                Song("s1", "Numb", artist = "Linkin Park", album = "Meteora"),
+                Song("s2", "Numb", artist = "U2", album = "Zooropa"),
+                Song("s3", "Faint", artist = "Linkin Park", album = "Meteora"),
+            ),
+            albums = listOf(Album("a1", "Meteora", artist = "Linkin Park")),
+            artists = listOf(Artist("r1", "Linkin Park")),
+        )
+        val found = localResults(index, "linkin numb", SearchFilter.All, emptyList())
+        assertEquals(listOf("s1"), found.songs.map { it.id })
+        assertEquals(listOf("s1", "s3"), localResults(index, "Linkin Park", SearchFilter.All, emptyList()).songs.map { it.id })
+        assertEquals(listOf("a1"), localResults(index, "meteora", SearchFilter.All, emptyList()).albums.map { it.id })
+        assertTrue(localResults(index, "meteora", SearchFilter.Songs, emptyList()).albums.isEmpty())
+    }
+
+    @Test
+    fun theServersAnswerKeepsTheRowsShown() {
+        assertEquals(listOf("b", "a", "c"), inShownOrder(listOf("b", "a"), listOf("a", "c", "b")) { it })
+        assertEquals(listOf("a", "c"), inShownOrder(listOf("x", "a"), listOf("a", "c")) { it })
+        assertEquals(listOf("a", "c"), inShownOrder(emptyList(), listOf("a", "c")) { it })
     }
 }
 

@@ -7,6 +7,8 @@ import OctoKit
 /// - `query:TEXT` opens Search and types TEXT into its field
 /// - `charts` opens the Charts page
 /// - `searchkind:all|songs|albums|artists|playlists` picks what Search shows
+/// - `searchonline:hold|fail|empty|pass` makes Search's question to the server wait without end,
+///   fail, come back with nothing found online, or go as usual; kept in memory only
 /// - `livelist:new` opens the editor for a new live list; `livelist:first` opens the first live
 ///   list kept; `livelist:from:TEXT` opens the editor started from the Songs page's words TEXT, as
 ///   Save as live list does; `livelist:ID` opens that live list
@@ -26,6 +28,8 @@ enum DiscoveryDrive {
             NotificationCenter.default.post(name: .driveSearch, object: value)
         case "charts":
             router.go(.charts)
+        case "searchonline":
+            SearchModel.driveOnline = value == "pass" ? nil : value
         case "searchkind":
             router.drive = .tab(.search)
             try? await Task.sleep(for: .milliseconds(300))

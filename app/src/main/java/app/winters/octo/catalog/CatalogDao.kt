@@ -129,7 +129,12 @@ interface CatalogDao {
     @Query("SELECT * FROM artist WHERE searchKey IN (:keys)")
     suspend fun artistsWithKeys(keys: List<String>): List<ArtistEntity>
 
-    @Query("SELECT * FROM track WHERE searchKey LIKE '%' || :q || '%' ORDER BY sortKey LIMIT :limit")
+    // Songs whose title holds the words, then those whose artist does (an
+    // artist's name matched as typed, accents and all), each by title.
+    @Query(
+        "SELECT * FROM track WHERE searchKey LIKE '%' || :q || '%' OR lower(artist) LIKE '%' || :q || '%' " +
+            "ORDER BY searchKey LIKE '%' || :q || '%' DESC, sortKey LIMIT :limit",
+    )
     suspend fun searchTracks(q: String, limit: Int): List<TrackEntity>
 
     @Query("SELECT COUNT(*) FROM track WHERE sourceId = :sourceId")

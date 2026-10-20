@@ -44,6 +44,11 @@ final class SearchModel {
     /// Whether this visit has counted the line saying what the plus does.
     @ObservationIgnored private(set) var hintCounted = false
 
+    #if DEBUG
+    /// How the server's answer is bent for a drive step: "hold", "fail" or "empty"; nil as usual.
+    static var driveOnline: String?
+    #endif
+
     private static let recentKey = "search.recent"
     static let hintShownKey = "add_hint.shown"
     static let hintAddedKey = "add_hint.added"
@@ -148,9 +153,19 @@ final class SearchModel {
             guard !Task.isCancelled, let self else { return }
             // The library is searched again each time the server is asked anew.
             self.searchLibrary(wait: false)
+            #if DEBUG
+            if Self.driveOnline == "hold" { return }
+            if Self.driveOnline == "fail" {
+                self.discover = .failed
+                return
+            }
+            #endif
             do {
-                let found = try await discovery.search(query)
+                var found = try await discovery.search(query)
                 guard !Task.isCancelled else { return }
+                #if DEBUG
+                if Self.driveOnline == "empty" { found = found.map { _ in Discovered(songs: [], albums: [], artists: []) } }
+                #endif
                 self.discover = found.map { .done($0) } ?? .idle
             } catch {
                 guard !Task.isCancelled else { return }
@@ -180,6 +195,12 @@ final class SearchModel {
             guard !Task.isCancelled else { return }
             self?.topSongs = list
         }
+    }
+
+    /// Asks the server again after it could not be reached.
+    func retryOnline() {
+        askedText = nil
+        askServer()
     }
 
     // MARK: Recent searches

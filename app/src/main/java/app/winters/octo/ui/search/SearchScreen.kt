@@ -1,5 +1,24 @@
 package app.winters.octo.ui.search
 
+import app.winters.octo.ui.common.LocalReduceMotion
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import app.winters.octo.ui.common.ListRowSide
+import app.winters.octo.catalog.ArtistEntity
+import app.winters.octo.catalog.AlbumEntity
+import app.winters.octo.discovery.OnlineArtist
+import app.winters.octo.discovery.OnlineAlbum
+import app.winters.octo.ui.family.TRY_AGAIN
 import app.winters.octo.covers.playlistGlyph
 import app.winters.octo.ui.common.phonePlaylistFooter
 import app.winters.octo.ui.common.PlaylistArtwork
@@ -58,7 +77,6 @@ import app.winters.octo.design.GlassInput
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
 import app.winters.octo.discovery.Discovered
-import app.winters.octo.discovery.PartlyInLibraryText
 import app.winters.octo.discovery.RankedTracks
 import app.winters.octo.discovery.SEARCH_TOP_SHOWN
 import app.winters.octo.discovery.TOP_CHART_SHOWN
@@ -73,7 +91,6 @@ import app.winters.octo.discovery.LIBRARY_ONLY_SETTING
 import app.winters.octo.discovery.inLibraryOnly
 import app.winters.octo.ui.common.LocalLibraryOnly
 import app.winters.octo.ui.common.LocalSetLibraryOnly
-import app.winters.octo.ui.common.NotInLibraryText
 import app.winters.octo.ui.library.FilterChip
 import app.winters.octo.ui.common.QuietButton
 import app.winters.octo.ui.common.ScreenTitle
@@ -176,13 +193,15 @@ fun SearchScreen(onOpen: (NavKey) -> Unit, vm: SearchViewModel = hiltViewModel()
             found.isEmpty && nothingOnline -> Hint("No results for \"${vm.text.trim()}\"")
             // Songs from the library and from the server can be picked together.
             else -> SelectableSongs(pickableResults(found, online, top)) {
+                val query = vm.text.trim()
                 LazyColumn(
                     Modifier.fillMaxSize().nestedScroll(hider),
                     state = list,
                     contentPadding = PaddingValues(top = 12.dp, bottom = bottom),
                 ) {
+                    val shown = Shown(found, online, query, addHint, open, vm::playSong, vm::playFound, vm::retryOnline, vm::addHintSeen)
                     if (filter == SearchFilter.All) {
-                        everything(found, open, pick, vm::playSong) {
+                        everything(shown, pick) {
                             top?.let { list ->
                                 rankedSection(
                                     "top", "Top songs", list, SEARCH_TOP_SHOWN, vm.topOpen, { vm.topOpen = it },
@@ -191,14 +210,7 @@ fun SearchScreen(onOpen: (NavKey) -> Unit, vm: SearchViewModel = hiltViewModel()
                             }
                         }
                     } else {
-                        oneKind(found, open, vm::playSong)
-                    }
-                    // The server could not be asked, so say the library has none.
-                    if (found.isEmpty && online is DiscoverState.Failed) {
-                        item { Hint("No results for \"${vm.text.trim()}\"") }
-                    }
-                    if (!nothingOnline) {
-                        discoverSection(online, open, onPlay = vm::playFound, top = !found.isEmpty, hint = addHint, onHintSeen = vm::addHintSeen)
+                        oneKind(shown, filter)
                     }
                 }
             }
@@ -206,37 +218,72 @@ fun SearchScreen(onOpen: (NavKey) -> Unit, vm: SearchViewModel = hiltViewModel()
     }
 }
 
-// A few of every kind, each kind with "See all" when it has more.
-private fun LazyListScope.everything(
-    found: SearchResults,
-    onOpen: (NavKey) -> Unit,
-    onSeeAll: (SearchFilter) -> Unit,
-    onPlay: (TrackEntity) -> Unit,
-    afterArtists: LazyListScope.() -> Unit = {},
+// What a search shows and what its rows do: the library's results, what the
+// server found online (already narrowed to the filter's kinds), and the
+// line between them.
+private class Shown(
+    val found: SearchResults,
+    val online: DiscoverState,
+    val query: String,
+    val hint: Boolean,
+    val onOpen: (NavKey) -> Unit,
+    val onPlay: (TrackEntity) -> Unit,
+    val onPlayFound: (TrackEntity) -> Unit,
+    val onRetry: () -> Unit,
+    val onHintSeen: () -> Unit,
 ) {
+    val finds: Discovered? = (online as? DiscoverState.Done)?.found
+
+    // Whether the server is asked at all, so library songs keep the add
+    // button's space and their lengths line up with the finds'.
+    val wanted: Boolean = online !is DiscoverState.Idle
+
+    // Where looking online stands for one kind, by how many of it came back.
+    fun look(count: Int): OutsideLook = outsideLook(
+        wanted = wanted,
+        looking = online is DiscoverState.Loading,
+        failed = online is DiscoverState.Failed,
+        songs = count,
+    )
+}
+
+// A few of every kind, each kind one list: the library's first, then what
+// the server found online. Songs come right under the artists, so songs
+// found online are on the first screen whatever the library holds: a few
+// library songs, then a few finds, or, while the server looks, a line that
+// says so over rows that hold their place. An artist the library lacks
+// joins the row of library artists, or, when there is none, gets a row of
+// its own lower down, so nothing above the songs moves when it arrives.
+private fun LazyListScope.everything(
+    shown: Shown,
+    onSeeAll: (SearchFilter) -> Unit,
+    afterSongs: LazyListScope.() -> Unit = {},
+) {
+    val found = shown.found
+    val finds = shown.finds
     var first = true
-    fun title(text: String, more: Boolean, kind: SearchFilter) {
+    fun title(text: String, more: Boolean, kind: SearchFilter, key: String = text) {
         val top = !first
         first = false
-        item(key = "title:$text") {
+        item(key = "title:$key") {
             KindTitle(text, top, onSeeAll = if (more) ({ onSeeAll(kind) }) else null)
         }
     }
+    val onlineArtists = finds?.artists.orEmpty()
     if (found.artists.isNotEmpty()) {
         title("Artists", found.moreArtists, SearchFilter.Artists)
-        item(key = "artists") {
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 20.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                items(found.artists, key = { it.id }) { artist ->
-                    ArtistCircle(artist) { onOpen(ArtistRoute(artist.id)) }
-                }
-            }
-        }
+        item(key = "artists") { ArtistCircles(found.artists, onlineArtists, shown.onOpen) }
     }
-    afterArtists()
-    if (found.albums.isNotEmpty()) {
+    val onlineSongs = finds?.songs.orEmpty()
+    val look = shown.look(onlineSongs.size)
+    if (songsShown(found.songs.size, look)) {
+        title("Songs", moreSongsThanShown(found.songs.size, onlineSongs.size), SearchFilter.Songs)
+        items(found.songs.take(LIBRARY_SONGS_SHOWN), key = { it.id }) { track -> SongRow(track, offerAdd = shown.wanted) { shown.onPlay(track) } }
+        outsideRows(shown, look, "songs", onlineSongs.take(ONLINE_SONGS_SHOWN))
+    }
+    afterSongs()
+    val onlineAlbums = finds?.let { it.partAlbums + it.albums }.orEmpty()
+    if (found.albums.isNotEmpty() || onlineAlbums.isNotEmpty()) {
         title("Albums", found.moreAlbums, SearchFilter.Albums)
         item(key = "albums") {
             LazyRow(
@@ -244,38 +291,92 @@ private fun LazyListScope.everything(
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 items(found.albums, key = { it.id }) { album ->
-                    AlbumCard(album, onClick = { onOpen(AlbumRoute(album.id)) })
+                    AlbumCard(album, onClick = { shown.onOpen(AlbumRoute(album.id)) })
+                }
+                items(onlineAlbums, key = { "online:${it.id}" }) { album ->
+                    AlbumCard(album, onClick = { shown.onOpen(OnlineAlbumRoute(album.id)) })
                 }
             }
         }
     }
     if (found.playlists.isNotEmpty()) {
         title("Playlists", found.morePlaylists, SearchFilter.Playlists)
-        playlistRows(found, onOpen)
+        playlistRows(found, shown.onOpen)
     }
-    if (found.songs.isNotEmpty()) {
-        title("Songs", found.moreSongs, SearchFilter.Songs)
-        items(found.songs, key = { it.id }) { track -> SongRow(track) { onPlay(track) } }
+    if (found.artists.isEmpty() && onlineArtists.isNotEmpty()) {
+        title("Artists", more = false, SearchFilter.Artists, key = "online-artists")
+        item(key = "online-artists") { ArtistCircles(emptyList(), onlineArtists, shown.onOpen) }
     }
 }
 
-// All of one kind, as a list: rows for songs, artists and playlists, and
-// covers two to a row for albums.
-private fun LazyListScope.oneKind(found: SearchResults, onOpen: (NavKey) -> Unit, onPlay: (TrackEntity) -> Unit) {
-    items(found.artists, key = { it.id }) { artist -> ArtistRow(artist) { onOpen(ArtistRoute(artist.id)) } }
-    items(found.albums.chunked(2), key = { pair -> pair.first().id }) { pair ->
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 9.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            pair.forEach { album ->
-                AlbumCard(album, onClick = { onOpen(AlbumRoute(album.id)) }, modifier = Modifier.weight(1f), width = null)
-            }
-            if (pair.size == 1) Spacer(Modifier.weight(1f))
+// The library's artists, then those found online, in one row.
+@Composable
+private fun ArtistCircles(library: List<ArtistEntity>, online: List<OnlineArtist>, onOpen: (NavKey) -> Unit) {
+    LazyRow(
+        contentPadding = PaddingValues(horizontal = 20.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        items(library, key = { it.id }) { artist ->
+            ArtistCircle(artist) { onOpen(ArtistRoute(artist.id)) }
+        }
+        items(online, key = { "online:${it.id}" }) { artist ->
+            ArtistCircle(artist) { onOpen(OnlineArtistRoute(artist.id)) }
         }
     }
-    playlistRows(found, onOpen)
-    items(found.songs, key = { it.id }) { track -> SongRow(track) { onPlay(track) } }
+}
+
+// All of one kind, as one list: rows for songs, artists and playlists, and
+// covers two to a row for albums, the library's first and then those found
+// online, with the line about looking online after them.
+private fun LazyListScope.oneKind(shown: Shown, filter: SearchFilter) {
+    val found = shown.found
+    val finds = shown.finds
+    when (filter) {
+        SearchFilter.Artists -> {
+            items(found.artists, key = { it.id }) { artist -> ArtistRow(artist) { shown.onOpen(ArtistRoute(artist.id)) } }
+            val online = finds?.artists.orEmpty()
+            items(online, key = { "online:${it.id}" }) { artist -> ArtistRow(artist) { shown.onOpen(OnlineArtistRoute(artist.id)) } }
+            outsideRows(shown, shown.look(online.size), "artists", emptyList())
+        }
+        SearchFilter.Albums -> {
+            val online = finds?.let { it.partAlbums + it.albums }.orEmpty()
+            val cards = found.albums.map { AlbumItem.Library(it) } + online.map { AlbumItem.Online(it) }
+            items(cards.chunked(2), key = { pair -> pair.first().key }) { pair ->
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 9.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    pair.forEach { card ->
+                        when (card) {
+                            is AlbumItem.Library -> AlbumCard(card.album, onClick = { shown.onOpen(AlbumRoute(card.album.id)) }, modifier = Modifier.weight(1f), width = null)
+                            is AlbumItem.Online -> AlbumCard(card.album, onClick = { shown.onOpen(OnlineAlbumRoute(card.album.id)) }, modifier = Modifier.weight(1f), width = null)
+                        }
+                    }
+                    if (pair.size == 1) Spacer(Modifier.weight(1f))
+                }
+            }
+            outsideRows(shown, shown.look(online.size), "albums", emptyList())
+        }
+        SearchFilter.Playlists -> playlistRows(found, shown.onOpen)
+        else -> {
+            items(found.songs, key = { it.id }) { track -> SongRow(track, offerAdd = shown.wanted) { shown.onPlay(track) } }
+            val online = finds?.songs.orEmpty()
+            outsideRows(shown, shown.look(online.size), "songs", online)
+        }
+    }
+}
+
+// A library album or one found online, for the grid of albums.
+private sealed interface AlbumItem {
+    val key: String
+
+    class Library(val album: AlbumEntity) : AlbumItem {
+        override val key get() = album.id
+    }
+
+    class Online(val album: OnlineAlbum) : AlbumItem {
+        override val key get() = "online:${album.id}"
+    }
 }
 
 private fun LazyListScope.playlistRows(found: SearchResults, onOpen: (NavKey) -> Unit) {
@@ -396,88 +497,90 @@ private fun DiscoverState.only(filter: SearchFilter): DiscoverState {
 private fun DiscoverState.without(listed: Set<String>): DiscoverState =
     if (this is DiscoverState.Done && listed.isNotEmpty()) DiscoverState.Done(found.without(listed)) else this
 
-// What the server has beyond the library: songs, then albums, then artists,
-// under a title that says so. The first few times, a quiet line under it
-// says what the plus does. While it looks, or when it cannot be reached, a
-// quiet line says so.
-private fun LazyListScope.discoverSection(
-    online: DiscoverState,
-    onOpen: (NavKey) -> Unit,
-    onPlay: (TrackEntity) -> Unit,
-    top: Boolean,
-    hint: Boolean,
-    onHintSeen: () -> Unit,
-) {
-    // Albums the library holds some of come first, under their own title,
-    // each saying how much.
-    val part = (online as? DiscoverState.Done)?.found?.partAlbums.orEmpty()
-    if (part.isNotEmpty()) {
-        item(key = "discover:part") { SectionTitle(PartlyInLibraryText, if (top) Modifier.padding(top = 12.dp) else Modifier) }
-        item(key = "discover:part:albums") {
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 20.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                items(part, key = { it.id }) { album ->
-                    AlbumCard(album, onClick = { onOpen(OnlineAlbumRoute(album.id)) })
-                }
+// Under the library's results of a kind: while the server looks, a line
+// saying so over rows that hold the finds' place; when it found songs, the
+// same line, quieter, the first few times a line saying what the plus does,
+// then the songs; when it found none, or could not be asked, a line that
+// says so plainly, with Try again for the second.
+private fun LazyListScope.outsideRows(shown: Shown, look: OutsideLook, kind: String, songs: List<TrackEntity>) {
+    when (look) {
+        OutsideLook.Off -> Unit
+        OutsideLook.Looking -> {
+            item(key = "outside:$kind:line") { OutsideLine(look, shown.query, kind) }
+            items(WAITING_ROWS, key = { "outside:$kind:waiting:$it" }) { WaitingRow(round = kind == "artists", n = it) }
+        }
+        OutsideLook.NoneFound -> item(key = "outside:$kind:line") { OutsideLine(look, shown.query, kind) }
+        OutsideLook.Failed -> item(key = "outside:$kind:line") { OutsideLine(look, shown.query, kind, shown.onRetry) }
+        OutsideLook.Found -> {
+            // The line stays where it said it was looking, quieter, over
+            // the finds that took the waiting rows' places.
+            if (songs.isNotEmpty()) item(key = "outside:$kind:line") { OutsideLine(look, shown.query, kind) }
+            if (shown.hint && songs.isNotEmpty()) item(key = "outside:hint") { AddHintLine(shown.onHintSeen) }
+            items(songs, key = { "discover:${it.id}" }) { track ->
+                SongRow(track, offerAdd = true) { shown.onPlayFound(track) }
             }
         }
-        if ((online as DiscoverState.Done).found.notInLibraryEmpty) return
-    }
-    item(key = "discover") { SectionTitle(NotInLibraryText, if (top || part.isNotEmpty()) Modifier.padding(top = 12.dp) else Modifier) }
-    when (online) {
-        DiscoverState.Loading -> item(key = "discover:looking") { QuietLine("Looking online") }
-        DiscoverState.Failed -> item(key = "discover:failed") { QuietLine("Could not reach your server") }
-        is DiscoverState.Done -> {
-            val found = online.found
-            if (hint && found.songs.isNotEmpty()) item(key = "discover:hint") { AddHintLine(onHintSeen) }
-            if (found.songs.isNotEmpty()) item(key = "discover:songs:title") { SubTitle("Songs") }
-            items(found.songs, key = { "discover:${it.id}" }) { track ->
-                // A find that turns into its library song ends like the
-                // library songs listed above, at its length.
-                SongRow(track, offerAdd = true, librarySpace = false) { onPlay(track) }
-            }
-            if (found.albums.isNotEmpty()) {
-                item(key = "discover:albums:title") { SubTitle("Albums") }
-                item(key = "discover:albums") {
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    ) {
-                        items(found.albums, key = { it.id }) { album ->
-                            AlbumCard(album, onClick = { onOpen(OnlineAlbumRoute(album.id)) })
-                        }
-                    }
-                }
-            }
-            if (found.artists.isNotEmpty()) {
-                item(key = "discover:artists:title") { SubTitle("Artists") }
-                item(key = "discover:artists") {
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    ) {
-                        items(found.artists, key = { it.id }) { artist ->
-                            ArtistCircle(artist) { onOpen(OnlineArtistRoute(artist.id)) }
-                        }
-                    }
-                }
-            }
-        }
-        DiscoverState.Idle -> Unit
     }
 }
 
-// Names each kind of find under Discover, quieter than a section title.
+// The line between the library's results and the server's, on the rows'
+// lines: its mark centred where their covers are, its words where their
+// titles start. A small spinner while the server looks, a warning mark
+// when it could not be asked, the plus over the finds.
 @Composable
-private fun SubTitle(text: String) {
-    Text(
-        text,
-        style = OctoType.bodySmall,
-        color = OctoColors.TextMuted,
-        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 8.dp),
-    )
+private fun OutsideLine(look: OutsideLook, query: String, kind: String, onRetry: (() -> Unit)? = null) {
+    val text = outsideLine(look, query, kind) ?: return
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(start = ListRowSide, end = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+            when (look) {
+                OutsideLook.Looking -> CircularProgressIndicator(color = OctoColors.Accent, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                OutsideLook.Failed -> Icon(painterResource(OctoIcons.Info), contentDescription = null, tint = OctoColors.SignalOrange, modifier = Modifier.size(18.dp))
+                OutsideLook.Found -> Icon(painterResource(OctoIcons.NotInLibrary), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.size(18.dp))
+                else -> Icon(painterResource(OctoIcons.Search), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.size(18.dp))
+            }
+        }
+        Text(
+            text,
+            style = OctoType.bodySmall,
+            color = when (look) {
+                OutsideLook.Failed -> OctoColors.TextPrimary
+                OutsideLook.Found -> OctoColors.TextMuted
+                else -> OctoColors.TextSecondary
+            },
+            modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite },
+        )
+        if (onRetry != null) QuietButton(TRY_AGAIN, onRetry)
+    }
+}
+
+// A row that holds a find's place while the server looks: the shape of a
+// song row (or an artist's, round), in the faint fill of an empty cover,
+// its lines a little longer or shorter from row to row.
+@Composable
+private fun WaitingRow(round: Boolean, n: Int) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = if (round) 64.dp else 56.dp).padding(horizontal = ListRowSide, vertical = 4.dp).clearAndSetSemantics {},
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        // Breathing slowly, unless motion is reduced.
+        val breath = if (LocalReduceMotion.current) 1f else rememberInfiniteTransition(label = "waiting").animateFloat(
+            initialValue = 1f,
+            targetValue = 0.45f,
+            animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
+            label = "breath",
+        ).value
+        val fill = OctoColors.TextPrimary.copy(alpha = 0.10f * breath)
+        Box(Modifier.size(if (round) 48.dp else 44.dp).background(fill, if (round) CircleShape else RoundedCornerShape(6.dp)))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Box(Modifier.fillMaxWidth(listOf(0.55f, 0.42f, 0.62f, 0.48f)[n % 4]).height(11.dp).background(fill, RoundedCornerShape(4.dp)))
+            Box(Modifier.fillMaxWidth(listOf(0.35f, 0.3f, 0.4f, 0.26f)[n % 4]).height(9.dp).background(fill, RoundedCornerShape(4.dp)))
+        }
+    }
 }
 
 // What the plus does, in a muted line under the title. Counted as seen once
@@ -490,16 +593,6 @@ private fun AddHintLine(onSeen: () -> Unit) {
         style = OctoType.caption,
         color = OctoColors.TextMuted,
         modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 2.dp),
-    )
-}
-
-@Composable
-private fun QuietLine(text: String) {
-    Text(
-        text,
-        style = OctoType.bodySmall,
-        color = OctoColors.TextMuted,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
     )
 }
 

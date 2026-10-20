@@ -84,9 +84,67 @@ sealed interface SearchState {
     // Too little typed to ask.
     data object Idle : SearchState
     data object Looking : SearchState
-    data class Done(val found: SearchFound) : SearchState
+
+    // What is shown: the library's results, and where looking online
+    // stands. The library's come from the library as last read while the
+    // server is asked, and from the server's answer once it is in.
+    data class Done(val found: SearchFound, val online: OnlinePhase = OnlinePhase.Done) : SearchState
     data class Failed(val message: String) : SearchState
 }
+
+// Where asking the server for what it found online stands.
+sealed interface OnlinePhase {
+    // Not asked: "Library songs only", or a server that finds nothing
+    // online. Or answered, with what it found in the results.
+    data object Done : OnlinePhase
+    data object Looking : OnlinePhase
+    data class Failed(val message: String) : OnlinePhase
+}
+
+// The library's results from the library as last read, while the server is
+// asked: a song, album or artist whose words hold every word typed, in the
+// library's order. The same kinds and caps as the server's answer.
+fun localResults(index: LibraryIndex, query: String, filter: SearchFilter, playlists: List<Playlist>): LibraryResults {
+    val caps = searchCaps(filter)
+    val words = searchKey(query).split(' ').filter(String::isNotEmpty)
+    fun matches(vararg texts: String?): Boolean {
+        val all = searchKey(texts.filterNotNull().joinToString(" "))
+        return words.all(all::contains)
+    }
+    val artists = if (caps.artists > 0) index.artists.filter { matches(it.name) } else emptyList()
+    val albums = if (caps.albums > 0) index.albums.filter { matches(it.name, it.artist) } else emptyList()
+    val songs = if (caps.songs > 0) index.songs.filter { matches(it.title, it.artist, it.album) } else emptyList()
+    val key = searchKey(query)
+    val named = if (caps.playlists > 0) playlists.filter { searchKey(it.name).contains(key) } else emptyList()
+    return LibraryResults(
+        artists = artists.take(caps.artists),
+        albums = albums.take(caps.albums),
+        songs = songs.take(caps.songs),
+        playlists = named.take(caps.playlists),
+        moreArtists = artists.size > caps.artists,
+        moreAlbums = albums.size > caps.albums,
+        moreSongs = songs.size > caps.songs,
+        morePlaylists = named.size > caps.playlists,
+    )
+}
+
+// The fresh list in the order already shown: what was shown keeps its
+// place, and what is new follows, so rows on screen do not move when the
+// server's answer replaces the library's own.
+fun <T> inShownOrder(shown: List<T>, fresh: List<T>, key: (T) -> String): List<T> {
+    if (shown.isEmpty()) return fresh
+    val byKey = fresh.associateBy(key)
+    val kept = shown.mapNotNull { byKey[key(it)] }
+    val keptKeys = kept.mapTo(HashSet(), key)
+    return kept + fresh.filterNot { key(it) in keptKeys }
+}
+
+// The server's library results, in the order the library's own were shown.
+fun LibraryResults.inOrderOf(shown: LibraryResults?): LibraryResults = if (shown == null) this else copy(
+    artists = inShownOrder(shown.artists, artists) { it.id },
+    albums = inShownOrder(shown.albums, albums) { it.id },
+    songs = inShownOrder(shown.songs, songs) { it.id },
+)
 
 // Splits what the server sent into the library's and the rest. Only a
 // server that can fetch songs into the library (`outsideOn`) mixes in songs
@@ -221,22 +279,31 @@ class SearchModel(
             return
         }
         val filter = filter
-        state = SearchState.Looking
+        val online = connection.acquires && !libraryOnly()
+        // The library as last read answers at once, with the server's finds
+        // still to come; with no library read yet, the page waits for the
+        // server.
+        val local = index()?.let { localResults(it, query, filter, playlists()) }
+        state = if (local != null) SearchState.Done(SearchFound(local, OutsideResults()), if (online) OnlinePhase.Looking else OnlinePhase.Done) else SearchState.Looking
         job = scope.launch {
             if (pause) delay(SEARCH_AFTER_MS)
             val sent = try {
                 ask(query, filter)
             } catch (e: SubsonicException) {
-                state = SearchState.Failed(e.userMessage())
+                state = if (local != null && online) SearchState.Done(SearchFound(local, OutsideResults()), OnlinePhase.Failed(e.userMessage())) else if (local != null) SearchState.Done(SearchFound(local, OutsideResults())) else SearchState.Failed(e.userMessage())
                 return@launch
             }
-            state = SearchState.Done(split(sent, query, filter).also { tops.follow(query, it, filter) })
+            val shown = (state as? SearchState.Done)?.found?.library
+            state = SearchState.Done(split(sent, query, filter).let { it.copy(library = it.library.inOrderOf(shown)) }.also { tops.follow(query, it, filter) })
             // Music the server took in since the library was read is taken
             // in now; once it is, the same answer is split again, so it
             // lists as the library's everywhere.
             val index = index() ?: return@launch
             val arriving = arriving(sent, { index.hasSong(it.id) }, { index.hasAlbum(it.id) }, findsOnline = connection.acquires)
-            if (!arriving.isEmpty && takeIn(arriving)) state = SearchState.Done(split(sent, query, filter))
+            if (!arriving.isEmpty && takeIn(arriving)) {
+                val before = (state as? SearchState.Done)?.found?.library
+                state = SearchState.Done(split(sent, query, filter).let { it.copy(library = it.library.inOrderOf(before)) })
+            }
         }
     }
 
