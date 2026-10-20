@@ -27,6 +27,8 @@
 #   -Full <on|off>    the full player open (on), or Home with the player bar
 #   -Source <name>    library (default) or radio
 #   -Minimized        minimizes the window once it is up
+#   -MinimizeAfter <m> minimizes it that many minutes in
+#   -PauseAfter <m>   pauses the music that many minutes in, for good
 #   -Advance <s>      seconds per song (default 45; 0 lets each play out)
 #   -Every <s>        seconds between samples (default 60)
 #   -Queue <file>     the songs every library run plays (default
@@ -51,6 +53,8 @@ param(
     [ValidateSet("on", "off")][string]$Full = "on",
     [ValidateSet("library", "radio")][string]$Source = "library",
     [switch]$Minimized,
+    [int]$MinimizeAfter = 0,
+    [int]$PauseAfter = 0,
     [int]$Advance = 45,
     [int]$Every = 60,
     [string]$Queue = "",
@@ -243,7 +247,7 @@ foreach ($place in "config\settings.json", "Roaming\Octo\settings.json") {
     [IO.File]::WriteAllText($file, ($settings | ConvertTo-Json -Depth 32), (New-Object System.Text.UTF8Encoding($false)))
 }
 $plan = Join-Path $profileDir "soak.properties"
-$planText = "source=$Source`nlyrics=$Lyrics`nfull=$Full`nadvance=$Advance`nqueue=$($Queue -replace '\\', '/')`n"
+$planText = "source=$Source`nlyrics=$Lyrics`nfull=$Full`npauseAfter=$PauseAfter`nadvance=$Advance`nqueue=$($Queue -replace '\\', '/')`n"
 [IO.File]::WriteAllText($plan, $planText)
 
 $gcLog = Join-Path $out "gc.log"
@@ -281,6 +285,7 @@ try {
     Write-Host "Soak $Label`: pid $($process.Id), art $Art, wash $Wash, lyrics $Lyrics, full player $Full, $Source, $(if ($Minimized) { 'minimized' } else { 'shown' }), $Advance s a song, $Minutes min"
 
     $shown = $clock.Elapsed.TotalSeconds
+    $minimizedLate = $false
     $shotsDue = @($Shots -split ',' | Where-Object { $_.Trim() } | ForEach-Object { [int]$_ } | Sort-Object)
     $csv = Join-Path $out "samples.csv"
     $samples = @()
@@ -294,6 +299,11 @@ try {
             $samples += $sample
             $sample | Export-Csv -NoTypeInformation -Append -Path $csv
             $next += $Every
+        }
+        if ($MinimizeAfter -gt 0 -and -not $minimizedLate -and $clock.Elapsed.TotalMinutes -ge $MinimizeAfter) {
+            $process.Refresh()
+            [void][OctoSoak.Win]::ShowWindow($process.MainWindowHandle, 6)
+            $minimizedLate = $true
         }
         while ($shotsDue.Count -gt 0 -and $clock.Elapsed.TotalSeconds - $shown -ge $shotsDue[0]) {
             $process.Refresh()
@@ -317,7 +327,7 @@ try {
     $mark = $regular | Where-Object { $_.Minute -ge 15 } | Select-Object -First 1
     $last = $regular[-1]
     $summary = @(
-        "Soak $Label ($((Get-Date).ToString('yyyy-MM-dd HH:mm'))): art $Art, wash $Wash, lyrics $Lyrics, full player $Full, $Source, $(if ($Minimized) { 'minimized' } else { 'shown' }), $Advance s a song, $Minutes min, JVM extra '$Jvm'",
+        "Soak $Label ($((Get-Date).ToString('yyyy-MM-dd HH:mm'))): art $Art, wash $Wash, lyrics $Lyrics, full player $Full, $Source, $(if ($Minimized) { 'minimized' } elseif ($MinimizeAfter) { "minimized after $MinimizeAfter min" } else { 'shown' }), $(if ($PauseAfter) { "paused after $PauseAfter min, " })$Advance s a song, $Minutes min, JVM extra '$Jvm'",
         "Private MB: start $($regular[0].PrivateMB), 15 min $($mark.PrivateMB), end $($last.PrivateMB), most $(($regular | Measure-Object PrivateMB -Maximum).Maximum), after GC $($after.PrivateMB) (drop $([math]::Round($before.PrivateMB - $after.PrivateMB, 1)))",
         "Growth MB/h from 15 min: private $(Get-Slope $samples 'PrivateMB'), working set $(Get-Slope $samples 'WorkingSetMB'), outside the JVM $(Get-Slope $samples 'OutsideJvmMB'), JVM total $(Get-Slope $samples 'NmtMB'), heap used $(Get-Slope $samples 'HeapUsedMB'), GPU dedicated $(Get-Slope $samples 'GpuDedicatedMB')",
         "End: working set $($last.WorkingSetMB), threads $($last.Threads), octo-video threads $($last.VideoThreads), handles $($last.Handles), heap $($last.HeapUsedMB)/$($last.HeapMB), JVM total $($last.NmtMB), outside the JVM $($last.OutsideJvmMB), GPU dedicated $($last.GpuDedicatedMB)",

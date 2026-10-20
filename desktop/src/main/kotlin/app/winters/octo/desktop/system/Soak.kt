@@ -11,6 +11,7 @@ import app.winters.octo.desktop.radioId
 import app.winters.octo.liveradio.radioId
 import app.winters.octo.subsonic.Song
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import app.winters.octo.desktop.library.LibraryState
 import kotlinx.coroutines.flow.filterIsInstance
@@ -34,6 +35,7 @@ import kotlin.random.Random
 //                    or radio: the server's stations, else the kept ones
 //   lyrics=on|off    the lyrics beside the cover
 //   full=on|off      the full player open, or Home behind the player bar
+//   pauseAfter=20    minutes before it pauses and stays paused (0, never)
 //   advance=45       seconds a song plays before the next
 //   queue=<file>     the songs picked, written by the first run and read by
 //                    the next ones, so every run plays the same songs
@@ -49,6 +51,7 @@ suspend fun soakRun(app: AppState, plan: File) {
     val advance = wants.getProperty("advance", "45").toLong()
     val lyrics = wants.getProperty("lyrics", "on") == "on"
     val full = wants.getProperty("full", "on") == "on"
+    val pauseAfter = wants.getProperty("pauseAfter", "0").toLong() * 60_000
     val radio = wants.getProperty("source", "library") == "radio"
     note("start source=${if (radio) "radio" else "library"} lyrics=$lyrics full=$full advance=$advance")
 
@@ -71,12 +74,18 @@ suspend fun soakRun(app: AppState, plan: File) {
     }
     app.player.setRepeat(RepeatMode.All)
     var played = 0
+    val started = System.currentTimeMillis()
     while (true) {
+        if (pauseAfter > 0 && System.currentTimeMillis() - started >= pauseAfter) {
+            app.player.pause()
+            note("paused gpuCache=${gpuCacheLimit()}")
+            awaitCancellation()
+        }
         app.player.setVolume(0f)
         app.fullPlayer = full
         if ((app.playerPanel == SidePanel.Lyrics) != lyrics) app.togglePlayerPanel(SidePanel.Lyrics)
         val now = app.player.state.value
-        note("playing ${played++} ${now.current?.song?.id} album=${now.current?.song?.albumId} playing=${now.playing}")
+        note("playing ${played++} ${now.current?.song?.id} album=${now.current?.song?.albumId} playing=${now.playing} gpuCache=${gpuCacheLimit()}")
         if (advance > 0) {
             delay(advance * 1000)
             app.player.next()
@@ -88,6 +97,22 @@ suspend fun soakRun(app: AppState, plan: File) {
         }
     }
 }
+
+// The graphics card cache limit of the window's drawing, in bytes, as Skia
+// has it: skiko keeps the context out of reach, so it is read by reflection
+// (null when its insides differ, or it draws without the card).
+private fun gpuCacheLimit(): Long? = runCatching {
+    fun find(component: java.awt.Component): org.jetbrains.skiko.SkiaLayer? {
+        if (component is org.jetbrains.skiko.SkiaLayer) return component
+        if (component is java.awt.Container) component.components.forEach { child -> find(child)?.let { return it } }
+        return null
+    }
+    val layer = java.awt.Window.getWindows().firstNotNullOfOrNull(::find) ?: return null
+    val redrawer = layer.javaClass.getMethod("getRedrawer\$skiko").invoke(layer) ?: return null
+    val handler = redrawer.javaClass.getDeclaredField("contextHandler").apply { isAccessible = true }.get(redrawer) ?: return null
+    val context = Class.forName("org.jetbrains.skiko.context.ContextHandler").getDeclaredMethod("getContext").apply { isAccessible = true }.invoke(handler)
+    (context as? org.jetbrains.skia.DirectContext)?.resourceCacheLimit
+}.getOrNull()
 
 // The songs a library run plays: the ones picked by an earlier run, or one
 // song from each album with a tall loop, the rest from any album.
