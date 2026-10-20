@@ -312,6 +312,23 @@ fn the_systems_decoder_never_enlarges() {
     assert!(smaller.0 <= 90 && smaller.1 <= 90 && smaller.0 == smaller.1, "{smaller:?}");
 }
 
+#[cfg(windows)]
+#[test]
+fn loops_on_the_graphics_card_share_one_device() {
+    let first = media_foundation::MfSource::open(&fixture(), (0, 0)).unwrap();
+    let second = media_foundation::MfSource::open(&fixture(), (0, 0)).unwrap();
+    if !first.on_gpu() {
+        eprintln!("no graphics card for video here; skipped");
+        return;
+    }
+    assert!(second.on_gpu());
+    assert!(first.shares_device_with(&second));
+    drop(first);
+    // The device outlives the loop that made it.
+    let third = media_foundation::MfSource::open(&fixture(), (0, 0)).unwrap();
+    assert!(second.shares_device_with(&third));
+}
+
 #[test]
 fn rows_copy_upwards_and_set_alpha() {
     // Two rows of one pixel, stored bottom row first, alpha 0.

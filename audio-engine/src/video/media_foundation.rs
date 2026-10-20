@@ -2,6 +2,7 @@
 //! with its video processing on, giving 32-bit RGB frames in the size
 //! asked for. Everything is made and used on the loop's own thread.
 
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use windows::Win32::Foundation::HMODULE;
@@ -53,20 +54,62 @@ pub(crate) struct MfSource {
     /// The graphics card decoding, when it does; kept until the reader
     /// has gone, and Media Foundation and COM after that (fields drop in
     /// order).
-    gpu: Option<Gpu>,
+    gpu: Option<Arc<Gpu>>,
     _started: Started,
 }
 
-/// A Direct3D 11 device the decoder and its colour conversion run on.
+/// A Direct3D 11 device the decoder and its colour conversion run on, one
+/// for every loop: a device of its own for each open cost the driver's
+/// memory for a whole device each time, kept until that loop closed.
 struct Gpu {
-    _manager: IMFDXGIDeviceManager,
-    _device: ID3D11Device,
+    manager: IMFDXGIDeviceManager,
+    device: ID3D11Device,
+    /// Media Foundation kept started for as long as the device is.
+    _started: Started,
 }
 
+// SAFETY: the device is multithread protected (the decoders call it from
+// their own threads anyway), and the device manager is free-threaded.
+unsafe impl Send for Gpu {}
+unsafe impl Sync for Gpu {}
+
+/// The device every loop decodes on, once made.
+static SHARED_GPU: Mutex<Option<Arc<Gpu>>> = Mutex::new(None);
+
 impl Gpu {
-    /// A device on the system's graphics card for video, or None where
-    /// there is none (a remote session, a basic display driver).
+    /// The shared device, made the first time; None where there is none (a
+    /// remote session, a basic display driver).
+    fn shared() -> Option<Arc<Self>> {
+        let mut shared = SHARED_GPU.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(gpu) = shared.as_ref() {
+            return Some(gpu.clone());
+        }
+        // SAFETY: plain device and Media Foundation calls; the objects are
+        // free-threaded (see above).
+        let gpu = Arc::new(unsafe { Self::new() }?);
+        *shared = Some(gpu.clone());
+        Some(gpu)
+    }
+
+    /// Lets the shared device go when the driver lost it (a driver update,
+    /// a reset), so the next loop makes a new one; loops on it keep theirs
+    /// until they close.
+    fn forget_if_lost(gpu: &Arc<Self>) {
+        // SAFETY: a plain query on the device.
+        let lost = unsafe { gpu.device.GetDeviceRemovedReason() }.is_err();
+        if !lost {
+            return;
+        }
+        let mut shared = SHARED_GPU.lock().unwrap_or_else(|e| e.into_inner());
+        if shared.as_ref().is_some_and(|now| Arc::ptr_eq(now, gpu)) {
+            log::info!("the video device was lost; the next loop makes a new one");
+            *shared = None;
+        }
+    }
+
+    /// Made on a loop's thread, which has COM and Media Foundation started.
     unsafe fn new() -> Option<Self> {
+        let started = Started::media_only().ok()?;
         unsafe {
             let mut device: Option<ID3D11Device> = None;
             D3D11CreateDevice(
@@ -82,7 +125,7 @@ impl Gpu {
             )
             .ok()?;
             let device = device?;
-            // The decoder calls the device from its own threads.
+            // The decoders call the device from their own threads.
             if let Ok(multithread) = device.cast::<ID3D11Multithread>() {
                 let _ = multithread.SetMultithreadProtected(true);
             }
@@ -91,7 +134,7 @@ impl Gpu {
             MFCreateDXGIDeviceManager(&mut token, &mut manager).ok()?;
             let manager = manager?;
             manager.ResetDevice(&device, token).ok()?;
-            Some(Self { _manager: manager, _device: device })
+            Some(Self { manager, device, _started: started })
         }
     }
 }
@@ -119,6 +162,17 @@ impl Started {
     }
 }
 
+impl Started {
+    /// Media Foundation alone, on a thread that has COM already: what the
+    /// shared device keeps, so it stays usable after the loop that made it
+    /// closes, and lets go of from whichever thread drops it.
+    fn media_only() -> Result<Self, Failure> {
+        // SAFETY: a plain start call, paired in drop.
+        unsafe { MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET) }.map_err(|e| failed("start", e))?;
+        Ok(Self { com: false, live: true })
+    }
+}
+
 impl Drop for Started {
     fn drop(&mut self) {
         if !self.live {
@@ -142,11 +196,12 @@ impl MfSource {
         // stays on it.
         unsafe {
             if !software_only()
-                && let Some(gpu) = Gpu::new()
+                && let Some(gpu) = Gpu::shared()
             {
-                match Self::with(path, target, Some(gpu)) {
+                match Self::with(path, target, Some(gpu.clone())) {
                     Ok((reader, gpu)) => return Ok(Self::made(reader, gpu, started)),
                     Err(failure) => {
+                        Gpu::forget_if_lost(&gpu);
                         log::info!("video on the graphics card failed, decoding on the processor: {failure}")
                     }
                 }
@@ -156,7 +211,7 @@ impl MfSource {
         }
     }
 
-    fn made(mut reader: Self, gpu: Option<Gpu>, started: Started) -> Self {
+    fn made(mut reader: Self, gpu: Option<Arc<Gpu>>, started: Started) -> Self {
         reader.gpu = gpu;
         reader._started = started;
         reader
@@ -164,9 +219,9 @@ impl MfSource {
 
     /// A source on `path`, decoding on `gpu` when given. Started and given
     /// back its device separately, so a failure lets both go.
-    unsafe fn with(path: &str, target: (u32, u32), gpu: Option<Gpu>) -> Result<(Self, Option<Gpu>), Failure> {
+    unsafe fn with(path: &str, target: (u32, u32), gpu: Option<Arc<Gpu>>) -> Result<(Self, Option<Arc<Gpu>>), Failure> {
         unsafe {
-            let reader = open_reader(path, gpu.as_ref().map(|g| &g._manager))?;
+            let reader = open_reader(path, gpu.as_ref().map(|g| &g.manager))?;
             let mut source = Self {
                 reader,
                 stream: MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32,
@@ -194,6 +249,12 @@ impl MfSource {
     #[allow(dead_code)]
     pub(crate) fn on_gpu(&self) -> bool {
         self.gpu.is_some()
+    }
+
+    /// Whether both decode on the one device.
+    #[cfg(test)]
+    pub(crate) fn shares_device_with(&self, other: &MfSource) -> bool {
+        matches!((&self.gpu, &other.gpu), (Some(a), Some(b)) if Arc::ptr_eq(a, b))
     }
 
     /// Asks for 32-bit RGB at the size that covers `target`, falling back
