@@ -6,6 +6,9 @@ import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
 // How long a frame is waited for before it counts as drawn anyway: a
@@ -28,12 +31,17 @@ object LateClose {
 
     @Volatile private var followed = false
 
+    // Closes what waited a second while no window follows frames.
+    private val timer: ScheduledExecutorService by lazy {
+        Executors.newSingleThreadScheduledExecutor { task -> Thread(task, "Octo late close").apply { isDaemon = true } }
+    }
+
     // Hands `thing` in to be closed after the next whole frame.
     fun close(thing: AutoCloseable?) {
         thing ?: return
         waiting.add(Waiting(thing, frames.get(), System.nanoTime()))
         arrived.trySend(Unit)
-        if (!followed) closeOverdue()
+        if (!followed) timer.schedule({ if (!followed) closeOverdue() }, FrameWaitMs + 10, TimeUnit.MILLISECONDS)
     }
 
     // How many wait to be closed, for the tests.
