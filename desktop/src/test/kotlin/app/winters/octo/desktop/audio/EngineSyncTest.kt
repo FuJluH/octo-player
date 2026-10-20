@@ -8,6 +8,7 @@ import app.winters.octo.audio.TrackInfo
 import app.winters.octo.desktop.FakeServer
 import app.winters.octo.desktop.player.DEFAULT_OUTPUT
 import app.winters.octo.desktop.player.DeviceFormat
+import app.winters.octo.desktop.player.PlayFormat
 import app.winters.octo.desktop.player.RepeatMode
 import app.winters.octo.desktop.player.SavedQueue
 import app.winters.octo.desktop.player.SongFormat
@@ -574,6 +575,28 @@ class EngineSyncTest {
         assertEquals("pcm", songFormatOf(pcm, null).codec)
         val mp3 = songFormatOf(TrackInfo("mp3", false, 44_100u, 2u, null, null, null), Song("y", bitRate = 320))
         assertEquals(SongFormat("mp3", false, 44_100, null, 2, 320), mp3)
+    }
+
+    // A song can arrive as another file than the one the library lists: the
+    // label is what opened, with nothing borrowed from the listing.
+    @Test
+    fun theFileOpenedIsShownOverTheListing() {
+        val listed = Song("m", suffix = "mp3", bitRate = 320, samplingRate = 44_100)
+        val flac = songFormatOf(TrackInfo("flac", true, 48_000u, 2u, 24u, null, null), listed)
+        assertEquals(SongFormat("flac", true, 48_000, 24, 2, null), flac)
+        assertEquals("FLAC 24/48", formatLabel(PlayFormat(flac, null)))
+        val aac = songFormatOf(TrackInfo("aac", false, 44_100u, 2u, null, null, null), listed)
+        assertNull(aac.bitRate)
+        assertEquals(320, songFormatOf(TrackInfo("mp3", false, 44_100u, 2u, null, null, null), listed).bitRate)
+    }
+
+    @Test
+    fun theListingShowsUntilTheSongOpens() {
+        val (p, engine) = setUp()
+        p.play(listOf(Song("m", "Listed", suffix = "mp3", bitRate = 320, samplingRate = 44_100)))
+        assertEquals(SongFormat("mp3", false, 44_100, bitRate = 320), p.state.value.format?.song)
+        engine.emit(EngineEvent.TrackStarted(itemId(p.key("m")), 0u, TrackInfo("flac", true, 44_100u, 2u, 16u, null, null)))
+        assertEquals(SongFormat("flac", true, 44_100, 16, 2), p.state.value.format?.song)
     }
 
     // Polled right after a skip, the engine can already give the next

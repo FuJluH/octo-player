@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.library
 
+import app.winters.octo.desktop.player.SongFormat
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SongReplayGain
 import org.junit.Assert.assertEquals
@@ -86,5 +87,30 @@ class SongFactsTest {
     fun evenFileFactsSentForASongFoundOnlineAreLeftOut() {
         val f = outsideFacts(online.copy(size = 9_000_000, created = "2026-09-28T10:00:00Z", bitDepth = 16, samplingRate = 44_100))
         listOf("File size", "Added", "Bit depth", "Sample rate").forEach { assertFalse("$it should not show", it in f) }
+    }
+
+    // A song can arrive as another file than the one listed: the song
+    // playing shows the file that opened, not the listing.
+    @Test
+    fun theSongPlayingShowsTheFileThatOpened() {
+        val mp3 = flac.copy(suffix = "mp3", contentType = "audio/mpeg", bitRate = 320, bitDepth = null, samplingRate = 44_100)
+        val opened = SongFormat("flac", lossless = true, sampleRate = 48_000, bits = 24, channels = 2)
+        val f = songFacts(mp3, "Your server (Octo)", ZoneOffset.UTC, Locale.UK, opened = opened).associate { it.label to it.value }
+        assertEquals("FLAC, lossless", f["Format"])
+        assertEquals("48 kHz", f["Sample rate"])
+        assertEquals("24-bit", f["Bit depth"])
+        listOf("Bitrate", "File type", "File size").forEach { assertFalse("$it should not show", it in f) }
+        val streams = songFacts(online, "Your server (Octo)", ZoneOffset.UTC, Locale.UK, outside = true, opened = opened)
+            .associate { it.label to it.value }
+        assertEquals("FLAC, lossless", streams["Streams as"])
+    }
+
+    @Test
+    fun theListingStaysWhenTheListedFileOpened() {
+        val opened = SongFormat("flac", lossless = true, sampleRate = 96_000, bits = 24, channels = 2)
+        assertEquals(facts(flac), songFacts(flac, "Your server (Octo)", ZoneOffset.UTC, Locale.UK, opened = opened).associate { it.label to it.value })
+        // A file on this computer lists no codec: its facts stay as they are.
+        val local = Song("file:abc", "Local", size = 1_000_000)
+        assertEquals(facts(local), songFacts(local, "Your server (Octo)", ZoneOffset.UTC, Locale.UK, opened = opened).associate { it.label to it.value })
     }
 }
