@@ -32,6 +32,9 @@
 #                     desktop\build\soak\queue.txt, written by the first run)
 #   -Jvm <options>    more JVM options for this run (space between them)
 #   -Jdk <folder>     a full JDK for jcmd (default JAVA_HOME)
+#   -Shots <s,s,...>  saves the window as shot-<s>.png that many seconds
+#                     after it shows (drawn by the window itself, so other
+#                     windows over it do not matter), for comparing builds
 #   -Keep             keeps the test profile afterwards
 #   -SelfTest         checks the script's reading of jcmd's answers
 #
@@ -53,6 +56,7 @@ param(
     [string]$Jdk = $env:JAVA_HOME,
     [int]$Width = 1440,
     [int]$Height = 900,
+    [string]$Shots = "",
     [switch]$Keep,
     [switch]$SelfTest
 )
@@ -67,6 +71,10 @@ if (-not ("OctoSoak.Win" -as [type])) {
 [DllImport("kernel32.dll")] public static extern bool CloseHandle(System.IntPtr handle);
 [DllImport("kernel32.dll")] public static extern int GetThreadDescription(System.IntPtr thread, out System.IntPtr description);
 [DllImport("kernel32.dll")] public static extern System.IntPtr LocalFree(System.IntPtr memory);
+[DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+[DllImport("user32.dll")] public static extern bool PrintWindow(System.IntPtr hWnd, System.IntPtr hdc, uint flags);
+[DllImport("user32.dll")] public static extern bool GetWindowRect(System.IntPtr hWnd, out Rect rect);
+public struct Rect { public int Left, Top, Right, Bottom; }
 public static string ThreadName(int id) {
     System.IntPtr thread = OpenThread(0x0800, false, id);
     if (thread == System.IntPtr.Zero) return null;
@@ -77,6 +85,25 @@ public static string ThreadName(int id) {
     } finally { CloseHandle(thread); }
 }
 '@
+}
+
+# The window as it draws itself, as a PNG (PW_RENDERFULLCONTENT, which
+# takes a window drawn by the graphics card too).
+function Save-WindowShot([IntPtr]$Handle, [string]$Path) {
+    Add-Type -AssemblyName System.Drawing
+    [void][OctoSoak.Win]::SetProcessDPIAware()
+    $rect = New-Object OctoSoak.Win+Rect
+    [void][OctoSoak.Win]::GetWindowRect($Handle, [ref]$rect)
+    $bitmap = New-Object System.Drawing.Bitmap ($rect.Right - $rect.Left), ($rect.Bottom - $rect.Top)
+    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    try {
+        $hdc = $graphics.GetHdc()
+        try { [void][OctoSoak.Win]::PrintWindow($Handle, $hdc, 2) } finally { $graphics.ReleaseHdc($hdc) }
+        $bitmap.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
+    } finally {
+        $graphics.Dispose()
+        $bitmap.Dispose()
+    }
 }
 
 # ---- Reading jcmd's answers ----
@@ -251,6 +278,8 @@ try {
     if ($Minimized) { Start-Sleep -Seconds 20; [void][OctoSoak.Win]::ShowWindow($process.MainWindowHandle, 6) }
     Write-Host "Soak $Label`: pid $($process.Id), art $Art, wash $Wash, lyrics $Lyrics, $Source, $(if ($Minimized) { 'minimized' } else { 'shown' }), $Advance s a song, $Minutes min"
 
+    $shown = $clock.Elapsed.TotalSeconds
+    $shotsDue = @($Shots -split ',' | Where-Object { $_.Trim() } | ForEach-Object { [int]$_ } | Sort-Object)
     $csv = Join-Path $out "samples.csv"
     $samples = @()
     $end = $Minutes * 60
@@ -264,7 +293,12 @@ try {
             $sample | Export-Csv -NoTypeInformation -Append -Path $csv
             $next += $Every
         }
-        Start-Sleep -Seconds 2
+        while ($shotsDue.Count -gt 0 -and $clock.Elapsed.TotalSeconds - $shown -ge $shotsDue[0]) {
+            $process.Refresh()
+            Save-WindowShot $process.MainWindowHandle (Join-Path $out "shot-$($shotsDue[0]).png")
+            $shotsDue = @($shotsDue | Select-Object -Skip 1)
+        }
+        Start-Sleep -Seconds 1
     }
     # A full collection, twice (the first lets the cleaners run), then the
     # memory again.

@@ -261,22 +261,25 @@ fun TallBackdrop(
             val file = got ?: model.posterFile(albumId, LoopShape.Tall, clip) ?: return@produceState
             value = withContext(Dispatchers.IO) { readStill(file) }?.let(::Shared)
         }
-        DisposableEffect(stillHeld) { onDispose { stillHeld?.release() } }
-        val still = stillHeld?.thing
-        val soft by produceState<SoftStill?>(null, stillHeld, stillWaited, color, aspect) {
-            val held = stillHeld
+        // Each effect below closes the value it was keyed on: read inside
+        // onDispose, a delegate gives the one replacing it.
+        val held = stillHeld
+        DisposableEffect(held) { onDispose { held?.release() } }
+        val still = held?.thing
+        val soft by produceState<SoftStill?>(null, held, stillWaited, color, aspect) {
             if (held == null && !stillWaited) return@produceState
             value = withContext(Dispatchers.Default) {
                 if (held == null) softStill(null, color, aspect) else held.use { softStill(it, color, aspect) }
             }
         }
-        DisposableEffect(soft) {
+        val softNow = soft
+        DisposableEffect(softNow) {
             onDispose {
-                LateClose.close(soft?.small)
-                LateClose.close(soft?.tiny)
+                LateClose.close(softNow?.small)
+                LateClose.close(softNow?.tiny)
             }
         }
-        LaunchedEffect(soft) { soft?.ink?.let(inkNow) }
+        LaunchedEffect(softNow) { softNow?.ink?.let(inkNow) }
         val alpha = remember(albumId) { Animatable(0f) }
         LaunchedEffect(albumId, soft != null) {
             if (soft == null) return@LaunchedEffect
