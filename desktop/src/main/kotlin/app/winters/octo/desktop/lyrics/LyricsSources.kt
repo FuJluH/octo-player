@@ -113,14 +113,15 @@ data class LyricsOption(
     val lyrics: Lyrics? = null,
 )
 
-// Finds a song's lyrics the way the phone does: the server first (on an
-// Octo server that keeps lyrics choices, its answer is final, and its
-// choices hold for every app), then the lyrics inside the song file, then
-// the online library when allowed. Answers are kept in memory for the
-// run; `revision` goes up for a song whose lyrics must be fetched again.
 // How many songs' lyrics answers are kept in memory.
 private const val LYRICS_ANSWERS_KEPT = 300
 
+// Finds a song's lyrics the way the phone does: the server first (on an
+// Octo server that keeps lyrics choices, its answer is final, and its
+// choices hold for every app), then the lyrics inside the song file, then
+// the online library when allowed. The last few hundred answers are kept
+// in memory; `revision` goes up for a song whose lyrics must be fetched
+// again.
 class LyricsSources(
     private val connection: () -> Connection?,
     private val http: OkHttpClient,

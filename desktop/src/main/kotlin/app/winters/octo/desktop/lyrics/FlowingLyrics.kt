@@ -243,7 +243,8 @@ fun FlowingLyrics(
             while (true) {
                 if (!windowShown) {
                     snapshotFlow { windowShown }.first { it }
-                    engine.clock.requestAnchor()
+                    // Back where the song is now, as when the view comes back.
+                    engine.restart()
                 }
                 val now = withFrameNanos { nanos ->
                     engine.frame(

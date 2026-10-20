@@ -23,13 +23,13 @@ const val KEPT_LOOPS = ".animated"
 // What a kept answer says when the album has no animated art.
 private val NoArt = AnimatedArt()
 
-// The animated art of downloaded albums, kept beside their songs: the
-// server's answer, and each loop and its still, so they play without a
-// connection. They go with the album's last kept song.
 // How many albums' kept answers are held in memory; the rest are read
 // from the disk again.
 private const val ANSWERS_KEPT = 256
 
+// The animated art of downloaded albums, kept beside their songs: the
+// server's answer, and each loop and its still, so they play without a
+// connection. They go with the album's last kept song.
 class KeptLoops(
     http: OkHttpClient,
     // The offline folder now (the listener can move it).
