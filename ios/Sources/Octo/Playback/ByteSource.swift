@@ -124,7 +124,7 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
         let queue = OperationQueue()
         queue.maxConcurrentOperationCount = 1
         queue.qualityOfService = .userInitiated
-        let config = URLSessionConfiguration.default
+        let config = URLSessionConfiguration.default.namingOcto(Session.appVersion)
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.urlCache = nil
         return URLSession(configuration: config, delegate: self, delegateQueue: queue)
@@ -220,7 +220,8 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
         let done = DispatchSemaphore(value: 0)
         final class Answer: @unchecked Sendable { var ranged = false }
         let answer = Answer()
-        let probeSession = URLSession(configuration: .ephemeral, delegate: TrustDelegate(), delegateQueue: nil)
+        let probeSession = URLSession(configuration: URLSessionConfiguration.ephemeral.namingOcto(Session.appVersion), delegate: TrustDelegate(),
+                                      delegateQueue: nil)
         defer { probeSession.finishTasksAndInvalidate() }
         let probe = probeSession.dataTask(with: request) { _, response, _ in
             if let http = response as? HTTPURLResponse {

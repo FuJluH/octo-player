@@ -437,7 +437,7 @@ final class SignInModel {
         let rows = headerRows() ?? []
         if signedUp == nil {
             var extra = Dictionary(rows.compactMap { $0.value.isEmpty ? nil : ($0.name, $0.value) }, uniquingKeysWith: { $1 })
-            extra["User-Agent"] = "Octo/\(Session.appVersion) (iOS)"
+            extra["User-Agent"] = octoUserAgent(Session.appVersion)
             let outcome = await joinWithInvite(address: url, token: invite.token,
                                                displayName: joinName.trimmingCharacters(in: .whitespacesAndNewlines),
                                                password: joinPassword, session: ServerTrust.shared.session, headers: extra, home: home)
@@ -489,7 +489,7 @@ final class SignInModel {
         let plain = Self.plainSession
         let device = Session.device().name
         let step: @Sendable (String) async -> Void = { [weak self] words in await self?.show(step: words) }
-        let agent = "Octo/\(Session.appVersion) (iOS)"
+        let agent = octoUserAgent(Session.appVersion)
         receiving = Task { [weak self] in
             let result = await receiveHandOver(link, session: plain, deviceName: device, platform: .iOS,
                                                headers: ["User-Agent": agent], step: step)
@@ -553,7 +553,7 @@ final class SignInModel {
 
     /// A session with no saved trust or certificates, for redeeming a hand-over.
     private static let plainSession: URLSession = {
-        let configuration = URLSessionConfiguration.ephemeral
+        let configuration = URLSessionConfiguration.ephemeral.namingOcto(Session.appVersion)
         configuration.timeoutIntervalForRequest = 20
         configuration.httpShouldSetCookies = false
         return URLSession(configuration: configuration)

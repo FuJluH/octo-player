@@ -168,7 +168,7 @@ final class AppUpdates {
         var request = URLRequest(url: releasesURL(api: Self.api))
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
-        request.setValue("Octo/\(Session.appVersion) (ios)", forHTTPHeaderField: "User-Agent")
+        request.setValue(octoUserAgent(Session.appVersion), forHTTPHeaderField: "User-Agent")
         if let etag = saved?["etag"] { request.setValue(etag, forHTTPHeaderField: "If-None-Match") }
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         guard let (data, response) = try? await session.data(for: request), let http = response as? HTTPURLResponse else {

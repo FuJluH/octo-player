@@ -41,7 +41,7 @@ final class ListenBrainzSync {
     }
 
     private init() {
-        let transport = ListenBrainzTransport(userAgent: "Octo/\(Session.appVersion) (iOS)")
+        let transport = ListenBrainzTransport(userAgent: octoUserAgent(Session.appVersion))
         api = ListenBrainzApi(send: { await transport.send($0) })
     }
 

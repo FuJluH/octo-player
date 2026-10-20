@@ -41,7 +41,7 @@ final class ServerTrust: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
 
     /// One URLSession for everything that talks to the server in use, so every request is judged here.
     lazy var session: URLSession = {
-        let configuration = URLSessionConfiguration.default
+        let configuration = URLSessionConfiguration.default.namingOcto(Session.appVersion)
         configuration.waitsForConnectivity = false
         configuration.timeoutIntervalForRequest = 30
         return URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
@@ -54,7 +54,7 @@ final class ServerTrust: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     func ownSession(for addresses: [URL], certificate: (data: Data, password: String)?,
                     seconds: TimeInterval? = nil) throws -> URLSession {
         let identity = try certificate.map { try Self.identity($0.data, password: $0.password) }
-        let configuration = URLSessionConfiguration.ephemeral
+        let configuration = URLSessionConfiguration.ephemeral.namingOcto(Session.appVersion)
         configuration.waitsForConnectivity = false
         configuration.timeoutIntervalForRequest = seconds ?? 30
         if let seconds { configuration.timeoutIntervalForResource = seconds }
