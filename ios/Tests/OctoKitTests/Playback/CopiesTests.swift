@@ -342,6 +342,33 @@ import Testing
         #expect(audioQuality(codecMime: nil, fileMime: "audio/x-unknown", bitDepth: nil, sampleRate: nil, bitrate: nil) == nil)
     }
 
+    /// A song can arrive as another file than the one listed: once it is open, the badge is the
+    /// file that opened.
+    @Test func theFileOpenedWinsOverTheListedType() {
+        let flac = audioQuality(codecMime: "audio/flac", fileMime: "audio/mpeg", bitDepth: 16, sampleRate: 44_100, bitrate: nil)!
+        #expect(flac.label == "Lossless")
+        #expect(flac.full == "FLAC · 16-bit · 44.1 kHz")
+        let aac = audioQuality(codecMime: "audio/mp4a-latm", fileMime: "audio/flac", bitDepth: nil, sampleRate: 44_100, bitrate: 256_000)!
+        #expect(aac.label == "AAC")
+        #expect(aac.full == "AAC · 256 kbps")
+    }
+
+    @Test func theFirstBytesSayWhatAFileIs() {
+        func bytes(_ text: String) -> [UInt8] { Array(text.utf8) }
+        #expect(sniffedAudioMime(bytes("fLaC") + [0, 0, 0, 34]) == "audio/flac")
+        #expect(sniffedAudioMime(bytes("RIFF") + [0, 0, 0, 0] + bytes("WAVE")) == "audio/wav")
+        #expect(sniffedAudioMime(bytes("FORM") + [0, 0, 0, 0] + bytes("AIFC")) == "audio/aiff")
+        #expect(sniffedAudioMime([0, 0, 0, 32] + bytes("ftypM4A ")) == "audio/mp4")
+        #expect(sniffedAudioMime(bytes("caff")) == "audio/x-caf")
+        #expect(sniffedAudioMime([0xFF, 0xFB, 0x90, 0x64]) == "audio/mpeg")
+        #expect(sniffedAudioMime([0xFF, 0xF1, 0x50, 0x80]) == "audio/aac")
+        // Tags first, an Ogg page, too few bytes: the listing decides.
+        #expect(sniffedAudioMime(bytes("ID3") + [4, 0, 0]) == nil)
+        #expect(sniffedAudioMime(bytes("OggS")) == nil)
+        #expect(sniffedAudioMime(bytes("fLa")) == nil)
+        #expect(sniffedAudioMime([]) == nil)
+    }
+
     @Test func thePlayersMeasureWinsOnceItHasOne() {
         #expect(songLengthMs(listedMs: 296_000, playerMs: 291_000) == 291_000)
         #expect(songLengthMs(listedMs: 296_000, playerMs: nil) == 296_000)

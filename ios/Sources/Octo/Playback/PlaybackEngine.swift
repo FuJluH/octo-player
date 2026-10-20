@@ -137,8 +137,10 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
     /// The deck's own measure of the song's length, when it has one.
     var measuredMs: Int? { deck.item?.entryId == queue.currentItem?.entryId ? deck.durationMs : nil }
 
-    /// The format the deck found the song to be.
-    var playingQuality: (codecMime: String?, bitDepth: Int?, sampleRate: Int?, bitrate: Int?)? { deck.current?.quality }
+    /// The format the deck found the current song to be: nil while the deck holds another one.
+    var playingQuality: (codecMime: String?, bitDepth: Int?, sampleRate: Int?, bitrate: Int?)? {
+        deck.item?.entryId == queue.currentItem?.entryId ? deck.current?.quality : nil
+    }
 
     // MARK: The queue
 

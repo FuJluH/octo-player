@@ -74,6 +74,28 @@ public func codecName(_ mime: String?) -> String? {
     }
 }
 
+/// What a file's first bytes (12 are enough) say it is, as a MIME type, or nil when they do not
+/// say for sure. A song can arrive as another file than the one listed, so this outranks the
+/// listed type. A file starting with ID3 tags is left to the listed type: tags come before more
+/// than one kind of file.
+public func sniffedAudioMime(_ head: [UInt8]) -> String? {
+    func starts(_ text: String, at offset: Int = 0) -> Bool {
+        let bytes = Array(text.utf8)
+        return head.count >= offset + bytes.count && Array(head[offset..<offset + bytes.count]) == bytes
+    }
+    if starts("fLaC") { return "audio/flac" }
+    if starts("RIFF"), starts("WAVE", at: 8) { return "audio/wav" }
+    if starts("FORM"), starts("AIFF", at: 8) || starts("AIFC", at: 8) { return "audio/aiff" }
+    if starts("caff") { return "audio/x-caf" }
+    if starts("ftyp", at: 4) { return "audio/mp4" }
+    // An MPEG frame starts with eleven set bits. ADTS (AAC) has its layer bits zero; MP3 and
+    // layers I and II do not.
+    if head.count >= 2, head[0] == 0xFF, head[1] & 0xE0 == 0xE0 {
+        return head[1] & 0x06 == 0 ? "audio/aac" : "audio/mpeg"
+    }
+    return nil
+}
+
 /// 44100 reads as "44.1", 48000 as "48".
 func kilohertz(_ hz: Int) -> String {
     hz % 1000 == 0 ? "\(hz / 1000)" : String(format: "%.1f", Double(hz) / 1000.0)

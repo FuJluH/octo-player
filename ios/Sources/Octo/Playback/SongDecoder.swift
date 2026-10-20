@@ -54,6 +54,10 @@ final class SongDecoder: SongDecoding {
         box = SourceBox(source)
         // The length comes first: the file is opened only once its size is known.
         _ = try source.length()
+        // The first bytes outrank the listed type: a song can arrive as another file than listed.
+        var head = [UInt8](repeating: 0, count: 12)
+        let got = try head.withUnsafeMutableBytes { try source.read(at: 0, into: $0.baseAddress!, count: 12) }
+        let hint = Self.typeHint(sniffedAudioMime(Array(head.prefix(got))) ?? mimeType ?? source.contentType)
 
         var fileID: AudioFileID?
         let read: AudioFile_ReadProc = { client, position, count, buffer, actual in
@@ -64,7 +68,7 @@ final class SongDecoder: SongDecoding {
             Unmanaged<SourceBox>.fromOpaque(client).takeUnretainedValue().size()
         }
         let opened = AudioFileOpenWithCallbacks(Unmanaged.passUnretained(box).toOpaque(), read, nil, size, nil,
-                                                Self.typeHint(mimeType ?? source.contentType), &fileID)
+                                                hint, &fileID)
         guard opened == noErr, let fileID else { throw box.failure ?? Self.openError(opened) }
         file = fileID
 
