@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.animated
 
+import app.winters.octo.desktop.lruMap
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
@@ -78,8 +79,9 @@ class AnimatedArtModel(
     @Volatile var tallPx: Pair<Int, Int> = 675 to 900
 
     // The words' color over each tall loop once worked out, by its video,
-    // so the player opens straight onto it the next time.
-    val tallInks = java.util.concurrent.ConcurrentHashMap<String, androidx.compose.ui.graphics.Color>()
+    // so the player opens straight onto it the next time (the last few
+    // hundred).
+    val tallInks: MutableMap<String, androidx.compose.ui.graphics.Color> = lruMap(256)
 
     // The loop files on screen, which trimming the shelf keeps.
     private val onScreen = HashSet<File>()

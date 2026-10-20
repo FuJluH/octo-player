@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.animated
 
+import app.winters.octo.desktop.lruMap
 import app.winters.octo.animated.LoopFetcher
 import app.winters.octo.animated.offlineLoopFile
 import app.winters.octo.animated.offlineLoopPoster
@@ -9,7 +10,6 @@ import app.winters.octo.subsonic.AnimatedArtAnswer
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import java.io.File
-import java.util.concurrent.ConcurrentHashMap
 
 // The size a downloaded album's loops are kept for: the square for a
 // large cover, the tall one for a tall window.
@@ -26,6 +26,10 @@ private val NoArt = AnimatedArt()
 // The animated art of downloaded albums, kept beside their songs: the
 // server's answer, and each loop and its still, so they play without a
 // connection. They go with the album's last kept song.
+// How many albums' kept answers are held in memory; the rest are read
+// from the disk again.
+private const val ANSWERS_KEPT = 256
+
 class KeptLoops(
     http: OkHttpClient,
     // The offline folder now (the listener can move it).
@@ -35,7 +39,7 @@ class KeptLoops(
     private val json = Json { ignoreUnknownKeys = true }
 
     // Answers read from the disk, by folder and album.
-    private val answers = ConcurrentHashMap<String, AnimatedArt>()
+    private val answers = lruMap<String, AnimatedArt>(ANSWERS_KEPT)
 
     private fun dir(server: String): File = File(folder(), "${fileSafe(server)}${File.separator}$KEPT_LOOPS")
 

@@ -122,6 +122,9 @@ import app.winters.octo.liveradio.RadioBrowser
 // How long a notice said in passing stays up.
 const val PASSING_NOTICE_MS = 6_000L
 
+// How many songs that could not play keep their mark in their rows.
+const val FAILED_SONGS_KEPT = 500
+
 // The panel that can open on the right of the main area.
 enum class SidePanel(val key: String) {
     Queue("queue"),
@@ -383,8 +386,10 @@ class AppState(
     // The system side sets it.
     var jumpList: JumpListHooks? = null
 
-    // Songs that could not play this run, by id, with why, for their rows.
+    // Songs that could not play this run, by id, with why, for their rows:
+    // the last FAILED_SONGS_KEPT of them.
     val failedSongs = mutableStateMapOf<String, String>()
+    private val failedOrder = ArrayDeque<String>()
 
     // The engine's own words for the notice's last failure, shown on asking.
     var noticeDetail by mutableStateOf<String?>(null)
@@ -486,7 +491,12 @@ class AppState(
             player.state.map { it.problem }.distinctUntilChanged().collect { problem ->
                 if (problem == null) return@collect
                 val song = problem.song
-                if (song != null) failedSongs[song.id] = problem.words
+                if (song != null) {
+                    failedSongs[song.id] = problem.words
+                    failedOrder.remove(song.id)
+                    failedOrder.addLast(song.id)
+                    while (failedOrder.size > FAILED_SONGS_KEPT) failedSongs.remove(failedOrder.removeFirst())
+                }
                 // A station that fails stops there; a song is skipped.
                 notice = when {
                     song == null -> problem.words
@@ -530,6 +540,7 @@ class AppState(
             starOverrides.clear()
             ratingOverrides.clear()
             failedSongs.clear()
+            failedOrder.clear()
             playlistViews.clear()
             playlistSaves.clear()
             infoSong = null
