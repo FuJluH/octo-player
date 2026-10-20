@@ -29,7 +29,7 @@ class ArtworkProvider : ContentProvider() {
     }
 
     private fun cached(ctx: Context, ref: String): File? {
-        val dir = File(ctx.cacheDir, "car-art").apply { mkdirs() }
+        val dir = File(ctx.cacheDir, "car-art-$ART_SIZE").apply { mkdirs() }
         val file = File(dir, sha1(ref) + ".jpg")
         if (file.exists()) return file
         val loaded = artworkBitmap(ctx, ref, ART_SIZE) ?: return null
@@ -56,10 +56,12 @@ class ArtworkProvider : ContentProvider() {
 
     companion object {
         const val AUTHORITY = BuildConfig.APPLICATION_ID + ".art"
-        private const val ART_SIZE = 320
+        private const val ART_SIZE = 512
 
-        // The address of a cover for other apps.
-        fun uriFor(ref: String): Uri = Uri.Builder().scheme("content").authority(AUTHORITY).appendPath(ref).build()
+        // The address of a cover for other apps. The size is part of it, so a
+        // car that keeps pictures by address asks again when the size changes.
+        fun uriFor(ref: String): Uri =
+            Uri.Builder().scheme("content").authority(AUTHORITY).appendPath(ART_SIZE.toString()).appendPath(ref).build()
 
         private fun sha1(text: String): String =
             MessageDigest.getInstance("SHA-1").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }

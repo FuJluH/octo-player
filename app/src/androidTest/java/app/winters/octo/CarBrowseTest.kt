@@ -97,7 +97,7 @@ class CarBrowseTest {
         assertEquals(ArtworkProvider.AUTHORITY, uri.authority)
         val bitmap = context.contentResolver.openInputStream(uri)!!.use(BitmapFactory::decodeStream)
         assertNotNull(bitmap)
-        assertTrue(bitmap.width in 1..320 && bitmap.height in 1..320)
+        assertTrue(bitmap.width in 1..512 && bitmap.height in 1..512)
     }
 
     @Test

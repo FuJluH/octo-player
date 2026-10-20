@@ -1,8 +1,11 @@
 package app.winters.octo.playback
 
+import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import androidx.annotation.DrawableRes
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -18,9 +21,14 @@ import app.winters.octo.catalog.UserDao
 import app.winters.octo.catalog.byLatestPlay
 import app.winters.octo.catalog.byPlayCount
 import app.winters.octo.catalog.matchKey
+import app.winters.octo.design.OctoIcons
 import app.winters.octo.listening.PlayHistory
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -36,6 +44,15 @@ class CarLibrary @Inject constructor(
 ) {
     fun root(): MediaItem = folder(CarNode.Root, "Octo")
 
+    // What a car's tabs are built from: how many songs there are, the
+    // playlists and their sizes, and how many songs are liked.
+    val changes: Flow<Unit> = combine(
+        catalog.libraryTrackCount(),
+        playlists.playlists.map { lists -> lists.map { it.id to it.songCount } },
+        user.likedCount(),
+        ::Triple,
+    ).distinctUntilChanged().map { }
+
     // What is inside one place in the tree, a page at a time.
     suspend fun children(parentId: String, page: Int, pageSize: Int): List<MediaItem> {
         val all = when (val node = parseCarId(parentId)) {
@@ -50,7 +67,7 @@ class CarLibrary @Inject constructor(
                 val summaries = playlists.playlists.first()
                 val liked = user.likedCount().first()
                 val likedItem = if (liked > 0) listOf(likedItem(liked)) else emptyList()
-                likedItem + summaries.map(::playlistItem)
+                likedItem + summaries.filterNot { isToolPlaylist(it.name) }.map(::playlistItem)
             }
             CarNode.Albums -> catalog.albums().first().map { albumItem(it) }
             CarNode.Artists -> catalog.artists().first().map(::artistItem)
@@ -109,9 +126,10 @@ class CarLibrary @Inject constructor(
         return catalog.searchTracks(q, 50).map { it.id } to false
     }
 
-    // Lets a car app read the covers of the items it was just sent.
+    // Lets a car app read the covers of the items it was just sent. Icons
+    // from the app's own drawables need no grant.
     fun grantArtwork(packageName: String, items: List<MediaItem>) {
-        items.mapNotNull { it.mediaMetadata.artworkUri }.forEach {
+        items.mapNotNull { it.mediaMetadata.artworkUri }.filter { it.scheme == ContentResolver.SCHEME_CONTENT }.forEach {
             context.grantUriPermission(packageName, it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
     }
@@ -125,10 +143,10 @@ class CarLibrary @Inject constructor(
     }
 
     private fun tabs() = listOf(
-        folder(CarNode.Recent, "Recent"),
-        folder(CarNode.Playlists, "Playlists"),
-        folder(CarNode.Albums, "Albums", grid = true),
-        folder(CarNode.Artists, "Artists"),
+        folder(CarNode.Recent, "Recent", icon = OctoIcons.History),
+        folder(CarNode.Playlists, "Playlists", icon = OctoIcons.Playlists),
+        folder(CarNode.Albums, "Albums", grid = true, icon = OctoIcons.Album),
+        folder(CarNode.Artists, "Artists", icon = OctoIcons.Artist),
     )
 
     private fun likedItem(count: Int) = listItem(CarNode.Liked, "Liked songs", "$count songs", null)
@@ -136,10 +154,11 @@ class CarLibrary @Inject constructor(
     private fun playlistItem(playlist: PlaylistSummary) =
         listItem(CarNode.Playlist(playlist.id), playlist.name, "${playlist.songCount} songs", playlist.covers.firstOrNull())
 
-    private fun folder(node: CarNode, title: String, grid: Boolean = false) = item(
+    private fun folder(node: CarNode, title: String, grid: Boolean = false, @DrawableRes icon: Int? = null) = item(
         node,
         MediaMetadata.Builder()
             .setTitle(title)
+            .setArtworkUri(icon?.let(::drawableUri))
             .setIsBrowsable(true)
             .setIsPlayable(false)
             .setExtras(if (grid) gridStyle() else null),
@@ -193,6 +212,14 @@ class CarLibrary @Inject constructor(
             .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
             .setExtras(group?.let(::groupTitle)),
     )
+
+    // One of the app's own drawables, at an address a car can read.
+    private fun drawableUri(@DrawableRes id: Int): Uri = Uri.Builder()
+        .scheme(ContentResolver.SCHEME_ANDROID_RESOURCE)
+        .authority(context.packageName)
+        .appendPath(context.resources.getResourceTypeName(id))
+        .appendPath(context.resources.getResourceEntryName(id))
+        .build()
 
     private fun item(node: CarNode, metadata: MediaMetadata.Builder) =
         MediaItem.Builder().setMediaId(carId(node)).setMediaMetadata(metadata.build()).build()

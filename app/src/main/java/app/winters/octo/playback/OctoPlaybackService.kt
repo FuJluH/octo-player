@@ -68,6 +68,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -266,6 +267,9 @@ class OctoPlaybackService : MediaLibraryService() {
         }
         // Editing the queue saves it once things settle.
         scope.launch { queueChanged.debounce(500).collect { saveQueue() } }
+        // A car reads its tabs again once the library under them settles,
+        // like after signing in or while a sync brings songs in.
+        scope.launch { car.changes.drop(1).debounce(2_000).collect { refreshCarTabs() } }
         // A switch of server stops the music and brings the other's queue.
         switcher.attach(side)
     }
@@ -441,6 +445,14 @@ class OctoPlaybackService : MediaLibraryService() {
         serverQueue.restored(snapshot())
     }
 
+    private suspend fun refreshCarTabs() {
+        val library = session ?: return
+        for (node in listOf(CarNode.Root, CarNode.Recent, CarNode.Playlists, CarNode.Albums, CarNode.Artists)) {
+            val id = carId(node)
+            library.notifyChildrenChanged(id, car.children(id, 0, Int.MAX_VALUE).size, null)
+        }
+    }
+
     private fun saveQueue() {
         if (!::player.isInitialized || holding) return
         queue.save(snapshot())
@@ -472,13 +484,7 @@ class OctoPlaybackService : MediaLibraryService() {
 
         // A car reads its tabs again, since the library under them changed.
         override fun libraryChanged() {
-            scope.launch {
-                val library = session ?: return@launch
-                for (node in listOf(CarNode.Root, CarNode.Recent, CarNode.Playlists, CarNode.Albums, CarNode.Artists)) {
-                    val id = carId(node)
-                    library.notifyChildrenChanged(id, car.children(id, 0, Int.MAX_VALUE).size, null)
-                }
-            }
+            scope.launch { refreshCarTabs() }
         }
 
         // What plays stops and counts, casting ends, and the player is empty.
