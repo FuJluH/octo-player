@@ -57,7 +57,7 @@ fun InfoPanel(app: AppState, modifier: Modifier = Modifier) {
     // A song found online is not on the server: its facts say how it
     // streams, and the head offers to add it to the library.
     val outside = isOutside(app, song)
-    val facts = songFacts(song, server, outside = outside)
+    val facts = songFacts(song, server, outside = outside, opened = state.format?.song?.takeIf { picked == null })
     val list = rememberLazyListState()
     LazyColumn(modifier.scrollbar(list), list, contentPadding = PaddingValues(start = Space.L, end = Space.L, top = Space.M, bottom = Space.Xl)) {
         if (picked != null) {

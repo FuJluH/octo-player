@@ -69,7 +69,8 @@ final class Session {
     private static let deviceKey = "device.id"
     private static let qualityKey = "stream.quality"
 
-    static var appVersion: String {
+    /// The app's version from its Info.plist, readable from any thread.
+    nonisolated static var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
     }
 

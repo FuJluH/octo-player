@@ -101,4 +101,14 @@ fun requestForDevice(preferred: StreamRequest, originalType: String?, accepts: (
     return if (accepts(type)) preferred else StreamRequest(DEVICE_MP3_KBPS)
 }
 
+// A server song once the server has said what it sends (`answered`, asked
+// only for a file as it is): that type, or the listed one when it named
+// none, and an MP3 made on the way when the device does not play it. A
+// song asked for as it is can come as another file than listed.
+fun deviceMediaFor(request: StreamRequest, listed: String?, answered: String?, accepts: (String) -> Boolean): Pair<StreamRequest, String?> {
+    if (request.maxKbps != null) return request to request.mimeType(listed)
+    val type = answered ?: listed
+    return if (type == null || accepts(type)) request to type else StreamRequest(DEVICE_MP3_KBPS) to "audio/mpeg"
+}
+
 const val DEVICE_MP3_KBPS = 320

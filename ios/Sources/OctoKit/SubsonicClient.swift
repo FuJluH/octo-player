@@ -124,7 +124,7 @@ public final class SubsonicClient: Sendable {
         self.musicFolderId = musicFolderId
     }
 
-    public var userAgent: String { "Octo/\(appVersion) (iOS)" }
+    public var userAgent: String { octoUserAgent(appVersion) }
 
     /// The same server with other credentials.
     public func with(_ credentials: Credentials) -> SubsonicClient {

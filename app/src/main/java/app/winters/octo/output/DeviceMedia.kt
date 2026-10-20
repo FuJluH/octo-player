@@ -88,8 +88,11 @@ class DeviceMedia @Inject constructor(
         try {
             when (val source = sourceOf(item)) {
                 is CastSource.Server -> {
-                    val request = requestForDevice(streams.deviceRequest(source.ref), source.ref.mimeType, output::accepts)
-                    val type = request.mimeType(source.ref.mimeType) ?: meta.extra(EXTRA_MIME) ?: "audio/mpeg"
+                    val preferred = requestForDevice(streams.deviceRequest(source.ref), source.ref.mimeType, output::accepts)
+                    // A file as it is may come as another file than listed: the server says which.
+                    val answered = if (preferred.maxKbps == null) streams.answeredType(source.ref, preferred) else null
+                    val (request, named) = deviceMediaFor(preferred, source.ref.mimeType, answered, output::accepts)
+                    val type = named ?: meta.extra(EXTRA_MIME) ?: "audio/mpeg"
                     // A file as it is can be sought in; one made on the way cannot.
                     val seekable = request.maxKbps == null
                     if (security.reachableByOtherDevices()) {

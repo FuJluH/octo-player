@@ -18,7 +18,7 @@ final class HlsBytes: LiveByteSource, @unchecked Sendable {
     private var plain: URL?
     private var reading: Task<Void, Never>?
     private let session: URLSession = {
-        let config = URLSessionConfiguration.default
+        let config = URLSessionConfiguration.default.namingOcto(Session.appVersion)
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.urlCache = nil
         config.timeoutIntervalForRequest = 20

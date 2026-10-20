@@ -117,6 +117,14 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
     private var savedLooked = false
     /// The saved copy could not be read: everything comes from the server.
     private var ignoreSaved = false
+    /// The saved songs hold part of this song but not all: the server is asked before it opens
+    /// whether it still sends the same file.
+    private var savedPartly = false
+    /// The server answered at least once.
+    private var answered = false
+    /// The player has had the length or bytes: from then on another file cannot take this one's
+    /// place, and the song is opened again instead.
+    private var served = false
 
     private let file: URL
     private let handle: FileHandle
@@ -124,7 +132,7 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
         let queue = OperationQueue()
         queue.maxConcurrentOperationCount = 1
         queue.qualityOfService = .userInitiated
-        let config = URLSessionConfiguration.default
+        let config = URLSessionConfiguration.default.namingOcto(Session.appVersion)
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.urlCache = nil
         return URLSession(configuration: config, delegate: self, delegateQueue: queue)
@@ -170,7 +178,17 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
         defer { condition.unlock() }
         lookAtSaved()
         while true {
-            if let total { return total }
+            if let total {
+                // A song saved in part is checked with the server first (when it can be reached):
+                // the server may send another file for it now.
+                if savedPartly && !answered && !ignoreSaved && failure == nil && !cancelled && online() {
+                    if task == nil { try start(from: lengthAskFrom()) }
+                    condition.wait(until: Date().addingTimeInterval(0.5))
+                    continue
+                }
+                served = true
+                return total
+            }
             if cancelled { throw PlayError(.ioUnspecified, detail: "stopped") }
             if let failure { throw failure }
             if task == nil { try start(from: lengthAskFrom()) }
@@ -182,6 +200,7 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
         condition.lock()
         defer { condition.unlock() }
         lookAtSaved()
+        served = true
         while true {
             if cancelled { throw PlayError(.ioUnspecified, detail: "stopped") }
             if let total, offset >= total { return 0 }
@@ -220,7 +239,8 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
         let done = DispatchSemaphore(value: 0)
         final class Answer: @unchecked Sendable { var ranged = false }
         let answer = Answer()
-        let probeSession = URLSession(configuration: .ephemeral, delegate: TrustDelegate(), delegateQueue: nil)
+        let probeSession = URLSession(configuration: URLSessionConfiguration.ephemeral.namingOcto(Session.appVersion), delegate: TrustDelegate(),
+                                      delegateQueue: nil)
         defer { probeSession.finishTasksAndInvalidate() }
         let probe = probeSession.dataTask(with: request) { _, response, _ in
             if let http = response as? HTTPURLResponse {
@@ -263,6 +283,10 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
         let info = (try? blocking { await StreamCache.shared.info(savedKey).map { Unchecked($0) } }) ?? nil
         if total == nil, let length = info?.value.length, length > 0 { total = length }
         if type == nil { type = info?.value.mimeType }
+        if let total {
+            let run = (try? blocking { await StreamCache.shared.savedRun(savedKey, from: 0) }) ?? 0
+            savedPartly = run > 0 && run < total
+        }
     }
 
     /// Where to ask the server from to learn the song's length: from its start, or, when the saved
@@ -384,6 +408,42 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
             completionHandler(.cancel)
             return
         }
+        let answer = streamShapeOf(status: http.statusCode, contentType: http.mimeType,
+                                   contentRange: http.value(forHTTPHeaderField: "Content-Range"),
+                                   contentLength: http.expectedContentLength)
+        let changed = StreamShape(type: type, total: total).differs(from: answer)
+        if changed {
+            // Another file than the one begun or saved (a whole FLAC for a listed preview, say):
+            // the saved copy goes with its length and type, and nothing held of it is read again.
+            ignoreSaved = true
+            if let savedKey {
+                let length = answer.total
+                let mime = http.mimeType
+                Task { await StreamCache.shared.answered(savedKey, contentLength: length, mimeType: mime) }
+            }
+            if served {
+                // The player has read the other file: it opens the song again.
+                task = nil
+                failure = PlayError(.sourceChanged, detail: "the server sent another file")
+                condition.broadcast()
+                completionHandler(.cancel)
+                return
+            }
+            held = ByteRanges()
+            total = nil
+            type = nil
+            responseHeaders = [:]
+            sendsParts = nil
+            if http.statusCode == 206 && taskStart > 0 {
+                // The new file is read from its start.
+                completionHandler(.cancel)
+                task = nil
+                try? start(from: 0)
+                condition.broadcast()
+                return
+            }
+        }
+        answered = true
         if responseHeaders.isEmpty {
             for (key, value) in http.allHeaderFields { responseHeaders["\(key)"] = ["\(value)"] }
         }
@@ -400,7 +460,8 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
             if total == nil, http.expectedContentLength > 0 { total = http.expectedContentLength }
         }
         errorsInARow = 0
-        if let savedKey {
+        // A changed file was described as the saved copy went, in that order.
+        if let savedKey, !changed {
             let length = total
             let mime = http.mimeType
             Task { await StreamCache.shared.describe(savedKey, contentLength: length, mimeType: mime) }

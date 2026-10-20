@@ -74,7 +74,7 @@ final class LiveBytes: NSObject, LiveByteSource, URLSessionDataDelegate, @unchec
         let queue = OperationQueue()
         queue.maxConcurrentOperationCount = 1
         queue.qualityOfService = .userInitiated
-        let config = URLSessionConfiguration.default
+        let config = URLSessionConfiguration.default.namingOcto(Session.appVersion)
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.urlCache = nil
         config.timeoutIntervalForRequest = 30

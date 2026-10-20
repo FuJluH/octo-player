@@ -144,6 +144,8 @@ final class Player {
     @ObservationIgnored private let queueStore = QueueStore(rows: QueueFile.standard, parked: ParkedQueues(PlayerTexts()))
     @ObservationIgnored private let shared: PlayerShared
     @ObservationIgnored private var failuresInARow = 0
+    /// The queue entry last opened again because the server began sending another file for it.
+    @ObservationIgnored private var reopenedEntry: String?
     @ObservationIgnored private var saveSoon: Task<Void, Never>?
     @ObservationIgnored private var ticker: Timer?
     @ObservationIgnored private var ticks = 0
@@ -849,6 +851,13 @@ final class Player {
     /// over only when a song becomes ready. A live station that fails stops there with its line,
     /// never moving on to the next station by itself.
     private func failed(_ item: QueueItem, _ error: PlayError) {
+        // The server began sending another file for the playing song: it opens again from where
+        // it is, once for each time it is in the queue.
+        if error.code == .sourceChanged, let entry = item.entryId, entry == engine.currentItem?.entryId, reopenedEntry != entry {
+            reopenedEntry = entry
+            engine.reopenCurrent()
+            return
+        }
         guard engine.playWhenReady else { return }
         let why = item.isRadioStation ? stationFailureWords(error) : playFailureOf(error, outside: item.isFind).words
         let title = item.title.trimmingCharacters(in: .whitespaces).isEmpty ? "a song" : item.title
@@ -950,6 +959,7 @@ final class Player {
         tickedAt = Date()
     }
 
+    /// The badge: what the deck opened once the song is open, the listed file type before then.
     private func publishQuality() {
         guard let item = engine.currentItem else {
             quality = nil
@@ -957,9 +967,10 @@ final class Player {
         }
         let found = engine.playingQuality
         // The phone's output rate, when the song is resampled to play.
-        quality = audioQuality(codecMime: found?.codecMime, fileMime: item.mimeType ?? item.fileMime, bitDepth: found?.bitDepth,
+        let now = audioQuality(codecMime: found?.codecMime, fileMime: item.mimeType ?? item.fileMime, bitDepth: found?.bitDepth,
                                sampleRate: found?.sampleRate, bitrate: found?.bitrate)
             .map { $0.playingAt(Int(AVAudioSession.sharedInstance().sampleRate)) }
+        if now != quality { quality = now }
     }
 
     /// Reads the position four times a second while there is a song, and saves the queue every
@@ -976,6 +987,8 @@ final class Player {
     private func tick() {
         publishPosition()
         publishState()
+        // The badge follows the deck: what opened once it opens, and the output's rate.
+        publishQuality()
         ticks += 1
         if isPlaying && ticks % 60 == 0 { saveQueue() }
         if ticks % 4 == 0 { nowPlaying.publish() }

@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 import Testing
 @testable import OctoKit
 
@@ -60,7 +63,19 @@ import Testing
     @Test func deviceHeaders() {
         #expect(client.headers["X-Octo-Device-Id"] == "abc")
         #expect(client.headers["X-Octo-Device-Name"] == "Sam%E2%80%99s%20iPhone")
-        #expect(client.headers["User-Agent"] == "Octo/0.1.0 (iOS)")
+        #expect(client.headers["User-Agent"] == "Octo/0.1.0 (iPhone)")
+    }
+
+    /// The server reads the app and the platform from the User-Agent, as Android's
+    /// "Octo/1.9.0 (Android)": every request names the iPhone, a stream too.
+    @Test func everyRequestNamesTheAppAndTheIPhone() {
+        #expect(octoUserAgent("1.9.0") == "Octo/1.9.0 (iPhone)")
+        let flac = Song(id: "1", title: "", suffix: "flac")
+        #expect(client.request(client.streamURL(for: flac, quality: .original)).value(forHTTPHeaderField: "User-Agent")
+            == "Octo/0.1.0 (iPhone)")
+        #expect(client.request(client.url("ping")).value(forHTTPHeaderField: "User-Agent") == "Octo/0.1.0 (iPhone)")
+        let configuration = URLSessionConfiguration.ephemeral.namingOcto("1.9.0")
+        #expect(configuration.httpAdditionalHeaders?["User-Agent"] as? String == "Octo/1.9.0 (iPhone)")
     }
 
     @Test func streamsAskForWhatThePhoneCanPlay() {

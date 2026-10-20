@@ -44,7 +44,7 @@ import Testing
     @Test func aRedirectElsewhereLosesTheServersHeaders() {
         let scope = ServerScope([main, home])
         let headers = ["X-Proxy-Token": "secret", "X-Octo-Device-Id": "abc", "X-Octo-Device-Name": "Phone",
-                       "User-Agent": "Octo/1.0 (iOS)", "Range": "bytes=0-"]
+                       "User-Agent": "Octo/1.0 (iPhone)", "Range": "bytes=0-"]
         let first = URL(string: "https://music.example.com/octo/rest/stream")!
         #expect(scope.headersToDrop(headers, to: URL(string: "https://cdn.example.net/file")!, first: first)
             == ["X-Octo-Device-Id", "X-Octo-Device-Name", "X-Proxy-Token"])

@@ -34,6 +34,9 @@ public enum PlayErrorCode: Sendable, Equatable {
     case decodingFailed
     case audioTrackInitFailed
     case audioTrackWriteFailed
+    /// The server began sending another file for the song than the one being played, after the
+    /// player had read from it: the song is opened again from where it is.
+    case sourceChanged
     /// Reading failed some other way, such as a load refused before the server was asked.
     case ioUnspecified
     case unspecified
@@ -66,7 +69,7 @@ public func playFailureOf(_ code: PlayErrorCode, httpStatus: Int? = nil, outside
         .unsupported
     case .parsingContainerMalformed, .parsingManifestMalformed, .decodingFailed: .damaged
     case .audioTrackInitFailed, .audioTrackWriteFailed: .device
-    case .ioUnspecified, .unspecified: .other
+    case .sourceChanged, .ioUnspecified, .unspecified: .other
     }
 }
 

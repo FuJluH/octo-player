@@ -58,6 +58,18 @@ class QualityTest {
         assertEquals("FLAC", quality.full)
     }
 
+    // A song can arrive as another file than the one listed: once it is
+    // open, the badge is the file that opened.
+    @Test
+    fun theFileOpenedWinsOverTheListedType() {
+        val flac = audioQuality("audio/flac", "audio/mpeg", C.ENCODING_PCM_16BIT, 44_100, Format.NO_VALUE)!!
+        assertEquals("Lossless", flac.label)
+        assertEquals("FLAC · 16-bit · 44.1 kHz", flac.full)
+        val aac = audioQuality("audio/mp4a-latm", "audio/flac", Format.NO_VALUE, 44_100, 256_000)!!
+        assertEquals("AAC", aac.label)
+        assertEquals("AAC · 256 kbps", aac.full)
+    }
+
     @Test
     fun unknownTypeHasNoBadge() {
         assertNull(audioQuality(null, "audio/x-unknown", Format.NO_VALUE, Format.NO_VALUE, Format.NO_VALUE))

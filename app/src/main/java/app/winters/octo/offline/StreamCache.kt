@@ -12,6 +12,8 @@ import androidx.media3.datasource.cache.ContentMetadataMutations
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import app.winters.octo.playback.SavedCopies
+import app.winters.octo.playback.StreamShape
+import app.winters.octo.playback.StreamShapes
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -103,6 +105,39 @@ class StreamCache @Inject constructor(
         }
     }
 
+    // What each saved copy was made from, as the server answered for it:
+    // its type, noted here, and its whole length, which the player notes.
+    val shapes: StreamShapes = object : StreamShapes {
+        override fun shape(key: String): StreamShape? {
+            if (!_enabled.value) return null
+            val metadata = cache.getContentMetadata(key)
+            val type = metadata.get(FILE_TYPE, null as String?)
+            val total = ContentMetadata.getContentLength(metadata).takeIf { it > 0 }
+            return if (type == null && total == null) null else StreamShape(type, total)
+        }
+
+        override fun note(key: String, shape: StreamShape) {
+            val type = shape.type ?: return
+            if (!_enabled.value || cache.getContentMetadata(key).get(FILE_TYPE, null as String?) != null) return
+            try {
+                cache.applyContentMetadataMutations(key, ContentMetadataMutations().set(FILE_TYPE, type))
+            } catch (e: Cache.CacheException) {
+                // Unnoted, the next answer notes it.
+            }
+        }
+
+        // The copy goes, and with it what it was made from, even while
+        // another reader still holds a part of it open.
+        override fun drop(key: String) {
+            try {
+                cache.applyContentMetadataMutations(key, ContentMetadataMutations().remove(FILE_TYPE).remove(ContentMetadata.KEY_CONTENT_LENGTH))
+            } catch (e: Cache.CacheException) {
+                // The copy going below leaves nothing to describe.
+            }
+            copies.drop(key)
+        }
+    }
+
     suspend fun clear() = withContext(Dispatchers.IO) {
         clearNow()
         refreshUsed()
@@ -119,6 +154,9 @@ class StreamCache @Inject constructor(
 
 // The server's size for the file a saved song was made from.
 private const val FILE_SIZE = "octo_file_size"
+
+// The type the server answered with for the file a saved song was made from.
+private const val FILE_TYPE = "octo_file_type"
 
 // Lets the least recently played songs go once the store is over its size,
 // and takes a new size at any time. Each size is a fresh least-recently-used

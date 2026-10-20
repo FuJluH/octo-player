@@ -137,8 +137,10 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
     /// The deck's own measure of the song's length, when it has one.
     var measuredMs: Int? { deck.item?.entryId == queue.currentItem?.entryId ? deck.durationMs : nil }
 
-    /// The format the deck found the song to be.
-    var playingQuality: (codecMime: String?, bitDepth: Int?, sampleRate: Int?, bitrate: Int?)? { deck.current?.quality }
+    /// The format the deck found the current song to be: nil while the deck holds another one.
+    var playingQuality: (codecMime: String?, bitDepth: Int?, sampleRate: Int?, bitrate: Int?)? {
+        deck.item?.entryId == queue.currentItem?.entryId ? deck.current?.quality : nil
+    }
 
     // MARK: The queue
 
@@ -279,6 +281,18 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
             deck.seek(toMs: ms)
             if playWhenReady { deck.playWhenReady = true }
         }
+        crossfader.songChanged()
+    }
+
+    /// Opens the current song again from where it is, with a fresh source: the server began
+    /// sending another file for it than the one the player had read.
+    func reopenCurrent() {
+        guard queue.currentItem != nil else { return }
+        let at = positionMs
+        crossfader.interrupt()
+        ended = false
+        stoppedAtEnd = false
+        loadCurrent(atMs: at)
         crossfader.songChanged()
     }
 

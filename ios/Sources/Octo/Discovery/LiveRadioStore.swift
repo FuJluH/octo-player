@@ -32,7 +32,7 @@ final class LiveRadioStore {
     static let hlsPlays = true
 
     @ObservationIgnored private let store = UserDefaults(suiteName: "live_radio") ?? .standard
-    @ObservationIgnored private let browser = RadioBrowser(userAgent: "Octo/\(Session.appVersion) (iPhone)")
+    @ObservationIgnored private let browser = RadioBrowser(userAgent: octoUserAgent(Session.appVersion))
     @ObservationIgnored private var loading: Task<Void, Never>?
 
     private enum Keys {

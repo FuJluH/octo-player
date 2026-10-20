@@ -68,10 +68,15 @@ class PlayableSongs @Inject constructor(
         }
     }
 
-    private fun findItem(find: OnlineSongEntity, prefs: StreamPrefs): MediaItem {
-        val bitrate = find.bitrate?.times(1000)
-        return find.asTrack().toMediaItem(streams.uriFor(find.sourceId, find.nativeId, find.mimeType, bitrate), streams.mimeTypeFor(find.mimeType, bitrate, prefs))
-    }
+    // A find streams by no listed bitrate: the listed one is its preview's,
+    // and the server may send a whole FLAC in its place, so a cap applies as
+    // it does to a lossless song. The player goes by the bytes that come.
+    private fun findItem(find: OnlineSongEntity, prefs: StreamPrefs): MediaItem =
+        find.asTrack().toMediaItem(
+            streams.uriFor(find.sourceId, find.nativeId, find.mimeType, null),
+            streams.mimeTypeFor(find.mimeType, null, prefs),
+            sniffed = true,
+        )
 
     private suspend fun libraryItems(ids: List<String>): List<MediaItem> {
         if (ids.isEmpty()) return emptyList()

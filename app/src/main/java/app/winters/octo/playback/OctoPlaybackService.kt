@@ -520,7 +520,11 @@ class OctoPlaybackService : MediaLibraryService() {
         private var lastId: String? = null
         private var lastIndex = C.INDEX_UNSET
 
+        // The queue entry last opened again for another file from the server.
+        private var reopened: String? = null
+
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            reopened = null
             val endedStation = lastId?.takeIf(::isRadio)
             val endedAt = lastIndex
             lastId = mediaItem?.mediaId
@@ -562,6 +566,15 @@ class OctoPlaybackService : MediaLibraryService() {
         // the music, and one line says which and why. Once every song in the
         // queue has failed, it stops.
         override fun onPlayerError(error: PlaybackException) {
+            // The server began sending another file for the song: it opens
+            // again from where it is, from the new file's start, once each
+            // time the song comes on.
+            val entry = player.currentMediaItem?.let { it.entryId ?: it.mediaId }
+            if (entry != null && streamChangedIn(error) && reopened != entry) {
+                reopened = entry
+                scope.launch { player.prepare() }
+                return
+            }
             if (!player.playWhenReady) return
             failedInARow++
             val title = player.currentMediaItem?.mediaMetadata?.title?.toString()?.takeIf(String::isNotBlank) ?: "a song"

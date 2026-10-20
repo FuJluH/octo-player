@@ -1,5 +1,8 @@
 package app.winters.octo.desktop.library
 
+import app.winters.octo.desktop.player.SongFormat
+import app.winters.octo.desktop.player.codecName
+import app.winters.octo.desktop.player.libraryFormat
 import app.winters.octo.desktop.system.isOpenedFile
 import app.winters.octo.server.serverTime
 import app.winters.octo.subsonic.Song
@@ -18,12 +21,17 @@ data class SongFact(val label: String, val value: String, val copyable: Boolean 
 // song found online (`outside`) is not a file on the server, so it says
 // how it streams instead, and nothing a file would have: no date added,
 // size, bit depth or rating, and no plays until it has some.
+// `opened` is the file the player opened for the song, when it is the one
+// playing. A song can arrive as another file than the one listed: when the
+// listing names a codec and the opened one is another, the format lines
+// are the opened file's, and the listed file's type and size are left out.
 fun songFacts(
     song: Song,
     server: String?,
     zone: ZoneId = ZoneId.systemDefault(),
     locale: Locale = Locale.getDefault(),
     outside: Boolean = false,
+    opened: SongFormat? = null,
 ): List<SongFact> = buildList {
     fun add(label: String, value: String?, copyable: Boolean = false) {
         if (!value.isNullOrBlank()) add(SongFact(label, value, copyable))
@@ -47,18 +55,20 @@ fun songFacts(
     add("Comment", song.comment)
 
     add("Length", lengthText(song.duration).takeIf { song.duration > 0 })
-    val bitrate = song.bitRate?.takeIf { it > 0 }?.let { "$it kbps" }
+    val arrived = opened?.takeIf { now -> libraryFormat(song)?.codec.let { it != null && it != now.codec } }
+    val format = arrived?.let { if (it.lossless) "${codecName(it.codec)}, lossless" else codecName(it.codec) } ?: formatName(song.suffix)
+    val bitrate = (if (arrived != null) arrived.bitRate else song.bitRate)?.takeIf { it > 0 }?.let { "$it kbps" }
     if (outside) {
-        add("Streams as", listOfNotNull(formatName(song.suffix), bitrate).joinToString(", "))
+        add("Streams as", listOfNotNull(format, bitrate).joinToString(", "))
         add("Source", "Found online")
         add("Suggested by", song.octoSuggestedBy?.trim())
     } else {
-        add("Format", formatName(song.suffix))
-        add("File type", song.contentType)
+        add("Format", format)
+        if (arrived == null) add("File type", song.contentType)
         add("Bitrate", bitrate)
-        add("Sample rate", song.samplingRate?.takeIf { it > 0 }?.let { sampleRateText(it, locale) })
-        add("Bit depth", song.bitDepth?.takeIf { it > 0 }?.let { "$it-bit" })
-        add("File size", song.size?.takeIf { it > 0 }?.let { sizeText(it, locale) })
+        add("Sample rate", (if (arrived != null) arrived.sampleRate else song.samplingRate)?.takeIf { it > 0 }?.let { sampleRateText(it, locale) })
+        add("Bit depth", (if (arrived != null) arrived.bits else song.bitDepth)?.takeIf { it > 0 }?.let { "$it-bit" })
+        if (arrived == null) add("File size", song.size?.takeIf { it > 0 }?.let { sizeText(it, locale) })
         add("Source", if (isOpenedFile(song.id)) "A file on this computer" else server ?: "Your server")
         add("Suggested by", song.octoSuggestedBy?.trim())
     }

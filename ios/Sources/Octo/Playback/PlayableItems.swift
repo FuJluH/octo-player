@@ -139,11 +139,10 @@ struct PlayableItems {
     }
 
     private func findItem(_ find: OnlineSong, context: StreamContext, source: QueueSource) -> QueueItem {
-        let bitrate = find.bitrate.map { $0 * 1_000 }
-        let ref = StreamRef(sourceId: find.sourceId, serverId: find.nativeId, mimeType: find.mimeType, bitrate: bitrate)
+        let ref = findStreamRef(sourceId: find.sourceId, serverId: find.nativeId, mimeType: find.mimeType)
         var item = QueueItem(
             trackId: find.id, uri: streamUri(ref), title: find.title, artist: find.artist, album: find.album,
-            durationMs: Int(find.durationMs), mimeType: phoneRequest(find.mimeType, bitrate, context.quality).mimeType(find.mimeType),
+            durationMs: Int(find.durationMs), mimeType: ref.request(context.quality).mimeType(find.mimeType),
             // A find has no album or artist in the library to open.
             fileMime: find.mimeType, artwork: onlineArtwork(find.sourceId, find.coverId), albumId: "",
             artistId: "", explicit: find.explicit ?? false, source: source, isFind: true)

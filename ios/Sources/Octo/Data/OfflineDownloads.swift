@@ -26,7 +26,7 @@ final class OfflineDownloads {
     @ObservationIgnored private let announce: @MainActor (String) -> Void
     @ObservationIgnored private let bridge = TransferBridge()
     @ObservationIgnored private lazy var transfer: URLSession = {
-        let configuration = URLSessionConfiguration.background(withIdentifier: "app.winters.octo.downloads")
+        let configuration = URLSessionConfiguration.background(withIdentifier: "app.winters.octo.downloads").namingOcto(Session.appVersion)
         configuration.sessionSendsLaunchEvents = true
         configuration.isDiscretionary = false
         return URLSession(configuration: configuration, delegate: bridge, delegateQueue: bridge.queue)

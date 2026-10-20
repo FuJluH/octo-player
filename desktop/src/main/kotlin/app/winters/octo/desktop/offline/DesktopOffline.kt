@@ -65,6 +65,26 @@ fun keptAsIs(path: String, suffix: String?): Boolean {
     return type.isNotEmpty() && type.equals(suffix, ignoreCase = true) && !type.equals("opus", ignoreCase = true)
 }
 
+// The ending a kept file gets: Opus for a smaller copy made as Opus;
+// otherwise the type the server answered with, since a song asked for as it
+// is can come as another file than listed (a whole FLAC for a listed
+// preview); the listed suffix when the answer names no type it knows.
+fun keptSuffix(format: String?, answeredType: String?, listed: String?): String? {
+    if (format == "opus") return "opus"
+    val answered = when (answeredType?.substringBefore(';')?.trim()?.lowercase()) {
+        "audio/flac", "audio/x-flac" -> "flac"
+        "audio/mpeg", "audio/mp3" -> "mp3"
+        "audio/mp4", "audio/x-m4a", "audio/m4a" -> "m4a"
+        "audio/aac" -> "aac"
+        "audio/ogg", "application/ogg" -> "ogg"
+        "audio/opus" -> "opus"
+        "audio/wav", "audio/x-wav", "audio/wave" -> "wav"
+        "audio/aiff", "audio/x-aiff" -> "aiff"
+        else -> null
+    }
+    return answered ?: listed
+}
+
 // How the keeping is going, for the settings line.
 data class KeepStatus(val kept: Int = 0, val bytes: Long = 0, val waiting: Int = 0, val failed: Int = 0, val busy: Boolean = false)
 
@@ -295,25 +315,27 @@ class DesktopOffline(
 
     // Downloads one song into the folder, in the download quality: the file
     // as it is, or Opus at that bitrate, with the same stream parameters
-    // playing uses.
+    // playing uses. The file is named by the type the server sent (see
+    // keptSuffix), and its size is what came.
     private suspend fun fetch(server: String, client: app.winters.octo.subsonic.SubsonicClient, song: Song): KeptFile? = withContext(Dispatchers.IO) {
         val params = streamParams(appPicks = true, quality = downloadQuality)
-        val suffix = if (params["format"] == "opus") "opus" else song.suffix
-        val path = "${app.winters.octo.offline.fileSafe(server)}/" + keptPath(song.displayArtist ?: song.artist, song.album, song.track, song.title, suffix)
-        val target = File(folder, path)
-        val part = File(target.parentFile, target.name + ".part")
+        var part: File? = null
         try {
-            target.parentFile?.mkdirs()
             val request = Request.Builder().url(client.url("stream", mapOf("id" to song.id) + params)).build()
             http.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return@withContext null
-                part.outputStream().use { out -> response.body.byteStream().copyTo(out) }
+                val suffix = keptSuffix(params["format"], response.header("Content-Type"), song.suffix)
+                val path = "${app.winters.octo.offline.fileSafe(server)}/" + keptPath(song.displayArtist ?: song.artist, song.album, song.track, song.title, suffix)
+                val target = File(folder, path)
+                target.parentFile?.mkdirs()
+                val incoming = File(target.parentFile, target.name + ".part").also { part = it }
+                incoming.outputStream().use { out -> response.body.byteStream().copyTo(out) }
+                if (target.exists()) target.delete()
+                if (!incoming.renameTo(target)) return@withContext null
+                KeptFile(server, song.id, path, target.length(), song.title, song.artist.orEmpty(), song.size?.takeIf { it > 0 }, song.albumId.orEmpty())
             }
-            if (target.exists()) target.delete()
-            if (!part.renameTo(target)) return@withContext null
-            KeptFile(server, song.id, path, target.length(), song.title, song.artist.orEmpty(), song.size?.takeIf { it > 0 }, song.albumId.orEmpty())
         } catch (e: IOException) {
-            part.delete()
+            part?.delete()
             null
         }
     }
