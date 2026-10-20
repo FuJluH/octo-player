@@ -54,10 +54,12 @@ import app.winters.octo.desktop.settings.systemTextScale
 import app.winters.octo.desktop.settings.textScale
 import app.winters.octo.desktop.system.AudioDropZone
 import app.winters.octo.desktop.system.LocalSystem
+import app.winters.octo.desktop.system.SOAK_RUN
 import app.winters.octo.desktop.system.SingleInstance
 import app.winters.octo.desktop.system.SystemIntegration
 import app.winters.octo.desktop.system.letRunningOctoComeForward
 import app.winters.octo.desktop.system.preloadStartClasses
+import app.winters.octo.desktop.system.soakRun
 import app.winters.octo.desktop.system.startsInTray
 import app.winters.octo.desktop.system.useAppNatives
 import app.winters.octo.desktop.ui.ListFocus
@@ -242,6 +244,9 @@ fun main(args: Array<String>) {
                         exitApplication()
                     }
                 }
+            }
+            System.getProperty(SOAK_RUN)?.let { path ->
+                LaunchedEffect(ready) { soakRun(ready.app, File(path)) }
             }
             LaunchedEffect(ready) {
                 // The covers of the song on and the next ones, ready ahead.
