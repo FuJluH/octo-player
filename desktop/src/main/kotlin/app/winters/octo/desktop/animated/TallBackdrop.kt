@@ -143,6 +143,12 @@ fun softStill(still: SkiaImage?, color: Color, aspect: Float): SoftStill {
 // How the fill is toned for its words: white words on a fill darkened by
 // `scale`, or dark ones on a fill lifted towards white by `lift`.
 data class FillTone(val white: Boolean, val scale: Float, val lift: Float) {
+    // A color as the filter below tones it.
+    fun applied(color: Color): Color {
+        fun channel(c: Float) = (c * scale * (1 - lift) + lift).coerceIn(0f, 1f)
+        return Color(channel(color.red), channel(color.green), channel(color.blue), color.alpha)
+    }
+
     fun filter(): ColorFilter = ColorFilter.makeMatrix(
         ColorMatrix(
             scale * (1 - lift), 0f, 0f, 0f, lift,
@@ -321,6 +327,7 @@ fun TallBackdrop(
             // The blurred loop over the whole player: its tiniest copy at the
             // sharp loop's place and size, its edge colors carried out to the
             // player's edges, so the colors beside the loop are its own.
+            val footColors = remember { FootColors() }
             fun tinyNow(): SkiaImage? {
                 feed.tinies?.arrived?.intValue
                 return feed.tinies?.take()?.takeIf { feed.frames.arrived.intValue > 0 } ?: ready.tiny
@@ -339,6 +346,19 @@ fun TallBackdrop(
                     drawIntoCanvas { it.skiaCanvas.drawRect(Rect.makeWH(size.width, size.height), blurPaint) }
                     blurPaint.shader = null
                     shader.close()
+                    // Below a loop shorter than the player its last row would
+                    // run on down as stripes behind the title and controls:
+                    // there it eases into one even fill of its foot's color.
+                    if (place.height < size.height - 1f) {
+                        val foot = ready.tone.applied(Color(footColors.of(image)))
+                        val ramp = FootRamp.toPx()
+                        drawRect(
+                            Brush.verticalGradient(0f to foot.copy(alpha = 0f), 1f to foot, startY = place.height, endY = place.height + ramp),
+                            topLeft = Offset(0f, place.height),
+                            size = androidx.compose.ui.geometry.Size(size.width, ramp),
+                        )
+                        drawRect(foot, topLeft = Offset(0f, place.height + ramp), size = androidx.compose.ui.geometry.Size(size.width, size.height - place.height - ramp))
+                    }
                 },
             )
             // And at the sharp loop's own place and size, so what the sharp
@@ -408,6 +428,49 @@ fun TallBackdrop(
                 },
             )
         }
+    }
+}
+
+// How far below a short loop's foot its blurred copy takes to ease into one
+// even fill.
+private val FootRamp = 120.dp
+
+// The average color of the bottom fifth of a small copy, as opaque ARGB,
+// worked out again only when the copy changes.
+internal class FootColors {
+    private var last: SkiaImage? = null
+    private var color = 0xFF000000.toInt()
+
+    fun of(image: SkiaImage): Int {
+        if (image === last) return color
+        last = image
+        color = footColor(image) ?: color
+        return color
+    }
+}
+
+internal fun footColor(image: SkiaImage): Int? {
+    val info = ImageInfo(image.width, image.height, ColorType.BGRA_8888, ColorAlphaType.PREMUL)
+    val bitmap = org.jetbrains.skia.Bitmap()
+    try {
+        if (!bitmap.allocPixels(info) || !image.readPixels(bitmap, 0, 0)) return null
+        val bytes = bitmap.readPixels(info, image.width * 4, 0, 0) ?: return null
+        val from = image.height - maxOf(1, image.height / 5)
+        var r = 0L
+        var g = 0L
+        var b = 0L
+        var n = 0
+        for (y in from until image.height) for (x in 0 until image.width) {
+            val o = (y * image.width + x) * 4
+            b += bytes[o].toInt() and 0xFF
+            g += bytes[o + 1].toInt() and 0xFF
+            r += bytes[o + 2].toInt() and 0xFF
+            n++
+        }
+        if (n == 0) return null
+        return (0xFF shl 24) or ((r / n).toInt() shl 16) or ((g / n).toInt() shl 8) or (b / n).toInt()
+    } finally {
+        bitmap.close()
     }
 }
 

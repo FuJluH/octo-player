@@ -230,6 +230,26 @@ class AnimatedArtTest {
     }
 
     @Test
+    fun theFootFillIsTheAverageOfTheCopysBottomFifth() {
+        val surface = org.jetbrains.skia.Surface.makeRasterN32Premul(4, 10)
+        val paint = org.jetbrains.skia.Paint()
+        // White above, half red and half blue along the bottom two rows.
+        surface.canvas.clear(0xFFFFFFFF.toInt())
+        paint.color = 0xFFFF0000.toInt()
+        surface.canvas.drawRect(org.jetbrains.skia.Rect.makeLTRB(0f, 8f, 2f, 10f), paint)
+        paint.color = 0xFF0000FF.toInt()
+        surface.canvas.drawRect(org.jetbrains.skia.Rect.makeLTRB(2f, 8f, 4f, 10f), paint)
+        val image = surface.makeImageSnapshot()
+        try {
+            assertEquals(0xFF7F007F.toInt(), footColor(image))
+        } finally {
+            image.close()
+            paint.close()
+            surface.close()
+        }
+    }
+
+    @Test
     fun aBackdropTakesTheClipsColorElseTheCovers() {
         assertEquals(Color(0xFF203040), backdropColor(AnimatedClip(video = "v", color = "203040"), 0x00FF0000))
         assertEquals(Color(0xFFFF0000), backdropColor(AnimatedClip(video = "v"), 0xFFFF0000.toInt()))
