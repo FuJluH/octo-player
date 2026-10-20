@@ -22,7 +22,8 @@
 #   -Label <name>     names the run; results go to desktop\build\soak\<label>
 #   -Minutes <n>      how long it plays (default 120)
 #   -Art <key>        Animated art: full_screen (default), square or off
-#   -Wash <on|off>    the immersive background (on) or the glow (off)
+#   -Wash <on|off>    the pages' background: immersive (on) or the glow (off)
+#   -WashMotion <on|off> the full player's wash moving (on) or held still
 #   -Lyrics <on|off>  the lyrics beside the cover in the full player
 #   -Full <on|off>    the full player open (on), or Home with the player bar
 #   -Source <name>    library (default) or radio
@@ -49,6 +50,7 @@ param(
     [int]$Minutes = 120,
     [ValidateSet("full_screen", "square", "off")][string]$Art = "full_screen",
     [ValidateSet("on", "off")][string]$Wash = "on",
+    [ValidateSet("on", "off")][string]$WashMotion = "on",
     [ValidateSet("on", "off")][string]$Lyrics = "on",
     [ValidateSet("on", "off")][string]$Full = "on",
     [ValidateSet("library", "radio")][string]$Source = "library",
@@ -243,6 +245,8 @@ foreach ($place in "config\settings.json", "Roaming\Octo\settings.json") {
     $settings.appearance | Add-Member -NotePropertyName animated_art -NotePropertyValue $Art -Force
     $settings.appearance | Add-Member -NotePropertyName ambience -NotePropertyValue $(if ($Wash -eq "on") { "Immersive" } else { "Glow" }) -Force
     $settings.playback | Add-Member -NotePropertyName volume -NotePropertyValue 0 -Force
+    if (-not $settings.appearance.wash) { $settings.appearance | Add-Member -NotePropertyName wash -NotePropertyValue ([pscustomobject]@{}) }
+    $settings.appearance.wash | Add-Member -NotePropertyName moving -NotePropertyValue ($WashMotion -eq "on") -Force
     $settings | Add-Member -NotePropertyName window -NotePropertyValue ([pscustomobject]@{ x = 60; y = 60; width = $Width; height = $Height; maximized = $false }) -Force
     [IO.File]::WriteAllText($file, ($settings | ConvertTo-Json -Depth 32), (New-Object System.Text.UTF8Encoding($false)))
 }
@@ -282,7 +286,7 @@ try {
         Start-Sleep -Milliseconds 200
     }
     if ($Minimized) { Start-Sleep -Seconds 20; [void][OctoSoak.Win]::ShowWindow($process.MainWindowHandle, 6) }
-    Write-Host "Soak $Label`: pid $($process.Id), art $Art, wash $Wash, lyrics $Lyrics, full player $Full, $Source, $(if ($Minimized) { 'minimized' } else { 'shown' }), $Advance s a song, $Minutes min"
+    Write-Host "Soak $Label`: pid $($process.Id), art $Art, wash $Wash (moving $WashMotion), lyrics $Lyrics, full player $Full, $Source, $(if ($Minimized) { 'minimized' } else { 'shown' }), $Advance s a song, $Minutes min"
 
     $shown = $clock.Elapsed.TotalSeconds
     $minimizedLate = $false
@@ -327,7 +331,7 @@ try {
     $mark = $regular | Where-Object { $_.Minute -ge 15 } | Select-Object -First 1
     $last = $regular[-1]
     $summary = @(
-        "Soak $Label ($((Get-Date).ToString('yyyy-MM-dd HH:mm'))): art $Art, wash $Wash, lyrics $Lyrics, full player $Full, $Source, $(if ($Minimized) { 'minimized' } elseif ($MinimizeAfter) { "minimized after $MinimizeAfter min" } else { 'shown' }), $(if ($PauseAfter) { "paused after $PauseAfter min, " })$Advance s a song, $Minutes min, JVM extra '$Jvm'",
+        "Soak $Label ($((Get-Date).ToString('yyyy-MM-dd HH:mm'))): art $Art, wash $Wash (moving $WashMotion), lyrics $Lyrics, full player $Full, $Source, $(if ($Minimized) { 'minimized' } elseif ($MinimizeAfter) { "minimized after $MinimizeAfter min" } else { 'shown' }), $(if ($PauseAfter) { "paused after $PauseAfter min, " })$Advance s a song, $Minutes min, JVM extra '$Jvm'",
         "Private MB: start $($regular[0].PrivateMB), 15 min $($mark.PrivateMB), end $($last.PrivateMB), most $(($regular | Measure-Object PrivateMB -Maximum).Maximum), after GC $($after.PrivateMB) (drop $([math]::Round($before.PrivateMB - $after.PrivateMB, 1)))",
         "Growth MB/h from 15 min: private $(Get-Slope $samples 'PrivateMB'), working set $(Get-Slope $samples 'WorkingSetMB'), outside the JVM $(Get-Slope $samples 'OutsideJvmMB'), JVM total $(Get-Slope $samples 'NmtMB'), heap used $(Get-Slope $samples 'HeapUsedMB'), GPU dedicated $(Get-Slope $samples 'GpuDedicatedMB')",
         "End: working set $($last.WorkingSetMB), threads $($last.Threads), octo-video threads $($last.VideoThreads), handles $($last.Handles), heap $($last.HeapUsedMB)/$($last.HeapMB), JVM total $($last.NmtMB), outside the JVM $($last.OutsideJvmMB), GPU dedicated $($last.GpuDedicatedMB)",
