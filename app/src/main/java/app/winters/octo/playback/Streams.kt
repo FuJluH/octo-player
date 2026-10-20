@@ -45,10 +45,13 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import app.winters.octo.subsonic.OctoPurpose
 import app.winters.octo.subsonic.markedFor
+import app.winters.octo.subsonic.purpose
 import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.io.FileNotFoundException
 import java.io.IOException
 import javax.inject.Inject
@@ -160,12 +163,13 @@ class Streams @Inject constructor(
         sign = ::sign,
         cached = ::cachedFactory,
         keeping = { saved.enabled.value },
+        shapes = saved.shapes,
     )
 
     // Fills the saved copy of a song ahead of time, for the next songs in
     // the queue. Null while nothing is kept.
     fun savingSource(): CacheDataSource? =
-        if (saved.enabled.value) cachedFactory(signedFactory(networkFactory())).createDataSource() else null
+        if (saved.enabled.value) cachedFactory(ShapeGuardDataSource.Factory(signedFactory(networkFactory()), ::isStream, saved.shapes)).createDataSource() else null
 
     // Reads a server song for downloading: from its saved copy when there is
     // one, otherwise from the server, without filling the saved copies.
@@ -198,6 +202,20 @@ class Streams @Inject constructor(
         val client = client() ?: return null
         if (fromAnotherServer(ref, currentSourceId())) return null
         return client.url("stream", mapOf("id" to ref.serverId) + request.params).toString()
+    }
+
+    // The type the server sends a song as for `request`, asked with its
+    // first byte, or null when it does not say or cannot be reached. A song
+    // asked for as it is can come as another file than listed. Marked like
+    // an offline copy, so an Octo server does not count it as playing.
+    suspend fun answeredType(ref: StreamRef, request: StreamRequest): String? {
+        val address = deviceAddress(ref, request) ?: return null
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                val probe = Request.Builder().url(address).header("Range", "bytes=0-0").purpose(OctoPurpose.Offline).build()
+                http.newCall(probe).execute().use { answer -> if (answer.isSuccessful) plainType(answer.header("Content-Type")) else null }
+            }.getOrNull()
+        }
     }
 
     // The name a song is saved under, or null when no server is known for it.
@@ -264,9 +282,11 @@ class Streams @Inject constructor(
 
     // A failed load is tried again as usual, except with no connection or
     // no server: then the song fails at once and is skipped, not waited on.
+    // Another file for the song fails at once too, and the song is opened
+    // again from its start (see the service's error handling).
     private inner class Retries : DefaultLoadErrorHandlingPolicy() {
         override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorInfo): Long =
-            if (loadErrorInfo.exception is StreamUnavailable || !online()) {
+            if (loadErrorInfo.exception is StreamUnavailable || loadErrorInfo.exception is StreamChanged || !online()) {
                 C.TIME_UNSET
             } else {
                 super.getRetryDelayMsFor(loadErrorInfo)
@@ -336,7 +356,10 @@ internal fun radioLoader(id: String): RadioLoader {
 // in their address, then are read from their saved copy while songs are
 // kept (filling it from the server as they go), or straight from the
 // server, signed as they open. Everything else (phone files) opens from
-// `network` as it is.
+// `network` as it is. Every answer for a server song is checked against the
+// file it began as and its saved copy's (`shapes`): see
+// ShapeGuardDataSource. One reader keeps one source of each kind for all
+// its opens, so the check sees every answer the reader had.
 @OptIn(UnstableApi::class)
 internal fun streamSources(
     network: DataSource.Factory,
@@ -345,15 +368,19 @@ internal fun streamSources(
     sign: (Uri) -> Uri,
     cached: (DataSource.Factory) -> DataSource.Factory,
     keeping: () -> Boolean,
+    shapes: StreamShapes? = null,
 ): DataSource.Factory {
-    val signed = signedSources(network, isStream, sign)
+    val signed = ShapeGuardDataSource.Factory(signedSources(network, isStream, sign), isStream, shapes)
     val saved = cached(signed)
     val split = DataSource.Factory {
+        val phone by lazy { network.createDataSource() }
+        val kept by lazy { saved.createDataSource() }
+        val direct by lazy { signed.createDataSource() }
         SplitDataSource { spec ->
             when {
-                !isStream(spec.uri) -> network.createDataSource()
-                keeping() -> saved.createDataSource()
-                else -> signed.createDataSource()
+                !isStream(spec.uri) -> phone
+                keeping() -> kept
+                else -> direct
             }
         }
     }
@@ -365,10 +392,11 @@ private fun signedSources(upstream: DataSource.Factory, isStream: (Uri) -> Boole
     ResolvingDataSource.Factory(upstream) { spec -> if (isStream(spec.uri)) spec.withUri(sign(spec.uri)) else spec }
 
 // Opens server songs and everything else from different sources, picked
-// as each one opens.
+// as each one opens. A source picked again is told of the listeners once.
 @OptIn(UnstableApi::class)
 private class SplitDataSource(private val pick: (DataSpec) -> DataSource) : DataSource {
     private val listeners = ArrayList<TransferListener>()
+    private val told = HashMap<DataSource, Int>()
     private var current: DataSource? = null
 
     override fun addTransferListener(transferListener: TransferListener) {
@@ -377,7 +405,9 @@ private class SplitDataSource(private val pick: (DataSpec) -> DataSource) : Data
 
     override fun open(dataSpec: DataSpec): Long {
         val source = pick(dataSpec)
-        listeners.forEach(source::addTransferListener)
+        val already = told[source] ?: 0
+        listeners.drop(already).forEach(source::addTransferListener)
+        told[source] = listeners.size
         current = source
         return source.open(dataSpec)
     }

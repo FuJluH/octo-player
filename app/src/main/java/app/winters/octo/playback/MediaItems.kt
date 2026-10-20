@@ -50,12 +50,21 @@ fun TrackEntity.toMediaItem(): MediaItem = toMediaItem(uri, mimeType)
 
 // A song from the catalog, playing from one of its copies: where that copy
 // is, what the player will receive from it, how loud the song is when its
-// source says, and its tempo when any copy knows it.
-fun TrackEntity.toMediaItem(uri: String?, mimeType: String?, loudness: ReplayGainInfo? = null, bpm: Int? = null): MediaItem =
+// source says, and its tempo when any copy knows it. `sniffed` leaves the
+// type off the player's item, so the player goes by the bytes that come: a
+// find can arrive as another file than the one listed. The listed type
+// still names the song until it opens.
+fun TrackEntity.toMediaItem(
+    uri: String?,
+    mimeType: String?,
+    loudness: ReplayGainInfo? = null,
+    bpm: Int? = null,
+    sniffed: Boolean = false,
+): MediaItem =
     MediaItem.Builder()
         .setMediaId(id)
         .setUri(uri)
-        .setMimeType(mimeType)
+        .setMimeType(playerMimeType(mimeType, sniffed))
         .setMediaMetadata(
             MediaMetadata.Builder()
                 .setTitle(title)
@@ -143,3 +152,7 @@ fun MediaMetadata.storedLoudness(): ReplayGainInfo? {
 // (C.TIME_UNSET while it has not), else `listedMs`.
 fun songLengthMs(listedMs: Long, playerMs: Long): Long =
     playingLengthMs(listedMs, playerMs.takeIf { it != C.TIME_UNSET })
+
+// The type the player's item names: the listed one, or none for a song
+// whose bytes may be another file than listed, so the player goes by them.
+fun playerMimeType(listed: String?, sniffed: Boolean): String? = if (sniffed) null else listed
