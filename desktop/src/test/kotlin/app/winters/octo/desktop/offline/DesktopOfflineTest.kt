@@ -88,6 +88,18 @@ class DesktopOfflineTest {
         assertFalse(file.exists())
     }
 
+    // A song asked for as it is can come as another file than listed (a
+    // whole FLAC for a listed preview): the kept file is named by what came.
+    @Test
+    fun aKeptFileIsNamedByTheTypeTheServerSent() {
+        assertEquals("flac", keptSuffix("raw", "audio/flac", "m4a"))
+        assertEquals("m4a", keptSuffix("raw", "audio/mp4; charset=binary", "opus"))
+        assertEquals("opus", keptSuffix("opus", "audio/flac", "flac"))
+        // An answer that names no type it knows keeps the listed suffix.
+        assertEquals("flac", keptSuffix("raw", "application/octet-stream", "flac"))
+        assertEquals("flac", keptSuffix("raw", null, "flac"))
+    }
+
     @Test
     fun aLowerDownloadQualityFetchesOpusThroughTheStreamParameters() {
         server.file("stream", ByteArray(100) { 3 })
