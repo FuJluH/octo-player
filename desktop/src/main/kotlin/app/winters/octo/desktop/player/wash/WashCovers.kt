@@ -36,6 +36,8 @@ import org.jetbrains.skia.ImageInfo
 import org.jetbrains.skia.MipmapMode
 import org.jetbrains.skia.Paint
 import org.jetbrains.skia.Rect
+import org.jetbrains.skia.Surface
+import app.winters.octo.desktop.ui.LateClose
 
 // A cover made ready for the background: the 512 square the wash draws
 // from, the darkest and brightest patches of it (`washRange`), from which
@@ -50,7 +52,34 @@ class WashCover(
     val main: Int = 0,
     val peak: Int = 0xFF000000.toInt(),
     val glowPeak: Int = peak,
-)
+) {
+    // Closed once the covers let it go (see WashCovers), after the frame
+    // that last drew it.
+    @Volatile var closed = false
+        private set
+
+    // A copy of the square of its own, for drawing from after this cover is
+    // let go; null once it is closed. On the window's thread, where it
+    // closes.
+    fun hold(): Image? {
+        if (closed) return null
+        val surface = Surface.makeRasterN32Premul(square.width, square.height)
+        try {
+            surface.canvas.drawImage(square, 0f, 0f)
+            return surface.makeImageSnapshot()
+        } finally {
+            surface.close()
+        }
+    }
+
+    // Closes the square after the next whole frame.
+    fun retire() {
+        LateClose.close {
+            closed = true
+            square.close()
+        }
+    }
+}
 
 // How long the wash waits before asking again for a cover the server did
 // not send, each time; then it keeps the blend.
@@ -82,8 +111,14 @@ class WashCovers(
     private val holdMs: Long = WASH_HOLD_MS,
     private val images: () -> ImageLoader? = { null },
 ) {
+    // Whoever draws a kept cover draws from a hold of their own, so the one
+    // let go here closes.
     private val kept = object : LinkedHashMap<String, WashCover>(8, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, WashCover>?) = size > 4
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, WashCover>?): Boolean {
+            if (size <= 4) return false
+            eldest?.value?.retire()
+            return true
+        }
     }
 
     // One fetch per cover at a time, however many places draw it.
@@ -138,32 +173,65 @@ class WashCovers(
                 }
             }.getOrNull()?.let { runCatching { Image.makeFromEncoded(it) }.getOrNull() }
         }
-        val cover = withContext(Dispatchers.Default) { prepared(key, image, tuning) }
         // With no cover to ask for, the blend is the answer, and is kept.
         val real = image != null || client == null || coverId == null
-        if (real) synchronized(kept) { kept[key] = cover }
-        return Made(cover, real)
+        // The blend standing in for a cover not sent yet is the same for
+        // every cover, so one is made for each tuning and kept.
+        if (!real) return Made(standIn(tuning), false)
+        val cover = try {
+            withContext(Dispatchers.Default) { prepared(key, image, tuning) }
+        } finally {
+            image?.close()
+        }
+        synchronized(kept) { kept.put(key, cover)?.takeIf { it !== cover }?.retire() }
+        return Made(cover, true)
+    }
+
+    private val standIns = HashMap<String, WashCover>()
+
+    private suspend fun standIn(tuning: WashTuning): WashCover {
+        val key = "blend|${tuning.contrast}|${tuning.saturation}|${tuning.brightnessCap}"
+        synchronized(standIns) { standIns[key] }?.let { return it }
+        val made = withContext(Dispatchers.Default) { prepared(key, null, tuning) }
+        return synchronized(standIns) {
+            standIns[key] ?: made.also {
+                // A tuning changed in Settings leaves the one before.
+                standIns.values.forEach(WashCover::retire)
+                standIns.clear()
+                standIns[key] = it
+            }
+        }.also { if (it !== made) made.square.close() }
     }
 
     companion object {
         // A cover image through every step; with none, a soft dark blend.
         fun prepared(key: String, source: Image?, tuning: WashTuning): WashCover {
-            val bitmap = Bitmap()
-            bitmap.allocPixels(SquareInfo)
-            val canvas = Canvas(bitmap)
-            if (source != null) {
-                val side = minOf(source.width, source.height).toFloat()
-                val crop = Rect.makeXYWH((source.width - side) / 2f, (source.height - side) / 2f, side, side)
-                canvas.drawImageRect(
-                    source,
-                    crop,
-                    Rect.makeWH(WashSize.toFloat(), WashSize.toFloat()),
-                    FilterMipmap(FilterMode.LINEAR, MipmapMode.LINEAR),
-                    Paint(),
-                    true,
-                )
+            val bytes = if (source == null) {
+                ByteArray(WashSize * WashSize * 4)
+            } else {
+                val bitmap = Bitmap()
+                val canvas: Canvas
+                val paint = Paint()
+                try {
+                    bitmap.allocPixels(SquareInfo)
+                    canvas = Canvas(bitmap)
+                    val side = minOf(source.width, source.height).toFloat()
+                    val crop = Rect.makeXYWH((source.width - side) / 2f, (source.height - side) / 2f, side, side)
+                    canvas.drawImageRect(
+                        source,
+                        crop,
+                        Rect.makeWH(WashSize.toFloat(), WashSize.toFloat()),
+                        FilterMipmap(FilterMode.LINEAR, MipmapMode.LINEAR),
+                        paint,
+                        true,
+                    )
+                    canvas.close()
+                    bitmap.readPixels(SquareInfo, WashSize * 4, 0, 0) ?: ByteArray(WashSize * WashSize * 4)
+                } finally {
+                    paint.close()
+                    bitmap.close()
+                }
             }
-            val bytes = bitmap.readPixels(SquareInfo, WashSize * 4, 0, 0) ?: ByteArray(WashSize * WashSize * 4)
             val pixels = if (source == null) {
                 blend()
             } else {
@@ -186,11 +254,17 @@ class WashCovers(
                 bytes[o + 2] = (p shr 16 and 0xFF).toByte()
                 bytes[o + 3] = 0xFF.toByte()
             }
+            // The image keeps the bitmap's pixels; the bitmap itself goes.
             val out = Bitmap()
-            out.allocPixels(SquareInfo)
-            out.installPixels(SquareInfo, bytes, WashSize * 4)
-            out.setImmutable()
-            return WashCover(key, Image.makeFromBitmap(out), washRange(pixels, WashSize), dominant, washPeak(pixels), raw)
+            val square = try {
+                out.allocPixels(SquareInfo)
+                out.installPixels(SquareInfo, bytes, WashSize * 4)
+                out.setImmutable()
+                Image.makeFromBitmap(out)
+            } finally {
+                out.close()
+            }
+            return WashCover(key, square, washRange(pixels, WashSize), dominant, washPeak(pixels), raw)
         }
 
         // The cover's brightest colour, leaving out the brightest fiftieth
