@@ -14,7 +14,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 // The one line the card on Home shows. Kept short.
-const val WhatsNewSummary = "Animated art, accent colors and a cooler running player"
+const val WhatsNewSummary = "Android Auto opens again, library-first search and songs ready as FLAC"
 
 // What this update brings, part by part, as markdown in the app's assets.
 // Rewrite it with each update.

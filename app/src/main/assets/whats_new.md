@@ -1,44 +1,24 @@
-**Animated art** for albums that have it, accent colors, Settings > Radio and a player that keeps your phone cooler.
+**Android Auto** opens again, search puts your library first with online songs right after, and songs downloaded ahead play as FLAC.
 
-## Sound
+## In the car
 
-- The crossfade curve says why it is grayed out: Smart transitions picks the curve while it is on, and the row says to turn it off to choose your own.
-- Casting to a speaker no longer stops or skips when the speaker goes on to the next song by itself.
+- **Android Auto opens Octo again** instead of staying on the loading screen.
+- Its tabs have icons, covers are sharper, Octo's tool playlists stay out of Playlists, and the tabs follow your library as it changes.
 
-## Library
+## Search
 
-- **Animated art**: albums with animated artwork on Apple Music play it in the player and on the album page, served by your Octo server. Choose Square, Full screen or Off in Settings > Appearance.
-- **Full screen** shows the album's tall artwork at the top of the player, blending into the background behind the controls.
-- Library health no longer calls two songs copies when their albums are different versions, like an original and its remix album.
+- Each kind is one list: a few songs from your library first, then the songs found online right after.
+- A clear line says when Octo is looking online, found nothing, or couldn't look, with Try again.
+- Your library's songs are found by their artist too, not only by their title.
 
 ## Playback
 
-- The round now playing button shows just the cover. While music is paused its ring breathes softly, and a tap still opens the small player.
-- The player and lyrics use far less power, so your phone stays cooler and the battery lasts longer. Everything looks the same.
-- A live station's notification and media keys show Stop. Play rejoins what is on air.
+- **Songs downloaded ahead play as FLAC.** With Get upcoming songs ahead on in your Octo server, the next songs of what you play are ready in lossless before they start.
+- The quality badge shows the file that actually opened, not the type the song was listed with.
+- A song whose file changed on the server starts over cleanly instead of failing partway.
+- Casting sends the speaker the type of file it really gets.
+- On mobile data, a song that turns out to be lossless keeps to your streaming quality cap.
 
 ## Server
 
-- Animated art needs your Octo server on the 2026.10.15 update or newer, with Animated art left on.
-- A song you heart that Octo downloads for you stays hearted once it is in your library.
-
-## Lyrics
-
-- The lyrics bar shows the song's round cover, with a ring for how much has played.
-- Lyrics rest while the song is paused, which saves battery.
-
-## Offline
-
-- Animated art plays only while you are looking at it. With Reduce motion or battery saver on, the still cover shows instead.
-
-## Everyday touches
-
-- The heart and More beside a song's name line up with its capital letters, a step quieter than the name.
-- A song or artist name too long for its space fades out at the end instead of being cut off.
-
-## Settings
-
-- **Accent color** in Appearance: Octo's own blue gray, eight more colors, or From the album art. Color the glass tints the bar and buttons to match.
-- **Settings > Radio** brings together Song radio (Discovery, Adventure, Artist variety, Favorites) and Live radio (stations near you and the stations on your server).
-- The Frame rate setting is gone. The player picks the right rate by itself.
-- Backups keep your accent color and your Animated art choice.
+- Downloading songs ahead needs your Octo server on the 2026.10.21 update or newer, with Get upcoming songs ahead turned on.
