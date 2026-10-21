@@ -26,7 +26,6 @@ import app.winters.octo.player.immersive.WashVisibility
 import app.winters.octo.player.immersive.dollyScale
 import app.winters.octo.player.immersive.targetFps
 import app.winters.octo.desktop.ui.LateClose
-import app.winters.octo.desktop.ui.LocalWindowGpu
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runInterruptible
 import org.jetbrains.skia.Image
@@ -65,8 +64,6 @@ fun ImmersiveWash(
     opacity: () -> Float = { 1f },
 ) {
     val renderer = remember { WashRenderer() }
-    // The window's graphics card, for the wash's own working squares.
-    val gpu = LocalWindowGpu.current
     val covers = remember { CoverSwap<Image>() }
     val first = remember { FirstFrame() }
     // One more for every frame drawn; only the drawing reads it.
@@ -135,7 +132,7 @@ fun ImmersiveWash(
                 val zoom = dollyScale(dolly())
                 val alpha = shown.value * opacity()
                 drawIntoCanvas { canvas ->
-                    if (renderer.draw(canvas.skiaCanvas, size.width, size.height, clock.motion, clock.fade.mix, zoom, alpha, gpu?.context())) first.drawn = true
+                    if (renderer.draw(canvas.skiaCanvas, size.width, size.height, clock.motion, clock.fade.mix, zoom, alpha)) first.drawn = true
                 }
             },
     )
