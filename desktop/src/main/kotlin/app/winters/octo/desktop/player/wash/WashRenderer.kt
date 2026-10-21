@@ -42,15 +42,21 @@ import kotlin.random.Random
 //     whatever the window's size), then brightened with a speck of noise
 //     by the final shader.
 // It all runs where the window draws, on the GPU; per frame the work here
-// is setting a few numbers.
-class WashRenderer {
+// is setting a few numbers. A frame's shader and filters hold the numbers
+// it was drawn with, so they are made for it and closed once it is drawn
+// (what was drawn keeps its own hold on them); the paint and the covers'
+// shaders are made once.
+class WashRenderer : AutoCloseable {
     private val composite = RuntimeShaderBuilder(RuntimeEffect.makeForShader(CompositeShader))
     private val final = RuntimeShaderBuilder(RuntimeEffect.makeForShader(FinalShader))
     private val squareBounds = IRect.makeWH(WashSize, WashSize)
     private val placement = FloatArray(6 * WashCopies.size)
     private val smooth: SamplingMode = FilterMipmap(FilterMode.LINEAR, MipmapMode.NONE)
+    private val paint = Paint()
     private var oldCover: Image? = null
     private var newCover: Image? = null
+    private var oldShader: Shader? = null
+    private var newShader: Shader? = null
 
     // The phone's platform blur radius turned into the spread Skia takes
     // (Android's blur treats a radius r as a spread of 0.57735 r + 0.5).
@@ -65,9 +71,21 @@ class WashRenderer {
 
     // The two covers the copies fade between: 512 squares that repeat at
     // their edges.
+    // The builder keeps its own hold on the shaders it is given, so the
+    // ones replaced close at once.
     fun setCovers(old: Image, new: Image) {
-        if (old !== oldCover) composite.child("oldCover", coverShader(old))
-        if (new !== newCover) composite.child("newCover", coverShader(new))
+        if (old !== oldCover) {
+            val shader = coverShader(old)
+            composite.child("oldCover", shader)
+            oldShader?.close()
+            oldShader = shader
+        }
+        if (new !== newCover) {
+            val shader = coverShader(new)
+            composite.child("newCover", shader)
+            newShader?.close()
+            newShader = shader
+        }
         oldCover = old
         newCover = new
     }
@@ -89,7 +107,8 @@ class WashRenderer {
         final.uniform("seed", Random.nextFloat() * 64f)
 
         // Steps 1 and 2, in the square's own pixels.
-        val square = ImageFilter.makeShader(composite.makeShader(), false, squareBounds)
+        val shader = composite.makeShader()
+        val square = ImageFilter.makeShader(shader, false, squareBounds)
         val blurred = ImageFilter.makeBlur(spreadAcross, spreadDown, FilterTileMode.MIRROR, square, squareBounds)
         // Step 3: magnified 2b about its centre and turned in its own space,
         // stretched over the area.
@@ -99,13 +118,31 @@ class WashRenderer {
             .makeConcat(turned(motion.turn))
             .makeConcat(Matrix33.makeTranslate(-WashSize / 2f, -WashSize / 2f))
         val placed = ImageFilter.makeMatrixTransform(place, smooth, blurred)
-        val paint = Paint().apply {
-            imageFilter = ImageFilter.makeRuntimeShader(final, "wash", placed)
-            this.alpha = (alpha.coerceIn(0f, 1f) * 255).toInt()
+        val washed = ImageFilter.makeRuntimeShader(final, "wash", placed)
+        try {
+            paint.imageFilter = washed
+            paint.alpha = (alpha.coerceIn(0f, 1f) * 255).toInt()
+            canvas.saveLayer(Rect.makeWH(width, height), paint)
+            canvas.restore()
+        } finally {
+            paint.imageFilter = null
+            washed.close()
+            placed.close()
+            blurred.close()
+            square.close()
+            shader.close()
         }
-        canvas.saveLayer(Rect.makeWH(width, height), paint)
-        canvas.restore()
         return true
+    }
+
+    override fun close() {
+        oldShader?.close()
+        newShader?.close()
+        oldShader = null
+        newShader = null
+        paint.close()
+        composite.close()
+        final.close()
     }
 
     // A turn by `radians`, built by hand: this Skia's Matrix33.makeRotate

@@ -23,6 +23,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -93,6 +94,8 @@ import app.winters.octo.player.LyricsLayout
 import app.winters.octo.player.LyricsSpec
 import app.winters.octo.player.WordBox
 import app.winters.octo.player.measureLine
+import app.winters.octo.desktop.ui.LocalWindowShown
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlin.math.ceil
@@ -185,6 +188,8 @@ fun FlowingLyrics(
     val outputOffset by rememberUpdatedState(outputOffsetMs)
     val isPlaying by rememberUpdatedState(playing)
     val seek by rememberUpdatedState(onSeek)
+    // Minimized or in the tray, nothing is seen, so no frame is asked for.
+    val windowShown by rememberUpdatedState(LocalWindowShown.current)
 
     // A fresh anchor on play, pause and a new song. Seeks are told apart
     // from time passing by the clock itself.
@@ -236,6 +241,11 @@ fun FlowingLyrics(
             engine.restart()
             var stillSince = 0L
             while (true) {
+                if (!windowShown) {
+                    snapshotFlow { windowShown }.first { it }
+                    // Back where the song is now, as when the view comes back.
+                    engine.restart()
+                }
                 val now = withFrameNanos { nanos ->
                     engine.frame(
                         nanos,

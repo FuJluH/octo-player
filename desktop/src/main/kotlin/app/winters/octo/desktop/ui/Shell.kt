@@ -417,11 +417,13 @@ private fun OmniboxOver(app: AppState, backdrop: HazeState) {
 // itself; the frame's glass is under it.
 @Composable
 private fun TitleBar(app: AppState, frame: Frame?, onClose: () -> Unit) {
+    // Over the full player, its ink, so they read on a light loop too.
+    val ink = app.playerInk.takeIf { app.fullPlayer }
     TitleStrip {
         if (app.mac) Spacer(Modifier.width(MacLightsRoom)) else Spacer(Modifier.width(Space.M))
         if (app.connection != null) {
-            IconAction(OctoIcons.Back, "Back", { app.navigator.back() }, size = ControlHeight.S, iconSize = IconSize.Toolbar, enabled = app.navigator.canGoBack)
-            IconAction(OctoIcons.Forward, "Forward", { app.navigator.forward() }, size = ControlHeight.S, iconSize = IconSize.Toolbar, enabled = app.navigator.canGoForward)
+            IconAction(OctoIcons.Back, "Back", { app.navigator.back() }, size = ControlHeight.S, iconSize = IconSize.Toolbar, enabled = app.navigator.canGoBack, tint = ink ?: Color.White)
+            IconAction(OctoIcons.Forward, "Forward", { app.navigator.forward() }, size = ControlHeight.S, iconSize = IconSize.Toolbar, enabled = app.navigator.canGoForward, tint = ink ?: Color.White)
             val settings by app.settings.state.collectAsState()
             IconAction(
                 OctoIcons.Library,
@@ -430,11 +432,12 @@ private fun TitleBar(app: AppState, frame: Frame?, onClose: () -> Unit) {
                 size = ControlHeight.S,
                 iconSize = IconSize.Toolbar,
                 active = settings.libraryOnly,
+                tint = ink ?: Color.White,
                 toggled = settings.libraryOnly,
             )
         }
         Box(Modifier.weight(1f).fillMaxHeight().then(if (frame != null) Modifier.dragsWindow(frame) else Modifier))
-        if (frame != null) WindowButtons(frame, onClose)
+        if (frame != null) WindowButtons(frame, onClose, ink)
     }
 }
 

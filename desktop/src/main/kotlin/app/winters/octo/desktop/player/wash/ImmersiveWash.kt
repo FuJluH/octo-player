@@ -6,6 +6,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -24,6 +25,7 @@ import app.winters.octo.player.immersive.WashClock
 import app.winters.octo.player.immersive.WashVisibility
 import app.winters.octo.player.immersive.dollyScale
 import app.winters.octo.player.immersive.targetFps
+import app.winters.octo.desktop.ui.LateClose
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runInterruptible
 import org.jetbrains.skia.Image
@@ -76,10 +78,22 @@ fun ImmersiveWash(
     val pace by rememberUpdatedState(speed)
     val clock = remember { WashClock(target) }
 
+    // The squares in the fade are this wash's own holds on the covers' (or
+    // blends it made), so the covers can close theirs once let go; each
+    // one the fade leaves is closed after the frame that last drew it.
+    DisposableEffect(Unit) {
+        onDispose {
+            LateClose.close(covers.old)
+            if (covers.new !== covers.old) LateClose.close(covers.new)
+            LateClose.close(renderer)
+        }
+    }
     LaunchedEffect(cover) {
-        val next = cover?.square ?: return@LaunchedEffect
+        val next = cover?.hold() ?: return@LaunchedEffect
+        val before = listOfNotNull(covers.old, covers.new)
         val (from, to) = covers.arrive(next, clock.fade, System.nanoTime() / 1_000_000, ::mixCovers)
         renderer.setCovers(from, to)
+        before.filter { it !== from && it !== to }.distinct().forEach(LateClose::close)
         arrivals++
     }
 
@@ -128,10 +142,16 @@ fun ImmersiveWash(
 // for a fade that starts while another is under way.
 internal fun mixCovers(old: Image, new: Image, mix: Float): Image {
     val surface = Surface.makeRasterN32Premul(old.width, old.height)
-    val all = Rect.makeWH(old.width.toFloat(), old.height.toFloat())
-    surface.canvas.drawImage(old, 0f, 0f)
-    surface.canvas.drawImageRect(new, all, Paint().apply { alpha = (mix.coerceIn(0f, 1f) * 255).roundToInt() })
-    return surface.makeImageSnapshot()
+    val paint = Paint().apply { alpha = (mix.coerceIn(0f, 1f) * 255).roundToInt() }
+    try {
+        val all = Rect.makeWH(old.width.toFloat(), old.height.toFloat())
+        surface.canvas.drawImage(old, 0f, 0f)
+        surface.canvas.drawImageRect(new, all, paint)
+        return surface.makeImageSnapshot()
+    } finally {
+        paint.close()
+        surface.close()
+    }
 }
 
 // Rests this long, closely. Longer waits here wake on the system's coarse

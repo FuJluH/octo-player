@@ -265,6 +265,15 @@ compose.desktop {
             "-XX:MinHeapFreeRatio=10",
             "-XX:MaxHeapFreeRatio=30",
         )
+        // How much the graphics card cache keeps of what it has drawn, as
+        // spares to reuse. Skia frees spares only once this is full and never
+        // for being old, and its 256 MB counts well under what they take on
+        // the card (Direct3D 12 lays them out in 256 MB blocks freed only
+        // when empty, which Windows also charges to the app's memory): with
+        // Full screen, the wash and lyrics playing, the app grew to 2.2 GB
+        // and on OpenGL kept growing. At 64 MB it stays near 1.27 GB on
+        // either, at the same processor use (soaks of 2026-10-20).
+        jvmArgs("-Dskiko.gpu.resourceCacheLimit=64m")
         // `-Pocto.checkPlay=build/check/tone.wav` plays a made-up tone once
         // the window opens and prints what the engine says (audio/SoundCheck.kt).
         providers.gradleProperty("octo.checkPlay").orNull?.let { jvmArgs("-Docto.checkPlay=${file(it).absolutePath}") }

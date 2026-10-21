@@ -108,6 +108,42 @@ class AnimatedArtTest {
     }
 
     @Test
+    fun theNextAlbumShowsItsOwnArtWhenItWasKnownAhead() {
+        serverWithLoop().use { server ->
+            val connection = connectionTo(server)
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            val model = AnimatedArtModel(OkHttpClient(), scope, { connection }, null)
+            model.follow(connection)
+            val first = AnimatedArt(tall = AnimatedClip(video = "https://loops.example/first.m3u8"))
+            val next = AnimatedArt(tall = AnimatedClip(video = "https://loops.example/next.m3u8"))
+            // Both known before either shows, as the next song's album is.
+            model.note("first", first)
+            model.note("next", next)
+            val album = mutableStateOf("first")
+            var shown: AnimatedArt? = null
+            lateinit var scene: ImageComposeScene
+            SwingUtilities.invokeAndWait {
+                scene = ImageComposeScene(10, 10, Density(1f)) { shown = model.artOf(album.value).value }
+            }
+            fun frame() = SwingUtilities.invokeAndWait { scene.render(System.nanoTime()).close() }
+            try {
+                frame()
+                assertEquals(first, shown)
+                album.value = "next"
+                repeat(3) { frame() }
+                assertEquals(next, shown)
+                // An album not known yet shows nothing of the one before.
+                album.value = "unknown"
+                frame()
+                assertFalse(shown == next)
+            } finally {
+                SwingUtilities.invokeAndWait { scene.close() }
+                scope.cancel()
+            }
+        }
+    }
+
+    @Test
     fun theModelFetchesALoopToTheShelfOnceAndPrefersAKeptOne() = runBlocking {
         serverWithLoop().use { server ->
             val connection = connectionTo(server)
@@ -191,6 +227,26 @@ class AnimatedArtTest {
     fun wordsOnAColorPickTheReadableInk() {
         assertEquals(Color.White, inkOn(Color(0xFF101012)))
         assertEquals(DarkInk, inkOn(Color(0xFFF4F0E8)))
+    }
+
+    @Test
+    fun theFootFillIsTheAverageOfTheCopysBottomFifth() {
+        val surface = org.jetbrains.skia.Surface.makeRasterN32Premul(4, 10)
+        val paint = org.jetbrains.skia.Paint()
+        // White above, half red and half blue along the bottom two rows.
+        surface.canvas.clear(0xFFFFFFFF.toInt())
+        paint.color = 0xFFFF0000.toInt()
+        surface.canvas.drawRect(org.jetbrains.skia.Rect.makeLTRB(0f, 8f, 2f, 10f), paint)
+        paint.color = 0xFF0000FF.toInt()
+        surface.canvas.drawRect(org.jetbrains.skia.Rect.makeLTRB(2f, 8f, 4f, 10f), paint)
+        val image = surface.makeImageSnapshot()
+        try {
+            assertEquals(0xFF7F007F.toInt(), footColor(image))
+        } finally {
+            image.close()
+            paint.close()
+            surface.close()
+        }
     }
 
     @Test

@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.lyrics
 
+import app.winters.octo.desktop.lruMap
 import app.winters.octo.desktop.server.Connection
 import app.winters.octo.desktop.server.OCTO_LYRICS
 import app.winters.octo.desktop.settings.LyricsPrefs
@@ -112,11 +113,15 @@ data class LyricsOption(
     val lyrics: Lyrics? = null,
 )
 
+// How many songs' lyrics answers are kept in memory.
+private const val LYRICS_ANSWERS_KEPT = 300
+
 // Finds a song's lyrics the way the phone does: the server first (on an
 // Octo server that keeps lyrics choices, its answer is final, and its
 // choices hold for every app), then the lyrics inside the song file, then
-// the online library when allowed. Answers are kept in memory for the
-// run; `revision` goes up for a song whose lyrics must be fetched again.
+// the online library when allowed. The last few hundred answers are kept
+// in memory; `revision` goes up for a song whose lyrics must be fetched
+// again.
 class LyricsSources(
     private val connection: () -> Connection?,
     private val http: OkHttpClient,
@@ -129,7 +134,8 @@ class LyricsSources(
     // online library could be asked, so neither change shows an old answer.
     private data class AnswerKey(val server: String?, val online: Boolean, val songId: String)
 
-    private val answers = HashMap<AnswerKey, LyricsAnswer>()
+    // The last few hundred songs' answers; older ones are asked for again.
+    private val answers = lruMap<AnswerKey, LyricsAnswer>(LYRICS_ANSWERS_KEPT)
 
     private fun keyFor(songId: String) =
         AnswerKey(settings.current.server?.let { "${it.username}@${it.address}" }, prefs.online, songId)

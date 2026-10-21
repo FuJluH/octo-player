@@ -243,12 +243,13 @@ fun Modifier.dragsWindow(frame: Frame): Modifier = pointerInput(frame) {
     }
 }
 
-// The window's own buttons: minimize, maximize or restore, and close.
+// The window's own buttons: minimize, maximize or restore, and close. Over
+// the full player they take its `ink`, a step quieter until hovered.
 @Composable
-fun RowScope.WindowButtons(frame: Frame, onClose: () -> Unit) {
-    WindowButton(OctoIcons.Minimize, "Minimize") { frame.minimize() }
-    WindowButton(if (frame.maximized) OctoIcons.Restore else OctoIcons.Maximize, if (frame.maximized) "Restore" else "Maximize") { frame.toggleMaximized() }
-    WindowButton(OctoIcons.Close, "Close", danger = true, onClick = onClose)
+fun RowScope.WindowButtons(frame: Frame, onClose: () -> Unit, ink: Color? = null) {
+    WindowButton(OctoIcons.Minimize, "Minimize", ink = ink) { frame.minimize() }
+    WindowButton(if (frame.maximized) OctoIcons.Restore else OctoIcons.Maximize, if (frame.maximized) "Restore" else "Maximize", ink = ink) { frame.toggleMaximized() }
+    WindowButton(OctoIcons.Close, "Close", danger = true, ink = ink, onClick = onClose)
 }
 
 @Composable
@@ -256,6 +257,7 @@ private fun WindowButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     description: String,
     danger: Boolean = false,
+    ink: Color? = null,
     onClick: () -> Unit,
 ) {
     val interaction = remember { MutableInteractionSource() }
@@ -269,7 +271,7 @@ private fun WindowButton(
             .background(
                 when {
                     hovered && danger -> Color(0xFFC42B1C)
-                    hovered -> Color.White.copy(alpha = 0.08f)
+                    hovered -> (ink ?: Color.White).copy(alpha = 0.08f)
                     else -> Color.Transparent
                 },
             )
@@ -281,7 +283,13 @@ private fun WindowButton(
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
-        Glyph(icon, size = 16.dp, tint = if (hovered) Color.White else OctoColors.TextSecondary)
+        val tint = when {
+            hovered && danger -> Color.White
+            ink != null -> ink.copy(alpha = if (hovered) 1f else 0.7f)
+            hovered -> Color.White
+            else -> OctoColors.TextSecondary
+        }
+        Glyph(icon, size = 16.dp, tint = tint)
         TooltipPopup(tip, description, TooltipSide.Bottom)
     }
 }

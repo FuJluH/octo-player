@@ -11,6 +11,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.skiaImageFilter
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
+import app.winters.octo.desktop.ui.LateClose
 import app.winters.octo.lyrics.engine.LineState
 import app.winters.octo.lyrics.engine.shownBlur
 import org.jetbrains.skia.Canvas
@@ -90,7 +91,11 @@ internal class LinePictures(
     // was no longer wanted by the time its turn came.
     private class Made(val line: LinePicture, val ticket: Int, val copy: BlurCopy?)
 
-    fun line(index: Int): LinePicture = lines.getOrPut(index) { LinePicture() }
+    // Pictures out with the worker, which close once back if they were
+    // replaced meanwhile.
+    private val lent = Lent()
+
+    fun line(index: Int): LinePicture = lines.getOrPut(index) { LinePicture(lent) }
 
     // Once a frame, after the engine has moved: takes in the copies made
     // since the last frame, sets each shown line's copy for the blur it has
@@ -112,9 +117,14 @@ internal class LinePictures(
             val version = st.drawVersion.intValue
             val (picture, ticket) = line.follow(version, radius, nanos) ?: continue
             val filter = blurOf(radius).skiaImageFilter
+            lent.lend(picture)
             worker.execute {
-                val copy = if (closed || !line.stillWants(ticket)) null else blurredCopy(picture, filter, radius, version)
-                if (closed) copy?.image?.close() else made.add(Made(line, ticket, copy))
+                try {
+                    val copy = if (closed || !line.stillWants(ticket)) null else blurredCopy(picture, filter, radius, version)
+                    if (closed) copy?.image?.close() else made.add(Made(line, ticket, copy))
+                } finally {
+                    lent.back(picture)
+                }
             }
         }
     }
@@ -139,10 +149,43 @@ internal class LinePictures(
             val done = made.poll() ?: break
             done.copy?.image?.close()
         }
+        LateClose.close(recorder)
+        LateClose.close(bounds)
+    }
+
+    // Pictures the worker is blurring: one replaced while it is out closes
+    // when it comes back, and any other after the next whole frame (the
+    // frame drawn keeps its own hold on it).
+    internal class Lent {
+        private val out = java.util.IdentityHashMap<Picture, Int>()
+        private val replaced = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Picture, Boolean>())
+
+        fun lend(picture: Picture) = synchronized(this) { out[picture] = (out[picture] ?: 0) + 1 }
+
+        fun back(picture: Picture) {
+            val close = synchronized(this) {
+                val left = (out[picture] ?: 1) - 1
+                if (left > 0) out[picture] = left else out.remove(picture)
+                left <= 0 && replaced.remove(picture)
+            }
+            if (close) LateClose.close(picture)
+        }
+
+        fun retire(picture: Picture) {
+            val now = synchronized(this) {
+                if (picture in out) {
+                    replaced.add(picture)
+                    false
+                } else {
+                    true
+                }
+            }
+            if (now) LateClose.close(picture)
+        }
     }
 
     // A line's latest picture, its copies and the one it shows.
-    internal class LinePicture {
+    internal class LinePicture(private val lent: Lent = Lent()) {
         // The copy the line shows instead of drawing itself, or null to draw.
         val copy = mutableStateOf<BlurCopy?>(null)
 
@@ -163,6 +206,7 @@ internal class LinePictures(
 
         fun drew(picture: Picture, version: Int) {
             if (version != pictureVersion) dropCopies()
+            this.picture?.takeIf { it !== picture }?.let(lent::retire)
             this.picture = picture
             pictureVersion = version
         }
@@ -203,6 +247,7 @@ internal class LinePictures(
 
         fun letGo() {
             dropCopies()
+            picture?.let(lent::retire)
             picture = null
             pictureVersion = -1
         }

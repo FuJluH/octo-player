@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,6 +37,8 @@ import app.winters.octo.animated.LOOP_FADE_MS
 import app.winters.octo.animated.LoopPlay
 import app.winters.octo.design.LocalReduceMotion
 import app.winters.octo.desktop.ui.DarkInk
+import app.winters.octo.desktop.ui.LateClose
+import app.winters.octo.desktop.ui.Shared
 import app.winters.octo.subsonic.AnimatedClip
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -118,15 +121,19 @@ fun softStill(still: SkiaImage?, color: Color, aspect: Float): SoftStill {
     val surface = Surface.makeRasterN32Premul(w, h)
     surface.canvas.clear(color.toArgb())
     if (still != null) {
-        surface.canvas.drawImageRect(
-            still, Rect.makeWH(still.width.toFloat(), still.height.toFloat()), Rect.makeWH(w.toFloat(), h.toFloat()),
-            FilterMipmap(FilterMode.LINEAR, MipmapMode.LINEAR), Paint(), true,
-        )
+        Paint().use { paint ->
+            surface.canvas.drawImageRect(
+                still, Rect.makeWH(still.width.toFloat(), still.height.toFloat()), Rect.makeWH(w.toFloat(), h.toFloat()),
+                FilterMipmap(FilterMode.LINEAR, MipmapMode.LINEAR), paint, true,
+            )
+        }
     }
     val small = surface.makeImageSnapshot()
     surface.close()
     val little = Surface.makeRasterN32Premul(max(2, w / 2), max(2, h / 2))
-    little.canvas.drawImageRect(small, Rect.makeWH(w.toFloat(), h.toFloat()), Rect.makeWH(little.width.toFloat(), little.height.toFloat()), FilterMipmap(FilterMode.LINEAR, MipmapMode.LINEAR), edgePaint(), true)
+    edgePaint().use { paint ->
+        little.canvas.drawImageRect(small, Rect.makeWH(w.toFloat(), h.toFloat()), Rect.makeWH(little.width.toFloat(), little.height.toFloat()), FilterMipmap(FilterMode.LINEAR, MipmapMode.LINEAR), paint, true)
+    }
     val tiny = little.makeImageSnapshot()
     little.close()
     val tone = fillTone(lightnesses(small))
@@ -136,6 +143,12 @@ fun softStill(still: SkiaImage?, color: Color, aspect: Float): SoftStill {
 // How the fill is toned for its words: white words on a fill darkened by
 // `scale`, or dark ones on a fill lifted towards white by `lift`.
 data class FillTone(val white: Boolean, val scale: Float, val lift: Float) {
+    // A color as the filter below tones it.
+    fun applied(color: Color): Color {
+        fun channel(c: Float) = (c * scale * (1 - lift) + lift).coerceIn(0f, 1f)
+        return Color(channel(color.red), channel(color.green), channel(color.blue), color.alpha)
+    }
+
     fun filter(): ColorFilter = ColorFilter.makeMatrix(
         ColorMatrix(
             scale * (1 - lift), 0f, 0f, 0f, lift,
@@ -244,19 +257,35 @@ fun TallBackdrop(
         val hPx = place.height.roundToInt()
         LaunchedEffect(wPx, hPx) { measured(wPx, hPx) }
 
-        // The still and its small copy, made once.
+        // The still and its small copy, made once, and closed once replaced
+        // (the small copy is made from the still off the window's thread,
+        // so the still waits for that too).
         var stillWaited by remember(albumId) { mutableStateOf(false) }
-        val still by produceState<SkiaImage?>(null, albumId, clip.poster) {
+        val stillHeld by produceState<Shared<SkiaImage>?>(null, albumId, clip.poster) {
             val got = withTimeoutOrNull(StillWaitMs) { model.posterFile(albumId, LoopShape.Tall, clip) }
             stillWaited = true
             val file = got ?: model.posterFile(albumId, LoopShape.Tall, clip) ?: return@produceState
-            value = withContext(Dispatchers.IO) { readStill(file) }
+            value = withContext(Dispatchers.IO) { readStill(file) }?.let(::Shared)
         }
-        val soft by produceState<SoftStill?>(null, still, stillWaited, color, aspect) {
-            if (still == null && !stillWaited) return@produceState
-            value = withContext(Dispatchers.Default) { softStill(still, color, aspect) }
+        // Each effect below closes the value it was keyed on: read inside
+        // onDispose, a delegate gives the one replacing it.
+        val held = stillHeld
+        DisposableEffect(held) { onDispose { held?.release() } }
+        val still = held?.thing
+        val soft by produceState<SoftStill?>(null, held, stillWaited, color, aspect) {
+            if (held == null && !stillWaited) return@produceState
+            value = withContext(Dispatchers.Default) {
+                if (held == null) softStill(null, color, aspect) else held.use { softStill(it, color, aspect) }
+            }
         }
-        LaunchedEffect(soft) { soft?.ink?.let(inkNow) }
+        val softNow = soft
+        DisposableEffect(softNow) {
+            onDispose {
+                LateClose.close(softNow?.small)
+                LateClose.close(softNow?.tiny)
+            }
+        }
+        LaunchedEffect(softNow) { softNow?.ink?.let(inkNow) }
         val alpha = remember(albumId) { Animatable(0f) }
         LaunchedEffect(albumId, soft != null) {
             if (soft == null) return@LaunchedEffect
@@ -273,7 +302,14 @@ fun TallBackdrop(
         val feed = rememberLoopFeed(file, play, IntSize(wPx, hPx), small = smallSize)
         val tone = remember(ready) { ready.tone.filter() }
         val blurPaint = remember(tone) { Paint().apply { colorFilter = tone } }
+        DisposableEffect(blurPaint) {
+            onDispose {
+                LateClose.close(blurPaint)
+                LateClose.close(tone)
+            }
+        }
         val sharpPaint = remember { Paint() }
+        DisposableEffect(sharpPaint) { onDispose { LateClose.close(sharpPaint) } }
         // The words' side darkens (or lightens) a little more, gently.
         val shade = if (ready.tone.white) Color.Black else Color.White
         Box(Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha.value }) {
@@ -291,6 +327,7 @@ fun TallBackdrop(
             // The blurred loop over the whole player: its tiniest copy at the
             // sharp loop's place and size, its edge colors carried out to the
             // player's edges, so the colors beside the loop are its own.
+            val footColors = remember { FootColors() }
             fun tinyNow(): SkiaImage? {
                 feed.tinies?.arrived?.intValue
                 return feed.tinies?.take()?.takeIf { feed.frames.arrived.intValue > 0 } ?: ready.tiny
@@ -302,9 +339,26 @@ fun TallBackdrop(
                     val local = Matrix33.makeTranslate(place.x, 0f).makeConcat(
                         Matrix33.makeScale(place.width / image.width, place.height / image.height),
                     )
-                    blurPaint.shader = image.makeShader(FilterTileMode.CLAMP, FilterTileMode.CLAMP, Smooth, local)
+                    // The frame's shader is made for it; what was drawn keeps
+                    // its own hold on it.
+                    val shader = image.makeShader(FilterTileMode.CLAMP, FilterTileMode.CLAMP, Smooth, local)
+                    blurPaint.shader = shader
                     drawIntoCanvas { it.skiaCanvas.drawRect(Rect.makeWH(size.width, size.height), blurPaint) }
                     blurPaint.shader = null
+                    shader.close()
+                    // Below a loop shorter than the player its last row would
+                    // run on down as stripes behind the title and controls:
+                    // there it eases into one even fill of its foot's color.
+                    if (place.height < size.height - 1f) {
+                        val foot = ready.tone.applied(Color(footColors.of(image)))
+                        val ramp = FootRamp.toPx()
+                        drawRect(
+                            Brush.verticalGradient(0f to foot.copy(alpha = 0f), 1f to foot, startY = place.height, endY = place.height + ramp),
+                            topLeft = Offset(0f, place.height),
+                            size = androidx.compose.ui.geometry.Size(size.width, ramp),
+                        )
+                        drawRect(foot, topLeft = Offset(0f, place.height + ramp), size = androidx.compose.ui.geometry.Size(size.width, size.height - place.height - ramp))
+                    }
                 },
             )
             // And at the sharp loop's own place and size, so what the sharp
@@ -374,6 +428,49 @@ fun TallBackdrop(
                 },
             )
         }
+    }
+}
+
+// How far below a short loop's foot its blurred copy takes to ease into one
+// even fill.
+private val FootRamp = 120.dp
+
+// The average color of the bottom fifth of a small copy, as opaque ARGB,
+// worked out again only when the copy changes.
+internal class FootColors {
+    private var last: SkiaImage? = null
+    private var color = 0xFF000000.toInt()
+
+    fun of(image: SkiaImage): Int {
+        if (image === last) return color
+        last = image
+        color = footColor(image) ?: color
+        return color
+    }
+}
+
+internal fun footColor(image: SkiaImage): Int? {
+    val info = ImageInfo(image.width, image.height, ColorType.BGRA_8888, ColorAlphaType.PREMUL)
+    val bitmap = org.jetbrains.skia.Bitmap()
+    try {
+        if (!bitmap.allocPixels(info) || !image.readPixels(bitmap, 0, 0)) return null
+        val bytes = bitmap.readPixels(info, image.width * 4, 0, 0) ?: return null
+        val from = image.height - maxOf(1, image.height / 5)
+        var r = 0L
+        var g = 0L
+        var b = 0L
+        var n = 0
+        for (y in from until image.height) for (x in 0 until image.width) {
+            val o = (y * image.width + x) * 4
+            b += bytes[o].toInt() and 0xFF
+            g += bytes[o + 1].toInt() and 0xFF
+            r += bytes[o + 2].toInt() and 0xFF
+            n++
+        }
+        if (n == 0) return null
+        return (0xFF shl 24) or ((r / n).toInt() shl 16) or ((g / n).toInt() shl 8) or (b / n).toInt()
+    } finally {
+        bitmap.close()
     }
 }
 
