@@ -54,9 +54,7 @@ import app.winters.octo.desktop.settings.systemTextScale
 import app.winters.octo.desktop.settings.textScale
 import app.winters.octo.desktop.system.AudioDropZone
 import app.winters.octo.desktop.system.LocalSystem
-import app.winters.octo.desktop.system.COLLECT_EVERY
 import app.winters.octo.desktop.system.SOAK_RUN
-import app.winters.octo.desktop.system.collectWhilePlaying
 import app.winters.octo.desktop.system.SingleInstance
 import app.winters.octo.desktop.system.SystemIntegration
 import app.winters.octo.desktop.system.letRunningOctoComeForward
@@ -250,9 +248,6 @@ fun main(args: Array<String>) {
             }
             System.getProperty(SOAK_RUN)?.let { path ->
                 LaunchedEffect(ready) { soakRun(ready.app, File(path)) }
-            }
-            System.getProperty(COLLECT_EVERY)?.toLongOrNull()?.takeIf { it > 0 }?.let { every ->
-                LaunchedEffect(ready) { collectWhilePlaying(ready.app.player, every) }
             }
             LaunchedEffect(ready) {
                 // The covers of the song on and the next ones, ready ahead.
