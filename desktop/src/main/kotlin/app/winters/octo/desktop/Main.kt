@@ -105,6 +105,8 @@ import app.winters.octo.desktop.system.OctopusArt
 import app.winters.octo.desktop.system.OctopusPainter
 import java.awt.image.BufferedImage
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import kotlinx.coroutines.withContext
 
 // The window's icons, one drawn from the vector for each size Windows may
@@ -114,6 +116,14 @@ private fun windowIconsAhead(): CompletableFuture<List<BufferedImage>> =
 
 // What the window runs once the app is made.
 private class Opened(val app: AppState, val system: SystemIntegration, val updates: DesktopUpdates)
+
+// The system reads done when Octo comes back to the front: its "Animation
+// effects" and its text size, which are native calls. One thread for them
+// for the whole run — coming back to the window a hundred times made a
+// hundred threads before, each with a stack of its own charged to the app.
+private val systemReads: ExecutorService by lazy {
+    Executors.newSingleThreadExecutor { task -> Thread(task, "Octo system reads").apply { isDaemon = true } }
+}
 
 // How long the window waits for its first frame before the app is made in
 // any case (a window starting in the tray draws none).
@@ -334,14 +344,14 @@ fun main(args: Array<String>) {
                         override fun windowGainedFocus(e: WindowEvent?) {
                             app.queueSync.check()
                             app.library?.look()
-                            Thread {
+                            systemReads.submit {
                                 val calm = systemReducesMotion(os)
                                 val text = systemTextScale(os)
                                 SwingUtilities.invokeLater {
                                     systemCalm = calm
                                     systemText = text
                                 }
-                            }.apply { isDaemon = true }.start()
+                            }
                         }
                     })
                     system.focusWindow = {
