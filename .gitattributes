@@ -8,3 +8,9 @@ gradlew text eol=lf
 
 # Signed test fixtures: their bytes are what was signed.
 shared/core/src/commonTest/resources/update/** -text
+
+# Patch series keep their own bytes: git am reads them as made, and
+# a CRLF checkout of a patch is what makes "patch does not apply".
+*.patch -text
+*.bundle binary
+*.ps1 text eol=crlf
