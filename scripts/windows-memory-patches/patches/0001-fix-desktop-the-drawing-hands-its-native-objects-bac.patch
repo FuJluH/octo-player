@@ -1,0 +1,473 @@
+From 5e0f759cdec8a9c1df0ac51fd850c49d909cd4d8 Mon Sep 17 00:00:00 2001
+From: FuJluH <Support@fujluh.ru>
+Date: Sun, 25 Oct 2026 23:49:15 +0800
+Subject: [PATCH 1/4] fix(desktop): the drawing hands its native objects back
+
+Skia keeps a native object per Paint, Path, Image, Bitmap, Canvas and
+Surface until the collector runs, so on Windows an app that draws
+constantly pays for them at once in private bytes and only later gives
+them back. The hot paths made new ones on every repaint:
+
+- the tray's icon drew a whole surface chain per player state change
+  (OctopusArt.icon) and closed nothing of it; the surfaces are closed
+  now, and the fifteen window icons are drawn once for the run rather
+  than per window shown;
+- the taskbar paint, the wash's cover, the shrunken covers and every
+  Image, Bitmap, Canvas and Paint in the playlist art store close as
+  far as the drawing is through (LateClose where a frame still draws
+  with the object, use elsewhere);
+- the equalizer's curve made two paths per animated frame and the
+  slider and loop paints stayed; they close through LateClose and on
+  dispose;
+- the lyrics' word mask left its layer open over every frame drawn
+  after a throw in the drawing, so each later frame drew into the
+  frame before it and the layers piled up. The restore is in a finally.
+
+The playlist art store's byte tally counted every picture added and
+none taken away, so it kept telling the cache it was full.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ .../app/winters/octo/design/LineSlider.kt     |  7 ++
+ .../winters/octo/desktop/animated/LoopArt.kt  |  2 +
+ .../winters/octo/desktop/library/Covers.kt    |  4 +-
+ .../octo/desktop/library/PlaylistArtStore.kt  | 92 +++++++++++++------
+ .../octo/desktop/lyrics/FlowingLyrics.kt      | 16 +++-
+ .../app/winters/octo/desktop/sound/EqCurve.kt |  7 ++
+ .../winters/octo/desktop/system/OctopusArt.kt | 65 ++++++++-----
+ .../octo/desktop/system/TaskbarIcons.kt       | 25 +++--
+ .../app/winters/octo/desktop/ui/Ambience.kt   | 13 ++-
+ 9 files changed, 164 insertions(+), 67 deletions(-)
+
+diff --git a/desktop-design/src/main/kotlin/app/winters/octo/design/LineSlider.kt b/desktop-design/src/main/kotlin/app/winters/octo/design/LineSlider.kt
+index f775ac6..f6f2a1d 100644
+--- a/desktop-design/src/main/kotlin/app/winters/octo/design/LineSlider.kt
++++ b/desktop-design/src/main/kotlin/app/winters/octo/design/LineSlider.kt
+@@ -13,6 +13,7 @@ import androidx.compose.foundation.interaction.collectIsHoveredAsState
+ import androidx.compose.foundation.layout.Box
+ import androidx.compose.foundation.layout.height
+ import androidx.compose.runtime.Composable
++import androidx.compose.runtime.DisposableEffect
+ import androidx.compose.runtime.getValue
+ import androidx.compose.runtime.mutableFloatStateOf
+ import androidx.compose.runtime.mutableStateOf
+@@ -109,6 +110,12 @@ fun LineSlider(
+             strokeCap = PaintStrokeCap.ROUND
+         }
+     }
++    // The sliders in the settings pages come and go; the paint's own copy of
++    // what it draws is kept on the graphics side, so a slider that leaves
++    // hands it back there rather than leaving it for the collector.
++    DisposableEffect(glowPaint) {
++        onDispose { glowPaint.close() }
++    }
+     val jewel = if (look == SliderLook.Jewel) rememberJewelLook(hovered, held) else null
+     val followed = if (look == SliderLook.Jewel) rememberFollowedFraction(fraction, dragging) else null
+     val measurer = rememberTextMeasurer()
+diff --git a/desktop/src/main/kotlin/app/winters/octo/desktop/animated/LoopArt.kt b/desktop/src/main/kotlin/app/winters/octo/desktop/animated/LoopArt.kt
+index 5e27083..05372c4 100644
+--- a/desktop/src/main/kotlin/app/winters/octo/desktop/animated/LoopArt.kt
++++ b/desktop/src/main/kotlin/app/winters/octo/desktop/animated/LoopArt.kt
+@@ -49,6 +49,7 @@ import app.winters.octo.audio.loopVideoAvailable
+ import app.winters.octo.design.LocalReduceMotion
+ import app.winters.octo.design.artworkRim
+ import app.winters.octo.desktop.ui.DarkInk
++import app.winters.octo.desktop.ui.LateClose
+ import app.winters.octo.subsonic.AnimatedClip
+ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.NonCancellable
+@@ -200,6 +201,7 @@ fun LoopFrames(file: File?, play: LoopPlay, modifier: Modifier = Modifier, fadeM
+     var size by remember { mutableStateOf(IntSize.Zero) }
+     val feed = rememberLoopFeed(file, play, size, fadeMs = fadeMs)
+     val paint = remember { Paint() }
++    DisposableEffect(paint) { onDispose { LateClose.close(paint) } }
+     Spacer(
+         modifier
+             .onSizeChanged { size = it }
+diff --git a/desktop/src/main/kotlin/app/winters/octo/desktop/library/Covers.kt b/desktop/src/main/kotlin/app/winters/octo/desktop/library/Covers.kt
+index 15d3481..ec00df5 100644
+--- a/desktop/src/main/kotlin/app/winters/octo/desktop/library/Covers.kt
++++ b/desktop/src/main/kotlin/app/winters/octo/desktop/library/Covers.kt
+@@ -421,7 +421,9 @@ private fun shrink(image: Image, width: Int, height: Int): Bitmap {
+     while (current.width >= width * 2 && current.height >= height * 2) {
+         val half = draw(current, (current.width + 1) / 2, (current.height + 1) / 2, FilterMipmap(FilterMode.LINEAR, MipmapMode.NONE))
+         current.close()
+-        current = Image.makeFromBitmap(half)
++        // makeFromBitmap takes the pixels into an image of its own, so the
++        // step's bitmap is free the moment it has been.
++        current = Image.makeFromBitmap(half).also { half.close() }
+     }
+     val done = draw(current, width, height, CubicResampler(1f / 3, 1f / 3))
+     current.close()
+diff --git a/desktop/src/main/kotlin/app/winters/octo/desktop/library/PlaylistArtStore.kt b/desktop/src/main/kotlin/app/winters/octo/desktop/library/PlaylistArtStore.kt
+index b08b6c0..884db7b 100644
+--- a/desktop/src/main/kotlin/app/winters/octo/desktop/library/PlaylistArtStore.kt
++++ b/desktop/src/main/kotlin/app/winters/octo/desktop/library/PlaylistArtStore.kt
+@@ -16,6 +16,7 @@ import app.winters.octo.covers.coverFileName
+ import app.winters.octo.covers.coverPalette
+ import app.winters.octo.covers.coverSwatches
+ import app.winters.octo.covers.quarterSwatches
++import app.winters.octo.desktop.lruMap
+ import app.winters.octo.design.CoverFontFamily
+ import app.winters.octo.design.coverMeasurer
+ import app.winters.octo.design.designCover
+@@ -64,7 +65,10 @@ class PlaylistArtStore(private val http: OkHttpClient) {
+     // Where covers are kept between runs; none in tests.
+     @Volatile var folder: File? = null
+ 
+-    private val palettes = HashMap<String, CoverPalette>()
++    // The lists' colours, the ones used last kept: a long run through the
++    // library touches a great many lists, and each one's colours are small
++    // but never thrown out on their own.
++    private val palettes = lruMap<String, CoverPalette>(PalettesKept)
+     private val pictures = object : LinkedHashMap<String, ImageBitmap>(64, 0.75f, true) {
+         var bytes = 0L
+ 
+@@ -114,7 +118,7 @@ class PlaylistArtStore(private val http: OkHttpClient) {
+         known(key)?.let { return it }
+         val file = folder?.let { File(File(it, "art"), coverFileName(key, "png")) }
+         val stored = withContext(Dispatchers.IO) {
+-            file?.takeIf(File::isFile)?.let { runCatching { Image.makeFromEncoded(it.readBytes()).toComposeImageBitmap() }.getOrNull() }
++            file?.takeIf(File::isFile)?.let { runCatching { Image.makeFromEncoded(it.readBytes()).use { it.toComposeImageBitmap() } }.getOrNull() }
+         }
+         if (stored != null) return keep(key, stored)
+         val drawn = drawing.withPermit {
+@@ -135,14 +139,18 @@ class PlaylistArtStore(private val http: OkHttpClient) {
+     }
+ 
+     private fun keep(key: String, image: ImageBitmap): ImageBitmap = synchronized(pictures) {
+-        if (pictures.put(key, image) == null) pictures.bytes += image.width.toLong() * image.height * 4
++        // Only the difference is counted: the same cover drawn at a bigger
++        // size replaces the one kept, and the tally that lets the map know
++        // its own weight has to follow it.
++        val replaced = pictures.put(key, image)
++        pictures.bytes += image.width.toLong() * image.height * 4 - (replaced?.let { it.width.toLong() * it.height * 4 } ?: 0L)
+         image
+     }
+ 
+     private fun save(file: File, image: ImageBitmap) {
+         runCatching {
+             file.parentFile.mkdirs()
+-            val png = Image.makeFromBitmap(image.asSkiaBitmap()).encodeToData(EncodedImageFormat.PNG)?.bytes ?: return
++            val png = Image.makeFromBitmap(image.asSkiaBitmap()).use { it.encodeToData(EncodedImageFormat.PNG) }?.bytes ?: return
+             val temp = File(file.parentFile, file.name + ".tmp")
+             temp.writeBytes(png)
+             if (!temp.renameTo(file)) temp.delete()
+@@ -173,6 +181,9 @@ class PlaylistArtStore(private val http: OkHttpClient) {
+         private const val DiskBytes = 96L * 1024 * 1024
+         private const val TrimEvery = 40
+ 
++        // How many lists' colours are remembered at once.
++        private const val PalettesKept = 512
++
+         // Covers are looked at this small: plenty for their colours.
+         const val SampleSize = 64
+ 
+@@ -187,16 +198,27 @@ class PlaylistArtStore(private val http: OkHttpClient) {
+         // size, as ARGB pixels and its side.
+         fun decodePixels(bytes: ByteArray): Pair<IntArray, Int> {
+             val image = Image.makeFromEncoded(bytes)
+-            val side = image.width
+-            val info = ImageInfo(side, image.height, ColorType.BGRA_8888, ColorAlphaType.PREMUL)
+-            val bitmap = Bitmap()
+-            bitmap.allocPixels(info)
+-            Canvas(bitmap).drawImage(image, 0f, 0f)
+-            val raw = bitmap.readPixels(info, side * 4, 0, 0)!!
+-            return IntArray(side * image.height) { i ->
+-                val o = i * 4
+-                (0xFF shl 24) or ((raw[o + 2].toInt() and 0xFF) shl 16) or ((raw[o + 1].toInt() and 0xFF) shl 8) or (raw[o].toInt() and 0xFF)
+-            } to side
++            try {
++                val side = image.width
++                val info = ImageInfo(side, image.height, ColorType.BGRA_8888, ColorAlphaType.PREMUL)
++                val bitmap = Bitmap()
++                try {
++                    bitmap.allocPixels(info)
++                    Canvas(bitmap).use { it.drawImage(image, 0f, 0f) }
++                    val raw = bitmap.readPixels(info, side * 4, 0, 0)!!
++                    return IntArray(side * image.height) { i ->
++                        val o = i * 4
++                        (0xFF shl 24) or ((raw[o + 2].toInt() and 0xFF) shl 16) or ((raw[o + 1].toInt() and 0xFF) shl 8) or (raw[o].toInt() and 0xFF)
++                    } to side
++                } finally {
++                    bitmap.close()
++                }
++            } finally {
++                // The pixels come out as an IntArray, so nothing here outlives
++                // the call: a sidebar of lists re-decodes a background every
++                // time one falls out of the four kept.
++                image.close()
++            }
+         }
+ 
+         // ARGB pixels, `side` square, as a picture.
+@@ -221,21 +243,33 @@ class PlaylistArtStore(private val http: OkHttpClient) {
+         // A picture's pixels at 64 square, as ARGB.
+         fun coverPixels(bytes: ByteArray): IntArray? {
+             val source = runCatching { Image.makeFromEncoded(bytes) }.getOrNull() ?: return null
+-            val info = ImageInfo(SampleSize, SampleSize, ColorType.BGRA_8888, ColorAlphaType.PREMUL)
+-            val bitmap = Bitmap()
+-            bitmap.allocPixels(info)
+-            Canvas(bitmap).drawImageRect(
+-                source,
+-                Rect.makeWH(source.width.toFloat(), source.height.toFloat()),
+-                Rect.makeWH(SampleSize.toFloat(), SampleSize.toFloat()),
+-                FilterMipmap(FilterMode.LINEAR, MipmapMode.LINEAR),
+-                Paint(),
+-                true,
+-            )
+-            val raw = bitmap.readPixels(info, SampleSize * 4, 0, 0) ?: return null
+-            return IntArray(SampleSize * SampleSize) { i ->
+-                val o = i * 4
+-                (0xFF shl 24) or ((raw[o + 2].toInt() and 0xFF) shl 16) or ((raw[o + 1].toInt() and 0xFF) shl 8) or (raw[o].toInt() and 0xFF)
++            try {
++                val info = ImageInfo(SampleSize, SampleSize, ColorType.BGRA_8888, ColorAlphaType.PREMUL)
++                val bitmap = Bitmap()
++                val paint = Paint()
++                try {
++                    bitmap.allocPixels(info)
++                    Canvas(bitmap).use { canvas ->
++                        canvas.drawImageRect(
++                            source,
++                            Rect.makeWH(source.width.toFloat(), source.height.toFloat()),
++                            Rect.makeWH(SampleSize.toFloat(), SampleSize.toFloat()),
++                            FilterMipmap(FilterMode.LINEAR, MipmapMode.LINEAR),
++                            paint,
++                            true,
++                        )
++                    }
++                    val raw = bitmap.readPixels(info, SampleSize * 4, 0, 0) ?: return null
++                    return IntArray(SampleSize * SampleSize) { i ->
++                        val o = i * 4
++                        (0xFF shl 24) or ((raw[o + 2].toInt() and 0xFF) shl 16) or ((raw[o + 1].toInt() and 0xFF) shl 8) or (raw[o].toInt() and 0xFF)
++                    }
++                } finally {
++                    paint.close()
++                    bitmap.close()
++                }
++            } finally {
++                source.close()
+             }
+         }
+     }
+diff --git a/desktop/src/main/kotlin/app/winters/octo/desktop/lyrics/FlowingLyrics.kt b/desktop/src/main/kotlin/app/winters/octo/desktop/lyrics/FlowingLyrics.kt
+index 041f5a0..a5efe4e 100644
+--- a/desktop/src/main/kotlin/app/winters/octo/desktop/lyrics/FlowingLyrics.kt
++++ b/desktop/src/main/kotlin/app/winters/octo/desktop/lyrics/FlowingLyrics.kt
+@@ -539,10 +539,18 @@ private fun DrawScope.fillWord(
+         Brush.horizontalGradient(0f to lit, near to lit, far to unlit, 1f to unlit, startX = left, endX = right)
+     }
+     val canvas = drawContext.canvas
+-    canvas.saveLayer(area, Paint())
+-    paint(1f)
+-    drawRect(mask, topLeft = area.topLeft, size = area.size, blendMode = BlendMode.DstIn)
+-    canvas.restore()
++    // The restore is in a finally: the mask and the word drawing run
++    // between save and restore, so a throw there used to leave the layer
++    // open over every frame drawn after it — the lyrics page then drew
++    // each frame into the layer before it, and the layers piled up.
++    val layer = Paint()
++    try {
++        canvas.saveLayer(area, layer)
++        paint(1f)
++        drawRect(mask, topLeft = area.topLeft, size = area.size, blendMode = BlendMode.DstIn)
++    } finally {
++        canvas.restore()
++    }
+ }
+ 
+ // A word at one brightness: whole, or letter by letter while it blooms.
+diff --git a/desktop/src/main/kotlin/app/winters/octo/desktop/sound/EqCurve.kt b/desktop/src/main/kotlin/app/winters/octo/desktop/sound/EqCurve.kt
+index 05ff040..3f1e6a3 100644
+--- a/desktop/src/main/kotlin/app/winters/octo/desktop/sound/EqCurve.kt
++++ b/desktop/src/main/kotlin/app/winters/octo/desktop/sound/EqCurve.kt
+@@ -57,6 +57,7 @@ import app.winters.octo.sound.SoundSettings
+ import app.winters.octo.ui.sound.MAX_HZ
+ import app.winters.octo.ui.sound.MIN_HZ
+ import app.winters.octo.ui.sound.cleanGain
++import app.winters.octo.desktop.ui.LateClose
+ import app.winters.octo.ui.sound.readDb
+ import app.winters.octo.ui.sound.readHz
+ import app.winters.octo.ui.sound.shortHz
+@@ -316,6 +317,12 @@ private fun DrawScope.curve(plot: Plot, gains: List<Float>, color: Color, lit: F
+         }
+     }
+     drawPath(path, color, style = Stroke(stroke, cap = StrokeCap.Round, join = StrokeJoin.Round))
++    // Both paths are handed to LateClose: the curve is made again on every
++    // frame the page animates, and what a frame draws keeps its own hold on
++    // them until that frame is through. Leaving them for the collector is
++    // what grew the app over a long listen.
++    LateClose.close(fill.asSkiaPath())
++    LateClose.close(path.asSkiaPath())
+ }
+ 
+ private fun DrawScope.node(at: Offset, color: Color, lit: Float, big: Boolean) {
+diff --git a/desktop/src/main/kotlin/app/winters/octo/desktop/system/OctopusArt.kt b/desktop/src/main/kotlin/app/winters/octo/desktop/system/OctopusArt.kt
+index 4210a43..4d3c323 100644
+--- a/desktop/src/main/kotlin/app/winters/octo/desktop/system/OctopusArt.kt
++++ b/desktop/src/main/kotlin/app/winters/octo/desktop/system/OctopusArt.kt
+@@ -23,6 +23,7 @@ import org.jetbrains.skia.Surface
+ import org.jetbrains.skia.svg.SVGDOM
+ import java.awt.image.BufferedImage
+ import java.io.ByteArrayInputStream
++import java.util.Collections
+ import javax.imageio.ImageIO
+ import kotlin.math.ceil
+ import kotlin.math.floor
+@@ -97,21 +98,28 @@ object OctopusArt {
+     // outline's edges sit on whole pixels, so it stays crisp at 100% scaling.
+     fun icon(size: Int, shape: IconShape? = FlatShape): Image {
+         val surface = Surface.makeRasterN32Premul(size, size)
+-        val canvas = surface.canvas
+-        canvas.clear(Color.TRANSPARENT)
+-        if (shape == null) {
+-            art(size).use { canvas.drawImage(it, 0f, 0f) }
+-        } else {
+-            val margin = size * shape.margin
+-            val start = if (size <= SnapBelow) floor(margin + 0.5f) else margin
+-            val side = size - start * 2
+-            val radius = size * shape.radius
+-            canvas.save()
+-            canvas.clipRRect(RRect.makeXYWH(start, start, side, side, radius), true)
+-            art(ceil(side).toInt()).use { canvas.drawImageRect(it, Rect.makeWH(it.width.toFloat(), it.height.toFloat()), Rect.makeXYWH(start, start, side, side), SamplingMode.LINEAR, null, true) }
+-            canvas.restore()
++        try {
++            val canvas = surface.canvas
++            canvas.clear(Color.TRANSPARENT)
++            if (shape == null) {
++                art(size).use { canvas.drawImage(it, 0f, 0f) }
++            } else {
++                val margin = size * shape.margin
++                val start = if (size <= SnapBelow) floor(margin + 0.5f) else margin
++                val side = size - start * 2
++                val radius = size * shape.radius
++                canvas.save()
++                canvas.clipRRect(RRect.makeXYWH(start, start, side, side, radius), true)
++                art(ceil(side).toInt()).use { canvas.drawImageRect(it, Rect.makeWH(it.width.toFloat(), it.height.toFloat()), Rect.makeXYWH(start, start, side, side), SamplingMode.LINEAR, null, true) }
++                canvas.restore()
++            }
++            return surface.makeImageSnapshot()
++        } finally {
++            // The snapshot keeps pixels of its own, so the surface's raster
++            // is free from here on. It is the larger of the two, and this is
++            // drawn again for the tray whenever the player's state changes.
++            surface.close()
+         }
+-        return surface.makeImageSnapshot()
+     }
+ 
+     // The square art `side` pixels across, drawn at a power of two times
+@@ -121,16 +129,19 @@ object OctopusArt {
+         var steps = 2
+         while (side shl steps < ArtDrawnAt && steps < MaxHalvings) steps++
+         val drawn = side shl steps
+-        var image = Surface.makeRasterN32Premul(drawn, drawn).run {
+-            canvas.clear(Color.TRANSPARENT)
+-            drawSquare(canvas, drawn.toFloat())
+-            makeImageSnapshot()
++        // Each square is snapshotted into its own surface and the surface
++        // let go at once: `drawn` is up to ArtDrawnAt across, several times
++        // the size asked for, and the snapshots keep pixels of their own.
++        var image = Surface.makeRasterN32Premul(drawn, drawn).use { square ->
++            square.canvas.clear(Color.TRANSPARENT)
++            drawSquare(square.canvas, drawn.toFloat())
++            square.makeImageSnapshot()
+         }
+         repeat(steps) {
+             val half = image.width / 2
+-            val next = Surface.makeRasterN32Premul(half, half).run {
+-                canvas.drawImageRect(image, Rect.makeWH(image.width.toFloat(), image.height.toFloat()), Rect.makeWH(half.toFloat(), half.toFloat()), SamplingMode.CATMULL_ROM, null, true)
+-                makeImageSnapshot()
++            val next = Surface.makeRasterN32Premul(half, half).use { step ->
++                step.canvas.drawImageRect(image, Rect.makeWH(image.width.toFloat(), image.height.toFloat()), Rect.makeWH(half.toFloat(), half.toFloat()), SamplingMode.CATMULL_ROM, null, true)
++                step.makeImageSnapshot()
+             }
+             image.close()
+             image = next
+@@ -138,14 +149,20 @@ object OctopusArt {
+         return image
+     }
+ 
+-    fun iconPng(size: Int, shape: IconShape? = FlatShape): ByteArray = icon(size, shape).encodeToData(EncodedImageFormat.PNG)!!.bytes
++    fun iconPng(size: Int, shape: IconShape? = FlatShape): ByteArray = icon(size, shape).use { it.encodeToData(EncodedImageFormat.PNG)!!.bytes }
+ 
+     fun iconImage(size: Int, shape: IconShape? = FlatShape): BufferedImage = ImageIO.read(ByteArrayInputStream(iconPng(size, shape)))
+ 
+     // The window's icons, one drawn for each size Windows may ask for (the
+     // title bar, Alt+Tab and the taskbar, at every scaling), so none is a
+-    // smaller copy of a bigger one.
+-    fun windowIcons(shape: IconShape? = null): List<BufferedImage> = WindowIconSizes.map { iconImage(it, shape) }
++    // smaller copy of a bigger one. Drawn once for the run and kept: every
++    // window shows the same octopus, and drawing them costs fifteen icon
++    // chains, which is what a mini player opened now and then would pay
++    // over again. Windows only reads these; it never changes them.
++    private val drawn = Collections.synchronizedMap(mutableMapOf<IconShape?, List<BufferedImage>>())
++
++    fun windowIcons(shape: IconShape? = null): List<BufferedImage> =
++        synchronized(drawn) { drawn.getOrPut(shape) { WindowIconSizes.map { iconImage(it, shape) } } }
+ 
+     // At and below this size, the icon's outline sits on whole pixels.
+     private const val SnapBelow = 32
+diff --git a/desktop/src/main/kotlin/app/winters/octo/desktop/system/TaskbarIcons.kt b/desktop/src/main/kotlin/app/winters/octo/desktop/system/TaskbarIcons.kt
+index 003c730..6077d64 100644
+--- a/desktop/src/main/kotlin/app/winters/octo/desktop/system/TaskbarIcons.kt
++++ b/desktop/src/main/kotlin/app/winters/octo/desktop/system/TaskbarIcons.kt
+@@ -42,14 +42,23 @@ private fun drawn(size: Int, draw: (Canvas, Paint) -> Unit): ByteArray {
+         color = 0xFFFFFFFF.toInt()
+         isAntiAlias = true
+     }
+-    draw(surface.canvas, paint)
+-    val info = ImageInfo(size, size, ColorType.BGRA_8888, ColorAlphaType.UNPREMUL)
+-    val bitmap = Bitmap().apply { allocPixels(info) }
+-    surface.readPixels(bitmap, 0, 0)
+-    val pixels = bitmap.readPixels(info, size * 4, 0, 0) ?: ByteArray(size * size * 4)
+-    bitmap.close()
+-    surface.close()
+-    return pixels
++    try {
++        draw(surface.canvas, paint)
++        val info = ImageInfo(size, size, ColorType.BGRA_8888, ColorAlphaType.UNPREMUL)
++        val bitmap = Bitmap().apply { allocPixels(info) }
++        try {
++            surface.readPixels(bitmap, 0, 0)
++            return bitmap.readPixels(info, size * 4, 0, 0) ?: ByteArray(size * size * 4)
++        } finally {
++            bitmap.close()
++        }
++    } finally {
++        // The taskbar's four icons are drawn afresh every time playing
++        // changes, so nothing of one drawing is left behind for the
++        // collector to get round to later.
++        paint.close()
++        surface.close()
++    }
+ }
+ 
+ // An icon file's paths, filling the square as its grid lays them out.
+diff --git a/desktop/src/main/kotlin/app/winters/octo/desktop/ui/Ambience.kt b/desktop/src/main/kotlin/app/winters/octo/desktop/ui/Ambience.kt
+index 2001d2c..4318525 100644
+--- a/desktop/src/main/kotlin/app/winters/octo/desktop/ui/Ambience.kt
++++ b/desktop/src/main/kotlin/app/winters/octo/desktop/ui/Ambience.kt
+@@ -67,7 +67,18 @@ internal object OctoArt {
+         val image = runCatching {
+             OctopusArt.icon(OCTO_ART_PX, shape = null)
+         }.getOrNull()
+-        return WashCovers.prepared(keyFor(tuning), image, tuning).also { made = it }
++        // prepared takes the icon's pixels into its own 512 square and keeps
++        // no hold of the image, so this is where it goes back.
++        val cover = try {
++            WashCovers.prepared(keyFor(tuning), image, tuning)
++        } finally {
++            image?.close()
++        }
++        // A tuning changed in Settings leaves the square drawn for the one
++        // before; retired, it closes after the frame that last drew it.
++        made?.retire()
++        made = cover
++        return cover
+     }
+ 
+     private fun keyFor(tuning: WashTuning) = "octo|${tuning.contrast}|${tuning.saturation}|${tuning.brightnessCap}"
+-- 
+2.55.0.windows.5
+

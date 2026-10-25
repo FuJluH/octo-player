@@ -1,0 +1,100 @@
+From 0c7e4194251f00d52f0fdcf81b6bbfdbb7132854 Mon Sep 17 00:00:00 2001
+From: FuJluH <Support@fujluh.ru>
+Date: Sun, 25 Oct 2026 23:49:27 +0800
+Subject: [PATCH 4/4] fix(audio-engine): the engine's own memory stops growing
+ per song
+
+Two records in the Rust engine only ever grew over a long listen:
+
+- Player::infos kept the deck info of every song it had ever played,
+  keyed by song id. It now keeps 256, and trimming keeps whatever the
+  queue holds and the song playing and next in line;
+- a deck's PCM fifo shrank only to the room its "start after" gate
+  asked for, which is more than the steady state needs, and kept that
+  capacity for the rest of the run. Once the read rate has settled it
+  drops back to the steady size plus a margin (Fifo::shrink_to).
+
+206 engine tests pass; the deck, fifo and player tests included.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ audio-engine/src/deck.rs   | 10 ++++++++--
+ audio-engine/src/fifo.rs   |  7 +++++++
+ audio-engine/src/player.rs | 14 ++++++++++++++
+ 3 files changed, 29 insertions(+), 2 deletions(-)
+
+diff --git a/audio-engine/src/deck.rs b/audio-engine/src/deck.rs
+index 400737c..a47e865 100644
+--- a/audio-engine/src/deck.rs
++++ b/audio-engine/src/deck.rs
+@@ -199,9 +199,15 @@ impl Deck {
+         let samples = state.pcm.pop_into(out);
+         let frames = samples / 2;
+         state.head_secs += frames as f64 / rate;
+-        // Once playing, only the usual amount is kept ahead.
+-        if frames > 0 && state.steady > 0 {
++        // Once playing, only the usual amount is kept ahead. A deck opened
++        // for a long "start after" gate took room for the whole gate; once
++        // the song runs, that much is never wanted, so the buffer hands it
++        // back here instead of holding it for the song's length (and the
++        // lane keeps two decks at once).
++        if frames > 0 && state.steady > 0 && state.capacity > state.steady {
+             state.capacity = state.steady;
++            let room = state.steady * 2 + 16_384;
++            state.pcm.shrink_to(room);
+         }
+         // Wake the decoder once half the buffer is free, not on every read.
+         if frames > 0 && state.pcm.len() / 2 < state.capacity / 2 {
+diff --git a/audio-engine/src/fifo.rs b/audio-engine/src/fifo.rs
+index 5ab33a8..401a222 100644
+--- a/audio-engine/src/fifo.rs
++++ b/audio-engine/src/fifo.rs
+@@ -60,6 +60,13 @@ impl Fifo {
+         self.start = 0;
+     }
+ 
++    /// Gives back the room above `samples`, keeping what is held. A stage
++    /// that opened big and runs small hands its spares back here.
++    pub fn shrink_to(&mut self, samples: usize) {
++        self.compact();
++        self.buf.shrink_to(samples);
++    }
++
+     // Moves what is held to the front once the used part is large, so the
+     // buffer does not grow forever.
+     fn compact(&mut self) {
+diff --git a/audio-engine/src/player.rs b/audio-engine/src/player.rs
+index 2e615d7..8bac91c 100644
+--- a/audio-engine/src/player.rs
++++ b/audio-engine/src/player.rs
+@@ -53,6 +53,11 @@ const SCOUT_LIMIT: Duration = Duration::from_secs(20);
+ // queued are let go.
+ const PROFILES_KEPT: usize = 64;
+ 
++/// How many opened decks keep what their decoder found out. Every song
++/// played adds one, and a listen of hours has played far more than are ever
++/// in the queue, so the ones no longer queued go as the rest do.
++const INFOS_KEPT: usize = 256;
++
+ /// The latest a waiting blend is decided: this long, in song time, before
+ /// the crossfade at the end of the song would have to start.
+ const DECIDE_MARGIN_SECS: f64 = 1.0;
+@@ -927,6 +932,15 @@ impl Player {
+                 self.infos.insert(deck.key(), info);
+             }
+         }
++        // The decks of songs no longer queued never open again, so what
++        // their decoders found goes with them: a long listen grows this over
++        // every song it plays.
++        if self.infos.len() > INFOS_KEPT {
++            let playing = lane.current().key();
++            let lined = lane.next().map(|d| d.key());
++            let live: Vec<u64> = self.queue.iter().map(|e| e.key).collect();
++            self.infos.retain(|key, _| live.contains(key) || *key == playing || Some(*key) == lined);
++        }
+         // Follow the lane onto the song it plays now.
+         let lane_key = lane.current().key();
+         if self.current_entry().map(|e| e.key) != Some(lane_key)
+-- 
+2.55.0.windows.5
+

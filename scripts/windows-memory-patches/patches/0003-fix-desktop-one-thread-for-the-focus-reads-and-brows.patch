@@ -1,0 +1,110 @@
+From 327c54ee5edddbfea904606f11b7fc868a66e0ef Mon Sep 17 00:00:00 2001
+From: FuJluH <Support@fujluh.ru>
+Date: Sun, 25 Oct 2026 23:49:23 +0800
+Subject: [PATCH 3/4] fix(desktop): one thread for the focus reads, and
+ browsers let go
+
+Coming back to the window read the system's motion and text settings on
+a new thread each time: a hundred returns made a hundred threads with a
+stack each, all charged to the app. One daemon thread of its own does
+them for the whole run now.
+
+The browser fallback started rundll32 (or open, xdg-open) and never
+looked at it again: every click on a link left its pipes read by nobody
+and its process handles open until the collector took the Process. The
+output is drained, the handles go as soon as the launcher ends, and one
+that hangs is dropped after half a minute. Nothing waits, so opening a
+link never stalls.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ .../kotlin/app/winters/octo/desktop/Main.kt   | 14 ++++++++++--
+ .../winters/octo/desktop/system/Browser.kt    | 22 ++++++++++++++++++-
+ 2 files changed, 33 insertions(+), 3 deletions(-)
+
+diff --git a/desktop/src/main/kotlin/app/winters/octo/desktop/Main.kt b/desktop/src/main/kotlin/app/winters/octo/desktop/Main.kt
+index 8a10513..96511de 100644
+--- a/desktop/src/main/kotlin/app/winters/octo/desktop/Main.kt
++++ b/desktop/src/main/kotlin/app/winters/octo/desktop/Main.kt
+@@ -105,6 +105,8 @@ import app.winters.octo.desktop.system.OctopusArt
+ import app.winters.octo.desktop.system.OctopusPainter
+ import java.awt.image.BufferedImage
+ import java.util.concurrent.CompletableFuture
++import java.util.concurrent.ExecutorService
++import java.util.concurrent.Executors
+ import kotlinx.coroutines.withContext
+ 
+ // The window's icons, one drawn from the vector for each size Windows may
+@@ -115,6 +117,14 @@ private fun windowIconsAhead(): CompletableFuture<List<BufferedImage>> =
+ // What the window runs once the app is made.
+ private class Opened(val app: AppState, val system: SystemIntegration, val updates: DesktopUpdates)
+ 
++// The system reads done when Octo comes back to the front: its "Animation
++// effects" and its text size, which are native calls. One thread for them
++// for the whole run — coming back to the window a hundred times made a
++// hundred threads before, each with a stack of its own charged to the app.
++private val systemReads: ExecutorService by lazy {
++    Executors.newSingleThreadExecutor { task -> Thread(task, "Octo system reads").apply { isDaemon = true } }
++}
++
+ // How long the window waits for its first frame before the app is made in
+ // any case (a window starting in the tray draws none).
+ private const val FIRST_FRAME_WAIT_MS = 500L
+@@ -334,14 +344,14 @@ fun main(args: Array<String>) {
+                         override fun windowGainedFocus(e: WindowEvent?) {
+                             app.queueSync.check()
+                             app.library?.look()
+-                            Thread {
++                            systemReads.submit {
+                                 val calm = systemReducesMotion(os)
+                                 val text = systemTextScale(os)
+                                 SwingUtilities.invokeLater {
+                                     systemCalm = calm
+                                     systemText = text
+                                 }
+-                            }.apply { isDaemon = true }.start()
++                            }
+                         }
+                     })
+                     system.focusWindow = {
+diff --git a/desktop/src/main/kotlin/app/winters/octo/desktop/system/Browser.kt b/desktop/src/main/kotlin/app/winters/octo/desktop/system/Browser.kt
+index fd2ed99..d0f8e89 100644
+--- a/desktop/src/main/kotlin/app/winters/octo/desktop/system/Browser.kt
++++ b/desktop/src/main/kotlin/app/winters/octo/desktop/system/Browser.kt
+@@ -4,6 +4,8 @@ import app.winters.octo.desktop.settings.DesktopOs
+ import app.winters.octo.desktop.settings.currentOs
+ import java.awt.Desktop
+ import java.net.URI
++import java.util.concurrent.CompletableFuture
++import java.util.concurrent.TimeUnit
+ 
+ // Opens a web address in the person's own browser: Java's way where the
+ // platform has one, else the platform's own command. Only http and https,
+@@ -18,5 +20,23 @@ fun openInBrowser(url: String, os: DesktopOs = currentOs()): Boolean {
+         DesktopOs.Mac -> listOf("open", uri.toString())
+         DesktopOs.Linux -> listOf("xdg-open", uri.toString())
+     }
+-    return runCatching { ProcessBuilder(command).start() }.isSuccess
++    // The command is only a launcher: it hands the address to the browser
++    // and ends. Its handles stay open until the collector takes the
++    // process, so every click on a link held a pair of pipes and a process
++    // handle for a while — read over a long session that is what grew. The
++    // output is drained so nothing blocks, and a launcher that hangs is
++    // let go of rather than left running.
++    return runCatching {
++        val process = ProcessBuilder(command).redirectErrorStream(true).start()
++        // Drained on its own: the reading is not what decides here, only
++        // that the pipes never fill and wedge the launcher.
++        CompletableFuture.runAsync(Runnable { runCatching { process.inputStream.readAllBytes() } })
++        // Let go of the handles as soon as the launcher ends, and drop a
++        // launcher that hangs; nothing here waits, so opening never stalls.
++        process.onExit().thenAccept { process.destroy() }
++        process.onExit().orTimeout(OpenHandoverSeconds, TimeUnit.SECONDS).exceptionally { runCatching { process.destroyForcibly() }; null }
++        true
++    }.getOrDefault(false)
+ }
++
++private const val OpenHandoverSeconds = 30L
+-- 
+2.55.0.windows.5
+
