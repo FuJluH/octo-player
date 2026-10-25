@@ -57,6 +57,7 @@ import app.winters.octo.sound.SoundSettings
 import app.winters.octo.ui.sound.MAX_HZ
 import app.winters.octo.ui.sound.MIN_HZ
 import app.winters.octo.ui.sound.cleanGain
+import app.winters.octo.desktop.ui.LateClose
 import app.winters.octo.ui.sound.readDb
 import app.winters.octo.ui.sound.readHz
 import app.winters.octo.ui.sound.shortHz
@@ -316,6 +317,12 @@ private fun DrawScope.curve(plot: Plot, gains: List<Float>, color: Color, lit: F
         }
     }
     drawPath(path, color, style = Stroke(stroke, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    // Both paths are handed to LateClose: the curve is made again on every
+    // frame the page animates, and what a frame draws keeps its own hold on
+    // them until that frame is through. Leaving them for the collector is
+    // what grew the app over a long listen.
+    LateClose.close(fill.asSkiaPath())
+    LateClose.close(path.asSkiaPath())
 }
 
 private fun DrawScope.node(at: Offset, color: Color, lit: Float, big: Boolean) {

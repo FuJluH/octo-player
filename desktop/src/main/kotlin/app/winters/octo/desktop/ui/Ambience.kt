@@ -67,7 +67,18 @@ internal object OctoArt {
         val image = runCatching {
             OctopusArt.icon(OCTO_ART_PX, shape = null)
         }.getOrNull()
-        return WashCovers.prepared(keyFor(tuning), image, tuning).also { made = it }
+        // prepared takes the icon's pixels into its own 512 square and keeps
+        // no hold of the image, so this is where it goes back.
+        val cover = try {
+            WashCovers.prepared(keyFor(tuning), image, tuning)
+        } finally {
+            image?.close()
+        }
+        // A tuning changed in Settings leaves the square drawn for the one
+        // before; retired, it closes after the frame that last drew it.
+        made?.retire()
+        made = cover
+        return cover
     }
 
     private fun keyFor(tuning: WashTuning) = "octo|${tuning.contrast}|${tuning.saturation}|${tuning.brightnessCap}"

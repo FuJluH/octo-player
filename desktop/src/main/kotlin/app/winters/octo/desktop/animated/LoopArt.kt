@@ -49,6 +49,7 @@ import app.winters.octo.audio.loopVideoAvailable
 import app.winters.octo.design.LocalReduceMotion
 import app.winters.octo.design.artworkRim
 import app.winters.octo.desktop.ui.DarkInk
+import app.winters.octo.desktop.ui.LateClose
 import app.winters.octo.subsonic.AnimatedClip
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -200,6 +201,7 @@ fun LoopFrames(file: File?, play: LoopPlay, modifier: Modifier = Modifier, fadeM
     var size by remember { mutableStateOf(IntSize.Zero) }
     val feed = rememberLoopFeed(file, play, size, fadeMs = fadeMs)
     val paint = remember { Paint() }
+    DisposableEffect(paint) { onDispose { LateClose.close(paint) } }
     Spacer(
         modifier
             .onSizeChanged { size = it }

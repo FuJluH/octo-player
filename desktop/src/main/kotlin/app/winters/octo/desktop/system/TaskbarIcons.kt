@@ -42,14 +42,23 @@ private fun drawn(size: Int, draw: (Canvas, Paint) -> Unit): ByteArray {
         color = 0xFFFFFFFF.toInt()
         isAntiAlias = true
     }
-    draw(surface.canvas, paint)
-    val info = ImageInfo(size, size, ColorType.BGRA_8888, ColorAlphaType.UNPREMUL)
-    val bitmap = Bitmap().apply { allocPixels(info) }
-    surface.readPixels(bitmap, 0, 0)
-    val pixels = bitmap.readPixels(info, size * 4, 0, 0) ?: ByteArray(size * size * 4)
-    bitmap.close()
-    surface.close()
-    return pixels
+    try {
+        draw(surface.canvas, paint)
+        val info = ImageInfo(size, size, ColorType.BGRA_8888, ColorAlphaType.UNPREMUL)
+        val bitmap = Bitmap().apply { allocPixels(info) }
+        try {
+            surface.readPixels(bitmap, 0, 0)
+            return bitmap.readPixels(info, size * 4, 0, 0) ?: ByteArray(size * size * 4)
+        } finally {
+            bitmap.close()
+        }
+    } finally {
+        // The taskbar's four icons are drawn afresh every time playing
+        // changes, so nothing of one drawing is left behind for the
+        // collector to get round to later.
+        paint.close()
+        surface.close()
+    }
 }
 
 // An icon file's paths, filling the square as its grid lays them out.

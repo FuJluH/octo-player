@@ -539,10 +539,18 @@ private fun DrawScope.fillWord(
         Brush.horizontalGradient(0f to lit, near to lit, far to unlit, 1f to unlit, startX = left, endX = right)
     }
     val canvas = drawContext.canvas
-    canvas.saveLayer(area, Paint())
-    paint(1f)
-    drawRect(mask, topLeft = area.topLeft, size = area.size, blendMode = BlendMode.DstIn)
-    canvas.restore()
+    // The restore is in a finally: the mask and the word drawing run
+    // between save and restore, so a throw there used to leave the layer
+    // open over every frame drawn after it — the lyrics page then drew
+    // each frame into the layer before it, and the layers piled up.
+    val layer = Paint()
+    try {
+        canvas.saveLayer(area, layer)
+        paint(1f)
+        drawRect(mask, topLeft = area.topLeft, size = area.size, blendMode = BlendMode.DstIn)
+    } finally {
+        canvas.restore()
+    }
 }
 
 // A word at one brightness: whole, or letter by letter while it blooms.

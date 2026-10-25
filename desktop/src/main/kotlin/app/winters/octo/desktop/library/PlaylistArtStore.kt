@@ -16,6 +16,7 @@ import app.winters.octo.covers.coverFileName
 import app.winters.octo.covers.coverPalette
 import app.winters.octo.covers.coverSwatches
 import app.winters.octo.covers.quarterSwatches
+import app.winters.octo.desktop.lruMap
 import app.winters.octo.design.CoverFontFamily
 import app.winters.octo.design.coverMeasurer
 import app.winters.octo.design.designCover
@@ -64,7 +65,10 @@ class PlaylistArtStore(private val http: OkHttpClient) {
     // Where covers are kept between runs; none in tests.
     @Volatile var folder: File? = null
 
-    private val palettes = HashMap<String, CoverPalette>()
+    // The lists' colours, the ones used last kept: a long run through the
+    // library touches a great many lists, and each one's colours are small
+    // but never thrown out on their own.
+    private val palettes = lruMap<String, CoverPalette>(PalettesKept)
     private val pictures = object : LinkedHashMap<String, ImageBitmap>(64, 0.75f, true) {
         var bytes = 0L
 
@@ -114,7 +118,7 @@ class PlaylistArtStore(private val http: OkHttpClient) {
         known(key)?.let { return it }
         val file = folder?.let { File(File(it, "art"), coverFileName(key, "png")) }
         val stored = withContext(Dispatchers.IO) {
-            file?.takeIf(File::isFile)?.let { runCatching { Image.makeFromEncoded(it.readBytes()).toComposeImageBitmap() }.getOrNull() }
+            file?.takeIf(File::isFile)?.let { runCatching { Image.makeFromEncoded(it.readBytes()).use { it.toComposeImageBitmap() } }.getOrNull() }
         }
         if (stored != null) return keep(key, stored)
         val drawn = drawing.withPermit {
@@ -135,14 +139,18 @@ class PlaylistArtStore(private val http: OkHttpClient) {
     }
 
     private fun keep(key: String, image: ImageBitmap): ImageBitmap = synchronized(pictures) {
-        if (pictures.put(key, image) == null) pictures.bytes += image.width.toLong() * image.height * 4
+        // Only the difference is counted: the same cover drawn at a bigger
+        // size replaces the one kept, and the tally that lets the map know
+        // its own weight has to follow it.
+        val replaced = pictures.put(key, image)
+        pictures.bytes += image.width.toLong() * image.height * 4 - (replaced?.let { it.width.toLong() * it.height * 4 } ?: 0L)
         image
     }
 
     private fun save(file: File, image: ImageBitmap) {
         runCatching {
             file.parentFile.mkdirs()
-            val png = Image.makeFromBitmap(image.asSkiaBitmap()).encodeToData(EncodedImageFormat.PNG)?.bytes ?: return
+            val png = Image.makeFromBitmap(image.asSkiaBitmap()).use { it.encodeToData(EncodedImageFormat.PNG) }?.bytes ?: return
             val temp = File(file.parentFile, file.name + ".tmp")
             temp.writeBytes(png)
             if (!temp.renameTo(file)) temp.delete()
@@ -173,6 +181,9 @@ class PlaylistArtStore(private val http: OkHttpClient) {
         private const val DiskBytes = 96L * 1024 * 1024
         private const val TrimEvery = 40
 
+        // How many lists' colours are remembered at once.
+        private const val PalettesKept = 512
+
         // Covers are looked at this small: plenty for their colours.
         const val SampleSize = 64
 
@@ -187,16 +198,27 @@ class PlaylistArtStore(private val http: OkHttpClient) {
         // size, as ARGB pixels and its side.
         fun decodePixels(bytes: ByteArray): Pair<IntArray, Int> {
             val image = Image.makeFromEncoded(bytes)
-            val side = image.width
-            val info = ImageInfo(side, image.height, ColorType.BGRA_8888, ColorAlphaType.PREMUL)
-            val bitmap = Bitmap()
-            bitmap.allocPixels(info)
-            Canvas(bitmap).drawImage(image, 0f, 0f)
-            val raw = bitmap.readPixels(info, side * 4, 0, 0)!!
-            return IntArray(side * image.height) { i ->
-                val o = i * 4
-                (0xFF shl 24) or ((raw[o + 2].toInt() and 0xFF) shl 16) or ((raw[o + 1].toInt() and 0xFF) shl 8) or (raw[o].toInt() and 0xFF)
-            } to side
+            try {
+                val side = image.width
+                val info = ImageInfo(side, image.height, ColorType.BGRA_8888, ColorAlphaType.PREMUL)
+                val bitmap = Bitmap()
+                try {
+                    bitmap.allocPixels(info)
+                    Canvas(bitmap).use { it.drawImage(image, 0f, 0f) }
+                    val raw = bitmap.readPixels(info, side * 4, 0, 0)!!
+                    return IntArray(side * image.height) { i ->
+                        val o = i * 4
+                        (0xFF shl 24) or ((raw[o + 2].toInt() and 0xFF) shl 16) or ((raw[o + 1].toInt() and 0xFF) shl 8) or (raw[o].toInt() and 0xFF)
+                    } to side
+                } finally {
+                    bitmap.close()
+                }
+            } finally {
+                // The pixels come out as an IntArray, so nothing here outlives
+                // the call: a sidebar of lists re-decodes a background every
+                // time one falls out of the four kept.
+                image.close()
+            }
         }
 
         // ARGB pixels, `side` square, as a picture.
@@ -221,21 +243,33 @@ class PlaylistArtStore(private val http: OkHttpClient) {
         // A picture's pixels at 64 square, as ARGB.
         fun coverPixels(bytes: ByteArray): IntArray? {
             val source = runCatching { Image.makeFromEncoded(bytes) }.getOrNull() ?: return null
-            val info = ImageInfo(SampleSize, SampleSize, ColorType.BGRA_8888, ColorAlphaType.PREMUL)
-            val bitmap = Bitmap()
-            bitmap.allocPixels(info)
-            Canvas(bitmap).drawImageRect(
-                source,
-                Rect.makeWH(source.width.toFloat(), source.height.toFloat()),
-                Rect.makeWH(SampleSize.toFloat(), SampleSize.toFloat()),
-                FilterMipmap(FilterMode.LINEAR, MipmapMode.LINEAR),
-                Paint(),
-                true,
-            )
-            val raw = bitmap.readPixels(info, SampleSize * 4, 0, 0) ?: return null
-            return IntArray(SampleSize * SampleSize) { i ->
-                val o = i * 4
-                (0xFF shl 24) or ((raw[o + 2].toInt() and 0xFF) shl 16) or ((raw[o + 1].toInt() and 0xFF) shl 8) or (raw[o].toInt() and 0xFF)
+            try {
+                val info = ImageInfo(SampleSize, SampleSize, ColorType.BGRA_8888, ColorAlphaType.PREMUL)
+                val bitmap = Bitmap()
+                val paint = Paint()
+                try {
+                    bitmap.allocPixels(info)
+                    Canvas(bitmap).use { canvas ->
+                        canvas.drawImageRect(
+                            source,
+                            Rect.makeWH(source.width.toFloat(), source.height.toFloat()),
+                            Rect.makeWH(SampleSize.toFloat(), SampleSize.toFloat()),
+                            FilterMipmap(FilterMode.LINEAR, MipmapMode.LINEAR),
+                            paint,
+                            true,
+                        )
+                    }
+                    val raw = bitmap.readPixels(info, SampleSize * 4, 0, 0) ?: return null
+                    return IntArray(SampleSize * SampleSize) { i ->
+                        val o = i * 4
+                        (0xFF shl 24) or ((raw[o + 2].toInt() and 0xFF) shl 16) or ((raw[o + 1].toInt() and 0xFF) shl 8) or (raw[o].toInt() and 0xFF)
+                    }
+                } finally {
+                    paint.close()
+                    bitmap.close()
+                }
+            } finally {
+                source.close()
             }
         }
     }

@@ -13,6 +13,7 @@ import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -108,6 +109,12 @@ fun LineSlider(
             mode = PaintMode.STROKE
             strokeCap = PaintStrokeCap.ROUND
         }
+    }
+    // The sliders in the settings pages come and go; the paint's own copy of
+    // what it draws is kept on the graphics side, so a slider that leaves
+    // hands it back there rather than leaving it for the collector.
+    DisposableEffect(glowPaint) {
+        onDispose { glowPaint.close() }
     }
     val jewel = if (look == SliderLook.Jewel) rememberJewelLook(hovered, held) else null
     val followed = if (look == SliderLook.Jewel) rememberFollowedFraction(fraction, dragging) else null

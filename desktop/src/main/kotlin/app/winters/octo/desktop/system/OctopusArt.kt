@@ -23,6 +23,7 @@ import org.jetbrains.skia.Surface
 import org.jetbrains.skia.svg.SVGDOM
 import java.awt.image.BufferedImage
 import java.io.ByteArrayInputStream
+import java.util.Collections
 import javax.imageio.ImageIO
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -97,21 +98,28 @@ object OctopusArt {
     // outline's edges sit on whole pixels, so it stays crisp at 100% scaling.
     fun icon(size: Int, shape: IconShape? = FlatShape): Image {
         val surface = Surface.makeRasterN32Premul(size, size)
-        val canvas = surface.canvas
-        canvas.clear(Color.TRANSPARENT)
-        if (shape == null) {
-            art(size).use { canvas.drawImage(it, 0f, 0f) }
-        } else {
-            val margin = size * shape.margin
-            val start = if (size <= SnapBelow) floor(margin + 0.5f) else margin
-            val side = size - start * 2
-            val radius = size * shape.radius
-            canvas.save()
-            canvas.clipRRect(RRect.makeXYWH(start, start, side, side, radius), true)
-            art(ceil(side).toInt()).use { canvas.drawImageRect(it, Rect.makeWH(it.width.toFloat(), it.height.toFloat()), Rect.makeXYWH(start, start, side, side), SamplingMode.LINEAR, null, true) }
-            canvas.restore()
+        try {
+            val canvas = surface.canvas
+            canvas.clear(Color.TRANSPARENT)
+            if (shape == null) {
+                art(size).use { canvas.drawImage(it, 0f, 0f) }
+            } else {
+                val margin = size * shape.margin
+                val start = if (size <= SnapBelow) floor(margin + 0.5f) else margin
+                val side = size - start * 2
+                val radius = size * shape.radius
+                canvas.save()
+                canvas.clipRRect(RRect.makeXYWH(start, start, side, side, radius), true)
+                art(ceil(side).toInt()).use { canvas.drawImageRect(it, Rect.makeWH(it.width.toFloat(), it.height.toFloat()), Rect.makeXYWH(start, start, side, side), SamplingMode.LINEAR, null, true) }
+                canvas.restore()
+            }
+            return surface.makeImageSnapshot()
+        } finally {
+            // The snapshot keeps pixels of its own, so the surface's raster
+            // is free from here on. It is the larger of the two, and this is
+            // drawn again for the tray whenever the player's state changes.
+            surface.close()
         }
-        return surface.makeImageSnapshot()
     }
 
     // The square art `side` pixels across, drawn at a power of two times
@@ -121,16 +129,19 @@ object OctopusArt {
         var steps = 2
         while (side shl steps < ArtDrawnAt && steps < MaxHalvings) steps++
         val drawn = side shl steps
-        var image = Surface.makeRasterN32Premul(drawn, drawn).run {
-            canvas.clear(Color.TRANSPARENT)
-            drawSquare(canvas, drawn.toFloat())
-            makeImageSnapshot()
+        // Each square is snapshotted into its own surface and the surface
+        // let go at once: `drawn` is up to ArtDrawnAt across, several times
+        // the size asked for, and the snapshots keep pixels of their own.
+        var image = Surface.makeRasterN32Premul(drawn, drawn).use { square ->
+            square.canvas.clear(Color.TRANSPARENT)
+            drawSquare(square.canvas, drawn.toFloat())
+            square.makeImageSnapshot()
         }
         repeat(steps) {
             val half = image.width / 2
-            val next = Surface.makeRasterN32Premul(half, half).run {
-                canvas.drawImageRect(image, Rect.makeWH(image.width.toFloat(), image.height.toFloat()), Rect.makeWH(half.toFloat(), half.toFloat()), SamplingMode.CATMULL_ROM, null, true)
-                makeImageSnapshot()
+            val next = Surface.makeRasterN32Premul(half, half).use { step ->
+                step.canvas.drawImageRect(image, Rect.makeWH(image.width.toFloat(), image.height.toFloat()), Rect.makeWH(half.toFloat(), half.toFloat()), SamplingMode.CATMULL_ROM, null, true)
+                step.makeImageSnapshot()
             }
             image.close()
             image = next
@@ -138,14 +149,20 @@ object OctopusArt {
         return image
     }
 
-    fun iconPng(size: Int, shape: IconShape? = FlatShape): ByteArray = icon(size, shape).encodeToData(EncodedImageFormat.PNG)!!.bytes
+    fun iconPng(size: Int, shape: IconShape? = FlatShape): ByteArray = icon(size, shape).use { it.encodeToData(EncodedImageFormat.PNG)!!.bytes }
 
     fun iconImage(size: Int, shape: IconShape? = FlatShape): BufferedImage = ImageIO.read(ByteArrayInputStream(iconPng(size, shape)))
 
     // The window's icons, one drawn for each size Windows may ask for (the
     // title bar, Alt+Tab and the taskbar, at every scaling), so none is a
-    // smaller copy of a bigger one.
-    fun windowIcons(shape: IconShape? = null): List<BufferedImage> = WindowIconSizes.map { iconImage(it, shape) }
+    // smaller copy of a bigger one. Drawn once for the run and kept: every
+    // window shows the same octopus, and drawing them costs fifteen icon
+    // chains, which is what a mini player opened now and then would pay
+    // over again. Windows only reads these; it never changes them.
+    private val drawn = Collections.synchronizedMap(mutableMapOf<IconShape?, List<BufferedImage>>())
+
+    fun windowIcons(shape: IconShape? = null): List<BufferedImage> =
+        synchronized(drawn) { drawn.getOrPut(shape) { WindowIconSizes.map { iconImage(it, shape) } } }
 
     // At and below this size, the icon's outline sits on whole pixels.
     private const val SnapBelow = 32

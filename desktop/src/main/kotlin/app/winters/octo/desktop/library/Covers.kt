@@ -421,7 +421,9 @@ private fun shrink(image: Image, width: Int, height: Int): Bitmap {
     while (current.width >= width * 2 && current.height >= height * 2) {
         val half = draw(current, (current.width + 1) / 2, (current.height + 1) / 2, FilterMipmap(FilterMode.LINEAR, MipmapMode.NONE))
         current.close()
-        current = Image.makeFromBitmap(half)
+        // makeFromBitmap takes the pixels into an image of its own, so the
+        // step's bitmap is free the moment it has been.
+        current = Image.makeFromBitmap(half).also { half.close() }
     }
     val done = draw(current, width, height, CubicResampler(1f / 3, 1f / 3))
     current.close()
