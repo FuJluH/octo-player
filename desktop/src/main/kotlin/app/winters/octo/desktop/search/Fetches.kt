@@ -1,6 +1,7 @@
 package app.winters.octo.desktop.search
 
 import app.winters.octo.subsonic.Acquisition
+import app.winters.octo.desktop.lruMap
 import app.winters.octo.subsonic.AcquisitionStage
 import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.SubsonicException
@@ -50,6 +51,13 @@ fun phaseText(phase: FetchPhase): String = when (phase) {
 // How often to ask how the downloads are going while any is on its way.
 const val FETCH_POLL_MS = 2_000L
 
+// How many songs brought in keep their library id remembered here.
+private const val LANDED_KEPT = 4096
+
+// How many asks keep their row shown: checks and alerts stay for the last
+// few hundred, which is more than a screen lists at once.
+private const val PhasesKept = 512
+
 // Has an Octo server fetch songs found online into the library: starring a
 // find asks for it, and the server's octoAcquisitions list says how each is
 // going. Only used when the server lists that extension.
@@ -72,10 +80,12 @@ class Fetches(
 
     // The library's own id for each song brought in, once the server names
     // it, so the song plays from the file it fetched rather than streaming
-    // from where it was found.
-    private val landed = ConcurrentHashMap<String, String>()
+    // from where it was found. The last few thousand: a song taken in long
+    // ago plays from its file by its own listing, not through this.
+    private val landed = lruMap<String, String>(LANDED_KEPT)
 
-    // When each song was asked for, once the server took the ask.
+    // When each song was asked for, once the server took the ask. Only the
+    // asks still on their way, and the last few settled ones, are kept.
     private val askedAt = ConcurrentHashMap<String, Long>()
 
     fun phase(id: String): FetchPhase = phases.value[id] ?: FetchPhase.None
@@ -125,19 +135,53 @@ class Fetches(
         }
         val now = clock()
         var arrived = false
+        // Built once, eagerly: a mapped view would work out each song again
+        // on every read, and keep this look's list alive while it is read.
+        val settled = ArrayList<String>()
         _phases.update { phases ->
-            phases.mapValues { (id, phase) ->
-                if (!phase.inFlight) return@mapValues phase
-                val entry = list.filter { it.id == id }.maxByOrNull { it.startedAt.orEmpty() }
-                    ?: return@mapValues askedAt[id]?.takeIf { !stillAsked(AskedSong(id, it), since, now) }?.let { FetchPhase.None } ?: phase
-                phaseOf(entry).also {
-                    if (it != FetchPhase.Done) return@also
-                    arrived = true
-                    entry.libraryId?.takeIf(String::isNotBlank)?.let { library -> landed[id] = library }
-                }
-            }
+            trimmed(
+                buildMap(phases.size) {
+                    phases.forEach { (id, phase) ->
+                        if (!phase.inFlight) {
+                            put(id, phase)
+                            return@forEach
+                        }
+                        val entry = list.filter { it.id == id }.maxByOrNull { it.startedAt.orEmpty() }
+                        if (entry == null) {
+                            val ended = askedAt[id]?.takeIf { !stillAsked(AskedSong(id, it), since, now) }
+                            if (ended == null) put(id, phase) else { settled += id; put(id, FetchPhase.None) }
+                            return@forEach
+                        }
+                        val next = phaseOf(entry)
+                        if (next == FetchPhase.Done) {
+                            arrived = true
+                            entry.libraryId?.takeIf(String::isNotBlank)?.let { library -> landed[id] = library }
+                        }
+                        put(id, next)
+                    }
+                },
+            )
         }
+        settled.forEach { askedAt.remove(it) }
         if (arrived) onArrived()
+    }
+
+    // Songs asked for over a long listen each left their row in the phases
+    // and their ask time behind. The rows are trimmed to the last few asks:
+    // a screen reads a missing row as FetchPhase.None, which is what an old
+    // settled song means anyway, so only the newest checks and alerts stay
+    // where a screen can still show them.
+    private fun trimmed(phases: Map<String, FetchPhase>): Map<String, FetchPhase> {
+        if (phases.size <= PhasesKept) return phases
+        val live = phases.filterValues { it.inFlight }
+        if (live.size >= PhasesKept) return live
+        val room = PhasesKept - live.size
+        val kept = phases.entries.reversed().asSequence().filter { !it.value.inFlight }.take(room).map { it.key }.toSet()
+        phases.keys.filterNot { it in live.keys || it in kept }.forEach { askedAt.remove(it) }
+        return buildMap(live.size + room) {
+            putAll(live)
+            kept.forEach { put(it, phases.getValue(it)) }
+        }
     }
 
     private val FetchPhase.inFlight: Boolean

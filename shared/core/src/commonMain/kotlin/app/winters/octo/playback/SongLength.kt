@@ -48,10 +48,30 @@ fun correctedLengthMs(listedMs: Long, playerMs: Long?): Long? {
 // The song listed with this length, in the whole seconds a listing has.
 fun Song.withLengthMs(ms: Long): Song = copy(duration = ((ms + 500) / 1_000).toInt())
 
+// How many songs' corrected lengths are kept at once: a listen through a
+// big library learns more songs than a run has room for, and a length
+// learned long ago is found again by playing the song.
+private const val CORRECTED_KEPT = 4096
+
+// The length learned, the first learned going when too many have gathered.
+// A map's own order is the order things were put in it, so cutting its
+// front drops what was learned first and keeps what plays now.
+private fun learned(kept: Map<String, Long>, id: String, ms: Long): Map<String, Long> {
+    val grown = kept + (id to ms)
+    if (grown.size <= CORRECTED_KEPT) return grown
+    val past = grown.size - CORRECTED_KEPT
+    return buildMap(CORRECTED_KEPT) {
+        var dropping = past
+        for ((key, value) in grown) {
+            if (dropping > 0) dropping-- else put(key, value)
+        }
+    }
+}
+
 // The real lengths of songs whose listing was wrong, learned by playing
 // them, by song id. Rows, the queue and the next play of a song read their
 // length through here, so a song shows the length of its sound everywhere
-// once it has played. Kept for as long as the app runs.
+// once it has played. The last few thousand learned are kept.
 class RealLengths {
     private val _corrected = MutableStateFlow<Map<String, Long>>(emptyMap())
     val corrected: StateFlow<Map<String, Long>> = _corrected
@@ -60,7 +80,7 @@ class RealLengths {
     // the length its listing should have when it is wrong, else null.
     fun learn(id: String, listedMs: Long, playerMs: Long?): Long? {
         val ms = correctedLengthMs(listedMs, playerMs) ?: return null
-        if (_corrected.value[id] != ms) _corrected.update { it + (id to ms) }
+        if (_corrected.value[id] != ms) _corrected.update { learned(it, id, ms) }
         return ms
     }
 

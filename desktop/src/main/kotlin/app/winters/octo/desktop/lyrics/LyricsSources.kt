@@ -116,6 +116,25 @@ data class LyricsOption(
 // How many songs' lyrics answers are kept in memory.
 private const val LYRICS_ANSWERS_KEPT = 300
 
+// How many songs' lyric refreshes are counted at once. Only the song
+// playing is read through them, and a long listen with the lyrics open
+// names far more songs than that.
+private const val LYRICS_REVISIONS_KEPT = 256
+
+// The count for a song refreshed, the first refreshed going when too many
+// have gathered: a map's own order is the order things were put in it.
+private fun revised(counts: Map<String, Int>, songId: String): Map<String, Int> {
+    val grown = counts + (songId to (counts[songId] ?: 0) + 1)
+    if (grown.size <= LYRICS_REVISIONS_KEPT) return grown
+    val past = grown.size - LYRICS_REVISIONS_KEPT
+    return buildMap(LYRICS_REVISIONS_KEPT) {
+        var dropping = past
+        for ((id, count) in grown) {
+            if (dropping > 0) dropping-- else put(id, count)
+        }
+    }
+}
+
 // Finds a song's lyrics the way the phone does: the server first (on an
 // Octo server that keeps lyrics choices, its answer is final, and its
 // choices hold for every app), then the lyrics inside the song file, then
@@ -350,7 +369,7 @@ class LyricsSources(
     // Asks for the song's lyrics again.
     fun refresh(songId: String) {
         synchronized(answers) { answers.keys.removeAll { it.songId == songId } }
-        _revisions.update { it + (songId to (it[songId] ?: 0) + 1) }
+        _revisions.update { revised(it, songId) }
     }
 
     private fun keepPick(songId: String, pick: String?) {

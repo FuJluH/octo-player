@@ -59,7 +59,15 @@ class DiscordArt(
         },
     )
     private val looking: MutableSet<String> = Collections.synchronizedSet(HashSet())
-    private val failedAt: MutableMap<String, Long> = Collections.synchronizedMap(HashMap())
+    // Where the catalogue could not be reached: rested keys, the last
+    // `keep` of them. A run offline with Discord on asks for a new song's
+    // pictures every song, and each rest is worth no more than the rest
+    // before it.
+    private val failedAt: MutableMap<String, Long> = Collections.synchronizedMap(
+        object : LinkedHashMap<String, Long>(16, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>) = size > keep
+        },
+    )
 
     fun known(now: NowPlaying): DiscordArtwork = known(artQueryOf(now))
 
