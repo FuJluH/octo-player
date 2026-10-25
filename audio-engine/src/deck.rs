@@ -199,9 +199,15 @@ impl Deck {
         let samples = state.pcm.pop_into(out);
         let frames = samples / 2;
         state.head_secs += frames as f64 / rate;
-        // Once playing, only the usual amount is kept ahead.
-        if frames > 0 && state.steady > 0 {
+        // Once playing, only the usual amount is kept ahead. A deck opened
+        // for a long "start after" gate took room for the whole gate; once
+        // the song runs, that much is never wanted, so the buffer hands it
+        // back here instead of holding it for the song's length (and the
+        // lane keeps two decks at once).
+        if frames > 0 && state.steady > 0 && state.capacity > state.steady {
             state.capacity = state.steady;
+            let room = state.steady * 2 + 16_384;
+            state.pcm.shrink_to(room);
         }
         // Wake the decoder once half the buffer is free, not on every read.
         if frames > 0 && state.pcm.len() / 2 < state.capacity / 2 {

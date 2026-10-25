@@ -53,6 +53,11 @@ const SCOUT_LIMIT: Duration = Duration::from_secs(20);
 // queued are let go.
 const PROFILES_KEPT: usize = 64;
 
+/// How many opened decks keep what their decoder found out. Every song
+/// played adds one, and a listen of hours has played far more than are ever
+/// in the queue, so the ones no longer queued go as the rest do.
+const INFOS_KEPT: usize = 256;
+
 /// The latest a waiting blend is decided: this long, in song time, before
 /// the crossfade at the end of the song would have to start.
 const DECIDE_MARGIN_SECS: f64 = 1.0;
@@ -926,6 +931,15 @@ impl Player {
                 }
                 self.infos.insert(deck.key(), info);
             }
+        }
+        // The decks of songs no longer queued never open again, so what
+        // their decoders found goes with them: a long listen grows this over
+        // every song it plays.
+        if self.infos.len() > INFOS_KEPT {
+            let playing = lane.current().key();
+            let lined = lane.next().map(|d| d.key());
+            let live: Vec<u64> = self.queue.iter().map(|e| e.key).collect();
+            self.infos.retain(|key, _| live.contains(key) || *key == playing || Some(*key) == lined);
         }
         // Follow the lane onto the song it plays now.
         let lane_key = lane.current().key();

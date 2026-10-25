@@ -60,6 +60,13 @@ impl Fifo {
         self.start = 0;
     }
 
+    /// Gives back the room above `samples`, keeping what is held. A stage
+    /// that opened big and runs small hands its spares back here.
+    pub fn shrink_to(&mut self, samples: usize) {
+        self.compact();
+        self.buf.shrink_to(samples);
+    }
+
     // Moves what is held to the front once the used part is large, so the
     // buffer does not grow forever.
     fn compact(&mut self) {
